@@ -1,39 +1,58 @@
-# 智能简历生成
+# 智历
 
-#### 介绍
-{**以下是 Gitee 平台说明，您可以替换此简介**
-Gitee 是 OSCHINA 推出的基于 Git 的代码托管平台（同时支持 SVN）。专为开发者提供稳定、高效、安全的云端软件开发协作平台
-无论是个人、团队、或是企业，都能够用 Gitee 实现代码托管、项目管理、协作开发。企业项目请看 [https://gitee.com/enterprises](https://gitee.com/enterprises)}
+面向求职者的岗位定制简历平台。当前仓库已初始化为模块化单体骨架，MVP 主流程为：
 
-#### 软件架构
-软件架构说明
+`职业资料库 -> JD -> 岗位定制简历 -> 基础规则评分 -> 单模板私有 PDF`
 
+详细范围、数据模型、接口和交付规则请从 [docs/README.md](docs/README.md) 开始阅读。
 
-#### 安装教程
+## 工程结构
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+```text
+server/       Spring Boot API（Java 17）
+web/          Vue 3 Web 应用（TypeScript）
+pdf-service/  Node.js PDF 服务边界
+docs/         产品、设计、测试和 AI 代理开发规范
+```
 
-#### 使用说明
+## 本地启动
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+前置条件：Java 17、Maven 3.9+、Node.js 20+、Docker Desktop（用于 MySQL）。
 
-#### 参与贡献
+```powershell
+# 1. 启动本地 MySQL
+Copy-Item .env.example .env
+docker compose up -d mysql
 
-1.  Fork 本仓库
-2.  新建 Feat_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
+# 2. 启动后端 API（http://localhost:8080）
+Set-Location server
+mvn spring-boot:run
 
+# 3. 新终端：启动前端（http://localhost:5173）
+Set-Location web
+Copy-Item .env.example .env.local
+npm install
+npm run dev
 
-#### 特技
+# 4. 新终端：启动 PDF 服务（http://localhost:3001）
+Set-Location pdf-service
+npm install
+npm run dev
+```
 
-1.  使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
-2.  Gitee 官方博客 [blog.gitee.com](https://blog.gitee.com)
-3.  你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解 Gitee 上的优秀开源项目
-4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
-5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
-6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+初始健康检查：
+
+- API：`GET http://localhost:8080/api/system/health`
+- PDF 服务：`GET http://localhost:3001/health`
+
+## 验证命令
+
+```powershell
+Set-Location server; mvn test
+Set-Location web; npm run build
+Set-Location pdf-service; npm run check
+```
+
+## 实现顺序
+
+所有实现必须遵循 [docs/12-面向AI代理的开发流程与交付规范.md](docs/12-面向AI代理的开发流程与交付规范.md)。首批任务按认证、简历与版本、职业资料、JD、岗位定制生成、评分与私有 PDF 的顺序推进。

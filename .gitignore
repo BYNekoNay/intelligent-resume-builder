@@ -1,0 +1,38 @@
+# Java
+server/target/
+server/build/
+server/pdf-output/
+*.class
+
+# Node and frontend
+web/node_modules/
+web/dist/
+pdf-service/node_modules/
+pdf-service/output/
+pdf-service/.cache/
+
+# Runtime-generated files
+pdf-output/
+*.pdf.tmp
+
+# Local configuration and IDE
+.env
+.env.local
+.env.*.local
+.idea/
+.vscode/
+*.iml
+
+# Local tooling and OS files
+.omc/
+.DS_Store
+Thumbs.db
+
+# Package manager diagnostics
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Logs
+*.log

@@ -1,0 +1,4 @@
+import { apiClient, type ApiResponse } from './client'
+export function startInterview(payload:{sourceType:'PLATFORM_RESUME'|'EXTERNAL_RESUME';resumeVersionId?:number;externalResumeText?:string;jobDescriptionId:number;interviewMode:'JD_TARGETED'|'TECHNICAL'|'BEHAVIORAL'|'COMPREHENSIVE'}){return apiClient.post<ApiResponse<{interviewId:number;firstQuestion:string;status:string}>>('/api/interviews/start',payload)}
+export function answerInterview(id:number,answer:string){return apiClient.post<ApiResponse<{roundScore:number;feedback:{strengths:string[];improvements:string[]};nextQuestion:string|null}>>(`/api/interviews/${id}/answer`,{answer})}
+export function getInterviewReport(id:number){return apiClient.get<ApiResponse<{totalScore:number;summary:string;strengths:string[];weaknesses:string[];resumeSuggestions:string[];expressionSuggestions:string[]}>>(`/api/interviews/${id}/report`)}

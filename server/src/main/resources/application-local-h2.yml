@@ -1,0 +1,50 @@
+# 本地浏览器联调用。通过 Maven 的 useTestClasspath 启动，因此 H2 不进入生产运行时依赖。
+spring:
+  datasource:
+    url: jdbc:h2:mem:intelligent_resume_local;MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=USER,KEY,VALUE,ORDER,DATABASE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+server:
+  port: 8081
+
+app:
+  cors:
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5176
+  jwt:
+    secret: local-h2-only-secret-local-h2-only-32bytes-min-length
+    issuer: intelligent-resume-builder-local-h2
+  security:
+    rate-limit:
+      login-per-minute: 1000
+      register-per-minute: 1000
+      refresh-per-minute: 1000
+  ai:
+    worker:
+      poll-interval-ms: 200
+      lease-seconds: 60
+      max-retries: 1
+      batch-size: 1
+    mock-provider:
+      fail-rate: 0.0
+      latency-ms: 0
+  pdf:
+    service-base-url: http://localhost:3010
+    service-token: dev-pdf-token-change-me
+    render-timeout-seconds: 15
+    max-input-bytes: 65536
+    max-output-bytes: 1048576
+    file-ttl-hours: 1
+    allowed-template-codes: classic,modern,minimal
+    output-dir: ./build/local-h2-pdf-output

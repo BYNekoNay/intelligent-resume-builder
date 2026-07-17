@@ -1,0 +1,7 @@
+<script setup lang="ts">
+import { ref } from 'vue';import { parseResumeFile,type ResumeImportResponse } from '@/api/resumeImport'
+const selected=ref<File|null>(null);const result=ref<ResumeImportResponse|null>(null);const error=ref('');const loading=ref(false)
+function choose(event:Event){selected.value=(event.target as HTMLInputElement).files?.[0]??null;result.value=null}
+async function parse(){if(!selected.value){error.value='请选择 PDF、DOCX 或 TXT 文件。';return}loading.value=true;error.value='';try{result.value=(await parseResumeFile(selected.value)).data.data}catch{error.value='解析失败，请确认文件格式、大小和内容。'}finally{loading.value=false}}
+</script>
+<template><section class="workspace-page"><p class="eyebrow">Resume import</p><h1>导入自带简历</h1><p>支持 PDF、DOCX、TXT，单文件不超过 5MB；服务器不会保留原文件。</p><form class="workspace-card" @submit.prevent="parse"><label>简历文件<input type="file" accept=".pdf,.docx,.txt" @change="choose" /></label><button class="btn-neon btn-primary" :disabled="loading">{{loading?'解析中…':'解析文本'}}</button></form><p v-if="error" class="form-error" role="alert">{{error}}</p><article v-if="result" class="workspace-card"><p class="disclaimer">原文件未保存：{{result.originalFileStored?'否':'是'}}。请检查文本后再用于素材生成或面试。</p><label>解析文本<textarea :value="result.extractedText" rows="16" readonly /></label><details><summary>统一简历输入结构</summary><pre>{{JSON.stringify(result.normalizedResumeInput,null,2)}}</pre></details></article></section></template>
