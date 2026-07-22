@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -123,5 +124,25 @@ class ExportServiceTest {
 
         assertThat(new ObjectMapper().valueToTree(response).path("taskId").asLong())
                 .isEqualTo(40L);
+    }
+
+    @Test
+    void retriesOnlyFailedExportsOwnedByTheCurrentUser() {
+        ExportTask failed = new ExportTask();
+        failed.setId(40L);
+        failed.setUserId(30L);
+        failed.setStatus(ExportTask.ExportStatus.FAILED);
+        failed.setErrorMessage("renderer unavailable");
+        when(exportTaskRepository.findByIdAndUserId(40L, 30L)).thenReturn(Optional.of(failed));
+        when(exportTaskRepository.save(any(ExportTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = exportService.retry(40L, 30L);
+
+        assertThat(response.status()).isEqualTo(ExportTask.ExportStatus.PENDING);
+        assertThat(response.errorMessage()).isNull();
+        assertThat(failed.getExpiresAt()).isNotNull();
+        assertThat(failed.getRetryCount()).isEqualTo(1);
+        assertThatThrownBy(() -> exportService.retry(40L, 31L))
+                .isInstanceOf(com.intelligentresume.common.error.BusinessException.class);
     }
 }

@@ -11,6 +11,7 @@ import com.intelligentresume.common.error.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,6 +42,10 @@ public class ApplicationController {
     @PatchMapping("/{id}/status") public ApiResponse<ApplicationResponse> update(@PathVariable Long id,
             @Valid @RequestBody ApplicationStatusRequest request, HttpServletRequest http) {
         return ApiResponse.success(service.updateStatus(id, request, userId(http)), traceId(http));
+    }
+    @DeleteMapping("/{id}") public ApiResponse<Void> delete(@PathVariable Long id, HttpServletRequest http) {
+        service.delete(id, userId(http));
+        return ApiResponse.success(null, traceId(http));
     }
     private Long userId(HttpServletRequest http) {
         Object value = http.getAttribute("currentUserId");

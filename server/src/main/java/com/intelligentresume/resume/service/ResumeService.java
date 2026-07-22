@@ -45,8 +45,18 @@ public class ResumeService {
         resume.setUserId(userId);
         resume.setTitle(request.title());
         Resume saved = resumeRepository.save(resume);
-        // 创建空基线版本的占位:简化 MVP,首版本由用户自行创建
-        return toResponse(saved);
+
+        ResumeVersion initialVersion = new ResumeVersion();
+        initialVersion.setResumeId(saved.getId());
+        initialVersion.setVersionNo(1);
+        initialVersion.setSourceType(ResumeVersion.SourceType.MANUAL);
+        initialVersion.setResumeJson(request.resumeJson());
+        initialVersion.setOptimizationSummary("初始简历内容");
+        initialVersion.setCreatedBy(userId);
+        ResumeVersion persistedVersion = resumeVersionRepository.save(initialVersion);
+
+        saved.setCurrentVersionId(persistedVersion.getId());
+        return toResponse(resumeRepository.save(saved));
     }
 
     public List<ResumeResponse> list(Long userId) {

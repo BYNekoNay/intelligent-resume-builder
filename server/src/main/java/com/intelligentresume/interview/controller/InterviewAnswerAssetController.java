@@ -10,7 +10,10 @@ import com.intelligentresume.interview.service.InterviewAnswerAssetService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -30,6 +33,14 @@ public class InterviewAnswerAssetController {
             @RequestParam(required = false) String keyword,
             HttpServletRequest http) {
         return ApiResponse.success(service.list(userId(http), jobDescriptionId, keyword), traceId(http));
+    }
+    @PutMapping("/{id}") public ApiResponse<InterviewAnswerAssetResponse> update(@PathVariable Long id,
+            @Valid @RequestBody InterviewAnswerAssetCreateRequest request, HttpServletRequest http) {
+        return ApiResponse.success(service.update(id, request, userId(http)), traceId(http));
+    }
+    @DeleteMapping("/{id}") public ApiResponse<Void> delete(@PathVariable Long id, HttpServletRequest http) {
+        service.delete(id, userId(http));
+        return ApiResponse.success(null, traceId(http));
     }
     private Long userId(HttpServletRequest http) { Object value = http.getAttribute("currentUserId"); if (value == null) throw new BusinessException(ErrorCode.UNAUTHENTICATED); return (Long) value; }
     private String traceId(HttpServletRequest http) { return (String) http.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE); }

@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class ApplicationService {
@@ -34,6 +35,9 @@ public class ApplicationService {
 
     @Transactional
     public ApplicationResponse create(ApplicationCreateRequest request, Long userId) {
+        if (request.status() != ApplicationRecord.Status.DRAFT) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Application records must start as DRAFT");
+        }
         validateOwnership(request.jobDescriptionId(), request.resumeVersionId(), userId);
         ApplicationRecord record = new ApplicationRecord();
         record.setUserId(userId);
@@ -41,9 +45,9 @@ public class ApplicationService {
         record.setResumeVersionId(request.resumeVersionId());
         record.setStatus(request.status());
         record.setCoverLetterText(request.coverLetterText());
+        record.setEmailBodyText(request.emailBodyText());
         record.setOpeningMessageText(request.openingMessageText());
-        if (request.status() != ApplicationRecord.Status.DRAFT) record.setAppliedAt(LocalDateTime.now());
-        return toResponse(repository.save(record));
+        return toResponse(repository.saveAndFlush(record));
     }
 
     public List<ApplicationResponse> list(Long userId) {
@@ -56,31 +60,63 @@ public class ApplicationService {
     }
 
     @Transactional
+    public void delete(Long id, Long userId) {
+        ApplicationRecord record = repository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        repository.delete(record);
+    }
+
+    @Transactional
     public ApplicationResponse update(Long id, ApplicationCreateRequest request, Long userId) {
         ApplicationRecord record = repository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         validateOwnership(request.jobDescriptionId(), request.resumeVersionId(), userId);
+        if (request.version() == null || !request.version().equals(record.getVersion())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Application record has changed; refresh before updating");
+        }
+        if (!isAllowedTransition(record.getStatus(), request.status())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Application status transition is not allowed");
+        }
         record.setJobDescriptionId(request.jobDescriptionId());
         record.setResumeVersionId(request.resumeVersionId());
         record.setStatus(request.status());
         record.setCoverLetterText(request.coverLetterText());
+        record.setEmailBodyText(request.emailBodyText());
         record.setOpeningMessageText(request.openingMessageText());
         if (record.getAppliedAt() == null && request.status() != ApplicationRecord.Status.DRAFT) {
             record.setAppliedAt(LocalDateTime.now());
         }
-        return toResponse(repository.save(record));
+        return toResponse(repository.saveAndFlush(record));
     }
 
     @Transactional
     public ApplicationResponse updateStatus(Long id, ApplicationStatusRequest request, Long userId) {
         ApplicationRecord record = repository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (!request.version().equals(record.getVersion())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Application record has changed; refresh before updating");
+        }
+        if (!isAllowedTransition(record.getStatus(), request.status())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Application status transition is not allowed");
+        }
         record.setStatus(request.status());
         record.setFeedbackText(request.feedbackText());
         if (record.getAppliedAt() == null && request.status() != ApplicationRecord.Status.DRAFT) {
             record.setAppliedAt(LocalDateTime.now());
         }
-        return toResponse(repository.save(record));
+        return toResponse(repository.saveAndFlush(record));
+    }
+
+    private boolean isAllowedTransition(ApplicationRecord.Status current, ApplicationRecord.Status target) {
+        if (current == target) return true; // Saving feedback without changing status is valid.
+        return switch (current) {
+            case DRAFT -> Set.of(ApplicationRecord.Status.APPLIED, ApplicationRecord.Status.WITHDRAWN).contains(target);
+            case APPLIED -> Set.of(ApplicationRecord.Status.INTERVIEWING, ApplicationRecord.Status.OFFERED,
+                    ApplicationRecord.Status.REJECTED, ApplicationRecord.Status.WITHDRAWN).contains(target);
+            case INTERVIEWING -> Set.of(ApplicationRecord.Status.OFFERED, ApplicationRecord.Status.REJECTED,
+                    ApplicationRecord.Status.WITHDRAWN).contains(target);
+            case OFFERED, REJECTED, WITHDRAWN -> false;
+        };
     }
 
     private void validateOwnership(Long jobId, Long versionId, Long userId) {
@@ -92,7 +128,7 @@ public class ApplicationService {
 
     private ApplicationResponse toResponse(ApplicationRecord record) {
         return new ApplicationResponse(record.getId(), record.getJobDescriptionId(), record.getResumeVersionId(),
-                record.getStatus(), record.getCoverLetterText(), record.getOpeningMessageText(), record.getFeedbackText(),
-                record.getAppliedAt(), record.getCreatedAt(), record.getUpdatedAt());
+                record.getStatus(), record.getCoverLetterText(), record.getEmailBodyText(), record.getOpeningMessageText(), record.getFeedbackText(),
+                record.getAppliedAt(), record.getVersion(), record.getCreatedAt(), record.getUpdatedAt());
     }
 }

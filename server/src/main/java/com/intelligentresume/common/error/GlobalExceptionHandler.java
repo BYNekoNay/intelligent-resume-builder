@@ -11,8 +11,10 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -44,6 +46,20 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception exception, HttpServletRequest request) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.failure(ErrorCode.VALIDATION.code(), ErrorCode.VALIDATION.message(), traceId(request)));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFound(
+            NoResourceFoundException exception, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.failure(ErrorCode.NOT_FOUND.code(), ErrorCode.NOT_FOUND.message(), traceId(request)));
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(
+            OptimisticLockingFailureException exception, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.failure(ErrorCode.CONFLICT.code(), ErrorCode.CONFLICT.message(), traceId(request)));
     }
 
     @ExceptionHandler(Exception.class)

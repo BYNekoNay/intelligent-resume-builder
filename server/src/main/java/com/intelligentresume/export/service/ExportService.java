@@ -121,6 +121,20 @@ public class ExportService {
         return toResponse(task);
     }
 
+    @Transactional
+    public ExportTaskResponse retry(Long id, Long userId) {
+        ExportTask task = repository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (task.getStatus() != ExportTask.ExportStatus.FAILED) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Only failed exports can be retried");
+        }
+        task.setStatus(ExportTask.ExportStatus.PENDING);
+        task.setErrorMessage(null);
+        task.setExpiresAt(LocalDateTime.now().plusHours(ttlHours));
+        task.setRetryCount(task.getRetryCount() + 1);
+        return toResponse(repository.save(task));
+    }
+
     public byte[] download(Long id, Long userId) {
         ExportTask task = repository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));

@@ -147,8 +147,6 @@ public class ScoringService {
         MatchResult result = repository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         findOwnedVersion(result.getResumeVersionId(), userId);
-        // Validate both resources before exposing a historical match result.
-        findOwnedVersion(result.getResumeVersionId(), userId);
         jobDescriptionRepository.findByIdAndUserId(result.getJobDescriptionId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         return toResponse(result);

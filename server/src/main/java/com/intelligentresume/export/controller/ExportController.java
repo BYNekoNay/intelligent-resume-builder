@@ -43,6 +43,12 @@ public class ExportController {
         return ApiResponse.success(service.get(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    @PostMapping("/tasks/{id}/retry")
+    public ResponseEntity<ApiResponse<ExportTaskResponse>> retry(@PathVariable Long id, HttpServletRequest httpRequest) {
+        return ResponseEntity.accepted().body(ApiResponse.success(
+                service.retry(id, currentUserId(httpRequest)), traceId(httpRequest)));
+    }
+
     @GetMapping("/files/{id}")
     public ResponseEntity<Resource> download(@PathVariable Long id, HttpServletRequest httpRequest) {
         byte[] bytes = service.download(id, currentUserId(httpRequest));

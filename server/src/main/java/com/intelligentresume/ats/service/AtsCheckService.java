@@ -53,12 +53,18 @@ public class AtsCheckService {
         boolean hasWork = resumeJson.get("work") instanceof List<?> list && !list.isEmpty();
         boolean hasSkills = resumeJson.get("skills") instanceof List<?> list && !list.isEmpty();
         List<String> risks = new ArrayList<>();
+        List<String> passedChecks = new ArrayList<>();
+        if (hasBasics) passedChecks.add("Basic information is present");
+        if (hasWork) passedChecks.add("Work experience is present");
+        if (hasSkills) passedChecks.add("Skills section is present");
+        if (textLength >= 180 && textLength <= 12000) passedChecks.add("Resume length is within the recommended range");
         if (!hasBasics) risks.add("缺少基本信息模块");
         if (!hasWork) risks.add("缺少可验证的工作经历");
         if (!hasSkills) risks.add("缺少技能模块");
         if (textLength < 180) risks.add("简历内容偏短，可能缺少经历证据");
         if (textLength > 12000) risks.add("简历内容过长，建议压缩低相关信息");
 
+        List<String> priorities = risks.stream().limit(3).toList();
         BigDecimal structureScore = BigDecimal.valueOf((hasBasics ? 34 : 0) + (hasWork ? 33 : 0) + (hasSkills ? 33 : 0));
         BigDecimal lengthScore = textLength >= 180 && textLength <= 12000 ? BigDecimal.valueOf(100) : BigDecimal.valueOf(55);
         BigDecimal total = match.totalScore().multiply(BigDecimal.valueOf(.6))
@@ -78,8 +84,9 @@ public class AtsCheckService {
         entity.setResumeVersionId(request.resumeVersionId());
         entity.setJobDescriptionId(request.jobDescriptionId());
         entity.setTotalScore(total);
-        entity.setResultJson(Map.of("checks", checks, "risks", risks, "disclaimer", DISCLAIMER));
+        entity.setResultJson(Map.of("checks", checks, "passedChecks", passedChecks, "risks", risks,
+                "priorities", priorities, "disclaimer", DISCLAIMER));
         AtsCheckResult saved = repository.save(entity);
-        return new AtsCheckResponse(saved.getId(), total, checks, risks, DISCLAIMER);
+        return new AtsCheckResponse(saved.getId(), total, checks, passedChecks, risks, priorities, DISCLAIMER);
     }
 }

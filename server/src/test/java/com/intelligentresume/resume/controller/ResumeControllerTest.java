@@ -22,6 +22,7 @@ import java.util.UUID;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -74,6 +75,21 @@ class ResumeControllerTest {
                         .content("{\"title\":\"Unauthorized update\"}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(40401));
+    }
+
+    @Test
+    void createsTheInitialManualVersionFromTheSubmittedResumeJson() {
+        TestUser user = createUser();
+        ResumeResponse resume = createResume(user.userId());
+
+        assertThat(resume.currentVersionId()).isNotNull();
+        assertThat(resumeService.listVersions(resume.id(), user.userId()))
+                .singleElement()
+                .satisfies(version -> {
+                    assertThat(version.versionNo()).isEqualTo(1);
+                    assertThat(version.sourceType()).isEqualTo(com.intelligentresume.resume.domain.ResumeVersion.SourceType.MANUAL);
+                    assertThat(version.resumeJson()).containsKey("basics");
+                });
     }
 
     private TestUser createUser() {
