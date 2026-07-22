@@ -4,6 +4,7 @@ import com.intelligentresume.ai.consent.domain.AiConsent;
 import com.intelligentresume.ai.consent.dto.ConsentRequest;
 import com.intelligentresume.ai.consent.dto.ConsentResponse;
 import com.intelligentresume.ai.consent.repository.AiConsentRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,10 +16,19 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ConsentService {
 
-    private final AiConsentRepository repository;
+    private static final java.util.List<String> ALL_AI_TASK_SCOPES = java.util.List.of(
+            "JOB_GENERATION", "MATERIAL_RESUME_GENERATION", "INLINE_OPTIMIZE",
+            "ACHIEVEMENT_GUIDANCE", "COMMUNICATION_GENERATE", "INTERVIEW");
+    private static final java.util.List<String> ALL_AI_DATA_CATEGORIES = java.util.List.of(
+            "CAREER_MATERIAL", "JOB_DESCRIPTION", "RESUME", "RAW_MATERIAL_TEXT",
+            "INTERVIEW_ANSWER", "TEXT_SELECTION");
 
-    public ConsentService(AiConsentRepository repository) {
+    private final AiConsentRepository repository;
+    private final String providerCode;
+
+    public ConsentService(AiConsentRepository repository, @Value("${app.ai.provider}") String providerCode) {
         this.repository = repository;
+        this.providerCode = providerCode;
     }
 
     @Transactional
@@ -27,9 +37,11 @@ public class ConsentService {
         c.setUserId(userId);
         c.setEventType(AiConsent.ConsentEventType.GRANTED);
         c.setPolicyVersion(request.policyVersion());
-        c.setProviderCode(request.providerCode());
-        c.setTaskScopes(request.taskScopes());
-        c.setDataCategories(request.dataCategories());
+        c.setProviderCode(providerCode);
+        // Consent currently gates all AI entry points through isConsented(). Persist the
+        // effective global scope rather than accepting a narrower, misleading client claim.
+        c.setTaskScopes(ALL_AI_TASK_SCOPES);
+        c.setDataCategories(ALL_AI_DATA_CATEGORIES);
         c.setNoticeHash(request.noticeHash());
         AiConsent saved = repository.save(c);
         return toResponse(saved);

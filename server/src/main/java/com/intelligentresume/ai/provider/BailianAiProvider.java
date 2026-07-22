@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -40,6 +41,7 @@ public class BailianAiProvider implements AiProvider {
     private final String apiKey;
     private final List<String> models;
 
+    @Autowired
     public BailianAiProvider(@Value("${app.ai.bailian.base-url}") String baseUrl,
                              @Value("${app.ai.bailian.api-key}") String apiKey,
                              @Value("${app.ai.bailian.models}") String configuredModels,
@@ -144,8 +146,16 @@ public class BailianAiProvider implements AiProvider {
             case "MATERIAL_RESUME_GENERATION" -> "{\"generatedResumeJson\":{\"basics\":{},\"work\":[],\"education\":[],\"skills\":[],\"projects\":[]},\"suggestions\":[\"...\"]}";
             default -> "{}";
         };
+        String taskRules = switch (taskType) {
+            case "INLINE_OPTIMIZE" -> "For inline optimization, preserve every fact exactly: do not add technologies, metrics, employers, responsibilities, or outcomes that are absent from content and resumeContext. jobDescription is only a wording target, never a source of candidate facts.";
+            case "COMMUNICATION_GENERATE" -> "For communication drafts, use only facts present in resume. jobTitle and jobText describe the target role, never the candidate's experience.";
+            case "MATERIAL_RESUME_GENERATION" -> "For material resume generation, use only facts stated in rawMaterialText. Do not infer tools, employers, metrics, education, or credentials.";
+            case "ACHIEVEMENT_GUIDANCE" -> "For achievement guidance, ask clarification questions only. Do not invent metrics, results, or answers.";
+            default -> "";
+        };
         try {
             return "TASK_TYPE: " + taskType + "\nREQUIRED_JSON_SCHEMA: " + schema
+                    + "\nTASK_RULES: " + taskRules
                     + "\nINPUT_DATA:\n" + objectMapper.writeValueAsString(input);
         } catch (JsonProcessingException exception) {
             throw new BusinessException(ErrorCode.AI_FAILURE, "AI 输入序列化失败");

@@ -103,7 +103,7 @@ public class MockAiProvider implements AiProvider {
         if (material.getSourceText() != null && !material.getSourceText().isBlank()) {
             item.putIfAbsent("summary", material.getSourceText());
         }
-        item.put("_source", "career-material:" + material.getId());
+        item.put("_source", "material:" + material.getId());
         item.put("_pending", false);
 
         switch (material.getMaterialType()) {

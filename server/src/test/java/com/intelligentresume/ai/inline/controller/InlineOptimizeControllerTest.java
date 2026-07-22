@@ -57,7 +57,9 @@ class InlineOptimizeControllerTest {
                 .andExpect(jsonPath("$.data.candidates[0].suggestion").isNotEmpty())
                 .andExpect(jsonPath("$.data.requiresManualConfirmation").value(true));
 
-        org.assertj.core.api.Assertions.assertThat(resumeService.listVersions(resume.resumeId(), user.userId())).hasSize(1);
+        // Creating the resume creates version 1; the fixture adds the baseline version 2.
+        // Inline suggestions must not create a third version before explicit confirmation.
+        org.assertj.core.api.Assertions.assertThat(resumeService.listVersions(resume.resumeId(), user.userId())).hasSize(2);
     }
 
     @Test

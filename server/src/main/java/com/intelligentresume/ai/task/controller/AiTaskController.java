@@ -44,6 +44,12 @@ public class AiTaskController {
         return ApiResponse.success(service.get(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    @PostMapping("/tasks/{id}/retry")
+    public ResponseEntity<ApiResponse<TaskResponse>> retry(@PathVariable Long id, HttpServletRequest httpRequest) {
+        return ResponseEntity.accepted().body(ApiResponse.success(
+                service.retry(id, currentUserId(httpRequest)), traceId(httpRequest)));
+    }
+
     private Long currentUserId(HttpServletRequest request) {
         Object attr = request.getAttribute("currentUserId");
         if (attr == null) {

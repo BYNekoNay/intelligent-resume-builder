@@ -31,6 +31,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final int loginPerMinute;
     private final int registerPerMinute;
     private final int refreshPerMinute;
+    private final boolean trustForwardedHeaders;
+    private final int maxBuckets;
     private final ObjectMapper objectMapper;
     private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
 
@@ -38,11 +40,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Value("${app.security.rate-limit.login-per-minute}") int loginPerMinute,
             @Value("${app.security.rate-limit.register-per-minute}") int registerPerMinute,
             @Value("${app.security.rate-limit.refresh-per-minute}") int refreshPerMinute,
+            @Value("${app.security.rate-limit.trust-forwarded-headers:false}") boolean trustForwardedHeaders,
+            @Value("${app.security.rate-limit.max-buckets:10000}") int maxBuckets,
             ObjectMapper objectMapper
     ) {
         this.loginPerMinute = loginPerMinute;
         this.registerPerMinute = registerPerMinute;
         this.refreshPerMinute = refreshPerMinute;
+        this.trustForwardedHeaders = trustForwardedHeaders;
+        this.maxBuckets = maxBuckets;
         this.objectMapper = objectMapper;
     }
 
@@ -58,6 +64,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String ip = clientIp(request);
         String key = path + "|" + ip;
         long currentMinute = System.currentTimeMillis() / 60_000L;
+        evictStaleBuckets(currentMinute);
         Bucket bucket = buckets.computeIfAbsent(key, k -> new Bucket());
         boolean allowed = bucket.allow(limit, currentMinute);
         if (!allowed) {
@@ -76,12 +83,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private String clientIp(HttpServletRequest request) {
-        String xff = request.getHeader("X-Forwarded-For");
+        String xff = trustForwardedHeaders ? request.getHeader("X-Forwarded-For") : null;
         if (xff != null && !xff.isBlank()) {
             int comma = xff.indexOf(',');
             return (comma > 0 ? xff.substring(0, comma) : xff).trim();
         }
         return request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
+    }
+
+    private void evictStaleBuckets(long currentMinute) {
+        if (buckets.size() < maxBuckets) return;
+        buckets.entrySet().removeIf(entry -> entry.getValue().minute < currentMinute - 1);
     }
 
     private void writeTooManyRequests(HttpServletResponse response, HttpServletRequest request) throws IOException {

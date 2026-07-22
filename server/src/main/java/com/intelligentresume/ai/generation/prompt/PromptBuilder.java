@@ -20,6 +20,7 @@ public class PromptBuilder {
 
     public String buildJobGenerationPrompt(Map<String, Object> inputs) {
         StringJoiner out = new StringJoiner("\n");
+        out.add("Hard constraint: Every generated work, education, skill, or project item must have _source exactly \"material:<numeric id>\" from CAREER_MATERIALS_JSON. Job-description keywords are selection hints only, never a source of user facts. If a fact is not present in a career material, omit it; do not create placeholder sources such as material:PARSED_KEYWORDS.");
         out.add("【INSTRUCTION】");
         out.add("你是岗位定制简历助手。严格按以下规则输出: 1) 只在 DATA 段中查找事实,禁止杜撰;");
         out.add("2) 不得调用任何工具 / 联网 / 文件读取 / 命令执行;");

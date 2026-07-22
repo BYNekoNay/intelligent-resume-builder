@@ -166,7 +166,7 @@ class HappyPathIT {
         assertThat(task.getStatus()).isEqualTo(AiTask.TaskStatus.SUCCESS);
         assertThat(task.getResultJson()).isNotNull();
         assertThat(objectMapper.writeValueAsString(task.getResultJson()))
-                .contains("career-material:" + material.id())
+                .contains("material:" + material.id())
                 .contains("Spring Boot")
                 .doesNotContain("MockCorp", "Mock Project");
         assertThat((List<?>) task.getResultJson().get("selected")).isNotEmpty();

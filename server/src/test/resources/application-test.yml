@@ -32,6 +32,8 @@ app:
       login-per-minute: 1000
       register-per-minute: 1000
       refresh-per-minute: 1000
+      trust-forwarded-headers: false
+      max-buckets: 100
   ai:
     provider: mock
     worker:

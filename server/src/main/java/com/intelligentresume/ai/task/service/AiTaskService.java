@@ -10,6 +10,7 @@ import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
 import com.intelligentresume.resume.repository.ResumeRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,19 +33,22 @@ public class AiTaskService {
     private final JobDescriptionRepository jobDescriptionRepository;
     private final CareerMaterialRepository materialRepository;
     private final IdempotencyService idempotencyService;
+    private final int maxRetries;
 
     public AiTaskService(AiTaskRepository repository,
                          ConsentService consentService,
                          ResumeRepository resumeRepository,
                          JobDescriptionRepository jobDescriptionRepository,
                          CareerMaterialRepository materialRepository,
-                         IdempotencyService idempotencyService) {
+                         IdempotencyService idempotencyService,
+                         @Value("${app.ai.worker.max-retries}") int maxRetries) {
         this.repository = repository;
         this.consentService = consentService;
         this.resumeRepository = resumeRepository;
         this.jobDescriptionRepository = jobDescriptionRepository;
         this.materialRepository = materialRepository;
         this.idempotencyService = idempotencyService;
+        this.maxRetries = maxRetries;
     }
 
     @Transactional
@@ -112,6 +116,24 @@ public class AiTaskService {
         AiTask task = repository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         return toResponse(task);
+    }
+
+    @Transactional
+    public TaskResponse retry(Long id, Long userId) {
+        AiTask task = repository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (task.getStatus() != AiTask.TaskStatus.FAILED) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Only failed tasks can be retried");
+        }
+        if (task.getRetryCount() >= maxRetries) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Task retry limit has been reached");
+        }
+        task.setStatus(AiTask.TaskStatus.PENDING);
+        task.setErrorMessage(null);
+        task.setLeaseOwner(null);
+        task.setLeaseExpiresAt(null);
+        task.setRetryCount(task.getRetryCount() + 1);
+        return toResponse(repository.save(task));
     }
 
     private TaskResponse toResponse(AiTask t) {

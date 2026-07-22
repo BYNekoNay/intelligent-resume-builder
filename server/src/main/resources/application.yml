@@ -64,6 +64,8 @@ app:
       login-per-minute: ${RATE_LIMIT_LOGIN:10}
       register-per-minute: ${RATE_LIMIT_REGISTER:5}
       refresh-per-minute: ${RATE_LIMIT_REFRESH:30}
+      trust-forwarded-headers: ${RATE_LIMIT_TRUST_FORWARDED_HEADERS:false}
+      max-buckets: ${RATE_LIMIT_MAX_BUCKETS:10000}
 
   # T06 AI 同意与任务
   ai:

@@ -148,6 +148,36 @@ class AiTaskServiceTest {
                 .isEqualTo("All pending draft items require a decision");
     }
 
+    @Test
+    void retriesOnlyOwnedFailedTasksAndClearsTheirExecutionState() {
+        Long ownerId = createUser();
+        Long otherUserId = createUser();
+        AiTask task = new AiTask();
+        task.setUserId(ownerId);
+        task.setTaskType(AiTask.TaskType.JOB_GENERATION);
+        task.setIdempotencyKey("retry-task");
+        task.setRequestFingerprint("retry-fingerprint");
+        task.setInputSnapshotJson(Map.of("resumeId", 1L));
+        task.setStatus(AiTask.TaskStatus.FAILED);
+        task.setErrorMessage("provider timed out");
+        task.setRetryCount(0);
+        AiTask saved = aiTaskRepository.saveAndFlush(task);
+
+        assertNotFound(() -> aiTaskService.retry(saved.getId(), otherUserId));
+
+        var retried = aiTaskService.retry(saved.getId(), ownerId);
+        assertThat(retried.status()).isEqualTo(AiTask.TaskStatus.PENDING);
+        assertThat(retried.errorMessage()).isNull();
+        assertThat(retried.retryCount()).isEqualTo(1);
+        AiTask exhausted = aiTaskRepository.findById(saved.getId()).orElseThrow();
+        exhausted.setStatus(AiTask.TaskStatus.FAILED);
+        aiTaskRepository.saveAndFlush(exhausted);
+        assertThatThrownBy(() -> aiTaskService.retry(saved.getId(), ownerId))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.CONFLICT);
+    }
+
     private Long createUser() {
         String username = "task_" + UUID.randomUUID().toString().substring(0, 8);
         authService.register(new RegisterRequest(username, username + "@example.com", "StrongPassword!1"));

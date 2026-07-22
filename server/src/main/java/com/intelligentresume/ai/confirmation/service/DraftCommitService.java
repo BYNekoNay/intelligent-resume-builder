@@ -95,9 +95,10 @@ public class DraftCommitService {
         if (!(value instanceof Map<?, ?> raw)) return;
         Map<String, Object> map = (Map<String, Object>) raw;
         Object source = map.get("_source");
-        if (source instanceof String sourceText && sourceText.startsWith("career-material:")) {
+        if (source instanceof String sourceText) {
             try {
-                Long materialId = Long.valueOf(sourceText.substring("career-material:".length()));
+                Long materialId = materialIdFromSource(sourceText);
+                if (materialId == null) return;
                 ConfirmRequest.Decision decision = decisions.getOrDefault(path, ConfirmRequest.Decision.ACCEPT);
                 ResumeMaterialReference reference = new ResumeMaterialReference();
                 reference.setResumeVersionId(versionId);
@@ -116,6 +117,12 @@ public class DraftCommitService {
                 collectReferences(entry.getValue(), path + "/" + entry.getKey(), versionId, decisions);
             }
         }
+    }
+
+    private Long materialIdFromSource(String source) {
+        String prefix = source.startsWith("material:") ? "material:" : "career-material:";
+        if (!source.startsWith(prefix)) return null;
+        return Long.valueOf(source.substring(prefix.length()));
     }
 
     public record CommitResult(

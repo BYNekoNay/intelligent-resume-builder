@@ -47,15 +47,41 @@ public class JobGenerationSchemaValidator {
                     throw new BusinessException(ErrorCode.AI_FAILURE,
                             "draftResumeJson." + field + "[] 必须是对象");
                 }
+                validateNestedEntries(entry, field);
                 if (!entry.containsKey("_source")) {
                     throw new BusinessException(ErrorCode.AI_FAILURE,
                             field + " 条目缺少 _source 字段");
+                }
+                Object source = entry.get("_source");
+                if (!(source instanceof String sourceText) || !sourceText.matches("material:[1-9]\\d*")) {
+                    throw new BusinessException(ErrorCode.AI_FAILURE,
+                            field + " item must reference a numeric career material source");
                 }
                 if (!entry.containsKey("_pending")) {
                     throw new BusinessException(ErrorCode.AI_FAILURE,
                             field + " 条目缺少 _pending 字段");
                 }
             }
+        }
+    }
+
+    private void validateNestedEntries(Map<?, ?> entry, String label) {
+        for (Map.Entry<?, ?> child : entry.entrySet()) {
+            if (child.getKey() instanceof String key && !key.startsWith("_")) {
+                validateNestedValue(child.getValue(), label + "." + key);
+            }
+        }
+    }
+
+    private void validateNestedValue(Object value, String label) {
+        if (value instanceof Map<?, ?> nested) {
+            if (!(nested.get("_source") instanceof String source) || !source.matches("material:[1-9]\\d*")
+                    || !(nested.get("_pending") instanceof Boolean)) {
+                throw new BusinessException(ErrorCode.AI_FAILURE, label + " nested item must include provenance and pending state");
+            }
+            validateNestedEntries(nested, label);
+        } else if (value instanceof List<?> list) {
+            for (Object child : list) validateNestedValue(child, label + "[]");
         }
     }
 }

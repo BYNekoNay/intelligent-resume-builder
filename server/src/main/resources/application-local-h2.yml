@@ -1,4 +1,4 @@
-# 本地浏览器联调用。通过 Maven 的 useTestClasspath 启动，因此 H2 不进入生产运行时依赖。
+# 本地浏览器联调用。使用内存 H2 与 mock AI，避免消耗真实模型额度。
 spring:
   datasource:
     url: jdbc:h2:mem:intelligent_resume_local;MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=USER,KEY,VALUE,ORDER,DATABASE
@@ -21,7 +21,7 @@ server:
 
 app:
   cors:
-    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5176
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5176,http://127.0.0.1:5176
   jwt:
     secret: local-h2-only-secret-local-h2-only-32bytes-min-length
     issuer: intelligent-resume-builder-local-h2
@@ -31,6 +31,7 @@ app:
       register-per-minute: 1000
       refresh-per-minute: 1000
   ai:
+    provider: mock
     worker:
       poll-interval-ms: 200
       lease-seconds: 60
