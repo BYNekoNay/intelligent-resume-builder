@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "axios": "^1.7.7",
@@ -16,9 +17,10 @@
     "vue-router": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22.5.5",
-    "@vue/tsconfig": "^0.5.1",
     "@vitejs/plugin-vue": "^5.1.2",
+    "@vue/tsconfig": "^0.5.1",
     "typescript": "^5.5.4",
     "vite": "^5.4.2",
     "vue-tsc": "^2.1.4"

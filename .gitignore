@@ -7,6 +7,8 @@ server/pdf-output/
 # Node and frontend
 web/node_modules/
 web/dist/
+web/test-results/
+web/playwright-report/
 pdf-service/node_modules/
 pdf-service/output/
 pdf-service/.cache/
