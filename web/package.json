@@ -8,7 +8,8 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "test:e2e": "playwright test",
-    "test:e2e:local": "cross-env LOCAL_E2E=true playwright test --grep @local-services"
+    "test:e2e:local": "cross-env LOCAL_E2E=true playwright test --grep @local-services",
+    "test:e2e:local:pdf-recovery": "cross-env LOCAL_E2E=true LOCAL_E2E_PDF_RECOVERY=true playwright test --grep \"PDF failure in the UI\""
   },
   "dependencies": {
     "axios": "^1.7.7",
