@@ -19,10 +19,11 @@ class BailianAiProviderLiveIT {
     @Test
     void returnsStructuredAchievementGuidanceFromTheConfiguredModelChain() {
         Map<String, Object> result = provider().invoke("ACHIEVEMENT_GUIDANCE", Map.of(
-                "content", "Implemented a small internal tool and reduced a manual review step."));
+                "content", "实现内部审核工具，减少了人工审核步骤。"));
 
         assertThat(result.get("questions")).isInstanceOf(List.class);
         assertThat((List<?>) result.get("questions")).isNotEmpty();
+        assertThat(String.valueOf(result.get("questions"))).containsPattern("\\p{IsHan}");
         printResult("achievement_guidance", result);
     }
 
@@ -30,13 +31,14 @@ class BailianAiProviderLiveIT {
     void returnsUsableInlineOptimizationCandidates() {
         Map<String, Object> result = provider().invoke("INLINE_OPTIMIZE", Map.of(
                 "section", "work",
-                "content", "Built an order API in Spring Boot and reduced checkout errors from 3% to 1.2%.",
-                "resumeContext", Map.of("basics", Map.of("name", "Test Candidate")),
-                "jobDescription", "Backend engineer with Kotlin and Spring Boot experience."));
+                "content", "使用 Spring Boot 构建订单接口，将结算错误率从 3% 降至 1.2%。",
+                "resumeContext", Map.of("basics", Map.of("name", "测试候选人")),
+                "jobDescription", "需要 Kotlin 和 Spring Boot 经验的后端工程师。"));
 
         assertThat(result.get("candidates")).isInstanceOf(List.class);
         assertThat((List<?>) result.get("candidates")).isNotEmpty();
         assertThat(String.valueOf(result.get("candidates"))).doesNotContainIgnoringCase("Kotlin");
+        assertThat(String.valueOf(result.get("candidates"))).containsPattern("\\p{IsHan}");
         printResult("inline_optimize", result);
     }
 
@@ -44,38 +46,47 @@ class BailianAiProviderLiveIT {
     void returnsACommunicationDraftGroundedInSuppliedFacts() {
         Map<String, Object> result = provider().invoke("COMMUNICATION_GENERATE", Map.of(
                 "type", "COVER_LETTER",
-                "resume", Map.of("basics", Map.of("name", "Test Candidate"),
-                        "work", List.of(Map.of("company", "Example Systems", "position", "Backend Engineer",
-                                "highlights", List.of("Reduced checkout errors from 3% to 1.2%."))),
+                "resume", Map.of("basics", Map.of("name", "测试候选人"),
+                        "work", List.of(Map.of("company", "示例科技", "position", "后端工程师",
+                                "highlights", List.of("将结算错误率从 3% 降至 1.2%。"))),
                         "skills", List.of("Java", "Spring Boot", "MySQL")),
-                "jobTitle", "Backend Engineer",
-                "jobText", "Build reliable Java services with Spring Boot and MySQL."));
+                "jobTitle", "后端工程师",
+                "jobText", "使用 Java、Spring Boot 与 MySQL 构建可靠服务。"));
 
         assertThat(String.valueOf(result.get("draft"))).containsIgnoringCase("Spring");
+        assertThat(String.valueOf(result.get("draft"))).containsPattern("\\p{IsHan}");
+        assertThat(String.valueOf(result.get("draft"))).doesNotContainIgnoringCase("Kotlin");
         printResult("communication_generate", result);
     }
 
     @Test
     void returnsAStructuredMaterialResumeDraft() {
         Map<String, Object> result = provider().invoke("MATERIAL_RESUME_GENERATION", Map.of(
-                "rawMaterialText", "Test Candidate. Backend engineer at Example Systems. Built an order API with Java, Spring Boot, and MySQL. Reduced checkout errors from 3% to 1.2%.",
+                "rawMaterialText", "测试候选人，示例科技后端工程师。使用 Java、Spring Boot 和 MySQL 构建订单接口，将结算错误率从 3% 降至 1.2%。",
                 "jobDescriptionId", ""));
 
         assertThat(result.get("generatedResumeJson")).isInstanceOf(Map.class);
         assertThat(result.get("suggestions")).isInstanceOf(List.class);
+        Map<?, ?> generatedResume = (Map<?, ?>) result.get("generatedResumeJson");
+        assertThat(generatedResume.get("work")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST).isNotEmpty();
+        assertThat(generatedResume.get("skills")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST).isNotEmpty();
+        assertThat(String.valueOf(result)).containsPattern("\\p{IsHan}");
+        assertThat(String.valueOf(result)).doesNotContainIgnoringCase("Kotlin");
         printResult("material_resume_generation", result);
     }
 
     @Test
     void returnsAJobDraftThatPassesTheApplicationSchema() {
         String prompt = new PromptBuilder().buildJobGenerationPrompt(Map.of(
-                "jdText", "Backend engineer: Java, Spring Boot, MySQL, reliable API delivery.",
+                "jdText", "后端工程师：Java、Spring Boot、MySQL 与可靠接口交付。",
                 "parsedKeywords", Map.of("keywords", List.of("Java", "Spring Boot", "MySQL")),
-                "materials", List.of(Map.of("id", 101, "title", "Order API", "materialType", "PROJECT_EXPERIENCE",
-                        "sourceText", "Built an order API with Java, Spring Boot, and MySQL. Reduced checkout errors from 3% to 1.2%."))));
+                "materials", List.of(Map.of("id", 101, "title", "订单接口", "materialType", "PROJECT_EXPERIENCE",
+                        "sourceText", "使用 Java、Spring Boot 和 MySQL 构建订单接口，将结算错误率从 3% 降至 1.2%。"))));
         Map<String, Object> result = provider().invoke("JOB_GENERATION", Map.of("prompt", prompt));
 
         new JobGenerationSchemaValidator().validate(result);
+        assertThat(String.valueOf(result)).containsPattern("\\p{IsHan}");
+        assertThat(String.valueOf(result)).doesNotContainIgnoringCase("Kotlin");
         printResult("job_generation", result);
     }
 

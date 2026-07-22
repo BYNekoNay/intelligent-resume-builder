@@ -61,6 +61,23 @@ class BailianAiProviderTest {
         assertThat(requestedModels).containsExactly("first");
     }
 
+    @Test
+    void instructsMaterialGenerationToReturnACompleteDraftInTheInputLanguage() throws Exception {
+        List<String> prompts = new CopyOnWriteArrayList<>();
+        startServer(exchange -> {
+            String request = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            prompts.add(request);
+            respond(exchange, 200, "{\"choices\":[{\"message\":{\"content\":\"{\\\"generatedResumeJson\\\":{\\\"basics\\\":{},\\\"work\\\":[],\\\"education\\\":[],\\\"skills\\\":[],\\\"projects\\\":[]},\\\"suggestions\\\":[]}\"}}]}");
+        });
+
+        provider("first").invoke("MATERIAL_RESUME_GENERATION", Map.of("rawMaterialText", "测试候选人"));
+
+        assertThat(prompts).singleElement().satisfies(prompt ->
+                assertThat(prompt).contains("Match the primary language of the input")
+                        .contains("Return a best-effort populated generatedResumeJson")
+                        .contains("never replace the draft with an explanation"));
+    }
+
     private BailianAiProvider provider(String models) {
         return new BailianAiProvider(RestClient.builder().baseUrl("http://127.0.0.1:" + server.getAddress().getPort()).build(),
                 new ObjectMapper(), "test-key", models);

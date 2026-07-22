@@ -149,7 +149,7 @@ public class BailianAiProvider implements AiProvider {
         String taskRules = switch (taskType) {
             case "INLINE_OPTIMIZE" -> "For inline optimization, preserve every fact exactly: do not add technologies, metrics, employers, responsibilities, or outcomes that are absent from content and resumeContext. jobDescription is only a wording target, never a source of candidate facts.";
             case "COMMUNICATION_GENERATE" -> "For communication drafts, use only facts present in resume. jobTitle and jobText describe the target role, never the candidate's experience.";
-            case "MATERIAL_RESUME_GENERATION" -> "For material resume generation, use only facts stated in rawMaterialText. Do not infer tools, employers, metrics, education, or credentials.";
+            case "MATERIAL_RESUME_GENERATION" -> "For material resume generation, use only facts stated in rawMaterialText. Do not infer tools, employers, metrics, education, or credentials. Match the primary language of the input in every generated text field and suggestion. Return a best-effort populated generatedResumeJson: when rawMaterialText provides a name, employer, role, skill, project, metric, or outcome, copy that fact into the appropriate basics, work, skills, or projects field. Do not omit provided facts merely because other resume sections are missing, and never replace the draft with an explanation.";
             case "ACHIEVEMENT_GUIDANCE" -> "For achievement guidance, ask clarification questions only. Do not invent metrics, results, or answers.";
             default -> "";
         };
