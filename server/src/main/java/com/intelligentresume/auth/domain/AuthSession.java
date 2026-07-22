@@ -19,7 +19,7 @@ public class AuthSession extends BaseEntity {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(name = "token_family_id", nullable = false, length = 36)
+    @Column(name = "token_family_id", nullable = false, length = 36, columnDefinition = "CHAR(36)")
     private String tokenFamilyId;
 
     @Column(name = "refresh_token_hash", nullable = false, length = 255)

@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Mock AI Provider,固定返回符合 JSON Schema 的草稿。
@@ -20,6 +22,8 @@ import java.util.Map;
 @Component
 @ConditionalOnProperty(name = "app.ai.provider", havingValue = "mock", matchIfMissing = true)
 public class MockAiProvider implements AiProvider {
+
+    private static final Pattern MATERIAL_ID_IN_PROMPT = Pattern.compile("\\\"id\\\"\\s*:\\s*([1-9]\\d*)");
 
     @Override
     public String code() {
@@ -79,6 +83,13 @@ public class MockAiProvider implements AiProvider {
                     .filter(CareerMaterial.class::isInstance)
                     .map(CareerMaterial.class::cast)
                     .forEach(material -> addMaterial(material, work, projects, education, skills, certificates));
+            materials.stream()
+                    .filter(Map.class::isInstance)
+                    .map(Map.class::cast)
+                    .forEach(material -> addMaterialMap(material, projects));
+        }
+        if (work.isEmpty() && projects.isEmpty() && education.isEmpty() && skills.isEmpty()) {
+            addPromptBackedProject(input, projects);
         }
 
         Map<String, Object> draft = new LinkedHashMap<>();
@@ -89,6 +100,33 @@ public class MockAiProvider implements AiProvider {
         draft.put("projects", projects);
         draft.put("certificates", certificates);
         return Map.of("draftResumeJson", draft);
+    }
+
+    private void addPromptBackedProject(Map<String, Object> input, List<Map<String, Object>> projects) {
+        Object prompt = input.get("prompt");
+        if (!(prompt instanceof String promptText)) return;
+        Matcher matcher = MATERIAL_ID_IN_PROMPT.matcher(promptText);
+        if (!matcher.find()) return;
+        projects.add(new LinkedHashMap<>(Map.of(
+                "name", "Mock career material project",
+                "description", "Generated from the selected local validation material.",
+                "_source", "material:" + matcher.group(1),
+                "_pending", false)));
+    }
+
+    private void addMaterialMap(Map<?, ?> material, List<Map<String, Object>> projects) {
+        Object id = material.get("id");
+        if (!(id instanceof Number number)) return;
+        Object type = material.get("materialType");
+        if (type != null && !"PROJECT_EXPERIENCE".equals(String.valueOf(type))) return;
+        Map<String, Object> item = new LinkedHashMap<>();
+        Object title = material.containsKey("title") ? material.get("title") : "Mock career material project";
+        Object sourceText = material.containsKey("sourceText") ? material.get("sourceText") : "Generated from selected material.";
+        item.put("name", String.valueOf(title));
+        item.put("description", String.valueOf(sourceText));
+        item.put("_source", "material:" + number.longValue());
+        item.put("_pending", false);
+        projects.add(item);
     }
 
     private void addMaterial(CareerMaterial material,

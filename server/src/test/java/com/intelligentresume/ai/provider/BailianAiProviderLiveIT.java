@@ -32,11 +32,11 @@ class BailianAiProviderLiveIT {
                 "section", "work",
                 "content", "Built an order API in Spring Boot and reduced checkout errors from 3% to 1.2%.",
                 "resumeContext", Map.of("basics", Map.of("name", "Test Candidate")),
-                "jobDescription", "Backend engineer with Java, Spring Boot, and MySQL experience."));
+                "jobDescription", "Backend engineer with Kotlin and Spring Boot experience."));
 
         assertThat(result.get("candidates")).isInstanceOf(List.class);
         assertThat((List<?>) result.get("candidates")).isNotEmpty();
-        assertThat(String.valueOf(result.get("candidates"))).doesNotContainIgnoringCase("MySQL");
+        assertThat(String.valueOf(result.get("candidates"))).doesNotContainIgnoringCase("Kotlin");
         printResult("inline_optimize", result);
     }
 
@@ -89,6 +89,13 @@ class BailianAiProviderLiveIT {
     }
 
     private void printResult(String task, Map<String, Object> result) {
-        System.out.println("LIVE_AI_RESULT " + task + " " + result);
+        Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("keys", result.keySet());
+        result.forEach((key, value) -> {
+            if (value instanceof List<?> list) summary.put(key + "Count", list.size());
+            else if (value instanceof Map<?, ?> map) summary.put(key + "Keys", map.keySet());
+            else summary.put(key + "Present", value != null);
+        });
+        System.out.println("LIVE_AI_SUMMARY " + task + " " + summary);
     }
 }

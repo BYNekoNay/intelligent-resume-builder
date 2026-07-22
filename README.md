@@ -17,28 +17,25 @@ docs/         产品、设计、测试和 AI 代理开发规范
 
 ## 本地启动
 
-前置条件：Java 17、Maven 3.9+、Node.js 20+、Docker Desktop（用于 MySQL）。
+前置条件：Java 17、Maven 3.9+、Node.js 20+ 与本机 MySQL。Docker 不是本地验收的前置条件。
 
 ```powershell
-# 1. 启动本地 MySQL
-Copy-Item .env.example .env
-docker compose up -d mysql
+# 1. 在忽略的根目录 .env 中配置本机 MySQL 连接（不要写入百炼密钥）
+# SPRING_DATASOURCE_URL=jdbc:mysql://127.0.0.1:3306/intelligent_resume?...
+# SPRING_DATASOURCE_USERNAME=你的本机用户名
+# SPRING_DATASOURCE_PASSWORD=你的本机密码
 
-# 2. 启动后端 API（http://localhost:8080）
-Set-Location server
-mvn spring-boot:run
+# 2. 启动由脚本管理的 Mock 验收拓扑
+.\scripts\Start-LocalValidation.ps1 -Mode Mock -SkipMySql
 
-# 3. 新终端：启动前端（http://localhost:5173）
-Set-Location web
-Copy-Item .env.example .env.local
-npm install
-npm run dev
+# 3. 运行完整 API 验收（包含 AI 与 PDF 故障恢复）
+.\scripts\Test-LocalFullFlow.ps1 -VerifyPdfRecovery
 
-# 4. 新终端：启动 PDF 服务（http://localhost:3001）
-Set-Location pdf-service
-npm install
-npm run dev
+# 4. 停止脚本管理的本地服务
+.\scripts\Stop-LocalValidation.ps1
 ```
+
+完整本机 MySQL 配置、真实百炼门禁和浏览器 smoke 操作见 [docs/LOCAL_VALIDATION.md](docs/LOCAL_VALIDATION.md)。
 
 初始健康检查：
 

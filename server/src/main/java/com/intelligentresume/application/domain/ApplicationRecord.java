@@ -5,10 +5,11 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import org.hibernate.annotations.JdbcTypeCode;
 
+import java.sql.Types;
 import java.time.LocalDateTime;
 
 @Entity
@@ -19,10 +20,10 @@ public class ApplicationRecord extends BaseEntity {
     @Column(name = "resume_version_id", nullable = false) private Long resumeVersionId;
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 32) private Status status;
-    @Lob @Column(name = "cover_letter_text") private String coverLetterText;
-    @Lob @Column(name = "email_body_text") private String emailBodyText;
-    @Lob @Column(name = "opening_message_text") private String openingMessageText;
-    @Lob @Column(name = "feedback_text") private String feedbackText;
+    @JdbcTypeCode(Types.LONGVARCHAR) @Column(name = "cover_letter_text", columnDefinition = "TEXT") private String coverLetterText;
+    @JdbcTypeCode(Types.LONGVARCHAR) @Column(name = "email_body_text", columnDefinition = "TEXT") private String emailBodyText;
+    @JdbcTypeCode(Types.LONGVARCHAR) @Column(name = "opening_message_text", columnDefinition = "TEXT") private String openingMessageText;
+    @JdbcTypeCode(Types.LONGVARCHAR) @Column(name = "feedback_text", columnDefinition = "TEXT") private String feedbackText;
     @Column(name = "applied_at") private LocalDateTime appliedAt;
     @Version @Column(name = "version", nullable = false) private Long version;
 

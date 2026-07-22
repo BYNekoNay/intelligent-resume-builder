@@ -1,0 +1,95 @@
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Get-LocalValidationRoot { return (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path }
+
+function Assert-LocalCommand {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { throw "Required command '$Name' was not found on PATH." }
+}
+
+function Get-LocalEnvValues {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return @{} }
+    $values = @{}
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#') -or -not $trimmed.Contains('=')) { continue }
+        $name, $value = $trimmed.Split('=', 2)
+        $values[$name.Trim()] = $value.Trim()
+    }
+    return $values
+}
+
+function Test-LocalHttpEndpoint {
+    param([Parameter(Mandatory = $true)][string]$Uri, [int]$TimeoutSeconds = 2)
+    try { $response = Invoke-WebRequest -Uri $Uri -TimeoutSec $TimeoutSeconds -UseBasicParsing; return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300 } catch { return $false }
+}
+
+function Wait-LocalHttpEndpoint {
+    param([Parameter(Mandatory = $true)][string]$Uri, [int]$TimeoutSeconds = 45)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do { if (Test-LocalHttpEndpoint -Uri $Uri) { return }; Start-Sleep -Milliseconds 500 } while ((Get-Date) -lt $deadline)
+    throw "Timed out waiting for $Uri."
+}
+
+function Stop-LocalProcessTree {
+    param([Parameter(Mandatory = $true)][int]$Id)
+    foreach ($child in @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $Id" -ErrorAction SilentlyContinue)) {
+        Stop-LocalProcessTree -Id $child.ProcessId
+    }
+    Stop-Process -Id $Id -Force -ErrorAction SilentlyContinue
+}
+
+function Stop-LocalPortListener {
+    param([Parameter(Mandatory = $true)][int]$Port)
+    foreach ($listener in @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) {
+        Stop-LocalProcessTree -Id $listener.OwningProcess
+    }
+}
+
+function Get-LocalValidationDirectory {
+    $path = Join-Path (Get-LocalValidationRoot) '.local-validation'
+    New-Item -ItemType Directory -Force -Path $path | Out-Null
+    return $path
+}
+
+function Assert-LocalValidationDirectoryIgnored {
+    $root = Get-LocalValidationRoot
+    $path = Get-LocalValidationDirectory
+    $probe = Join-Path $path '.gitignore-probe'
+    New-Item -ItemType File -Force -Path $probe | Out-Null
+    try { & git -C $root check-ignore --quiet -- $probe; if ($LASTEXITCODE -ne 0) { throw "Local validation output directory must be ignored by Git: $path" } } finally { Remove-Item -Force -ErrorAction SilentlyContinue $probe }
+}
+
+function Write-LocalValidationSummary {
+    param([Parameter(Mandatory = $true)][hashtable]$Summary, [string]$Name = 'summary.json')
+    Assert-LocalValidationDirectoryIgnored
+    $directory = Get-LocalValidationDirectory
+    $path = Join-Path $directory $Name
+    $Summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding utf8
+    if ($Name.EndsWith('.json', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $lines = @('# Local validation summary')
+        if ($Summary.ContainsKey('status')) { $lines += '', "- Status: $($Summary.status)" }
+        if ($Summary.ContainsKey('runId')) { $lines += "- Run: $($Summary.runId)" }
+        if ($Summary.ContainsKey('durationMs')) { $lines += "- Duration (ms): $($Summary.durationMs)" }
+        if ($Summary.ContainsKey('traceId')) { $lines += "- Trace ID: $($Summary.traceId)" }
+        if ($Summary.ContainsKey('pdfSha256')) { $lines += "- PDF SHA-256: $($Summary.pdfSha256)" }
+        if ($Summary.ContainsKey('cleanup')) { $lines += "- Cleanup: $($Summary.cleanup)" }
+        if ($Summary.ContainsKey('checks') -and $Summary.checks) {
+            $lines += '', '## Checks', ''
+            foreach ($check in $Summary.checks) { $lines += "- $($check.name): $($check.status)" }
+        }
+        $humanPath = Join-Path $directory ([System.IO.Path]::ChangeExtension($Name, '.md'))
+        $lines | Set-Content -LiteralPath $humanPath -Encoding utf8
+    }
+    return $path
+}
+
+function Import-LiveAiEnvironment {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $values = Get-LocalEnvValues -Path $Path
+    if ([string]::IsNullOrWhiteSpace($values['BAILIAN_API_KEY'])) { throw "Live AI requires BAILIAN_API_KEY in ignored local file: $Path" }
+    $env:AI_PROVIDER = 'bailian'
+    foreach ($pair in $values.GetEnumerator()) { Set-Item -Path "Env:$($pair.Key)" -Value $pair.Value }
+}

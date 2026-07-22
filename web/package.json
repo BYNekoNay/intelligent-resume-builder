@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:local": "cross-env LOCAL_E2E=true playwright test --grep @local-services"
   },
   "dependencies": {
     "axios": "^1.7.7",
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "cross-env": "^7.0.3",
     "@types/node": "^22.5.5",
     "@vitejs/plugin-vue": "^5.1.2",
     "@vue/tsconfig": "^0.5.1",

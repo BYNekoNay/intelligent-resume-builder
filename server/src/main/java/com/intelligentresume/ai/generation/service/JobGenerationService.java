@@ -12,6 +12,7 @@ import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.domain.JobDescription;
 import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,6 +40,7 @@ public class JobGenerationService {
     private final PromptInjectionDetector injectionDetector;
     private final JobGenerationSchemaValidator schemaValidator;
     private final AiProvider aiProvider;
+    private final boolean localValidationFailureInjectionEnabled;
 
     public JobGenerationService(AiTaskRepository taskRepository,
                                 CareerMaterialRepository materialRepository,
@@ -47,7 +49,8 @@ public class JobGenerationService {
                                 PromptBuilder promptBuilder,
                                 PromptInjectionDetector injectionDetector,
                                 JobGenerationSchemaValidator schemaValidator,
-                                AiProvider aiProvider) {
+                                AiProvider aiProvider,
+                                @Value("${app.local-validation.failure-injection-enabled:false}") boolean localValidationFailureInjectionEnabled) {
         this.taskRepository = taskRepository;
         this.materialRepository = materialRepository;
         this.jobDescriptionRepository = jobDescriptionRepository;
@@ -56,6 +59,7 @@ public class JobGenerationService {
         this.injectionDetector = injectionDetector;
         this.schemaValidator = schemaValidator;
         this.aiProvider = aiProvider;
+        this.localValidationFailureInjectionEnabled = localValidationFailureInjectionEnabled;
     }
 
     @Transactional
@@ -77,6 +81,9 @@ public class JobGenerationService {
         }
 
         // 1. 加载 JD,过注入检测
+        if (shouldInjectLocalValidationFailure(snapshot, task)) {
+            throw new BusinessException(ErrorCode.AI_FAILURE, "Synthetic local validation failure before retry");
+        }
         Object jdIdRaw = snapshot.get("jobDescriptionId");
         if (!(jdIdRaw instanceof Number jdIdNum)) {
             throw new BusinessException(ErrorCode.VALIDATION, "input_snapshot_json.jobDescriptionId 缺失");
@@ -133,6 +140,13 @@ public class JobGenerationService {
             }
         }
         return set;
+    }
+
+    private boolean shouldInjectLocalValidationFailure(Map<String, Object> snapshot, AiTask task) {
+        if (!localValidationFailureInjectionEnabled || task.getRetryCount() != 0) return false;
+        Object additionalInput = snapshot.get("additionalInput");
+        if (!(additionalInput instanceof Map<?, ?> values)) return false;
+        return values.get("localValidationFailOnce") instanceof Boolean enabled && enabled;
     }
 
     private List<Map<String, Object>> describeMaterials(List<CareerMaterial> materials,

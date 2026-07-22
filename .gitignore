@@ -21,6 +21,8 @@ pdf-output/
 .env
 .env.local
 .env.*.local
+.env.live-ai
+.local-validation/
 .idea/
 .vscode/
 *.iml

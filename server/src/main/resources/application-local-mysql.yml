@@ -1,0 +1,16 @@
+# Local MySQL validation relies on Flyway migrations as the schema authority.
+# Hibernate's validate mode is intentionally disabled here because MySQL 5.7
+# reports TEXT/CLOB compatibility differently from Hibernate 6.
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+app:
+  local-validation:
+    failure-injection-enabled: true
+  security:
+    rate-limit:
+      register-per-minute: 100
+      login-per-minute: 100
+      refresh-per-minute: 100
