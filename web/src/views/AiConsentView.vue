@@ -35,9 +35,9 @@ async function grant() {
   try {
     await grantConsent({
       policyVersion: 'mvp-v1',
-      providerCode: 'mock',
-      taskScopes: ['JOB_GENERATION'],
-      dataCategories: ['CAREER_MATERIAL', 'JOB_DESCRIPTION', 'RESUME'],
+      providerCode: 'configured',
+      taskScopes: ['JOB_GENERATION', 'MATERIAL_RESUME_GENERATION', 'INLINE_OPTIMIZE', 'ACHIEVEMENT_GUIDANCE', 'COMMUNICATION_GENERATE', 'INTERVIEW'],
+      dataCategories: ['CAREER_MATERIAL', 'JOB_DESCRIPTION', 'RESUME', 'RAW_MATERIAL_TEXT', 'INTERVIEW_ANSWER', 'TEXT_SELECTION'],
       noticeHash: 'mvp-local-notice-v1',
     })
     consent.value = (await getConsent()).data.data
@@ -77,7 +77,7 @@ async function withdraw() {
       <ul>
         <li>职业资料、目标简历与当前 JD 仅用于岗位定制任务。</li>
         <li>每条生成要点都需要你逐项接受、编辑或拒绝。</li>
-        <li>当前 MVP 使用确定性 Mock Provider，不调用真实外部模型。</li>
+        <li>处理提供方以当前服务端配置为准，授权记录会显示实际使用的提供方。</li>
       </ul>
       <p class="status-line" :class="{ success: granted }" role="status">{{ message }}</p>
       <p v-if="consent" class="status-line">当前事件：{{ consent.eventType }} · 提供商：{{ consent.providerCode }} · 范围：{{ consent.taskScopes.join(', ') || '无' }}</p>

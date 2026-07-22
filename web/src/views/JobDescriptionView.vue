@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { generateForJob, getConsent } from '@/api/ai'
+import { createJob, deleteJob, parseJob, type JobDescription, updateJob } from '@/api/jobDescription'
+import { useAiTaskStore } from '@/stores/aiTask'
+import { useCareerMaterialStore } from '@/stores/careerMaterial'
 import { useJobDescriptionStore } from '@/stores/jobDescription'
 import { useResumeStore } from '@/stores/resume'
-import { useCareerMaterialStore } from '@/stores/careerMaterial'
-import { useAiTaskStore } from '@/stores/aiTask'
-import { generateForJob, getConsent } from '@/api/ai'
-import { createJob, deleteJob, parseJob, type JobDescription } from '@/api/jobDescription'
 
 const store = useJobDescriptionStore()
 const resumeStore = useResumeStore()
@@ -14,20 +14,36 @@ const materialStore = useCareerMaterialStore()
 const taskStore = useAiTaskStore()
 const router = useRouter()
 const route = useRoute()
-const targetResumeId = ref<number | null>(null)
-const preferences = ref<Record<number, 'included' | 'preferred' | 'excluded'>>({})
-const creatingFor = ref<number | null>(null)
-const error = ref('')
 const title = ref('')
 const companyName = ref('')
 const jdText = ref('')
+const editingId = ref<number | null>(null)
+const targetResumeId = ref<number | null>(null)
+const preferences = ref<Record<number, 'included' | 'preferred' | 'excluded'>>({})
 const saving = ref(false)
+const creatingFor = ref<number | null>(null)
 const parsedResult = ref<JobDescription | null>(null)
+const error = ref('')
 
 onMounted(async () => {
   await Promise.all([store.load(), resumeStore.load(), materialStore.load()])
   targetResumeId.value = resumeStore.items[0]?.id ?? null
 })
+
+function resetForm() {
+  editingId.value = null
+  title.value = ''
+  companyName.value = ''
+  jdText.value = ''
+}
+
+function edit(job: JobDescription) {
+  editingId.value = job.id
+  title.value = job.title
+  companyName.value = job.companyName ?? ''
+  jdText.value = job.jdText
+  error.value = ''
+}
 
 function preferenceIds(preference: 'included' | 'preferred' | 'excluded') {
   return Object.entries(preferences.value)
@@ -35,9 +51,47 @@ function preferenceIds(preference: 'included' | 'preferred' | 'excluded') {
     .map(([id]) => Number(id))
 }
 
+async function save() {
+  saving.value = true
+  error.value = ''
+  const payload = { title: title.value, companyName: companyName.value || undefined, jdText: jdText.value }
+  try {
+    if (editingId.value === null) await createJob(payload)
+    else await updateJob(editingId.value, payload)
+    resetForm()
+    await store.load()
+  } catch {
+    error.value = 'Unable to save the job description. Check the required fields and try again.'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function parse(id: number) {
+  error.value = ''
+  try {
+    parsedResult.value = (await parseJob(id)).data.data
+    await store.load()
+  } catch {
+    error.value = 'Unable to parse this job description. Please try again.'
+  }
+}
+
+async function remove(id: number) {
+  if (!window.confirm('Delete this job description?')) return
+  error.value = ''
+  try {
+    await deleteJob(id)
+    if (editingId.value === id) resetForm()
+    await store.load()
+  } catch {
+    error.value = 'Unable to delete this job description. It may already be in use.'
+  }
+}
+
 async function generate(jobId: number) {
-  if (!targetResumeId.value) {
-    error.value = '请先创建并选择一份目标简历。'
+  if (targetResumeId.value === null) {
+    error.value = 'Create and select a target resume before generating a tailored draft.'
     return
   }
   creatingFor.value = jobId
@@ -58,87 +112,49 @@ async function generate(jobId: number) {
     taskStore.remember(response.data.data.id)
     await router.push({ name: 'job-generation-confirm', params: { jobId }, query: { taskId: response.data.data.id } })
   } catch {
-    error.value = '未能创建岗位定制任务。请先确认已授权 AI 数据处理，并检查资料和 JD。'
+    error.value = 'Unable to start generation. Confirm AI consent and review the selected resume and materials.'
   } finally {
     creatingFor.value = null
   }
-}
-
-async function create() {
-  saving.value = true
-  error.value = ''
-  try {
-    await createJob({ title: title.value, companyName: companyName.value || undefined, jdText: jdText.value })
-    title.value = ''
-    companyName.value = ''
-    jdText.value = ''
-    await store.load()
-  } catch {
-    error.value = 'JD 保存失败，请检查岗位名称和描述长度。'
-  } finally {
-    saving.value = false
-  }
-}
-
-async function parse(id: number) {
-  try {
-    parsedResult.value = (await parseJob(id)).data.data
-    await store.load()
-  } catch {
-    error.value = 'JD 解析失败，请稍后重试。'
-  }
-}
-
-async function remove(id: number) {
-  if (!window.confirm('删除 JD 后无法继续基于它生成草稿，确定继续吗？')) return
-  await deleteJob(id)
-  await store.load()
 }
 </script>
 
 <template>
   <section class="workspace-page">
-    <h1>岗位 JD</h1>
-    <p class="page-lead">选择目标简历，并按资料的重要性指定“固定使用 / 优先使用 / 不使用”。生成后仍需逐项确认。</p>
+    <p class="eyebrow">Job descriptions</p>
+    <h1>Target Jobs</h1>
+    <p>Save a job description, select a resume and material preferences, then generate a reviewable tailored draft.</p>
     <p v-if="error" class="form-error" role="alert">{{ error }}</p>
 
-    <form class="workspace-card job-form" @submit.prevent="create">
-      <label>岗位名称<input v-model.trim="title" required maxlength="255" placeholder="例如：高级 Java 工程师" /></label>
-      <label>公司名称<input v-model.trim="companyName" maxlength="255" placeholder="可选" /></label>
-      <label class="wide-field">JD 原文<textarea v-model.trim="jdText" required maxlength="5000" rows="6" placeholder="粘贴岗位职责、要求和技能关键词" /><small class="field-count">{{ jdText.length }}/5000</small></label>
-      <button class="btn-neon btn-primary" :disabled="saving">{{ saving ? '正在保存…' : '保存 JD' }}</button>
+    <form class="workspace-card job-form" @submit.prevent="save">
+      <h2>{{ editingId === null ? 'New job description' : 'Edit job description' }}</h2>
+      <label>Role title<input v-model.trim="title" required maxlength="255" /></label>
+      <label>Company<input v-model.trim="companyName" maxlength="255" /></label>
+      <label class="wide-field">Job description<textarea v-model.trim="jdText" required maxlength="5000" rows="6" /><small class="field-count">{{ jdText.length }}/5000</small></label>
+      <div class="job-actions">
+        <button class="btn-neon btn-primary" :disabled="saving">{{ saving ? 'Saving...' : editingId === null ? 'Save job' : 'Save changes' }}</button>
+        <button v-if="editingId !== null" class="btn-neon btn-ghost" type="button" :disabled="saving" @click="resetForm">Cancel</button>
+      </div>
     </form>
 
-    <div v-if="parsedResult" class="workspace-card"><h2>{{ parsedResult.title }} · 解析结果</h2><pre class="json-preview">{{ JSON.stringify(parsedResult.parsedKeywordsJson, null, 2) }}</pre></div>
+    <div v-if="parsedResult" class="workspace-card"><h2>{{ parsedResult.title }} parsing result</h2><pre class="json-preview">{{ JSON.stringify(parsedResult.parsedKeywordsJson, null, 2) }}</pre></div>
 
-    <div class="generation-config workspace-card">
-      <label>目标简历
-        <select v-model="targetResumeId">
-          <option :value="null">请选择简历</option>
-          <option v-for="resume in resumeStore.items" :key="resume.id" :value="resume.id">{{ resume.title }}</option>
-        </select>
-      </label>
-      <RouterLink class="text-link" to="/ai-consent">管理 AI 数据处理授权</RouterLink>
+    <section class="generation-config workspace-card">
+      <h2>Tailored draft setup</h2>
+      <label>Target resume<select v-model="targetResumeId"><option :value="null">Select a resume</option><option v-for="resume in resumeStore.items" :key="resume.id" :value="resume.id">{{ resume.title }}</option></select></label>
+      <RouterLink class="text-link" to="/ai-consent">Manage AI consent</RouterLink>
       <div v-if="materialStore.items.length" class="material-preferences">
-        <h2>资料使用偏好</h2>
-        <label v-for="material in materialStore.items" :key="material.id" class="preference-row">
-          <span><strong>{{ material.title }}</strong><small>{{ material.materialType }}</small></span>
-          <select v-model="preferences[material.id]">
-            <option :value="undefined">遵循资料默认设置</option>
-            <option value="included">固定使用</option>
-            <option value="preferred">优先使用</option>
-            <option value="excluded">不使用</option>
-          </select>
-        </label>
+        <h3>Material preferences</h3>
+        <label v-for="material in materialStore.items" :key="material.id" class="preference-row"><span><strong>{{ material.title }}</strong><small>{{ material.materialType }}</small></span><select v-model="preferences[material.id]"><option :value="undefined">Use material default</option><option value="included">Always include</option><option value="preferred">Prefer</option><option value="excluded">Exclude</option></select></label>
       </div>
-    </div>
+    </section>
 
-    <p v-if="store.loading">正在加载 JD…</p>
-    <p v-else-if="!store.items.length" class="empty-state">暂无 JD。请先创建岗位描述。</p>
+    <p v-if="store.loading">Loading job descriptions...</p>
+    <p v-else-if="!store.items.length" class="empty-state">No job descriptions yet.</p>
     <div v-else class="job-list">
       <article v-for="job in store.items" :key="job.id" class="workspace-card job-card">
-        <div><h2>{{ job.title }}</h2><p>{{ job.companyName || '未填写公司' }} · {{ job.parsedAt ? '已解析关键词' : '尚未解析' }}</p></div>
-        <div class="job-actions"><button class="btn-neon btn-ghost" @click="parse(job.id)">解析 JD</button><button class="btn-neon btn-primary" :disabled="creatingFor !== null" @click="generate(job.id)">{{ creatingFor === job.id ? '正在创建任务…' : '生成定制草稿' }}</button><button class="danger-action" title="删除 JD" @click="remove(job.id)">删除</button></div>
+        <div><h2>{{ job.title }}</h2><p>{{ job.companyName || 'No company specified' }} · {{ job.parsedAt ? 'Parsed' : 'Not parsed' }}</p></div>
+        <div class="job-actions"><button class="btn-neon btn-ghost" type="button" @click="edit(job)">Edit</button><button class="btn-neon btn-ghost" type="button" @click="parse(job.id)">Parse</button><button class="btn-neon btn-primary" type="button" :disabled="creatingFor !== null" @click="generate(job.id)">{{ creatingFor === job.id ? 'Starting...' : 'Generate draft' }}</button><button class="danger-action" type="button" title="Delete job description" @click="remove(job.id)">Delete</button></div>
       </article>
     </div>
   </section>

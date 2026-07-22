@@ -4,7 +4,9 @@ export interface AtsCheckResponse {
   id: number
   totalScore: number
   checks: Record<string, unknown>
+  passedChecks: string[]
   risks: string[]
+  priorities: string[]
   disclaimer: string
 }
 

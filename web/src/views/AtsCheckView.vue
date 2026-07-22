@@ -1,37 +1,52 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { runAtsCheck, type AtsCheckResponse } from '@/api/ats'
+import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 
 const resumeVersionId = ref('')
 const jobDescriptionId = ref('')
 const result = ref<AtsCheckResponse | null>(null)
 const error = ref('')
 const loading = ref(false)
+const { resumes, jobs, versions, selectedResumeId, loading: optionsLoading, error: optionsError, hasVersions, load, loadVersions } = useResumeJobOptions()
 
 async function check() {
+  if (!resumeVersionId.value || !jobDescriptionId.value) {
+    error.value = 'Select a resume version and target job first.'
+    return
+  }
   error.value = ''
   result.value = null
-  const resumeId = Number(resumeVersionId.value)
-  const jobId = Number(jobDescriptionId.value)
-  if (!resumeId || !jobId) { error.value = '请输入简历版本 ID 和 JD ID。'; return }
   loading.value = true
-  try { result.value = (await runAtsCheck(resumeId, jobId)).data.data } catch { error.value = '体检失败，请确认资源归属和网络状态。' } finally { loading.value = false }
+  try {
+    result.value = (await runAtsCheck(Number(resumeVersionId.value), Number(jobDescriptionId.value))).data.data
+  } catch {
+    error.value = 'Unable to run the resume health check. Confirm that the selected resources belong to you.'
+  } finally {
+    loading.value = false
+  }
 }
+
+onMounted(() => { void load() })
 </script>
 
 <template>
   <section class="workspace-page">
-    <p class="eyebrow">Resume health</p><h1>ATS 规则体检</h1>
-    <p class="disclaimer">这是规则化简历体检，不是企业 ATS 结果，也不代表录用概率。</p>
+    <p class="eyebrow">Resume health</p>
+    <h1>ATS rule check</h1>
+    <p class="disclaimer">This is a rules-based resume health check, not an enterprise ATS result or hiring prediction.</p>
     <form class="workspace-card compact-form" @submit.prevent="check">
-      <label>简历版本 ID<input v-model="resumeVersionId" inputmode="numeric" placeholder="例如：12" /></label>
-      <label>目标 JD ID<input v-model="jobDescriptionId" inputmode="numeric" placeholder="例如：4" /></label>
-      <button class="btn-neon btn-primary" :disabled="loading">{{ loading ? '检查中…' : '开始体检' }}</button>
+      <label>Resume<select v-model.number="selectedResumeId" :disabled="optionsLoading" @change="loadVersions"><option :value="null" disabled>Select a resume</option><option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.title }}</option></select></label>
+      <label>Resume version<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions" required><option value="" disabled>Select a version</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ version.sourceType }}</option></select></label>
+      <label>Target job<select v-model="jobDescriptionId" :disabled="optionsLoading" required><option value="" disabled>Select a job</option><option v-for="job in jobs" :key="job.id" :value="String(job.id)">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option></select></label>
+      <button class="btn-neon btn-primary" :disabled="loading || optionsLoading">{{ loading ? 'Checking...' : 'Run check' }}</button>
     </form>
-    <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+    <p v-if="optionsError || error" class="form-error" role="alert">{{ error || optionsError }}</p>
     <article v-if="result" class="workspace-card">
-      <div class="score-grid"><p><strong>体检分</strong>{{ result.totalScore }}</p><p><strong>结构</strong>{{ result.checks.structure }}</p><p><strong>关键词覆盖</strong>{{ result.checks.keywordCoverage }}</p></div>
-      <h2>风险与依据</h2><ul><li v-for="risk in result.risks" :key="risk">{{ risk }}</li><li v-if="!result.risks.length">未发现明显结构风险。</li></ul>
+      <div class="score-grid"><p><strong>Health score</strong>{{ result.totalScore }}</p><p><strong>Structure</strong>{{ result.checks.structure }}</p><p><strong>Keyword coverage</strong>{{ result.checks.keywordCoverage }}</p></div>
+      <h2>Priority changes</h2><ol><li v-for="priority in result.priorities" :key="priority">{{ priority }}</li><li v-if="!result.priorities.length">No urgent structural changes found.</li></ol>
+      <h2>Passed checks</h2><ul><li v-for="passed in result.passedChecks" :key="passed">{{ passed }}</li></ul>
+      <h2>Risks and evidence</h2><ul><li v-for="risk in result.risks" :key="risk">{{ risk }}</li><li v-if="!result.risks.length">No structural risks found.</li></ul>
       <small class="disclaimer">{{ result.disclaimer }}</small>
     </article>
   </section>

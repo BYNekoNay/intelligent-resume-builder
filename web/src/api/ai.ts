@@ -63,6 +63,11 @@ export interface InlineOptimizeResponse {
   requiresManualConfirmation: boolean
 }
 
+export interface AchievementGuidanceResponse {
+  questions: string[]
+  writesBackAutomatically: boolean
+}
+
 export function grantConsent(payload: ConsentRequest) {
   return apiClient.post<ApiResponse<ConsentResponse>>('/api/ai/consent', payload)
 }
@@ -85,6 +90,10 @@ export function getTask(id: number) {
   return apiClient.get<ApiResponse<AiTask>>(`/api/ai/tasks/${id}`)
 }
 
+export function retryTask(id: number) {
+  return apiClient.post<ApiResponse<AiTask>>(`/api/ai/tasks/${id}/retry`)
+}
+
 export function confirmTask(id: number, payload: ConfirmRequest, idempotencyKey: string) {
   return apiClient.post<ApiResponse<{ resumeVersionId: number; versionNo: number; resultResumeVersionId: number; rejectedPaths: string[]; newMaterialIds: number[] }>>(
     `/api/ai/tasks/${id}/confirm`,
@@ -99,4 +108,8 @@ export function rejectTask(id: number, taskUpdatedAt: string) {
 
 export function inlineOptimize(payload: InlineOptimizeRequest) {
   return apiClient.post<ApiResponse<InlineOptimizeResponse>>('/api/ai/inline-optimize', payload)
+}
+
+export function guideAchievement(payload: { resumeVersionId: number; section: string; content: string }) {
+  return apiClient.post<ApiResponse<AchievementGuidanceResponse>>('/api/ai/achievement-guidance', payload)
 }

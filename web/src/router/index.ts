@@ -22,6 +22,7 @@ import InterviewView from '@/views/InterviewView.vue'
 import ResumeImportView from '@/views/ResumeImportView.vue'
 import CommunicationView from '@/views/CommunicationView.vue'
 import InterviewAssetsView from '@/views/InterviewAssetsView.vue'
+import AchievementGuidanceView from '@/views/AchievementGuidanceView.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
@@ -45,6 +46,7 @@ const router = createRouter({
         { path: 'resume-import', name: 'resume-import', component: ResumeImportView, meta: { requiresAuth: true } },
         { path: 'communications', name: 'communications', component: CommunicationView, meta: { requiresAuth: true } },
         { path: 'interview-assets', name: 'interview-assets', component: InterviewAssetsView, meta: { requiresAuth: true } },
+        { path: 'achievement-guidance', name: 'achievement-guidance', component: AchievementGuidanceView, meta: { requiresAuth: true } },
         {
           path: 'jobs/:jobId/generate',
           name: 'job-generation-confirm',

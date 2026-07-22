@@ -23,6 +23,10 @@ export function getExportTask(id: number) {
   return apiClient.get<ApiResponse<ExportTask>>(`/api/exports/tasks/${id}`)
 }
 
+export function retryExport(id: number) {
+  return apiClient.post<ApiResponse<ExportTask>>(`/api/exports/tasks/${id}/retry`)
+}
+
 export function downloadExport(id: number) {
   return apiClient.get<Blob>(`/api/exports/files/${id}`, { responseType: 'blob' })
 }

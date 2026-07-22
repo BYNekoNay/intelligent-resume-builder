@@ -26,6 +26,10 @@ export function createJob(payload: JobDescriptionPayload) {
   return apiClient.post<ApiResponse<JobDescription>>('/api/jobs', payload)
 }
 
+export function updateJob(id: number, payload: JobDescriptionPayload) {
+  return apiClient.patch<ApiResponse<JobDescription>>(`/api/jobs/${id}`, payload)
+}
+
 export function parseJob(id: number) {
   return apiClient.post<ApiResponse<JobDescription>>(`/api/jobs/${id}/parse`)
 }

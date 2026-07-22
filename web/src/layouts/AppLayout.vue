@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FilePenLine, FileText, LayoutDashboard, LogIn, LogOut, NotebookPen, Sparkles, UserRoundPlus, Activity, Send } from 'lucide-vue-next'
+import { FilePenLine, FileText, LayoutDashboard, LogIn, LogOut, NotebookPen, Sparkles, UserRoundPlus, Activity, Send, Target } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
@@ -31,6 +31,7 @@ async function signOut() {
         <RouterLink to="/resume-import" class="nav-link"><FileText :size="16" />导入</RouterLink>
         <RouterLink to="/communications" class="nav-link"><Send :size="16" />文案</RouterLink>
         <RouterLink to="/interview-assets" class="nav-link"><NotebookPen :size="16" />答案库</RouterLink>
+        <RouterLink to="/achievement-guidance" class="nav-link"><Target :size="16" />成就引导</RouterLink>
       </nav>
       <div v-if="auth.accessToken" class="header-actions">
         <RouterLink class="icon-action" to="/ai-consent" aria-label="AI 数据处理同意" title="AI 数据处理同意"><Sparkles :size="18" /></RouterLink>

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Check, Pencil, RefreshCw, X } from 'lucide-vue-next'
 import { useAiTaskStore } from '@/stores/aiTask'
-import { confirmTask, rejectTask } from '@/api/ai'
+import { confirmTask, rejectTask, retryTask } from '@/api/ai'
 
 const props = defineProps<{ jobId: string }>()
 const taskStore = useAiTaskStore()
@@ -136,6 +136,23 @@ async function rejectDraft() {
     rejecting.value = false
   }
 }
+
+async function retryFailedTask() {
+  const task = taskStore.current
+  if (!task || task.status !== 'FAILED') return
+  submitting.value = true
+  error.value = ''
+  try {
+    const response = await retryTask(task.id)
+    taskStore.remember(response.data.data.id)
+    await taskStore.load(task.id)
+    taskStore.startPolling(task.id)
+  } catch {
+    error.value = '重试任务失败，请稍后再试。'
+  } finally {
+    submitting.value = false
+  }
+}
 </script>
 
 <template>
@@ -146,7 +163,7 @@ async function rejectDraft() {
     <p v-if="!taskStore.current" class="empty-state">请先在 JD 页面发起生成任务。</p>
     <template v-else>
       <div class="task-status workspace-card"><strong>任务状态：{{ taskStore.current.status }}</strong><span>最近更新：{{ taskStore.current.updatedAt }}</span><RefreshCw v-if="taskStore.polling" :size="16" class="spinning" /></div>
-      <p v-if="taskStore.current.status === 'FAILED'" class="form-error">{{ taskStore.current.errorMessage || '任务执行失败。' }}</p>
+      <div v-if="taskStore.current.status === 'FAILED'" class="workspace-card"><p class="form-error">{{ taskStore.current.errorMessage || '任务执行失败。' }}</p><button class="btn-neon btn-primary" :disabled="submitting || rejecting" @click="retryFailedTask">{{ submitting ? '正在重新排队…' : '重试任务' }}</button></div>
       <div v-if="canConfirm" class="confirmation-list">
         <article v-for="item in selectedItems" :key="item.outputPath" class="workspace-card confirmation-item">
           <div><code>{{ item.outputPath }}</code><p v-if="item.pendingReason" class="pending-note">待补充：{{ item.pendingReason }}</p><p v-else>来源：{{ item.sourceLabel || `资料 #${item.materialId ?? '—'}` }} · {{ item.selectedReason || '已选择用于生成' }}</p></div>
