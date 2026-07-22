@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   ArrowRight,
   BookOpen,
@@ -16,6 +16,8 @@ import { getSystemHealth, type SystemHealth } from '@/api/system'
 import { remotePhotos, FALLBACK_GRADIENT } from '@/assets/remote-photos'
 import { useStars } from '@/composables/useStars'
 import RemoteImage from '@/components/RemoteImage.vue'
+import { useAuthStore } from '@/stores/auth'
+import { useLocale } from '@/i18n'
 
 const starCanvas = ref<HTMLCanvasElement | null>(null)
 useStars(starCanvas, { starCount: 220, meteorIntervalMs: 2400 })
@@ -23,6 +25,9 @@ useStars(starCanvas, { starCount: 220, meteorIntervalMs: 2400 })
 const health = ref<SystemHealth | null>(null)
 const healthError = ref(false)
 const healthLoading = ref(true)
+const auth = useAuthStore()
+const { t } = useLocale()
+const startPath = computed(() => auth.accessToken ? '/career-materials' : '/register')
 
 onMounted(async () => {
   try {
@@ -34,12 +39,12 @@ onMounted(async () => {
   }
 })
 
-const stars = [
-  { label: '4', text: '核心模块' },
-  { label: '5', text: '步闭环' },
-  { label: '100%', text: '来源可追溯' },
-  { label: '0', text: '外部 LLM' },
-]
+const stars = computed(() => [
+  { label: '4', text: t('home.statModules') },
+  { label: '5', text: t('home.statSteps') },
+  { label: '100%', text: t('home.statTraceable') },
+  { label: '0', text: t('home.statLlm') },
+])
 </script>
 
 <template>
@@ -47,30 +52,23 @@ const stars = [
   <canvas ref="starCanvas" class="star-canvas" aria-hidden="true" />
 
   <!-- ============ Hero ============ -->
-  <section class="hero" aria-label="主页首屏">
+  <section class="hero" :aria-label="t('home.title')">
     <div class="hero-text">
       <p class="eyebrow sparkle-on-hover">
-        <Star :size="14" /> 智历 · 在群星之间书写简历
+        <Star :size="14" /> {{ t('home.eyebrow') }}
       </p>
-      <h1 class="neon-title">
-        把简历放进<em>银河</em>,<br />
-        让每一份事实<em>可追溯</em>。
-      </h1>
-      <p class="lead">
-        智历是面向求职者的星图工具:沉淀职业资料、按 JD 定制、逐项确认 AI 草稿、
-        规则覆盖度反馈,最后通过<em>受控 PDF</em> 私有下载。
-        所有事实可追溯,所有数据留在你的账户。
-      </p>
+      <h1 class="neon-title">{{ t('home.title') }}</h1>
+      <p class="lead">{{ t('home.description') }}</p>
 
       <div class="hero-actions">
-        <RouterLink class="btn-neon btn-primary" to="/register">
-          开始使用 <ArrowRight :size="16" />
+        <RouterLink class="btn-neon btn-primary" :to="startPath">
+          {{ t('home.start') }} <ArrowRight :size="16" />
         </RouterLink>
         <a class="btn-neon btn-ghost" href="https://github.com/" target="_blank" rel="noreferrer">
-          <BookOpen :size="15" /> 查看文档
+          <BookOpen :size="15" /> {{ t('home.docs') }}
         </a>
         <RouterLink class="btn-neon btn-ghost" to="/career-materials">
-          <Database :size="15" /> 进入资料库
+          <Database :size="15" /> {{ t('home.materials') }}
         </RouterLink>
       </div>
 
@@ -108,13 +106,13 @@ const stars = [
   </section>
 
   <!-- ============ 功能特性卡 ============ -->
-  <section class="section" aria-label="核心能力">
+  <section class="section" :aria-label="t('home.features')">
     <header class="section-head">
       <div>
-        <p class="eyebrow"><Star :size="14" /> / FEATURES</p>
-        <h2 class="neon-title">四个模块,串起一条完整链路</h2>
+        <p class="eyebrow"><Star :size="14" /> / {{ t('home.features') }}</p>
+        <h2 class="neon-title">{{ t('home.featureTitle') }}</h2>
       </div>
-      <p>从「沉淀」到「导出」,中间不离开智历。所有步骤保留审计痕迹。</p>
+      <p>{{ t('home.featureDescription') }}</p>
     </header>
 
     <div class="feature-grid">
@@ -163,13 +161,13 @@ const stars = [
   </section>
 
   <!-- ============ 5 步流程 ============ -->
-  <section class="section" aria-label="主流程">
+  <section class="section" :aria-label="t('home.flow')">
     <header class="section-head">
       <div>
-        <p class="eyebrow"><Sparkles :size="14" /> / FLOW</p>
-        <h2 class="neon-title">从资料到 PDF,五步闭环</h2>
+        <p class="eyebrow"><Sparkles :size="14" /> / {{ t('home.flow') }}</p>
+        <h2 class="neon-title">{{ t('home.flowTitle') }}</h2>
       </div>
-      <p>每一步可中断可恢复,任务 ID 持久化到本地,刷新页面也能继续。</p>
+      <p>{{ t('home.flowDescription') }}</p>
     </header>
 
     <div class="flow-strip">
@@ -183,10 +181,10 @@ const stars = [
   </section>
 
   <!-- ============ CTA 横幅 ============ -->
-  <section class="cta-banner" aria-label="服务状态与行动号召">
+  <section class="cta-banner" :aria-label="t('home.service')">
     <div>
-      <p class="eyebrow"><Star :size="14" /> / SERVICE STATE</p>
-      <h2 class="neon-title">服务心跳正常,准备就绪</h2>
+      <p class="eyebrow"><Star :size="14" /> / {{ t('home.service') }}</p>
+      <h2 class="neon-title">{{ t('home.serviceTitle') }}</h2>
       <p>
         <span v-if="healthLoading">正在检测后端健康度...</span>
         <span v-else-if="health">
@@ -197,8 +195,8 @@ const stars = [
       </p>
     </div>
     <div class="hero-actions">
-      <RouterLink class="btn-neon btn-primary" to="/register">创建账户 <ArrowRight :size="16" /></RouterLink>
-      <RouterLink class="btn-neon btn-ghost" to="/jobs"><FileText :size="15" /> 体验 JD 流程</RouterLink>
+      <RouterLink class="btn-neon btn-primary" to="/register">{{ t('home.creating') }} <ArrowRight :size="16" /></RouterLink>
+      <RouterLink class="btn-neon btn-ghost" to="/jobs"><FileText :size="15" /> {{ t('home.tryJobs') }}</RouterLink>
     </div>
   </section>
 
@@ -225,6 +223,7 @@ const stars = [
   border-radius: 32px !important;
   z-index: 0;
 }
+.hero-text h1 { white-space: pre-line; }
 .hero-mask {
   position: absolute;
   inset: 0;

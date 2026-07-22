@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { generateCommunication, type CommunicationType } from '@/api/communication'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
+import { useLocale } from '@/i18n'
 
 const router = useRouter()
 const resumeVersionId = ref('')
@@ -13,13 +14,14 @@ const draftContext = ref<{ resumeVersionId: number; jobDescriptionId: number; ty
 const error = ref('')
 const copyStatus = ref('')
 const loading = ref(false)
+const { t } = useLocale()
 const {
   resumes, jobs, versions, selectedResumeId, loading: optionsLoading, error: optionsError, hasVersions, load, loadVersions,
 } = useResumeJobOptions()
 
 async function generate() {
   if (!resumeVersionId.value || !jobId.value) {
-    error.value = 'Select a resume version and target job first.'
+    error.value = t('communication.selectError')
     return
   }
   loading.value = true
@@ -35,7 +37,7 @@ async function generate() {
       type: type.value,
     }
   } catch {
-    error.value = 'Unable to generate a draft. Check AI consent and the selected resources.'
+    error.value = t('communication.generateError')
   } finally {
     loading.value = false
   }
@@ -44,9 +46,9 @@ async function generate() {
 async function copyDraft() {
   try {
     await navigator.clipboard.writeText(draft.value)
-    copyStatus.value = 'Draft copied.'
+    copyStatus.value = t('communication.copied')
   } catch {
-    copyStatus.value = 'Clipboard access is unavailable. Select the text and copy it manually.'
+    copyStatus.value = t('communication.clipboardError')
   }
 }
 
@@ -64,40 +66,36 @@ onMounted(() => { void load() })
 
 <template>
   <section class="workspace-page">
-    <p class="eyebrow">Communication drafts</p>
-    <h1>Job communication</h1>
-    <p>Create editable application messages. The system never sends them to an external platform.</p>
+    <p class="eyebrow">{{ t('communication.eyebrow') }}</p><h1>{{ t('communication.title') }}</h1><p>{{ t('communication.subtitle') }}</p>
 
     <form class="workspace-card compact-form" @submit.prevent="generate">
-      <label>Resume
+      <label>{{ t('communication.resume') }}
         <select v-model.number="selectedResumeId" :disabled="optionsLoading" @change="loadVersions">
-          <option :value="null" disabled>Select a resume</option>
+          <option :value="null" disabled>{{ t('communication.selectResume') }}</option>
           <option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.title }}</option>
         </select>
       </label>
-      <label>Resume version
+      <label>{{ t('communication.version') }}
         <select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions" required>
-          <option value="" disabled>Select a version</option>
+          <option value="" disabled>{{ t('communication.selectVersion') }}</option>
           <option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ version.sourceType }}</option>
         </select>
       </label>
-      <label>Job description
+      <label>{{ t('communication.job') }}
         <select v-model="jobId" :disabled="optionsLoading" required>
-          <option value="" disabled>Select a job</option>
+          <option value="" disabled>{{ t('communication.selectJob') }}</option>
           <option v-for="job in jobs" :key="job.id" :value="String(job.id)">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option>
         </select>
       </label>
-      <label>Draft type
-        <select v-model="type"><option value="COVER_LETTER">Cover letter</option><option value="EMAIL">Email body</option><option value="OPENING_MESSAGE">Opening message</option></select>
+      <label>{{ t('communication.type') }}
+        <select v-model="type"><option value="COVER_LETTER">{{ t('communication.cover') }}</option><option value="EMAIL">{{ t('communication.email') }}</option><option value="OPENING_MESSAGE">{{ t('communication.opening') }}</option></select>
       </label>
-      <button class="btn-neon btn-primary" :disabled="loading || optionsLoading">{{ loading ? 'Generating...' : 'Generate draft' }}</button>
+      <button class="btn-neon btn-primary" :disabled="loading || optionsLoading">{{ loading ? t('communication.generating') : t('communication.generate') }}</button>
     </form>
 
     <p v-if="optionsError || error" class="form-error" role="alert">{{ error || optionsError }}</p>
     <article v-if="draft" class="workspace-card">
-      <p class="disclaimer">Verify the facts before copying or associating this draft with an application.</p>
-      <label>Editable draft<textarea v-model="draft" rows="14" /></label>
-      <div class="job-actions"><button class="btn-neon btn-secondary" type="button" @click="copyDraft">Copy</button><button class="btn-neon btn-primary" type="button" @click="useInApplication">Use in application</button></div>
+      <p class="disclaimer">{{ t('communication.verify') }}</p><label>{{ t('communication.draft') }}<textarea v-model="draft" rows="14" /></label><div class="job-actions"><button class="btn-neon btn-secondary" type="button" @click="copyDraft">{{ t('communication.copy') }}</button><button class="btn-neon btn-primary" type="button" @click="useInApplication">{{ t('communication.use') }}</button></div>
       <p v-if="copyStatus" class="disclaimer">{{ copyStatus }}</p>
     </article>
   </section>

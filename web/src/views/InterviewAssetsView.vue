@@ -8,6 +8,7 @@ import {
   updateInterviewAsset,
 } from '@/api/interviewAsset'
 import { listJobs, type JobDescription } from '@/api/jobDescription'
+import { useLocale } from '@/i18n'
 
 const assets = ref<InterviewAsset[]>([])
 const question = ref('')
@@ -20,6 +21,7 @@ const error = ref('')
 const jobs = ref<JobDescription[]>([])
 const jobDescriptionId = ref<number | null>(null)
 const keyword = ref('')
+const { t } = useLocale()
 
 function resetForm() {
   editingId.value = null
@@ -42,7 +44,7 @@ async function load() {
   try {
     assets.value = (await listInterviewAssets({ jobDescriptionId: jobDescriptionId.value ?? undefined, keyword: keyword.value.trim() || undefined })).data.data
   } catch {
-    error.value = 'Unable to load answer assets. Please try again.'
+    error.value = t('assets.loadError')
   } finally {
     loading.value = false
   }
@@ -66,21 +68,21 @@ async function save() {
     }
     resetForm()
   } catch {
-    error.value = 'Unable to save this answer asset. Check the required fields and try again.'
+    error.value = t('assets.saveError')
   } finally {
     saving.value = false
   }
 }
 
 async function remove(id: number) {
-  if (!window.confirm('Delete this answer asset?')) return
+  if (!window.confirm(t('assets.confirmDelete'))) return
   error.value = ''
   try {
     await deleteInterviewAsset(id)
     assets.value = assets.value.filter((asset) => asset.id !== id)
     if (editingId.value === id) resetForm()
   } catch {
-    error.value = 'Unable to delete this answer asset. Please try again.'
+    error.value = t('assets.deleteError')
   }
 }
 
@@ -91,44 +93,44 @@ onMounted(async () => {
 
 <template>
   <section class="workspace-page">
-    <p class="eyebrow">Answer library</p>
-    <h1>Interview Answer Assets</h1>
-    <p>Keep your original response and AI suggestion separate for honest interview review.</p>
+    <p class="eyebrow">{{ t('assets.eyebrow') }}</p>
+    <h1>{{ t('assets.title') }}</h1>
+    <p>{{ t('assets.subtitle') }}</p>
 
     <form class="workspace-card compact-form" @submit.prevent="load">
-      <label>Job<select v-model="jobDescriptionId"><option :value="null">All jobs</option><option v-for="job in jobs" :key="job.id" :value="job.id">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option></select></label>
-      <label>Keyword<input v-model.trim="keyword" placeholder="Search question, suggestion, or feedback" /></label>
-      <button class="btn-neon btn-ghost" :disabled="loading">Search</button>
+      <label>{{ t('assets.job') }}<select v-model="jobDescriptionId"><option :value="null">{{ t('assets.allJobs') }}</option><option v-for="job in jobs" :key="job.id" :value="job.id">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option></select></label>
+      <label>{{ t('assets.keyword') }}<input v-model.trim="keyword" :placeholder="t('assets.searchPlaceholder')" /></label>
+      <button class="btn-neon btn-ghost" :disabled="loading">{{ t('assets.search') }}</button>
     </form>
 
     <form class="workspace-card" @submit.prevent="save">
-      <h2>{{ editingId === null ? 'New answer asset' : 'Edit answer asset' }}</h2>
-      <label>Question<textarea v-model="question" rows="2" required /></label>
-      <label>Original answer<textarea v-model="original" rows="5" required /></label>
-      <label>Suggested answer<textarea v-model="suggestion" rows="5" /></label>
+      <h2>{{ editingId === null ? t('assets.create') : t('assets.edit') }}</h2>
+      <label>{{ t('assets.question') }}<textarea v-model="question" rows="2" required /></label>
+      <label>{{ t('assets.original') }}<textarea v-model="original" rows="5" required /></label>
+      <label>{{ t('assets.suggested') }}<textarea v-model="suggestion" rows="5" /></label>
       <div class="job-actions">
-        <button class="btn-neon btn-primary" :disabled="saving">{{ saving ? 'Saving...' : editingId === null ? 'Save asset' : 'Save changes' }}</button>
-        <button v-if="editingId !== null" class="btn-neon btn-ghost" type="button" :disabled="saving" @click="resetForm">Cancel</button>
+        <button class="btn-neon btn-primary" :disabled="saving">{{ saving ? t('assets.saving') : editingId === null ? t('assets.save') : t('assets.saveChanges') }}</button>
+        <button v-if="editingId !== null" class="btn-neon btn-ghost" type="button" :disabled="saving" @click="resetForm">{{ t('assets.cancel') }}</button>
       </div>
     </form>
 
     <p v-if="error" class="form-error">{{ error }}</p>
-    <p v-if="loading" class="empty-state">Loading answer assets...</p>
-    <p v-else-if="assets.length === 0" class="empty-state">No answer assets yet.</p>
+    <p v-if="loading" class="empty-state">{{ t('assets.loading') }}</p>
+    <p v-else-if="assets.length === 0" class="empty-state">{{ t('assets.empty') }}</p>
 
     <div v-else class="workspace-list">
       <article v-for="asset in assets" :key="asset.id" class="workspace-card">
         <div class="job-actions">
           <h2>{{ asset.questionText }}</h2>
           <div class="job-actions">
-            <button class="btn-neon btn-ghost" type="button" @click="edit(asset)">Edit</button>
-            <button class="danger-action" type="button" title="Delete answer asset" @click="remove(asset.id)">Delete</button>
+            <button class="btn-neon btn-ghost" type="button" @click="edit(asset)">{{ t('assets.editAction') }}</button>
+            <button class="danger-action" type="button" :title="t('assets.delete')" @click="remove(asset.id)">{{ t('assets.delete') }}</button>
           </div>
         </div>
-        <h3>Original answer</h3>
+        <h3>{{ t('assets.original') }}</h3>
         <p>{{ asset.originalAnswerText }}</p>
         <template v-if="asset.suggestedAnswerText">
-          <h3>AI suggestion</h3>
+          <h3>{{ t('assets.suggested') }}</h3>
           <p>{{ asset.suggestedAnswerText }}</p>
         </template>
       </article>

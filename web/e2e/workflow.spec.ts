@@ -16,6 +16,49 @@ async function mockAuthenticatedApi(page: Page) {
   await page.route('**/api/applications', route => route.fulfill({ json: response([]) }))
 }
 
+test('takes an authenticated user from the home start action to the career materials workspace', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+
+  await page.goto('/')
+  await page.getByRole('link', { name: '开始使用' }).click()
+
+  await expect(page).toHaveURL(/\/career-materials$/)
+})
+
+test('switches the application chrome and answer library between Chinese and English', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+
+  await page.goto('/interview-assets')
+  await expect(page.getByRole('heading', { name: '面试答案资产' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'EN' }).click()
+
+  await expect(page.getByRole('link', { name: 'Workspace' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Interview Answer Assets' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '中文' })).toHaveAttribute('aria-pressed', 'false')
+
+  await page.reload()
+
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+  await expect(page).toHaveTitle('ZhiLi · Intelligent Resume Builder')
+  await expect(page.getByRole('heading', { name: 'Interview Answer Assets' })).toBeVisible()
+})
+
+test('switches the complete job description workspace content with the selected language', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+
+  await page.goto('/jobs')
+  await expect(page.getByRole('heading', { name: '目标岗位' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'EN' }).click()
+  await expect(page.getByRole('heading', { name: 'Target Jobs' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'New job description' })).toBeVisible()
+
+  await page.getByRole('button', { name: '中文' }).click()
+  await expect(page.getByRole('heading', { name: '目标岗位' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '新建岗位描述' })).toBeVisible()
+})
+
 test('generates an editable communication draft and carries it into an application', async ({ page }) => {
   await mockAuthenticatedApi(page)
   let generationPayload: unknown

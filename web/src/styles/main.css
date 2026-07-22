@@ -173,11 +173,21 @@ h1, h2, h3, p { margin-top: 0; }
   box-shadow: 0 0 6px #FFFFFF;
 }
 
-.app-header nav { flex: 1; display: flex; gap: 24px; }
+.app-header nav {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.app-header nav::-webkit-scrollbar { display: none; }
 .nav-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: none;
+  white-space: nowrap;
   color: var(--ink-1);
   font-size: 14px;
   position: relative;
@@ -195,6 +205,36 @@ h1, h2, h3, p { margin-top: 0; }
 }
 
 .header-actions { display: flex; gap: 10px; }
+
+.language-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 3px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  color: var(--ink-2);
+  background: rgba(6, 9, 36, 0.48);
+}
+.language-switcher > svg { margin: 0 3px 0 2px; color: var(--star-cyan); }
+.language-switcher button {
+  min-width: 32px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  font: 700 11px var(--font-rune);
+  cursor: pointer;
+}
+.language-switcher button:hover,
+.language-switcher button:focus-visible { color: var(--ink-0); outline: none; }
+.language-switcher button.active {
+  color: #fff;
+  background: rgba(192, 76, 253, 0.4);
+  box-shadow: 0 0 10px rgba(192, 76, 253, 0.24);
+}
 
 .icon-action {
   width: 36px;
@@ -851,6 +891,10 @@ h1, h2, h3, p { margin-top: 0; }
 @media (max-width: 640px) {
   .app-header { padding: 0 14px; gap: 12px; }
   .app-header nav { display: none; }
+  .brand { margin-right: auto; }
+  .header-actions { gap: 6px; }
+  .icon-action { width: 32px; height: 32px; }
+  .language-switcher > svg { display: none; }
   .app-main { padding: 28px 16px 56px; }
   .section { margin-top: 56px; }
   .flow-strip { grid-template-columns: 1fr; }

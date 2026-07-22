@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { createApplication, deleteApplication, listApplications, updateApplication, updateApplicationStatus, type ApplicationRecord, type ApplicationStatus } from '@/api/application'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
+import { useLocale } from '@/i18n'
 
 const records = ref<ApplicationRecord[]>([])
 const loading = ref(true)
@@ -15,6 +16,7 @@ const coverLetterText = ref('')
 const emailBodyText = ref('')
 const openingMessageText = ref('')
 const feedbackDraft = ref<Record<number, string>>({})
+const { t } = useLocale()
 const { resumes, jobs, versions, selectedResumeId, loading: optionsLoading, error: optionsError, hasVersions, load: loadOptions, loadVersions } = useResumeJobOptions()
 
 async function load() {
@@ -122,17 +124,17 @@ onMounted(async () => {
 
 <template>
   <section class="workspace-page">
-    <p class="eyebrow">Application tracker</p><h1>Applications</h1><p>Track applications you manage manually. Nothing is sent automatically.</p>
+    <p class="eyebrow">{{ t('applications.eyebrow') }}</p><h1>{{ t('applications.title') }}</h1><p>{{ t('applications.subtitle') }}</p>
     <form class="workspace-card compact-form" @submit.prevent="save">
-      <h2>{{ editingId === null ? 'New application' : 'Edit application' }}</h2>
-      <label>Resume<select v-model.number="selectedResumeId" :disabled="optionsLoading" @change="loadVersions"><option :value="null" disabled>Select a resume</option><option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.title }}</option></select></label>
-      <label>Resume version<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions" required><option value="" disabled>Select a version</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ version.sourceType }}</option></select></label>
-      <label>Job description<select v-model="jobDescriptionId" :disabled="optionsLoading" required><option value="" disabled>Select a job</option><option v-for="job in jobs" :key="job.id" :value="String(job.id)">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option></select></label>
-      <label>Cover letter<textarea v-model="coverLetterText" rows="4" /></label><label>Email body<textarea v-model="emailBodyText" rows="4" /></label><label>Opening message<textarea v-model="openingMessageText" rows="4" /></label>
-      <div class="job-actions"><button class="btn-neon btn-primary" :disabled="saving || loadingEdit || optionsLoading">{{ saving ? 'Saving...' : editingId === null ? 'Create draft' : 'Save changes' }}</button><button v-if="editingId !== null" class="btn-neon btn-ghost" type="button" :disabled="loadingEdit" @click="resetForm">Cancel</button></div>
+      <h2>{{ editingId === null ? t('applications.create') : t('applications.edit') }}</h2>
+      <label>{{ t('applications.resume') }}<select v-model.number="selectedResumeId" :disabled="optionsLoading" @change="loadVersions"><option :value="null" disabled>{{ t('applications.selectResume') }}</option><option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.title }}</option></select></label>
+      <label>{{ t('applications.version') }}<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions" required><option value="" disabled>{{ t('applications.selectVersion') }}</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ version.sourceType }}</option></select></label>
+      <label>{{ t('applications.job') }}<select v-model="jobDescriptionId" :disabled="optionsLoading" required><option value="" disabled>{{ t('applications.selectJob') }}</option><option v-for="job in jobs" :key="job.id" :value="String(job.id)">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option></select></label>
+      <label>{{ t('applications.cover') }}<textarea v-model="coverLetterText" rows="4" /></label><label>{{ t('applications.email') }}<textarea v-model="emailBodyText" rows="4" /></label><label>{{ t('applications.opening') }}<textarea v-model="openingMessageText" rows="4" /></label>
+      <div class="job-actions"><button class="btn-neon btn-primary" :disabled="saving || loadingEdit || optionsLoading">{{ saving ? t('applications.saving') : editingId === null ? t('applications.createDraft') : t('applications.saveChanges') }}</button><button v-if="editingId !== null" class="btn-neon btn-ghost" type="button" :disabled="loadingEdit" @click="resetForm">{{ t('applications.cancel') }}</button></div>
     </form>
-    <p v-if="optionsError || error" class="form-error" role="alert">{{ error || optionsError }}</p><p v-if="loading">Loading application records...</p>
-    <div v-else-if="records.length" class="workspace-list"><article v-for="record in records" :key="record.id" class="workspace-card application-card"><div><strong>Application #{{ record.id }}</strong><small>Job #{{ record.jobDescriptionId }} · Resume version #{{ record.resumeVersionId }}</small></div><div class="job-actions"><button class="btn-neon btn-ghost" type="button" :disabled="loadingEdit" @click="edit(record)">{{ loadingEdit ? 'Loading...' : 'Edit' }}</button><button class="danger-action" type="button" title="Delete application record" :disabled="loadingEdit" @click="remove(record)">Delete</button></div><select :value="record.status" aria-label="Application status" @change="changeStatus(record, ($event.target as HTMLSelectElement).value as ApplicationStatus)"><option v-for="status in allowedStatuses(record.status)" :key="status" :value="status">{{ status }}</option></select><label>Feedback<textarea :value="feedbackDraft[record.id] ?? record.feedbackText ?? ''" rows="3" @input="feedbackDraft[record.id] = ($event.target as HTMLTextAreaElement).value" /></label><button class="btn-neon btn-secondary" type="button" @click="changeStatus(record, record.status)">Save feedback</button><p v-if="record.coverLetterText">Cover letter: {{ record.coverLetterText }}</p><p v-if="record.emailBodyText">Email body: {{ record.emailBodyText }}</p><p v-if="record.openingMessageText">Opening message: {{ record.openingMessageText }}</p></article></div>
-    <p v-else class="empty-state">No application records yet.</p>
+    <p v-if="optionsError || error" class="form-error" role="alert">{{ error || optionsError }}</p><p v-if="loading">{{ t('applications.loading') }}</p>
+    <div v-else-if="records.length" class="workspace-list"><article v-for="record in records" :key="record.id" class="workspace-card application-card"><div><strong>{{ t('applications.application') }} #{{ record.id }}</strong><small>{{ t('applications.jobRef') }} #{{ record.jobDescriptionId }} · {{ t('applications.versionRef') }} #{{ record.resumeVersionId }}</small></div><div class="job-actions"><button class="btn-neon btn-ghost" type="button" :disabled="loadingEdit" @click="edit(record)">{{ loadingEdit ? t('applications.loading') : t('applications.editAction') }}</button><button class="danger-action" type="button" :title="t('applications.delete')" :disabled="loadingEdit" @click="remove(record)">{{ t('applications.delete') }}</button></div><select :value="record.status" :aria-label="t('applications.title')" @change="changeStatus(record, ($event.target as HTMLSelectElement).value as ApplicationStatus)"><option v-for="status in allowedStatuses(record.status)" :key="status" :value="status">{{ status }}</option></select><label>{{ t('applications.feedback') }}<textarea :value="feedbackDraft[record.id] ?? record.feedbackText ?? ''" rows="3" @input="feedbackDraft[record.id] = ($event.target as HTMLTextAreaElement).value" /></label><button class="btn-neon btn-secondary" type="button" @click="changeStatus(record, record.status)">{{ t('applications.saveFeedback') }}</button><p v-if="record.coverLetterText">{{ t('applications.cover') }}: {{ record.coverLetterText }}</p><p v-if="record.emailBodyText">{{ t('applications.email') }}: {{ record.emailBodyText }}</p><p v-if="record.openingMessageText">{{ t('applications.opening') }}: {{ record.openingMessageText }}</p></article></div>
+    <p v-else class="empty-state">{{ t('applications.empty') }}</p>
   </section>
 </template>
