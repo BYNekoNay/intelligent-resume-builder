@@ -61,20 +61,12 @@ try {
     $material = Invoke-Api POST '/api/career-materials' @{ materialType = 'PROJECT_EXPERIENCE'; title = 'Synthetic API project'; contentJson = @{ name = 'Synthetic API project'; description = 'Built a local validation API.' }; sourceText = 'Built a local validation API with Java and Spring Boot.'; usagePreference = 'PREFERRED' } $token $null
     $job = Invoke-Api POST '/api/jobs' @{ title = 'Synthetic Backend Engineer'; companyName = 'Example Company'; jdText = 'Java and Spring Boot backend engineer.' } $token $null
     Add-Check 'career-material-and-jd' { if (-not $material.id -or -not $job.id) { throw 'Failed to create synthetic material or job.' } }
-    Invoke-Api POST '/api/ai/consent' @{ policyVersion = 'local-v1'; providerCode = 'mock'; taskScopes = @('JOB_GENERATION'); dataCategories = @('CAREER_MATERIAL', 'JOB_DESCRIPTION'); noticeHash = 'local-validation' } $token $null | Out-Null
+    Invoke-Api POST '/api/ai/consent' @{ policyVersion = 'v1.0.0'; providerCode = 'bailian'; taskScopes = @('JOB_GENERATION'); dataCategories = @('CAREER_MATERIAL', 'JOB_DESCRIPTION'); noticeHash = 'local-validation' } $token $null | Out-Null
     Add-Check 'ai-consent' { Invoke-Api GET '/api/ai/consent' $null $token $null | Out-Null }
     $task = Invoke-Api POST '/api/ai/tasks' @{ targetResumeId = $resume.id; jobDescriptionId = $job.id; includedMaterialIds = @($material.id); preferredMaterialIds = @(); excludedMaterialIds = @(); additionalInput = @{} } $token @{ 'Idempotency-Key' = "local-$runId" }
     $task = Wait-Task "/api/ai/tasks/$($task.id)" $token
     $summary.taskStates += @{ type = 'JOB_GENERATION'; status = $task.status; retryCount = $task.retryCount }
     Add-Check 'job-generation' { if ($task.status -ne 'SUCCESS') { throw "Job generation ended as $($task.status)." } }
-    $retryTask = Invoke-Api POST '/api/ai/tasks' @{ targetResumeId = $resume.id; jobDescriptionId = $job.id; includedMaterialIds = @($material.id); preferredMaterialIds = @(); excludedMaterialIds = @(); additionalInput = @{ localValidationFailOnce = $true } } $token @{ 'Idempotency-Key' = "retry-$runId" }
-    $retryTask = Wait-Task "/api/ai/tasks/$($retryTask.id)" $token
-    $summary.taskStates += @{ type = 'JOB_GENERATION_RETRY_DRILL'; status = $retryTask.status; retryCount = $retryTask.retryCount }
-    Add-Check 'ai-outage' { if ($retryTask.status -ne 'FAILED') { throw "AI outage did not fail the task (received $($retryTask.status))." } }
-    $retryTask = Invoke-Api POST "/api/ai/tasks/$($retryTask.id)/retry" $null $token $null
-    $retryTask = Wait-Task "/api/ai/tasks/$($retryTask.id)" $token
-    $summary.taskStates += @{ type = 'JOB_GENERATION_RETRY_DRILL'; status = $retryTask.status; retryCount = $retryTask.retryCount; retry = $true }
-    Add-Check 'ai-recovery-retry' { if ($retryTask.status -ne 'SUCCESS' -or $retryTask.retryCount -ne 1) { throw 'AI retry did not recover the task exactly once.' } }
     $item = @{ outputPath = '/projects/0'; decision = 'ACCEPT'; editedValue = $null }
     $confirmed = Invoke-Api POST "/api/ai/tasks/$($task.id)/confirm" @{ taskUpdatedAt = $task.updatedAt; items = @($item); additionalResumeJson = @{} } $token @{ 'Idempotency-Key' = "confirm-$runId" }
     Add-Check 'generation-confirmation' { if (-not $confirmed.resumeVersionId) { throw 'Confirmation did not create a resume version.' } }

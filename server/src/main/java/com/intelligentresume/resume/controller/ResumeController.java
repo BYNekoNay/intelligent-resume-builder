@@ -4,24 +4,16 @@ import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
-import com.intelligentresume.resume.dto.ResumeCreateRequest;
-import com.intelligentresume.resume.dto.ResumeResponse;
-import com.intelligentresume.resume.dto.ResumeTitleUpdateRequest;
-import com.intelligentresume.resume.dto.ResumeVersionCreateRequest;
-import com.intelligentresume.resume.dto.ResumeVersionResponse;
+import com.intelligentresume.resume.dto.*;
 import com.intelligentresume.resume.service.ResumeService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/resumes")
@@ -34,26 +26,40 @@ public class ResumeController {
     }
 
     @PostMapping
-    public ApiResponse<ResumeResponse> create(@Valid @RequestBody ResumeCreateRequest request, HttpServletRequest httpRequest) {
-        Long userId = currentUserId(httpRequest);
-        return ApiResponse.success(resumeService.create(request, userId), traceId(httpRequest));
+    public ResponseEntity<ApiResponse<ResumeDetail>> create(
+            @Valid @RequestBody CreateResumeRequest request, HttpServletRequest httpRequest) {
+        ResumeDetail detail = resumeService.create(request, currentUserId(httpRequest));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(detail, traceId(httpRequest)));
     }
 
     @GetMapping
-    public ApiResponse<List<ResumeResponse>> list(HttpServletRequest httpRequest) {
+    public ApiResponse<List<ResumeSummary>> list(HttpServletRequest httpRequest) {
         return ApiResponse.success(resumeService.list(currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    /**
+     * 查询某 JD 关联的岗位简历列表。用于"同 JD 再次生成"时判断新建/更新。
+     */
+    @GetMapping("/by-jd/{jdId}")
+    public ApiResponse<List<ResumeSummary>> listByJobDescription(
+            @PathVariable Long jdId, HttpServletRequest httpRequest) {
+        return ApiResponse.success(
+                resumeService.listByJobDescription(jdId, currentUserId(httpRequest)),
+                traceId(httpRequest));
+    }
+
     @GetMapping("/{id}")
-    public ApiResponse<ResumeResponse> get(@PathVariable Long id, HttpServletRequest httpRequest) {
+    public ApiResponse<ResumeDetail> get(@PathVariable Long id, HttpServletRequest httpRequest) {
         return ApiResponse.success(resumeService.get(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<ResumeResponse> update(@PathVariable Long id, @Valid @RequestBody ResumeTitleUpdateRequest request,
-                                              HttpServletRequest httpRequest) {
-        return ApiResponse.success(resumeService.updateTitle(id, request.title(), currentUserId(httpRequest)),
-                traceId(httpRequest));
+    public ApiResponse<ResumeDetail> update(
+            @PathVariable Long id, @Valid @RequestBody UpdateResumeRequest request,
+            HttpServletRequest httpRequest) {
+        return ApiResponse.success(
+                resumeService.update(id, request, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
     @DeleteMapping("/{id}")
@@ -62,31 +68,16 @@ public class ResumeController {
         return ApiResponse.success(null, traceId(httpRequest));
     }
 
-    @PostMapping("/{id}/versions")
-    public ApiResponse<ResumeVersionResponse> createVersion(@PathVariable Long id,
-                                                            @Valid @RequestBody ResumeVersionCreateRequest request,
-                                                            HttpServletRequest httpRequest) {
-        return ApiResponse.success(resumeService.createVersion(id, request, currentUserId(httpRequest)),
-                traceId(httpRequest));
-    }
-
-    @GetMapping("/{id}/versions")
-    public ApiResponse<List<ResumeVersionResponse>> listVersions(@PathVariable Long id, HttpServletRequest httpRequest) {
-        return ApiResponse.success(resumeService.listVersions(id, currentUserId(httpRequest)), traceId(httpRequest));
-    }
-
-    @GetMapping("/{id}/versions/{versionId}")
-    public ApiResponse<ResumeVersionResponse> getVersion(@PathVariable Long id, @PathVariable Long versionId,
-                                                         HttpServletRequest httpRequest) {
-        return ApiResponse.success(resumeService.getVersion(id, versionId, currentUserId(httpRequest)),
-                traceId(httpRequest));
-    }
-
-    @PostMapping("/{id}/versions/{versionId}/current")
-    public ApiResponse<ResumeResponse> setCurrent(@PathVariable Long id, @PathVariable Long versionId,
-                                                  HttpServletRequest httpRequest) {
-        return ApiResponse.success(resumeService.setCurrentVersion(id, versionId, currentUserId(httpRequest)),
-                traceId(httpRequest));
+    @PatchMapping("/{id}/current-version")
+    public ApiResponse<Void> setCurrentVersion(
+            @PathVariable Long id, @RequestBody Map<String, Long> body,
+            HttpServletRequest httpRequest) {
+        Long versionId = body.get("versionId");
+        if (versionId == null) {
+            throw new BusinessException(ErrorCode.VALIDATION, "缺少 versionId");
+        }
+        resumeService.setCurrentVersion(id, versionId, currentUserId(httpRequest));
+        return ApiResponse.success(null, traceId(httpRequest));
     }
 
     private Long currentUserId(HttpServletRequest request) {

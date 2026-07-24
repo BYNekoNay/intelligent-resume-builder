@@ -11,7 +11,8 @@ import ResumeDetailView from '@/views/ResumeDetailView.vue'
 import ResumeEditorView from '@/views/ResumeEditorView.vue'
 import CareerMaterialView from '@/views/CareerMaterialView.vue'
 import JobDescriptionView from '@/views/JobDescriptionView.vue'
-import JobGenerationConfirmView from '@/views/JobGenerationConfirmView.vue'
+import GenerationWorkbenchView from '@/views/GenerationWorkbenchView.vue'
+import GenerationConfirmView from '@/views/GenerationConfirmView.vue'
 import MatchResultView from '@/views/MatchResultView.vue'
 import ExportView from '@/views/ExportView.vue'
 import AiConsentView from '@/views/AiConsentView.vue'
@@ -37,6 +38,8 @@ const router = createRouter({
         { path: 'resumes/:id', name: 'resume-detail', component: ResumeDetailView, props: true, meta: { requiresAuth: true } },
         { path: 'resumes/:id/edit', name: 'resume-editor', component: ResumeEditorView, props: true, meta: { requiresAuth: true } },
         { path: 'career-materials', name: 'career-materials', component: CareerMaterialView, meta: { requiresAuth: true } },
+        { path: 'generate', name: 'generate', component: GenerationWorkbenchView, meta: { requiresAuth: true } },
+        { path: 'generate/confirm', name: 'generate-confirm', component: GenerationConfirmView, meta: { requiresAuth: true } },
         { path: 'jobs', name: 'jobs', component: JobDescriptionView, meta: { requiresAuth: true } },
         { path: 'ai-consent', name: 'ai-consent', component: AiConsentView, meta: { requiresAuth: true } },
         { path: 'ats', name: 'ats-check', component: AtsCheckView, meta: { requiresAuth: true } },
@@ -47,13 +50,6 @@ const router = createRouter({
         { path: 'communications', name: 'communications', component: CommunicationView, meta: { requiresAuth: true } },
         { path: 'interview-assets', name: 'interview-assets', component: InterviewAssetsView, meta: { requiresAuth: true } },
         { path: 'achievement-guidance', name: 'achievement-guidance', component: AchievementGuidanceView, meta: { requiresAuth: true } },
-        {
-          path: 'jobs/:jobId/generate',
-          name: 'job-generation-confirm',
-          component: JobGenerationConfirmView,
-          props: true,
-          meta: { requiresAuth: true },
-        },
         { path: 'match/:matchResultId', name: 'match-result', component: MatchResultView, props: true, meta: { requiresAuth: true } },
         { path: 'exports/:exportTaskId', name: 'export', component: ExportView, props: true, meta: { requiresAuth: true } },
       ],

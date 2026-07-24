@@ -1,18 +1,27 @@
 package com.intelligentresume.scoring.domain;
 
-import com.intelligentresume.common.persistence.BaseEntity;
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Map;
 
+/**
+ * 匹配评分结果。字段与 V1 DDL {@code match_result} 完全一致。
+ *
+ * <p>不继承 BaseEntity：DDL 中无 {@code updated_at} 列，
+ * 使用 {@code @PrePersist} 管理 {@code created_at}。
+ * 无 {@code user_id} 列——跨用户校验通过 resume_version → resume → user_id 间接完成。
+ */
 @Entity
 @Table(name = "match_result")
-public class MatchResult extends BaseEntity {
+public class MatchResult {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
     @Column(name = "resume_version_id", nullable = false)
     private Long resumeVersionId;
@@ -39,6 +48,18 @@ public class MatchResult extends BaseEntity {
     @Column(name = "rule_version", nullable = false, length = 32)
     private String ruleVersion;
 
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @PrePersist
+    void prePersist() {
+        if (createdAt == null) {
+            createdAt = LocalDateTime.now();
+        }
+    }
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
     public Long getResumeVersionId() { return resumeVersionId; }
     public void setResumeVersionId(Long resumeVersionId) { this.resumeVersionId = resumeVersionId; }
     public Long getJobDescriptionId() { return jobDescriptionId; }
@@ -55,4 +76,5 @@ public class MatchResult extends BaseEntity {
     public void setExplanationJson(Map<String, Object> explanationJson) { this.explanationJson = explanationJson; }
     public String getRuleVersion() { return ruleVersion; }
     public void setRuleVersion(String ruleVersion) { this.ruleVersion = ruleVersion; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
 }

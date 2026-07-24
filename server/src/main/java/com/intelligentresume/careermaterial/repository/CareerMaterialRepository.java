@@ -13,5 +13,7 @@ public interface CareerMaterialRepository extends JpaRepository<CareerMaterial, 
 
     List<CareerMaterial> findByUserIdOrderByUpdatedAtDesc(Long userId);
 
-    List<CareerMaterial> findByUserIdAndMaterialTypeOrderByUpdatedAtDesc(Long userId, MaterialType type);
+    List<CareerMaterial> findByUserIdAndMaterialTypeOrderByUpdatedAtDesc(Long userId, MaterialType materialType);
+
+    long countByUserId(Long userId);
 }

@@ -7,6 +7,14 @@ spring:
       ddl-auto: none
 
 app:
+  ai:
+    quota:
+      JOB_GENERATION: 100000
+      RESUME_OPTIMIZE: 100000
+      INLINE_OPTIMIZE: 100000
+      MATERIAL_IMPORT: 100000
+      ACHIEVEMENT_GUIDANCE: 100000
+      COMMUNICATION_GENERATE: 100000
   local-validation:
     failure-injection-enabled: true
   security:

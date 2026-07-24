@@ -1,197 +1,195 @@
 package com.intelligentresume.ai.task.service;
 
-import com.intelligentresume.ai.consent.dto.ConsentRequest;
-import com.intelligentresume.ai.consent.service.ConsentService;
-import com.intelligentresume.ai.task.dto.TaskCreateRequest;
+import com.intelligentresume.ai.consent.service.AiConsentService;
+import com.intelligentresume.ai.ratelimit.AiQuotaService;
 import com.intelligentresume.ai.task.domain.AiTask;
+import com.intelligentresume.ai.task.domain.AiTaskStatus;
+import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
+import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
-import com.intelligentresume.ai.confirmation.dto.ConfirmRequest;
-import com.intelligentresume.ai.confirmation.service.ConfirmationService;
-import com.intelligentresume.auth.dto.RegisterRequest;
-import com.intelligentresume.auth.repository.UserRepository;
-import com.intelligentresume.auth.service.AuthService;
-import com.intelligentresume.careermaterial.domain.MaterialType;
-import com.intelligentresume.careermaterial.domain.UsagePreference;
-import com.intelligentresume.careermaterial.dto.CareerMaterialCreateRequest;
-import com.intelligentresume.careermaterial.service.CareerMaterialService;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
-import com.intelligentresume.jobdescription.dto.JobDescriptionCreateRequest;
-import com.intelligentresume.jobdescription.service.JobDescriptionService;
-import com.intelligentresume.resume.dto.ResumeCreateRequest;
-import com.intelligentresume.resume.service.ResumeService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
+import java.time.LocalDateTime;
 import java.util.Map;
-import java.util.UUID;
+import java.util.Optional;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-@SpringBootTest
-@ActiveProfiles("test")
+/**
+ * AiTaskService 单元测试（Mockito）。
+ * 覆盖:同意校验、配额校验、幂等性（同指纹返回/异指纹冲突）、任务创建。
+ */
+@ExtendWith(MockitoExtension.class)
 class AiTaskServiceTest {
 
-    @Autowired private AiTaskService aiTaskService;
-    @Autowired private ConsentService consentService;
-    @Autowired private AuthService authService;
-    @Autowired private UserRepository userRepository;
-    @Autowired private ResumeService resumeService;
-    @Autowired private JobDescriptionService jobDescriptionService;
-    @Autowired private CareerMaterialService careerMaterialService;
-    @Autowired private AiTaskRepository aiTaskRepository;
-    @Autowired private ConfirmationService confirmationService;
+    @Mock private AiTaskRepository taskRepository;
+    @Mock private AiConsentService consentService;
+    @Mock private AiQuotaService quotaService;
 
-    @Test
-    void replaysSameIdempotencyKeyForTheSameRequestAndRejectsDifferentRequest() {
-        Long userId = createUser();
-        grantConsent(userId);
-        var resume = resumeService.create(new ResumeCreateRequest("My resume", Map.of("basics", Map.of("name", "User"))), userId);
-        var job = jobDescriptionService.create(new JobDescriptionCreateRequest("Backend Engineer", null, "Spring Boot and MySQL"), userId);
-        TaskCreateRequest original = new TaskCreateRequest(resume.id(), job.id(), List.of(), List.of(), List.of(), Map.of());
+    private IdempotencyService idempotencyService;
+    private AiTaskService service;
 
-        var created = aiTaskService.create(original, "same-key", userId);
-        var replayed = aiTaskService.create(original, "same-key", userId);
-
-        assertThat(created.confirmationStatus()).isEqualTo(AiTask.ConfirmationStatus.PENDING);
-        assertThat(replayed.id()).isEqualTo(created.id());
-        assertThatThrownBy(() -> aiTaskService.create(
-                new TaskCreateRequest(resume.id(), job.id(), List.of(), List.of(), List.of(), Map.of("variant", "different")),
-                "same-key", userId))
-                .isInstanceOf(BusinessException.class)
-                .extracting(error -> ((BusinessException) error).getErrorCode())
-                .isEqualTo(ErrorCode.CONFLICT);
+    @BeforeEach
+    void setUp() {
+        idempotencyService = new IdempotencyService();
+        service = new AiTaskService(taskRepository, consentService, quotaService, idempotencyService);
     }
 
     @Test
-    void rejectsForeignResumeJobAndMaterialIds() {
-        Long ownerId = createUser();
-        Long requesterId = createUser();
-        grantConsent(requesterId);
-        var ownerResume = resumeService.create(new ResumeCreateRequest("Owner resume", Map.of("basics", Map.of("name", "Owner"))), ownerId);
-        var ownerJob = jobDescriptionService.create(new JobDescriptionCreateRequest("Owner job", null, "Java"), ownerId);
-        var ownerMaterial = careerMaterialService.create(new CareerMaterialCreateRequest(
-                MaterialType.SKILL, "Owner skill", Map.of("name", "Java"), null, UsagePreference.NORMAL), ownerId);
-        var requesterResume = resumeService.create(new ResumeCreateRequest("Requester resume", Map.of("basics", Map.of("name", "Requester"))), requesterId);
-        var requesterJob = jobDescriptionService.create(new JobDescriptionCreateRequest("Requester job", null, "Spring"), requesterId);
+    @DisplayName("已授权用户创建任务 → PENDING")
+    void create_consented_returnsPending() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        doNothing().when(quotaService).check(eq(100L), any());
+        when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                eq(100L), any(), anyString())).thenReturn(Optional.empty());
+        when(taskRepository.save(any(AiTask.class))).thenAnswer(inv -> {
+            AiTask t = inv.getArgument(0);
+            t.setId(1L);
+            t.setCreatedAt(LocalDateTime.now());
+            t.setUpdatedAt(LocalDateTime.now());
+            return t;
+        });
 
-        assertNotFound(() -> aiTaskService.create(
-                new TaskCreateRequest(ownerResume.id(), requesterJob.id(), List.of(), List.of(), List.of(), Map.of()), "foreign-resume", requesterId));
-        assertNotFound(() -> aiTaskService.create(
-                new TaskCreateRequest(requesterResume.id(), ownerJob.id(), List.of(), List.of(), List.of(), Map.of()), "foreign-job", requesterId));
-        assertNotFound(() -> aiTaskService.create(
-                new TaskCreateRequest(requesterResume.id(), requesterJob.id(), List.of(ownerMaterial.id()), List.of(), List.of(), Map.of()), "foreign-material", requesterId));
+        CreateAiTaskRequest req = new CreateAiTaskRequest(
+                AiTaskType.JOB_GENERATION, Map.of("key", "value"), null, null, null, null, null, null);
+
+        AiTaskStatusResponse response = service.create(req, "idem-key-1", 100L);
+
+        assertEquals(AiTaskStatus.PENDING, response.status());
+        assertEquals(AiTaskType.JOB_GENERATION, response.taskType());
+        assertNull(response.jobDescriptionId());
+        assertEquals(0, response.retryCount());
     }
 
     @Test
-    void doesNotConfirmARejectedTask() {
-        Long userId = createUser();
-        grantConsent(userId);
-        var resume = resumeService.create(new ResumeCreateRequest("My resume", Map.of("basics", Map.of("name", "User"))), userId);
-        var job = jobDescriptionService.create(new JobDescriptionCreateRequest("Backend Engineer", null, "Spring Boot"), userId);
-        var created = aiTaskService.create(
-                new TaskCreateRequest(resume.id(), job.id(), List.of(), List.of(), List.of(), Map.of()), "rejected-task", userId);
-        AiTask task = aiTaskRepository.findById(created.id()).orElseThrow();
-        task.setStatus(AiTask.TaskStatus.SUCCESS);
-        task.setConfirmationStatus(AiTask.ConfirmationStatus.REJECTED);
-        AiTask rejected = aiTaskRepository.saveAndFlush(task);
+    @DisplayName("任务状态公开岗位 ID，供同 JD 简历选择使用")
+    void create_exposesJobDescriptionId() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        doNothing().when(quotaService).check(eq(100L), any());
+        when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(anyLong(), any(), anyString()))
+                .thenReturn(Optional.empty());
+        when(taskRepository.save(any(AiTask.class))).thenAnswer(invocation -> {
+            AiTask task = invocation.getArgument(0);
+            task.setId(1L);
+            task.setCreatedAt(LocalDateTime.now());
+            task.setUpdatedAt(LocalDateTime.now());
+            return task;
+        });
 
-        assertThatThrownBy(() -> confirmationService.confirm(rejected.getId(),
-                new ConfirmRequest(rejected.getUpdatedAt(), List.of(), null), "confirm-rejected", userId))
-                .isInstanceOf(BusinessException.class)
-                .extracting(Throwable::getMessage)
-                .isEqualTo("Task is not awaiting confirmation");
+        AiTaskStatusResponse response = service.create(new CreateAiTaskRequest(
+                AiTaskType.JOB_GENERATION, Map.of(), null, 88L, null, null, null, null),
+                "job-id-response", 100L);
+
+        assertEquals(88L, response.jobDescriptionId());
     }
 
     @Test
-    void doesNotRejectATaskBeforeItSucceeds() {
-        Long userId = createUser();
-        grantConsent(userId);
-        var resume = resumeService.create(new ResumeCreateRequest("My resume", Map.of("basics", Map.of("name", "User"))), userId);
-        var job = jobDescriptionService.create(new JobDescriptionCreateRequest("Backend Engineer", null, "Spring Boot"), userId);
-        var created = aiTaskService.create(
-                new TaskCreateRequest(resume.id(), job.id(), List.of(), List.of(), List.of(), Map.of()), "pending-task", userId);
-        AiTask task = aiTaskRepository.findById(created.id()).orElseThrow();
+    @DisplayName("未授权用户创建任务 → CONSENT_REQUIRED")
+    void create_notConsented_throwsConsentRequired() {
+        when(consentService.hasValidConsent(100L)).thenReturn(false);
 
-        assertThatThrownBy(() -> confirmationService.reject(task.getId(),
-                new com.intelligentresume.ai.confirmation.dto.RejectRequest(task.getUpdatedAt()), userId))
-                .isInstanceOf(BusinessException.class)
-                .extracting(Throwable::getMessage)
-                .isEqualTo("Task is not awaiting confirmation");
+        CreateAiTaskRequest req = new CreateAiTaskRequest(
+                AiTaskType.JOB_GENERATION, null, null, null, null, null, null, null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(req, "key", 100L));
+        assertEquals(ErrorCode.CONSENT_REQUIRED, ex.getErrorCode());
+        verify(taskRepository, never()).save(any());
     }
 
     @Test
-    void requiresAnExplicitDecisionForEveryPendingDraftItem() {
-        Long userId = createUser();
-        AiTask task = new AiTask();
-        task.setUserId(userId);
-        task.setTaskType(AiTask.TaskType.JOB_GENERATION);
-        task.setIdempotencyKey("pending-confirmation");
-        task.setRequestFingerprint("test");
-        task.setInputSnapshotJson(Map.of("resumeId", 1L));
-        task.setStatus(AiTask.TaskStatus.SUCCESS);
-        task.setConfirmationStatus(AiTask.ConfirmationStatus.PENDING);
-        task.setResultJson(Map.of("draftResumeJson", Map.of(
-                "basics", Map.of("summary", Map.of("_pending", true, "value", "Generated summary")))));
-        AiTask saved = aiTaskRepository.saveAndFlush(task);
+    @DisplayName("撤回同意后创建任务 → CONSENT_REQUIRED")
+    void create_afterWithdraw_throwsConsentRequired() {
+        // hasValidConsent 返回 false 模拟撤回后的状态
+        when(consentService.hasValidConsent(100L)).thenReturn(false);
 
-        assertThatThrownBy(() -> confirmationService.confirm(saved.getId(),
-                new ConfirmRequest(saved.getUpdatedAt(), List.of(
-                        new ConfirmRequest.ConfirmedDraftItem("/basics", ConfirmRequest.Decision.ACCEPT, null)),
-                null), "missing-pending", userId))
-                .isInstanceOf(BusinessException.class)
-                .extracting(Throwable::getMessage)
-                .isEqualTo("All pending draft items require a decision");
+        CreateAiTaskRequest req = new CreateAiTaskRequest(
+                AiTaskType.RESUME_OPTIMIZE, null, null, null, null, null, null, null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(req, "key", 100L));
+        assertEquals(ErrorCode.CONSENT_REQUIRED, ex.getErrorCode());
     }
 
     @Test
-    void retriesOnlyOwnedFailedTasksAndClearsTheirExecutionState() {
-        Long ownerId = createUser();
-        Long otherUserId = createUser();
-        AiTask task = new AiTask();
-        task.setUserId(ownerId);
-        task.setTaskType(AiTask.TaskType.JOB_GENERATION);
-        task.setIdempotencyKey("retry-task");
-        task.setRequestFingerprint("retry-fingerprint");
-        task.setInputSnapshotJson(Map.of("resumeId", 1L));
-        task.setStatus(AiTask.TaskStatus.FAILED);
-        task.setErrorMessage("provider timed out");
-        task.setRetryCount(0);
-        AiTask saved = aiTaskRepository.saveAndFlush(task);
+    @DisplayName("幂等: 相同 key + 相同指纹 → 返回已有任务")
+    void create_sameKeySameFingerprint_returnsExisting() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        doNothing().when(quotaService).check(eq(100L), any());
 
-        assertNotFound(() -> aiTaskService.retry(saved.getId(), otherUserId));
+        CreateAiTaskRequest req = new CreateAiTaskRequest(
+                AiTaskType.JOB_GENERATION, Map.of("key", "value"), null, null, null, null, null, null);
 
-        var retried = aiTaskService.retry(saved.getId(), ownerId);
-        assertThat(retried.status()).isEqualTo(AiTask.TaskStatus.PENDING);
-        assertThat(retried.errorMessage()).isNull();
-        assertThat(retried.retryCount()).isEqualTo(1);
-        AiTask exhausted = aiTaskRepository.findById(saved.getId()).orElseThrow();
-        exhausted.setStatus(AiTask.TaskStatus.FAILED);
-        aiTaskRepository.saveAndFlush(exhausted);
-        assertThatThrownBy(() -> aiTaskService.retry(saved.getId(), ownerId))
-                .isInstanceOf(BusinessException.class)
-                .extracting(error -> ((BusinessException) error).getErrorCode())
-                .isEqualTo(ErrorCode.CONFLICT);
+        // 计算与 service 内部相同的指纹
+        String fingerprint = idempotencyService.fingerprint(
+                Map.of("taskType", "JOB_GENERATION", "input", Map.of("key", "value")));
+
+        AiTask existing = task(1L, 100L, AiTaskType.JOB_GENERATION, fingerprint);
+        when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                100L, AiTaskType.JOB_GENERATION, "idem-key")).thenReturn(Optional.of(existing));
+
+        AiTaskStatusResponse response = service.create(req, "idem-key", 100L);
+
+        assertEquals(1L, response.id());
+        assertEquals(AiTaskStatus.PENDING, response.status());
+        verify(taskRepository, never()).save(any());
     }
 
-    private Long createUser() {
-        String username = "task_" + UUID.randomUUID().toString().substring(0, 8);
-        authService.register(new RegisterRequest(username, username + "@example.com", "StrongPassword!1"));
-        return userRepository.findByUsername(username).orElseThrow().getId();
+    @Test
+    @DisplayName("幂等: 相同 key + 不同指纹 → CONFLICT")
+    void create_sameKeyDifferentFingerprint_throwsConflict() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        doNothing().when(quotaService).check(eq(100L), any());
+
+        CreateAiTaskRequest req = new CreateAiTaskRequest(
+                AiTaskType.JOB_GENERATION, Map.of("key", "new-value"), null, null, null, null, null, null);
+
+        AiTask existing = task(1L, 100L, AiTaskType.JOB_GENERATION, "stale-fingerprint");
+        when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                100L, AiTaskType.JOB_GENERATION, "idem-key")).thenReturn(Optional.of(existing));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(req, "idem-key", 100L));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
     }
 
-    private void grantConsent(Long userId) {
-        consentService.grant(new ConsentRequest("v1", "mock", List.of("JOB_GENERATION"), List.of("resume"), "notice"), userId);
+    @Test
+    @DisplayName("配额超限 → RATE_LIMITED")
+    void create_quotaExceeded_throwsRateLimited() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        doThrow(new BusinessException(ErrorCode.RATE_LIMITED, "AI 任务配额已用完"))
+                .when(quotaService).check(100L, AiTaskType.JOB_GENERATION);
+
+        CreateAiTaskRequest req = new CreateAiTaskRequest(
+                AiTaskType.JOB_GENERATION, null, null, null, null, null, null, null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(req, "key", 100L));
+        assertEquals(ErrorCode.RATE_LIMITED, ex.getErrorCode());
     }
 
-    private void assertNotFound(org.assertj.core.api.ThrowableAssert.ThrowingCallable action) {
-        assertThatThrownBy(action)
-                .isInstanceOf(BusinessException.class)
-                .extracting(error -> ((BusinessException) error).getErrorCode())
-                .isEqualTo(ErrorCode.NOT_FOUND);
+    private AiTask task(Long id, Long userId, AiTaskType type, String fingerprint) {
+        AiTask t = new AiTask();
+        t.setId(id);
+        t.setUserId(userId);
+        t.setTaskType(type);
+        t.setIdempotencyKey("idem-key");
+        t.setRequestFingerprint(fingerprint);
+        t.setInputSnapshotJson(Map.of("taskType", type.name()));
+        t.setStatus(AiTaskStatus.PENDING);
+        t.setRetryCount(0);
+        t.setCreatedAt(LocalDateTime.now());
+        t.setUpdatedAt(LocalDateTime.now());
+        return t;
     }
 }

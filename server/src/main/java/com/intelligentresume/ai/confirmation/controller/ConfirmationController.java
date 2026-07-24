@@ -10,38 +10,53 @@ import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
+/**
+ * 来源确认控制器。
+ *
+ * <p>路由：
+ * <ul>
+ *   <li>POST {@code /api/ai/tasks/{id}/confirm} — 用户逐项确认</li>
+ *   <li>POST {@code /api/ai/tasks/{id}/reject} — 用户拒绝</li>
+ * </ul>
+ */
 @RestController
-@RequestMapping("/api/ai/tasks/{id}")
+@RequestMapping("/api/ai/tasks")
 public class ConfirmationController {
 
-    private final ConfirmationService service;
+    private final ConfirmationService confirmationService;
 
-    public ConfirmationController(ConfirmationService service) {
-        this.service = service;
+    public ConfirmationController(ConfirmationService confirmationService) {
+        this.confirmationService = confirmationService;
     }
 
-    @PostMapping("/confirm")
-    public ApiResponse<ConfirmResponse> confirm(@PathVariable Long id,
-                                                @Valid @RequestBody ConfirmRequest request,
-                                                @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-                                                HttpServletRequest httpRequest) {
-        return ApiResponse.success(service.confirm(id, request, idempotencyKey, currentUserId(httpRequest)),
-                traceId(httpRequest));
+    /**
+     * 确认 AI 任务结果。需要 Idempotency-Key 请求头。
+     */
+    @PostMapping("/{id}/confirm")
+    public ResponseEntity<ApiResponse<ConfirmResponse>> confirm(
+            @PathVariable Long id,
+            @Valid @RequestBody ConfirmRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            HttpServletRequest httpRequest) {
+        Long userId = currentUserId(httpRequest);
+        ConfirmResponse response = confirmationService.confirm(id, request, idempotencyKey, userId);
+        return ResponseEntity.ok(ApiResponse.success(response, traceId(httpRequest)));
     }
 
-    @PostMapping("/reject")
-    public ApiResponse<Void> reject(@PathVariable Long id,
-                                    @Valid @RequestBody RejectRequest request,
-                                    HttpServletRequest httpRequest) {
-        service.reject(id, request, currentUserId(httpRequest));
-        return ApiResponse.success(null, traceId(httpRequest));
+    /**
+     * 拒绝 AI 任务结果。
+     */
+    @PostMapping("/{id}/reject")
+    public ResponseEntity<ApiResponse<Void>> reject(
+            @PathVariable Long id,
+            @Valid @RequestBody RejectRequest request,
+            HttpServletRequest httpRequest) {
+        Long userId = currentUserId(httpRequest);
+        confirmationService.reject(id, request, userId);
+        return ResponseEntity.ok(ApiResponse.success(null, traceId(httpRequest)));
     }
 
     private Long currentUserId(HttpServletRequest request) {

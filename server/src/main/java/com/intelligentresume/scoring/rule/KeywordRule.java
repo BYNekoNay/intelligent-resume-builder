@@ -4,20 +4,23 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
- * 关键词匹配规则。
+ * 关键词规则：计算 JD 关键词在简历中的覆盖度。
  *
- * <p>score = matched / (matched + partial + missing)。
- * 语义:只匹配规范化的 jdTokens,resumeTokens 任意命中算 matched;同义词归一化一致则算 fully matched。
+ * <p>分类：
+ * <ul>
+ *   <li>matched：JD 关键词（归一化后）直接出现在简历 token 中</li>
+ *   <li>partialMatched：通过同义词命中</li>
+ *   <li>missing：JD 中存在但简历中无</li>
+ * </ul>
+ *
+ * <p>分数 = (matched + partialMatched) / total * 100；无关键词时满分 100。
+ * 关键词堆砌（重复出现多次）不影响分数（使用 Set 去重）。
  */
 @Component
-public class KeywordRule implements ScoringRule {
+public class KeywordRule {
 
     private final Normalizer normalizer;
 
@@ -25,90 +28,64 @@ public class KeywordRule implements ScoringRule {
         this.normalizer = normalizer;
     }
 
-    @Override
-    public String name() { return "keyword"; }
+    public String name() {
+        return "keyword";
+    }
 
-    @Override
-    public BigDecimal score(Set<String> jdTokens, Set<String> resumeTokens, Map<String, Object> jdMeta) {
-        if (jdTokens.isEmpty()) return new BigDecimal("100.00");
-        Set<String> normResume = canonicalize(resumeTokens);
-        Set<String> normJd = canonicalize(jdTokens);
-        int matched = 0;
-        int partial = 0;
-        for (String jd : normJd) {
-            if (normResume.contains(jd)) matched++;
-            else if (partialMatch(jd, normResume)) partial++;
+    /**
+     * 评估关键词覆盖度。
+     *
+     * @param jdKeywords       JD 关键词列表（原始形式）
+     * @param resumeTokens     简历归一化 token 集合
+     * @param resumeRawTokens  简历原始 token 集合（小写去标点）
+     * @return 评估结果
+     */
+    public RuleResult evaluate(List<String> jdKeywords, Set<String> resumeTokens,
+                               Set<String> resumeRawTokens) {
+        if (jdKeywords == null || jdKeywords.isEmpty()) {
+            return new RuleResult(BigDecimal.valueOf(100), List.of(), List.of(), List.of());
         }
-        int missing = Math.max(0, normJd.size() - matched - partial);
-        int total = Math.max(1, matched + partial + missing);
-        // 部分匹配按 0.5 折算
-        BigDecimal raw = BigDecimal.valueOf(matched + partial * 0.5)
-                .divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP);
-        return raw.multiply(BigDecimal.valueOf(100)).setScale(2, RoundingMode.HALF_UP);
-    }
 
-    @Override
-    public List<String> matched(Set<String> jdTokens, Set<String> resumeTokens) {
-        Set<String> normJd = canonicalize(jdTokens);
-        Set<String> normResume = canonicalize(resumeTokens);
-        List<String> r = new ArrayList<>();
-        for (String s : normJd) if (normResume.contains(s)) r.add(s);
-        return r;
-    }
+        List<String> matched = new ArrayList<>();
+        List<String> partialMatched = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
 
-    @Override
-    public List<String> partialMatched(Set<String> jdTokens, Set<String> resumeTokens) {
-        Set<String> normJd = canonicalize(jdTokens);
-        Set<String> normResume = canonicalize(resumeTokens);
-        List<String> r = new ArrayList<>();
-        for (String s : normJd) {
-            if (!normResume.contains(s) && partialMatch(s, normResume)) r.add(s);
+        // 去重（防止 JD 关键词重复）
+        LinkedHashSet<String> uniqueKeywords = new LinkedHashSet<>(jdKeywords);
+
+        for (String keyword : uniqueKeywords) {
+            String normalized = normalizer.normalize(keyword);
+            if (normalized.isEmpty()) {
+                continue;
+            }
+            if (resumeTokens.contains(normalized)) {
+                // 判断是直接匹配还是同义词匹配
+                if (normalizer.isDirectMatch(keyword, resumeRawTokens)) {
+                    matched.add(keyword);
+                } else {
+                    partialMatched.add(keyword);
+                }
+            } else {
+                missing.add(keyword);
+            }
         }
-        return r;
+
+        int total = matched.size() + partialMatched.size() + missing.size();
+        BigDecimal score = total == 0
+                ? BigDecimal.valueOf(100)
+                : BigDecimal.valueOf((matched.size() + partialMatched.size()) * 100.0 / total)
+                    .setScale(2, RoundingMode.HALF_UP);
+
+        return new RuleResult(score, matched, partialMatched, missing);
     }
 
-    @Override
-    public List<String> missing(Set<String> jdTokens, Set<String> resumeTokens) {
-        Set<String> normJd = canonicalize(jdTokens);
-        Set<String> normResume = canonicalize(resumeTokens);
-        List<String> r = new ArrayList<>();
-        for (String s : normJd) {
-            if (!normResume.contains(s) && !partialMatch(s, normResume)) r.add(s);
-        }
-        return r;
-    }
-
-    private Set<String> canonicalize(Set<String> tokens) {
-        Set<String> out = new HashSet<>();
-        for (String t : tokens) out.add(normalizer.canonical(t));
-        return out;
-    }
-
-    private boolean partialMatch(String jdToken, Set<String> resumeCanonical) {
-        // 任一 resume token 命中 jdToken 的子串/前缀,或长度差不超 1 的编辑距离近似
-        for (String rt : resumeCanonical) {
-            if (jdToken.length() >= 4 && (rt.contains(jdToken) || jdToken.contains(rt))) return true;
-            if (Math.abs(jdToken.length() - rt.length()) <= 1 && closeEnough(jdToken, rt)) return true;
-        }
-        return false;
-    }
-
-    private boolean closeEnough(String a, String b) {
-        if (a.equals(b)) return true;
-        int n = Math.abs(a.length() - b.length());
-        if (n > 1) return false;
-        int diff = 0;
-        int i = 0, j = 0;
-        while (i < a.length() && j < b.length()) {
-            if (a.charAt(i) != b.charAt(j)) {
-                diff++;
-                if (diff > 1) return false;
-                if (a.length() > b.length()) i++;
-                else if (b.length() > a.length()) j++;
-                else { i++; j++; }
-            } else { i++; j++; }
-        }
-        if (i < a.length() || j < b.length()) diff++;
-        return diff <= 1;
-    }
+    /**
+     * 规则评估结果。
+     */
+    public record RuleResult(
+            BigDecimal score,
+            List<String> matched,
+            List<String> partialMatched,
+            List<String> missing
+    ) {}
 }

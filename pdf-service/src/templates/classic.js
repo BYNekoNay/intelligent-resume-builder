@@ -44,9 +44,38 @@ function templateStyles(templateCode) {
   return variants[templateCode]
 }
 
+function boundedNumber(value, fallback, min, max) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback
+}
+
+function fontStack(code) {
+  const families = {
+    sans: '"Microsoft YaHei",Arial,sans-serif',
+    songti: '"Songti SC",SimSun,serif',
+    serif: 'Georgia,"Times New Roman",serif',
+    mono: '"Cascadia Mono","Courier New",monospace',
+  }
+  return families[code] ?? families.sans
+}
+
+function layoutStyles(layout) {
+  const bodyFontSize = boundedNumber(layout?.bodyFontSize, 13, 11, 16) * 0.75
+  const headingFontSize = boundedNumber(layout?.headingFontSize, 13, 11, 18) * 0.75
+  const nameFontSize = headingFontSize * 24 / 9.75
+  const roleFontSize = headingFontSize * 10.5 / 9.75
+  const lineHeight = boundedNumber(layout?.lineHeight, 1.65, 1.3, 2)
+  const sectionSpacing = boundedNumber(layout?.sectionSpacing, 20, 10, 32) * 0.75
+  const entrySpacing = boundedNumber(layout?.entrySpacing, 12, 6, 22) * 0.75
+  const pagePadding = boundedNumber(layout?.pagePadding, 58, 32, 80) * 0.75
+
+  return `:root{--resume-font-family:${fontStack(layout?.fontFamily)};--resume-body-size:${bodyFontSize}pt;--resume-heading-size:${headingFontSize}pt;--resume-name-size:${nameFontSize}pt;--resume-role-size:${roleFontSize}pt;--resume-line-height:${lineHeight};--resume-section-gap:${sectionSpacing}pt;--resume-entry-gap:${entrySpacing}pt;--paper-pad:${pagePadding}pt}`
+}
+
 export function renderResumeHtml(templateCode, payload) {
   if (!TEMPLATE_CODES.has(templateCode)) throw new Error('不支持的简历模板')
-  const resume = payload?.resumeJson ?? {}
+  const resume = payload?.resumeJson ?? payload ?? {}
+  const layout = resume.layout ?? {}
   const basics = resume.basics ?? {}
   const arrays = (key) => Array.isArray(resume[key]) ? resume[key] : []
   const work = arrays('work')
@@ -73,11 +102,13 @@ export function renderResumeHtml(templateCode, payload) {
   const contact = [basics.phone, basics.email, location].filter(Boolean).map(text).join(' · ')
 
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>resume</title><style>
-    @page{size:A4;margin:0}*{box-sizing:border-box}body{margin:0;min-height:297mm;padding:16mm;font-size:10pt;line-height:1.65;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .paper-header{padding-bottom:5mm;margin-bottom:6mm}.paper-header h1{margin:0;font:700 24pt "Microsoft YaHei",sans-serif;letter-spacing:.04em}.paper-header .role{margin:1.5mm 0;font:700 10.5pt "Microsoft YaHei",sans-serif}.contact{font:9pt "Microsoft YaHei",sans-serif}
-    section{margin:0 0 6mm}h2{display:flex;align-items:center;gap:3mm;margin:0 0 3mm;font:700 10pt "Microsoft YaHei",sans-serif;letter-spacing:.12em}h2::after{content:"";width:7mm;height:1px}
-    p,li{font-size:9.5pt}.summary{margin:0;white-space:pre-wrap}.entry{display:grid;grid-template-columns:1fr auto;gap:1mm 4mm;margin:0 0 3.5mm;break-inside:avoid}.entry strong{grid-column:1;grid-row:1;font:700 10.5pt "Microsoft YaHei",sans-serif}.entry>span{grid-column:1;grid-row:2}.entry>small{grid-column:2;grid-row:1/3;text-align:right}.entry span,.entry small{font:9pt "Microsoft YaHei",sans-serif}.entry p,.entry ul{grid-column:1/-1;margin:1mm 0 0}.entry ul{padding-left:5mm}.chips{display:flex;flex-wrap:wrap;gap:2mm}.chips span{padding:1mm 2.5mm;font:9pt "Microsoft YaHei",sans-serif}
+    ${layoutStyles(layout)}
+    @page{size:A4;margin:0}*{box-sizing:border-box}body{margin:0;min-height:297mm;padding:var(--paper-pad);font-size:10pt;line-height:var(--resume-line-height);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .paper-header{padding-bottom:5mm;margin-bottom:6mm}.paper-header h1{margin:0;font:700 var(--resume-name-size) "Microsoft YaHei",sans-serif;letter-spacing:.04em}.paper-header .role{margin:1.5mm 0;font:700 var(--resume-role-size) "Microsoft YaHei",sans-serif}.contact{font:9pt "Microsoft YaHei",sans-serif}
+    section{margin:0 0 var(--resume-section-gap)}h2{display:flex;align-items:center;gap:3mm;margin:0 0 3mm;font:700 var(--resume-heading-size) "Microsoft YaHei",sans-serif;letter-spacing:.12em}h2::after{content:"";width:7mm;height:1px}
+    p,li{font-size:var(--resume-body-size)}.summary{margin:0;white-space:pre-wrap}.entry{display:grid;grid-template-columns:1fr auto;gap:1mm 4mm;margin:0 0 var(--resume-entry-gap);break-inside:avoid}.entry strong{grid-column:1;grid-row:1;font:700 calc(var(--resume-body-size) + 0.75pt) "Microsoft YaHei",sans-serif}.entry>span{grid-column:1;grid-row:2}.entry>small{grid-column:2;grid-row:1/3;text-align:right}.entry span,.entry small{font:calc(var(--resume-body-size) - 0.5pt) "Microsoft YaHei",sans-serif}.entry p,.entry ul{grid-column:1/-1;margin:1mm 0 0}.entry ul{padding-left:5mm}.chips{display:flex;flex-wrap:wrap;gap:2mm}.chips span{padding:1mm 2.5mm;font:calc(var(--resume-body-size) - 0.5pt) "Microsoft YaHei",sans-serif}
     ${templateStyles(templateCode)}
+    body,.paper-header h1,.paper-header .role,.contact,h2,p,li,.entry strong,.entry span,.entry small,.chips span{font-family:var(--resume-font-family)}
   </style></head><body>
     <header class="paper-header"><h1>${text(basics.name || '你的姓名')}</h1><p class="role">${text(basics.title || basics.position || basics.label || '目标岗位')}</p><div class="contact">${contact}</div></header>
     ${section('个人概要', basics.summary ? `<p class="summary">${text(basics.summary)}</p>` : '')}

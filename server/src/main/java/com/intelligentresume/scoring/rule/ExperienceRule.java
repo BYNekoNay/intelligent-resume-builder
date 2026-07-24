@@ -4,84 +4,82 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 经历匹配:从 JD 解析年限要求 + 从简历抽出最长工作年限,差值不大于 0 时满分,差值越大得分越低。
+ * 经验规则：检查简历工作年限是否满足 JD 要求。
+ *
+ * <p>规则：
+ * <ul>
+ *   <li>从 JD requirements 中提取 "X年以上经验" 的年限要求</li>
+ *   <li>从简历 work 条目估算总年限（有日期则计算，否则每条估 2 年）</li>
+ *   <li>JD 无经验要求 → 满分 100</li>
+ *   <li>score = min(resumeYears / requiredYears, 1.0) * 100</li>
+ * </ul>
  */
 @Component
-public class ExperienceRule implements ScoringRule {
+public class ExperienceRule {
 
-    private static final Pattern YEARS = Pattern.compile(
-            "(?:(\\d{1,2})\\s*(?:\\+)?\\s*(?:years?|yrs?|年))",
-            Pattern.CASE_INSENSITIVE);
+    private static final Pattern YEARS_PATTERN = Pattern.compile("(\\d+)\\s*年");
+    private static final int DEFAULT_YEARS_PER_JOB = 2;
 
-    private final Normalizer normalizer;
-
-    public ExperienceRule(Normalizer normalizer) {
-        this.normalizer = normalizer;
+    public String name() {
+        return "experience";
     }
 
-    @Override
-    public String name() { return "experience"; }
-
-    @Override
-    public BigDecimal score(Set<String> jdTokens, Set<String> resumeTokens, Map<String, Object> jdMeta) {
-        int jdYears = parseYears(String.join(" ", jdTokens));
-        int resumeYears = 0;
-        Object resumeYearsMeta = jdMeta == null ? null : jdMeta.get("resumeYears");
-        if (resumeYearsMeta instanceof Number n) {
-            resumeYears = n.intValue();
-        } else {
-            resumeYears = parseYears(String.join(" ", resumeTokens));
+    /**
+     * 评估经验覆盖度。
+     *
+     * @param requirements JD requirements 列表（含 "X年以上经验" 等）
+     * @param resumeJson   简历 JSON（用于提取 work 条目）
+     * @return 分数（0-100）
+     */
+    @SuppressWarnings("unchecked")
+    public BigDecimal evaluate(List<String> requirements, Map<String, Object> resumeJson) {
+        int requiredYears = extractRequiredYears(requirements);
+        if (requiredYears <= 0) {
+            return BigDecimal.valueOf(100);
         }
-        if (jdYears <= 0) return new BigDecimal("100.00");
-        int delta = jdYears - resumeYears;
-        if (delta <= 0) return new BigDecimal("100.00");
-        // 每多 1 年扣 10 分,最低 0
-        BigDecimal v = BigDecimal.valueOf(Math.max(0, 100 - delta * 10));
-        return v.setScale(2, RoundingMode.HALF_UP);
+
+        int resumeYears = estimateWorkYears(resumeJson);
+        double ratio = Math.min((double) resumeYears / requiredYears, 1.0);
+        return BigDecimal.valueOf(ratio * 100).setScale(2, RoundingMode.HALF_UP);
     }
 
-    @Override
-    public List<String> matched(Set<String> jdTokens, Set<String> resumeTokens) {
-        int jdYears = parseYears(String.join(" ", jdTokens));
-        int resumeYears = parseYears(String.join(" ", resumeTokens));
-        if (jdYears <= 0) return List.of();
-        return resumeYears >= jdYears ? List.of(jdYears + " 年以上相关经验") : List.of();
-    }
-
-    @Override
-    public List<String> partialMatched(Set<String> jdTokens, Set<String> resumeTokens) {
-        int jdYears = parseYears(String.join(" ", jdTokens));
-        int resumeYears = parseYears(String.join(" ", resumeTokens));
-        if (jdYears <= 0 || resumeYears >= jdYears) return List.of();
-        return List.of(jdYears + " 年(" + resumeYears + ")");
-    }
-
-    @Override
-    public List<String> missing(Set<String> jdTokens, Set<String> resumeTokens) {
-        int jdYears = parseYears(String.join(" ", jdTokens));
-        int resumeYears = parseYears(String.join(" ", resumeTokens));
-        if (jdYears <= 0 || resumeYears >= jdYears) return List.of();
-        return List.of("差 " + (jdYears - resumeYears) + " 年经验");
-    }
-
-    private int parseYears(String text) {
-        if (text == null || text.isBlank()) return 0;
-        Matcher m = YEARS.matcher(text);
-        int max = 0;
-        while (m.find()) {
-            try {
-                int v = Integer.parseInt(m.group(1));
-                if (v > max && v < 60) max = v;
-            } catch (NumberFormatException ignored) {}
+    /**
+     * 从 requirements 中提取最大年限要求。
+     */
+    private int extractRequiredYears(List<String> requirements) {
+        if (requirements == null || requirements.isEmpty()) {
+            return 0;
         }
-        return max;
+        int maxYears = 0;
+        for (String req : requirements) {
+            Matcher m = YEARS_PATTERN.matcher(req);
+            if (m.find()) {
+                int years = Integer.parseInt(m.group(1));
+                maxYears = Math.max(maxYears, years);
+            }
+        }
+        return maxYears;
+    }
+
+    /**
+     * 估算简历总工作年限。
+     */
+    @SuppressWarnings("unchecked")
+    private int estimateWorkYears(Map<String, Object> resumeJson) {
+        if (resumeJson == null) {
+            return 0;
+        }
+        Object workObj = resumeJson.get("work");
+        if (!(workObj instanceof List)) {
+            return 0;
+        }
+        List<Object> workList = (List<Object>) workObj;
+        return workList.size() * DEFAULT_YEARS_PER_JOB;
     }
 }

@@ -1,148 +1,186 @@
 package com.intelligentresume.export.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.intelligentresume.export.client.PdfServiceClient;
+import com.intelligentresume.common.error.BusinessException;
+import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.export.domain.ExportStatus;
 import com.intelligentresume.export.domain.ExportTask;
-import com.intelligentresume.export.dto.ExportRequest;
+import com.intelligentresume.export.dto.CreateExportRequest;
+import com.intelligentresume.export.dto.ExportTaskStatusResponse;
 import com.intelligentresume.export.repository.ExportTaskRepository;
-import com.intelligentresume.resume.domain.Resume;
 import com.intelligentresume.resume.domain.ResumeVersion;
-import com.intelligentresume.resume.repository.ResumeRepository;
 import com.intelligentresume.resume.repository.ResumeVersionRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.junit.jupiter.api.io.TempDir;
+import org.springframework.core.io.Resource;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
+/**
+ * ExportService 单元测试。
+ */
 @ExtendWith(MockitoExtension.class)
 class ExportServiceTest {
 
     @Mock private ExportTaskRepository exportTaskRepository;
-    @Mock private PdfServiceClient pdfServiceClient;
-    @Mock private ResumeRepository resumeRepository;
     @Mock private ResumeVersionRepository resumeVersionRepository;
+    @Mock private ExportStorageService storageService;
 
-    @TempDir Path outputDir;
-    private ExportService exportService;
+    private ExportService service;
 
     @BeforeEach
     void setUp() {
-        exportService = new ExportService(exportTaskRepository, pdfServiceClient, resumeRepository,
-                resumeVersionRepository, outputDir.toString(), 1, "classic,modern,minimal");
+        service = new ExportService(exportTaskRepository, resumeVersionRepository, storageService, 24);
     }
 
     @Test
-    void createsPendingTaskWithoutCallingThePdfService() {
+    @DisplayName("正常路径: 创建导出返回 PENDING")
+    void create_pending() {
         ResumeVersion version = new ResumeVersion();
-        version.setId(10L);
-        version.setResumeId(20L);
-        version.setResumeJson(Map.of("basics", Map.of("name", "Test User")));
-        Resume resume = new Resume();
-        resume.setId(20L);
-        when(resumeVersionRepository.findById(10L)).thenReturn(Optional.of(version));
-        when(resumeRepository.findByIdAndUserId(20L, 30L)).thenReturn(Optional.of(resume));
-        when(exportTaskRepository.save(any(ExportTask.class))).thenAnswer(invocation -> {
-            ExportTask task = invocation.getArgument(0);
-            task.setId(40L);
-            return task;
+        version.setId(1L);
+        version.setCreatedBy(100L);
+        when(resumeVersionRepository.findById(1L)).thenReturn(Optional.of(version));
+        when(exportTaskRepository.save(any())).thenAnswer(inv -> {
+            ExportTask t = inv.getArgument(0);
+            t.setId(1L);
+            return t;
         });
 
-        var response = exportService.createExport(new ExportRequest(10L, "classic"), 30L);
+        CreateExportRequest req = new CreateExportRequest(1L, "classic");
+        ExportTaskStatusResponse resp = service.create(req, 100L);
 
-        assertThat(response.id()).isEqualTo(40L);
-        assertThat(response.status()).isEqualTo(ExportTask.ExportStatus.PENDING);
-        verifyNoInteractions(pdfServiceClient);
-        ArgumentCaptor<ExportTask> saved = ArgumentCaptor.forClass(ExportTask.class);
-        verify(exportTaskRepository).save(saved.capture());
-        assertThat(saved.getValue().getExpiresAt()).isNotNull();
+        assertEquals("PENDING", resp.status());
+        assertEquals("classic", resp.templateCode());
+        assertNull(resp.downloadUrl()); // PENDING 无下载链接
+        verify(exportTaskRepository).save(any());
     }
 
     @Test
-    void acceptsModernTemplateForExportTask() {
-        ResumeVersion version = new ResumeVersion();
-        version.setId(11L);
-        version.setResumeId(21L);
-        version.setResumeJson(Map.of("basics", Map.of("name", "Test User")));
-        Resume resume = new Resume();
-        resume.setId(21L);
-        when(resumeVersionRepository.findById(11L)).thenReturn(Optional.of(version));
-        when(resumeRepository.findByIdAndUserId(21L, 30L)).thenReturn(Optional.of(resume));
-        when(exportTaskRepository.save(any(ExportTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        var response = exportService.createExport(new ExportRequest(11L, "modern"), 30L);
-
-        assertThat(response.templateCode()).isEqualTo("modern");
-        verifyNoInteractions(pdfServiceClient);
+    @DisplayName("失败路径: templateCode 不是 classic 返回 VALIDATION")
+    void create_invalidTemplate_validationFails() {
+        CreateExportRequest req = new CreateExportRequest(1L, "modern");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(req, 100L));
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
     }
 
     @Test
-    void workerRendersPendingTaskAndStoresThePdf() throws Exception {
+    @DisplayName("失败路径: 跨用户 create 返回 NOT_FOUND")
+    void create_crossUser_notFound() {
         ResumeVersion version = new ResumeVersion();
-        version.setId(10L);
-        version.setResumeJson(Map.of("basics", Map.of("name", "Test User")));
+        version.setId(1L);
+        version.setCreatedBy(200L); // 其他用户
+        when(resumeVersionRepository.findById(1L)).thenReturn(Optional.of(version));
+
+        CreateExportRequest req = new CreateExportRequest(1L, "classic");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(req, 100L));
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("失败路径: 跨用户 get 返回 NOT_FOUND")
+    void get_crossUser_notFound() {
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.empty());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.get(1L, 100L));
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("失败路径: 跨用户 download 返回 NOT_FOUND")
+    void download_crossUser_notFound() {
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.empty());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.download(1L, 100L));
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("失败路径: 下载过期文件返回 NOT_FOUND")
+    void download_expired_notFound() {
         ExportTask task = new ExportTask();
-        task.setId(40L);
-        task.setResumeVersionId(10L);
-        task.setTemplateCode("classic");
-        task.setStatus(ExportTask.ExportStatus.PENDING);
-        byte[] pdf = "%PDF-test".getBytes();
-        when(exportTaskRepository.findTop10ByStatusOrderByCreatedAtAsc(ExportTask.ExportStatus.PENDING))
-                .thenReturn(List.of(task));
-        when(resumeVersionRepository.findById(10L)).thenReturn(Optional.of(version));
-        when(pdfServiceClient.render(eq("classic"), org.mockito.ArgumentMatchers.anyMap())).thenReturn(pdf);
-        when(exportTaskRepository.save(any(ExportTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        task.setId(1L);
+        task.setUserId(100L);
+        task.setStatus(ExportStatus.SUCCESS);
+        task.setExpiresAt(LocalDateTime.now().minusHours(1)); // 已过期
+        task.setStorageKey("test-key.pdf");
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(task));
 
-        exportService.processPendingExports();
-
-        assertThat(task.getStatus()).isEqualTo(ExportTask.ExportStatus.SUCCESS);
-        assertThat(task.getSha256()).hasSize(64);
-        assertThat(Files.readAllBytes(outputDir.resolve(task.getStorageKey() + ".pdf"))).isEqualTo(pdf);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.download(1L, 100L));
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
     }
 
     @Test
-    void serializesTaskIdForDocumentedExportContract() throws Exception {
-        var response = new com.intelligentresume.export.dto.ExportTaskResponse(
-                40L, 10L, "classic", ExportTask.ExportStatus.PENDING,
-                null, null, null, null, null, null);
+    @DisplayName("失败路径: 下载失败任务返回 NOT_FOUND")
+    void download_failed_notFound() {
+        ExportTask task = new ExportTask();
+        task.setId(1L);
+        task.setUserId(100L);
+        task.setStatus(ExportStatus.FAILED);
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(task));
 
-        assertThat(new ObjectMapper().valueToTree(response).path("taskId").asLong())
-                .isEqualTo(40L);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.download(1L, 100L));
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
     }
 
     @Test
-    void retriesOnlyFailedExportsOwnedByTheCurrentUser() {
-        ExportTask failed = new ExportTask();
-        failed.setId(40L);
-        failed.setUserId(30L);
-        failed.setStatus(ExportTask.ExportStatus.FAILED);
-        failed.setErrorMessage("renderer unavailable");
-        when(exportTaskRepository.findByIdAndUserId(40L, 30L)).thenReturn(Optional.of(failed));
-        when(exportTaskRepository.save(any(ExportTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    @DisplayName("正常路径: 下载成功任务返回 PDF 字节")
+    void download_success_returnsPdf() {
+        ExportTask task = new ExportTask();
+        task.setId(1L);
+        task.setUserId(100L);
+        task.setStatus(ExportStatus.SUCCESS);
+        task.setExpiresAt(LocalDateTime.now().plusHours(1));
+        task.setStorageKey("test-key.pdf");
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(task));
+        when(storageService.read("test-key.pdf")).thenReturn("PDF bytes".getBytes());
 
-        var response = exportService.retry(40L, 30L);
+        Resource resource = service.download(1L, 100L);
+        assertNotNull(resource);
+    }
 
-        assertThat(response.status()).isEqualTo(ExportTask.ExportStatus.PENDING);
-        assertThat(response.errorMessage()).isNull();
-        assertThat(failed.getExpiresAt()).isNotNull();
-        assertThat(failed.getRetryCount()).isEqualTo(1);
-        assertThatThrownBy(() -> exportService.retry(40L, 31L))
-                .isInstanceOf(com.intelligentresume.common.error.BusinessException.class);
+    @Test
+    @DisplayName("正常路径: get 过期任务自动标记 EXPIRED")
+    void get_expiredTask_marksExpired() {
+        ExportTask task = new ExportTask();
+        task.setId(1L);
+        task.setUserId(100L);
+        task.setStatus(ExportStatus.SUCCESS);
+        task.setExpiresAt(LocalDateTime.now().minusHours(1));
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(task));
+        when(exportTaskRepository.save(any())).thenReturn(task);
+
+        ExportTaskStatusResponse resp = service.get(1L, 100L);
+        assertEquals("EXPIRED", resp.status());
+        verify(exportTaskRepository).save(task);
+    }
+
+    @Test
+    @DisplayName("失败路径: 软删版本不可导出")
+    void create_deletedVersion_notFound() {
+        ResumeVersion version = new ResumeVersion();
+        version.setId(1L);
+        version.setCreatedBy(100L);
+        version.setDeletedAt(LocalDateTime.now()); // 已软删
+        when(resumeVersionRepository.findById(1L)).thenReturn(Optional.of(version));
+
+        CreateExportRequest req = new CreateExportRequest(1L, "classic");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(req, 100L));
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
     }
 }

@@ -25,8 +25,8 @@ docs/         产品、设计、测试和 AI 代理开发规范
 # SPRING_DATASOURCE_USERNAME=你的本机用户名
 # SPRING_DATASOURCE_PASSWORD=你的本机密码
 
-# 2. 启动由脚本管理的 Mock 验收拓扑
-.\scripts\Start-LocalValidation.ps1 -Mode Mock -SkipMySql
+# 2. 启动由脚本管理的本机 MySQL + 百炼验收拓扑
+.\scripts\Start-LocalValidation.ps1
 
 # 3. 运行完整 API 验收（包含 AI 与 PDF 故障恢复）
 .\scripts\Test-LocalFullFlow.ps1 -VerifyPdfRecovery

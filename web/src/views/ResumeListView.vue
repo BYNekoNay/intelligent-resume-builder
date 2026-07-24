@@ -2,7 +2,9 @@
 import { onMounted, ref } from 'vue'
 import { useResumeStore } from '@/stores/resume'
 import { createResume, deleteResume } from '@/api/resume'
+import { useLocale } from '@/i18n'
 
+const { t } = useLocale()
 const store = useResumeStore()
 const title = ref('')
 const name = ref('')
@@ -20,14 +22,14 @@ async function create() {
     name.value = ''
     await store.load()
   } catch {
-    error.value = '简历创建失败，请检查名称后重试。'
+    error.value = t('resumeList.createError')
   } finally {
     saving.value = false
   }
 }
 
 async function remove(id: number) {
-  if (!window.confirm('删除后将不再出现在列表中，确定继续吗？')) return
+  if (!window.confirm(t('resumeList.deleteConfirm'))) return
   await deleteResume(id)
   await store.load()
 }
@@ -35,17 +37,22 @@ async function remove(id: number) {
 
 <template>
   <section class="workspace-page">
-    <h1>简历列表</h1>
+    <h1>{{ t('resumeList.title') }}</h1>
     <form class="workspace-card inline-form" @submit.prevent="create">
-      <label>简历名称<input v-model.trim="title" required maxlength="255" placeholder="例如：Java 后端工程师" /></label>
-      <label>姓名<input v-model.trim="name" required placeholder="用于创建 basics 骨架" /></label>
-      <button class="btn-neon btn-primary" :disabled="saving">{{ saving ? '正在创建…' : '新建简历' }}</button>
+      <label>{{ t('resumeList.nameLabel') }}<input v-model.trim="title" required maxlength="255" :placeholder="t('resumeList.namePlaceholder')" /></label>
+      <label>{{ t('resumeList.nameField') }}<input v-model.trim="name" required :placeholder="t('resumeList.nameFieldPlaceholder')" /></label>
+      <button class="btn-neon btn-primary" :disabled="saving">{{ saving ? t('resumeList.creating') : t('resumeList.create') }}</button>
     </form>
     <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-    <p v-if="store.loading">加载中...</p>
-    <p v-else-if="!store.items.length" class="empty-state">还没有简历。创建第一份简历后即可用于岗位定制。</p>
+    <p v-if="store.loading">{{ t('resumeList.loading') }}</p>
+    <p v-else-if="!store.items.length" class="empty-state">{{ t('resumeList.empty') }}</p>
     <div v-else class="job-list">
-      <article v-for="r in store.items" :key="r.id" class="workspace-card job-card"><RouterLink :to="{ name: 'resume-detail', params: { id: r.id } }"><h2>{{ r.title }}</h2><p>最后更新：{{ r.updatedAt }}</p></RouterLink><button class="danger-action" title="删除简历" @click="remove(r.id)">删除</button></article>
+      <article v-for="r in store.items" :key="r.id" class="workspace-card job-card">
+        <RouterLink :to="{ name: 'resume-detail', params: { id: r.id } }">
+          <h2>{{ r.title }}</h2><p>{{ t('resumeList.lastUpdate') }}：{{ r.updatedAt }}</p>
+        </RouterLink>
+        <button class="danger-action" :title="t('resumeList.deleteAction')" @click="remove(r.id)">{{ t('common.delete') }}</button>
+      </article>
     </div>
   </section>
 </template>

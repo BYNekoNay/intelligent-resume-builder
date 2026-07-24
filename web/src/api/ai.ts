@@ -19,11 +19,18 @@ export interface ConsentResponse {
 }
 
 export interface GenerateTaskRequest {
-  targetResumeId: number
-  jobDescriptionId: number
-  includedMaterialIds?: number[]
-  preferredMaterialIds?: number[]
-  excludedMaterialIds?: number[]
+  taskType?: string
+  targetResumeId?: number | null
+  jobDescriptionId?: number | null
+  jdText?: string
+  companyName?: string
+  positionTitle?: string
+  resumeTitle?: string
+  input?: {
+    includedMaterialIds?: number[]
+    preferredMaterialIds?: number[]
+    excludedMaterialIds?: number[]
+  }
   additionalInput?: Record<string, unknown>
 }
 
@@ -32,6 +39,7 @@ export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELL
 export interface AiTask {
   id: number
   taskType: 'JOB_GENERATION' | 'EXPORT_PDF'
+  jobDescriptionId: number | null
   status: TaskStatus
   confirmationStatus: 'PENDING' | 'CONFIRMED' | 'REJECTED' | null
   resultJson: Record<string, unknown> | null
@@ -46,6 +54,8 @@ export interface ConfirmRequest {
   taskUpdatedAt: string
   items: { outputPath: string; decision: 'ACCEPT' | 'EDIT' | 'REJECT'; editedValue?: Record<string, unknown> }[]
   additionalResumeJson?: Record<string, unknown>
+  resumeTitle?: string
+  targetResumeId?: number | null
 }
 
 export interface InlineOptimizeRequest {
@@ -81,7 +91,7 @@ export function withdrawConsent() {
 }
 
 export function generateForJob(payload: GenerateTaskRequest, idempotencyKey: string) {
-  return apiClient.post<ApiResponse<AiTask>>('/api/ai/tasks', payload, {
+  return apiClient.post<ApiResponse<AiTask>>('/api/ai/generate-resume-for-job', payload, {
     headers: { 'Idempotency-Key': idempotencyKey },
   })
 }
@@ -95,7 +105,7 @@ export function retryTask(id: number) {
 }
 
 export function confirmTask(id: number, payload: ConfirmRequest, idempotencyKey: string) {
-  return apiClient.post<ApiResponse<{ resumeVersionId: number; versionNo: number; resultResumeVersionId: number; rejectedPaths: string[]; newMaterialIds: number[] }>>(
+  return apiClient.post<ApiResponse<{ resumeVersionId: number; versionNo: number; resultResumeVersionId: number; rejectedPaths: string[]; newMaterialIds: number[]; resumeId: number }>>(
     `/api/ai/tasks/${id}/confirm`,
     payload,
     { headers: { 'Idempotency-Key': idempotencyKey } },

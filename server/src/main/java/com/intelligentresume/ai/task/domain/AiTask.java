@@ -1,10 +1,14 @@
 package com.intelligentresume.ai.task.domain;
 
-import com.intelligentresume.common.persistence.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
@@ -12,16 +16,26 @@ import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 import java.util.Map;
 
+/**
+ * AI 任务。字段与 V1 DDL {@code ai_task} 完全一致。
+ *
+ * <p>不继承 BaseEntity:工作器通过原生 SQL 手动控制 updated_at,
+ * 使用 {@code @PrePersist}/{@code @PreUpdate} 回调管理时间戳。
+ */
 @Entity
 @Table(name = "ai_task")
-public class AiTask extends BaseEntity {
+public class AiTask {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "task_type", nullable = false, length = 32)
-    private TaskType taskType;
+    private AiTaskType taskType;
 
     @Column(name = "idempotency_key", nullable = false, length = 128)
     private String idempotencyKey;
@@ -35,7 +49,7 @@ public class AiTask extends BaseEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 16)
-    private TaskStatus status = TaskStatus.PENDING;
+    private AiTaskStatus status = AiTaskStatus.PENDING;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "result_json", columnDefinition = "json")
@@ -60,31 +74,40 @@ public class AiTask extends BaseEntity {
     @Column(name = "lease_expires_at")
     private LocalDateTime leaseExpiresAt;
 
-    public enum TaskType {
-        JOB_GENERATION,
-        EXPORT_PDF
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    void prePersist() {
+        LocalDateTime now = LocalDateTime.now();
+        if (createdAt == null) {
+            createdAt = now;
+        }
+        updatedAt = now;
     }
 
-    public enum TaskStatus {
-        PENDING, RUNNING, SUCCESS, FAILED, CANCELLED
+    @PreUpdate
+    void preUpdate() {
+        updatedAt = LocalDateTime.now();
     }
 
-    public enum ConfirmationStatus {
-        PENDING, CONFIRMED, REJECTED
-    }
-
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }
-    public TaskType getTaskType() { return taskType; }
-    public void setTaskType(TaskType taskType) { this.taskType = taskType; }
+    public AiTaskType getTaskType() { return taskType; }
+    public void setTaskType(AiTaskType taskType) { this.taskType = taskType; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
     public String getRequestFingerprint() { return requestFingerprint; }
     public void setRequestFingerprint(String requestFingerprint) { this.requestFingerprint = requestFingerprint; }
     public Map<String, Object> getInputSnapshotJson() { return inputSnapshotJson; }
     public void setInputSnapshotJson(Map<String, Object> inputSnapshotJson) { this.inputSnapshotJson = inputSnapshotJson; }
-    public TaskStatus getStatus() { return status; }
-    public void setStatus(TaskStatus status) { this.status = status; }
+    public AiTaskStatus getStatus() { return status; }
+    public void setStatus(AiTaskStatus status) { this.status = status; }
     public Map<String, Object> getResultJson() { return resultJson; }
     public void setResultJson(Map<String, Object> resultJson) { this.resultJson = resultJson; }
     public String getErrorMessage() { return errorMessage; }
@@ -99,4 +122,8 @@ public class AiTask extends BaseEntity {
     public void setLeaseOwner(String leaseOwner) { this.leaseOwner = leaseOwner; }
     public LocalDateTime getLeaseExpiresAt() { return leaseExpiresAt; }
     public void setLeaseExpiresAt(LocalDateTime leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

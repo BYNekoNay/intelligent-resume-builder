@@ -1,21 +1,15 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Mock', 'Live')][string]$Mode = 'Mock',
-    [switch]$SkipWeb,
-    [switch]$SkipMySql
+    [switch]$SkipWeb
 )
 
 . (Join-Path $PSScriptRoot 'lib\LocalValidationHelpers.ps1')
 
 $root = Get-LocalValidationRoot
-& (Join-Path $PSScriptRoot 'Test-LocalPrerequisites.ps1') -Mode $Mode -RequireDocker:(-not $SkipMySql)
+& (Join-Path $PSScriptRoot 'Test-LocalPrerequisites.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Prerequisite validation failed.' }
-if ($Mode -eq 'Live') { Import-LiveAiEnvironment -Path (Join-Path $root '.env.live-ai') }
+Import-LiveAiEnvironment -Path (Join-Path $root '.env.live-ai')
 $env:SPRING_PROFILES_ACTIVE = 'local-mysql'
-if (-not $SkipMySql) {
-    & docker compose -f (Join-Path $root 'docker-compose.yml') up -d mysql
-    if ($LASTEXITCODE -ne 0) { throw 'MySQL container failed to start.' }
-}
 
 $output = Get-LocalValidationDirectory
 $processes = @()
@@ -34,7 +28,7 @@ try {
     Wait-LocalHttpEndpoint -Uri 'http://127.0.0.1:3001/health'
     Wait-LocalHttpEndpoint -Uri 'http://127.0.0.1:8080/api/system/health'
     if (-not $SkipWeb) { Wait-LocalHttpEndpoint -Uri 'http://127.0.0.1:5173' }
-    Write-LocalValidationSummary -Name 'processes.json' -Summary @{ mode = $Mode; startedAt = (Get-Date).ToUniversalTime().ToString('o'); processes = $processes } | Write-Output
+    Write-LocalValidationSummary -Name 'processes.json' -Summary @{ mode = 'live'; database = 'local-mysql'; startedAt = (Get-Date).ToUniversalTime().ToString('o'); processes = $processes } | Write-Output
 } catch {
     foreach ($process in $processes) { Stop-LocalProcessTree -Id $process.id }
     throw

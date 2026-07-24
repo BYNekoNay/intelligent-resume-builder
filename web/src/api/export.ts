@@ -1,16 +1,14 @@
 import { apiClient, type ApiResponse } from './client'
 
 export interface ExportTask {
-  id: number
-  resumeVersionId: number
+  taskId: number
   templateCode: string
   status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'EXPIRED'
   fileSizeBytes: number | null
-  sha256: string | null
+  checksumSha256: string | null
   errorMessage: string | null
   expiresAt: string | null
-  createdAt: string
-  updatedAt: string
+  downloadUrl: string | null
 }
 
 export type ResumeTemplateCode = 'classic' | 'modern' | 'minimal'

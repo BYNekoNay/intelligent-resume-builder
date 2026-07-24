@@ -11,4 +11,6 @@ public interface ResumeRepository extends JpaRepository<Resume, Long> {
     Optional<Resume> findByIdAndUserId(Long id, Long userId);
 
     List<Resume> findByUserIdOrderByUpdatedAtDesc(Long userId);
+
+    List<Resume> findByUserIdAndJobDescriptionIdAndDeletedAtIsNull(Long userId, Long jobDescriptionId);
 }

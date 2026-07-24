@@ -1,144 +1,171 @@
 package com.intelligentresume.ai.task.service;
 
-import com.intelligentresume.ai.consent.service.ConsentService;
+import com.intelligentresume.ai.consent.service.AiConsentService;
+import com.intelligentresume.ai.ratelimit.AiQuotaService;
 import com.intelligentresume.ai.task.domain.AiTask;
-import com.intelligentresume.ai.task.dto.TaskCreateRequest;
-import com.intelligentresume.ai.task.dto.TaskResponse;
+import com.intelligentresume.ai.task.domain.AiTaskStatus;
+import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
+import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
-import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
-import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
-import com.intelligentresume.resume.repository.ResumeRepository;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashSet;
-import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
+import java.util.Optional;
 
 /**
- * AI 任务领域服务。
- *
- * <p>骨架:T06 落地幂等键去重 + 跨用户 + 同意校验 + 触发工作器。
+ * AI 任务服务。处理任务创建(含幂等性检查)和查询。
  */
 @Service
 public class AiTaskService {
 
-    private final AiTaskRepository repository;
-    private final ConsentService consentService;
-    private final ResumeRepository resumeRepository;
-    private final JobDescriptionRepository jobDescriptionRepository;
-    private final CareerMaterialRepository materialRepository;
+    private final AiTaskRepository taskRepository;
+    private final AiConsentService consentService;
+    private final AiQuotaService quotaService;
     private final IdempotencyService idempotencyService;
-    private final int maxRetries;
 
-    public AiTaskService(AiTaskRepository repository,
-                         ConsentService consentService,
-                         ResumeRepository resumeRepository,
-                         JobDescriptionRepository jobDescriptionRepository,
-                         CareerMaterialRepository materialRepository,
-                         IdempotencyService idempotencyService,
-                         @Value("${app.ai.worker.max-retries}") int maxRetries) {
-        this.repository = repository;
+    public AiTaskService(AiTaskRepository taskRepository,
+                         AiConsentService consentService,
+                         AiQuotaService quotaService,
+                         IdempotencyService idempotencyService) {
+        this.taskRepository = taskRepository;
         this.consentService = consentService;
-        this.resumeRepository = resumeRepository;
-        this.jobDescriptionRepository = jobDescriptionRepository;
-        this.materialRepository = materialRepository;
+        this.quotaService = quotaService;
         this.idempotencyService = idempotencyService;
-        this.maxRetries = maxRetries;
     }
 
+    /**
+     * 创建 AI 任务。
+     *
+     * <ol>
+     *   <li>校验 AI 同意</li>
+     *   <li>校验配额</li>
+     *   <li>计算请求指纹</li>
+     *   <li>幂等性检查:相同 idempotencyKey + 相同指纹 → 返回已有任务;不同指纹 → CONFLICT</li>
+     *   <li>创建 PENDING 任务</li>
+     * </ol>
+     */
     @Transactional
-    public TaskResponse create(TaskCreateRequest request, String idempotencyKey, Long userId) {
-        if (!consentService.isConsented(userId)) {
+    public AiTaskStatusResponse create(CreateAiTaskRequest req, String idempotencyKey, Long userId) {
+        // 1. 校验同意
+        if (!consentService.hasValidConsent(userId)) {
             throw new BusinessException(ErrorCode.CONSENT_REQUIRED);
         }
-        String fingerprint = idempotencyService.fingerprint(request);
-        var existing = repository.findByUserIdAndTaskTypeAndIdempotencyKey(
-                userId, AiTask.TaskType.JOB_GENERATION, idempotencyKey);
+
+        // 2. 校验配额
+        quotaService.check(userId, req.taskType());
+
+        // 3. 计算指纹
+        Map<String, Object> inputSnapshot = buildInputSnapshot(req);
+        String fingerprint = idempotencyService.fingerprint(inputSnapshot);
+
+        // 4. 幂等性检查
+        Optional<AiTask> existing = taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                userId, req.taskType(), idempotencyKey);
         if (existing.isPresent()) {
-            if (!existing.get().getRequestFingerprint().equals(fingerprint)) {
-                throw new BusinessException(ErrorCode.CONFLICT, "Idempotency-Key is already associated with a different request");
+            AiTask task = existing.get();
+            if (task.getRequestFingerprint().equals(fingerprint)) {
+                return toResponse(task);
             }
-            return toResponse(existing.get());
+            throw new BusinessException(ErrorCode.CONFLICT,
+                    "相同幂等键的请求内容不一致");
         }
 
-        validateOwnedReferences(request, userId);
-
+        // 5. 创建任务
         AiTask task = new AiTask();
         task.setUserId(userId);
-        task.setTaskType(AiTask.TaskType.JOB_GENERATION);
-        task.setConfirmationStatus(AiTask.ConfirmationStatus.PENDING);
+        task.setTaskType(req.taskType());
         task.setIdempotencyKey(idempotencyKey);
         task.setRequestFingerprint(fingerprint);
-        task.setInputSnapshotJson(Map.of(
-                "resumeId", request.targetResumeId(),
-                "jobDescriptionId", request.jobDescriptionId(),
-                "includedMaterialIds", request.includedMaterialIds() == null ? List.of() : request.includedMaterialIds(),
-                "preferredMaterialIds", request.preferredMaterialIds() == null ? List.of() : request.preferredMaterialIds(),
-                "excludedMaterialIds", request.excludedMaterialIds() == null ? List.of() : request.excludedMaterialIds(),
-                "additionalInput", request.additionalInput() == null ? Map.of() : request.additionalInput()
-        ));
-        AiTask saved = repository.save(task);
-        return toResponse(saved);
-    }
+        task.setInputSnapshotJson(inputSnapshot);
+        task.setStatus(AiTaskStatus.PENDING);
+        task.setRetryCount(0);
 
-    private void validateOwnedReferences(TaskCreateRequest request, Long userId) {
-        resumeRepository.findByIdAndUserId(request.targetResumeId(), userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        jobDescriptionRepository.findByIdAndUserId(request.jobDescriptionId(), userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-
-        Set<Long> materialIds = new HashSet<>();
-        addMaterialIds(materialIds, request.includedMaterialIds());
-        addMaterialIds(materialIds, request.preferredMaterialIds());
-        addMaterialIds(materialIds, request.excludedMaterialIds());
-        for (Long materialId : materialIds) {
-            materialRepository.findByIdAndUserId(materialId, userId)
-                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        }
-    }
-
-    private void addMaterialIds(Set<Long> materialIds, List<Long> ids) {
-        if (ids == null) return;
-        for (Long id : ids) {
-            if (id == null) {
-                throw new BusinessException(ErrorCode.VALIDATION, "Material ID must not be null");
-            }
-            materialIds.add(id);
-        }
-    }
-
-    public TaskResponse get(Long id, Long userId) {
-        AiTask task = repository.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        task = taskRepository.save(task);
         return toResponse(task);
     }
 
-    @Transactional
-    public TaskResponse retry(Long id, Long userId) {
-        AiTask task = repository.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        if (task.getStatus() != AiTask.TaskStatus.FAILED) {
-            throw new BusinessException(ErrorCode.CONFLICT, "Only failed tasks can be retried");
-        }
-        if (task.getRetryCount() >= maxRetries) {
-            throw new BusinessException(ErrorCode.CONFLICT, "Task retry limit has been reached");
-        }
-        task.setStatus(AiTask.TaskStatus.PENDING);
-        task.setErrorMessage(null);
-        task.setLeaseOwner(null);
-        task.setLeaseExpiresAt(null);
-        task.setRetryCount(task.getRetryCount() + 1);
-        return toResponse(repository.save(task));
+    /**
+     * 查询任务状态。
+     */
+    @Transactional(readOnly = true)
+    public AiTaskStatusResponse get(Long id, Long userId) {
+        AiTask task = taskRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "AI 任务不存在"));
+        return toResponse(task);
     }
 
-    private TaskResponse toResponse(AiTask t) {
-        return new TaskResponse(t.getId(), t.getTaskType(), t.getStatus(), t.getConfirmationStatus(),
-                t.getResultJson(), t.getErrorMessage(), t.getRetryCount(), t.getResultResumeVersionId(),
-                t.getCreatedAt(), t.getUpdatedAt());
+    private Map<String, Object> buildInputSnapshot(CreateAiTaskRequest req) {
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("taskType", req.taskType().name());
+        if (req.input() != null) {
+            snapshot.put("input", req.input());
+        }
+        if (req.targetResumeId() != null) {
+            snapshot.put("targetResumeId", req.targetResumeId());
+        }
+        if (req.jobDescriptionId() != null) {
+            snapshot.put("jobDescriptionId", req.jobDescriptionId());
+        }
+        if (req.jdText() != null && !req.jdText().isBlank()) {
+            snapshot.put("jdText", req.jdText());
+        }
+        if (req.companyName() != null && !req.companyName().isBlank()) {
+            snapshot.put("companyName", req.companyName());
+        }
+        if (req.positionTitle() != null && !req.positionTitle().isBlank()) {
+            snapshot.put("positionTitle", req.positionTitle());
+        }
+        if (req.resumeTitle() != null && !req.resumeTitle().isBlank()) {
+            snapshot.put("resumeTitle", req.resumeTitle());
+        }
+        return snapshot;
+    }
+
+    private AiTaskStatusResponse toResponse(AiTask task) {
+        return new AiTaskStatusResponse(
+                task.getId(),
+                task.getTaskType(),
+                toLong(task.getInputSnapshotJson().get("jobDescriptionId")),
+                task.getStatus(),
+                task.getResultJson(),
+                task.getErrorMessage(),
+                task.getConfirmationStatus(),
+                task.getResultResumeVersionId(),
+                task.getRetryCount(),
+                task.getCreatedAt(),
+                task.getUpdatedAt()
+        );
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value != null) {
+            try {
+                return Long.parseLong(value.toString());
+            } catch (NumberFormatException ignored) {
+                // A malformed legacy snapshot should not make task status unreadable.
+            }
+        }
+        return null;
+    }
+
+    @Transactional
+    public AiTaskStatusResponse retry(Long taskId, Long userId) {
+        AiTask task = taskRepository.findById(taskId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "AI 任务不存在"));
+        if (!com.intelligentresume.ai.task.domain.AiTaskStatus.FAILED.equals(task.getStatus())) {
+            throw new BusinessException(ErrorCode.VALIDATION, "只有失败的任务可以重试");
+        }
+        task.setStatus(com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING);
+        task.setErrorMessage(null);
+        task.setRetryCount(task.getRetryCount() + 1);
+        taskRepository.save(task);
+        return toResponse(task);
     }
 }

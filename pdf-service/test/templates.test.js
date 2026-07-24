@@ -33,3 +33,42 @@ test('renders every supported template with the same resume sections', () => {
 test('rejects unknown template codes', () => {
   assert.throws(() => renderResumeHtml('unknown', payload), /不支持的简历模板/)
 })
+
+test('renders URL-like resume text as escaped text without external resources', () => {
+  const html = renderResumeHtml('classic', {
+    resumeJson: {
+      basics: { name: 'Alice', summary: 'https://portfolio.example.com' },
+      work: [{ company: 'file: archive', description: '// internal note' }],
+    },
+  })
+
+  assert.match(html, /https:\/\/portfolio\.example\.com/)
+  assert.doesNotMatch(html, /href=|src=/)
+})
+
+test('renders the raw resume JSON sent by the export worker', () => {
+  const html = renderResumeHtml('classic', {
+    basics: { name: 'Alice' },
+    work: [{ company: 'ACME', position: 'Engineer' }],
+  })
+
+  assert.match(html, /Alice/)
+  assert.match(html, /ACME/)
+})
+
+test('applies saved layout settings within safe bounds', () => {
+  const html = renderResumeHtml('classic', {
+    basics: { name: 'Alice' },
+    layout: { fontFamily: 'songti', bodyFontSize: 16, headingFontSize: 18, lineHeight: 2, sectionSpacing: 32, entrySpacing: 22, pagePadding: 80 },
+  })
+
+  assert.match(html, /--resume-body-size:12pt/)
+  assert.match(html, /--resume-font-family:"Songti SC",SimSun,serif/)
+  assert.match(html, /--resume-heading-size:13\.5pt/)
+  assert.match(html, /--resume-name-size:33\.23076923076923pt/)
+  assert.match(html, /--resume-role-size:14\.538461538461538pt/)
+  assert.match(html, /--resume-line-height:2/)
+  assert.match(html, /--resume-section-gap:24pt/)
+  assert.match(html, /--resume-entry-gap:16\.5pt/)
+  assert.match(html, /--paper-pad:60pt/)
+})

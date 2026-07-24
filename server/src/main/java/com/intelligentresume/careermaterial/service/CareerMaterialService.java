@@ -1,94 +1,128 @@
 package com.intelligentresume.careermaterial.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.careermaterial.domain.CareerMaterial;
 import com.intelligentresume.careermaterial.domain.MaterialType;
 import com.intelligentresume.careermaterial.domain.UsagePreference;
-import com.intelligentresume.careermaterial.dto.CareerMaterialCreateRequest;
-import com.intelligentresume.careermaterial.dto.CareerMaterialResponse;
-import com.intelligentresume.resume.dto.ResumeMaterialReferenceResponse;
-import com.intelligentresume.resume.repository.ResumeMaterialReferenceRepository;
+import com.intelligentresume.careermaterial.dto.*;
 import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 职业资料领域服务。
+ * 职业资料 CRUD + 类型过滤 + 引用偏好。
  *
- * <p>骨架:T04 落地类型过滤 / 引用偏好 / 软删 / 历史快照。
+ * <p>关键约定:
+ * <ul>
+ *     <li>所有查询带 userId 条件,杜绝跨用户访问。</li>
+ *     <li>软删设置 deleted_at;被历史快照引用的资料删除后快照仍可读。</li>
+ *     <li>contentJson 字节数不超过 {@code app.career-material.content-json.max-bytes}。</li>
+ * </ul>
  */
 @Service
 public class CareerMaterialService {
 
     private final CareerMaterialRepository repository;
-    private final ResumeMaterialReferenceRepository referenceRepository;
+    private final ObjectMapper objectMapper;
+    private final int maxContentBytes;
 
     public CareerMaterialService(CareerMaterialRepository repository,
-                                 ResumeMaterialReferenceRepository referenceRepository) {
+                                 ObjectMapper objectMapper,
+                                 @Value("${app.career-material.content-json.max-bytes:65536}") int maxContentBytes) {
         this.repository = repository;
-        this.referenceRepository = referenceRepository;
+        this.objectMapper = objectMapper;
+        this.maxContentBytes = maxContentBytes;
     }
 
     @Transactional
-    public CareerMaterialResponse create(CareerMaterialCreateRequest request, Long userId) {
-        CareerMaterial m = new CareerMaterial();
-        m.setUserId(userId);
-        m.setMaterialType(request.materialType());
-        m.setTitle(request.title());
-        m.setContentJson(request.contentJson());
-        m.setSourceText(request.sourceText());
-        m.setUsagePreference(request.usagePreference() == null ? UsagePreference.NORMAL : request.usagePreference());
-        CareerMaterial saved = repository.save(m);
-        return toResponse(saved);
+    public CareerMaterialDetail create(CreateCareerMaterialRequest req, Long userId) {
+        validateContentJsonSize(req.contentJson());
+
+        CareerMaterial material = new CareerMaterial();
+        material.setUserId(userId);
+        material.setMaterialType(req.materialType());
+        material.setTitle(req.title());
+        material.setContentJson(req.contentJson());
+        material.setSourceText(req.sourceText());
+        material.setUsagePreference(req.usagePreference() != null ? req.usagePreference() : UsagePreference.NORMAL);
+        repository.save(material);
+        return toDetail(material);
     }
 
-    public List<CareerMaterialResponse> list(Long userId, MaterialType type) {
-        List<CareerMaterial> rows = (type == null)
-                ? repository.findByUserIdOrderByUpdatedAtDesc(userId)
-                : repository.findByUserIdAndMaterialTypeOrderByUpdatedAtDesc(userId, type);
-        return rows.stream().map(this::toResponse).toList();
+    @Transactional(readOnly = true)
+    public List<CareerMaterialSummary> list(Long userId, MaterialType filter) {
+        List<CareerMaterial> materials = (filter != null)
+                ? repository.findByUserIdAndMaterialTypeOrderByUpdatedAtDesc(userId, filter)
+                : repository.findByUserIdOrderByUpdatedAtDesc(userId);
+        return materials.stream().map(this::toSummary).toList();
     }
 
-    public CareerMaterialResponse get(Long id, Long userId) {
-        CareerMaterial m = repository.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        return toResponse(m);
+    @Transactional(readOnly = true)
+    public CareerMaterialDetail get(Long id, Long userId) {
+        return toDetail(findOwned(id, userId));
     }
 
     @Transactional
-    public CareerMaterialResponse update(Long id, CareerMaterialCreateRequest request, Long userId) {
-        CareerMaterial m = repository.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        if (request.title() != null) m.setTitle(request.title());
-        if (request.contentJson() != null) m.setContentJson(request.contentJson());
-        if (request.sourceText() != null) m.setSourceText(request.sourceText());
-        if (request.usagePreference() != null) m.setUsagePreference(request.usagePreference());
-        if (request.materialType() != null) m.setMaterialType(request.materialType());
-        return toResponse(repository.save(m));
+    public CareerMaterialDetail update(Long id, UpdateCareerMaterialRequest req, Long userId) {
+        CareerMaterial material = findOwned(id, userId);
+        if (req.title() != null && !req.title().isBlank()) {
+            material.setTitle(req.title());
+        }
+        if (req.contentJson() != null) {
+            validateContentJsonSize(req.contentJson());
+            material.setContentJson(req.contentJson());
+        }
+        if (req.sourceText() != null) {
+            material.setSourceText(req.sourceText());
+        }
+        if (req.usagePreference() != null) {
+            material.setUsagePreference(req.usagePreference());
+        }
+        repository.save(material);
+        return toDetail(material);
     }
 
     @Transactional
     public void softDelete(Long id, Long userId) {
-        CareerMaterial m = repository.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        m.setDeletedAt(java.time.LocalDateTime.now());
-        repository.save(m);
+        CareerMaterial material = findOwned(id, userId);
+        material.setDeletedAt(LocalDateTime.now());
+        repository.save(material);
     }
 
-    public List<ResumeMaterialReferenceResponse> references(Long id, Long userId) {
-        repository.findByIdAndUserId(id, userId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        return referenceRepository.findByMaterialIdOrderByCreatedAtDesc(id).stream()
-                .map(reference -> new ResumeMaterialReferenceResponse(reference.getId(), reference.getResumeVersionId(),
-                        reference.getMaterialId(), reference.getSelectionStatus(), reference.getOutputPath(),
-                        reference.getSourceSnapshotJson(), reference.getSelectionReason(), reference.getCreatedAt()))
-                .toList();
+    // ---- helpers ----
+
+    private CareerMaterial findOwned(Long id, Long userId) {
+        return repository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "资料不存在"));
     }
 
-    private CareerMaterialResponse toResponse(CareerMaterial m) {
-        return new CareerMaterialResponse(m.getId(), m.getMaterialType(), m.getTitle(), m.getContentJson(),
-                m.getSourceText(), m.getUsagePreference(), m.getCreatedAt(), m.getUpdatedAt());
+    private void validateContentJsonSize(Object contentJson) {
+        try {
+            byte[] bytes = objectMapper.writeValueAsBytes(contentJson);
+            if (bytes.length > maxContentBytes) {
+                throw new BusinessException(ErrorCode.VALIDATION,
+                        "contentJson 超过大小限制 (" + maxContentBytes + " bytes)");
+            }
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.VALIDATION, "contentJson 序列化失败");
+        }
+    }
+
+    private CareerMaterialSummary toSummary(CareerMaterial m) {
+        return new CareerMaterialSummary(m.getId(), m.getMaterialType(), m.getTitle(),
+                m.getUsagePreference(), m.getUpdatedAt());
+    }
+
+    private CareerMaterialDetail toDetail(CareerMaterial m) {
+        return new CareerMaterialDetail(m.getId(), m.getMaterialType(), m.getTitle(),
+                m.getContentJson(), m.getSourceText(), m.getUsagePreference(),
+                m.getCreatedAt(), m.getUpdatedAt());
     }
 }

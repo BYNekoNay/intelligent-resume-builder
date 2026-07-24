@@ -53,7 +53,111 @@ web/tests/e2e/mvp.spec.ts                                                       
 
 ---
 
-## 4. 验证矩阵总览
+## 4. 包结构与命名
+
+本卡为验收任务,不新增业务包结构。
+
+---
+
+## 5. 配置项
+
+本卡无配置变更。
+
+---
+
+## 6. 数据库变更
+
+本卡无数据库变更。
+
+---
+
+## 7. 关键代码骨架
+
+### 7.1 MvpHappyPathIT
+
+```java
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+class MvpHappyPathIT {
+
+    @LocalServerPort int port;
+    @Autowired MockMvc mvc;
+    // 或用 TestRestTemplate
+
+    @Test
+    @DisplayName("Happy Path: 注册 → 资料 → JD → AI → 评分 → PDF")
+    void happyPath_fullCycle() {
+        // 1. 注册 + 登录
+        // 2. 创建 2 条 career_material
+        // 3. 创建 1 条 job_description,parse
+        // 4. 创建 resume + 1 个手动版本
+        // 5. AI 同意
+        // 6. 创建 generate 任务 → 轮询 → SUCCESS
+        // 7. confirm → versionNo=2
+        // 8. 评分 → totalScore 数字,disclaimer 文案一致
+        // 9. 导出 → 轮询 → 下载 PDF 字节
+    }
+}
+```
+
+### 7.2 MvpFailurePathIT
+
+```java
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+class MvpFailurePathIT {
+
+    @Test
+    @DisplayName("未授权访问受保护接口返回 40101")
+    void unauthenticated_returns40101() {}
+
+    @Test
+    @DisplayName("跨用户访问返回 40401")
+    void crossUser_returns40401() {}
+
+    @Test
+    @DisplayName("未 AI 同意创建任务返回 40302")
+    void notConsented_returns40302() {}
+
+    @Test
+    @DisplayName("幂等键重放返回原 taskId")
+    void idempotentReplay_returnsSameTask() {}
+
+    @Test
+    @DisplayName("撤回 AI 同意后创建任务返回 40302")
+    void withdrawThenCreate_returns40302() {}
+
+    @Test
+    @DisplayName("租约过期任务可被工作器恢复")
+    void expiredLease_recoverable() {}
+
+    @Test
+    @DisplayName("空资料库生成返回 missing")
+    void emptyMaterials_returnsMissing() {}
+
+    @Test
+    @DisplayName("PDF 服务不可用时导出任务 FAILED")
+    void pdfServiceDown_exportFailed() {}
+
+    @Test
+    @DisplayName("PDF 文件过期后下载返回 40401")
+    void pdfExpired_downloadNotFound() {}
+}
+```
+
+---
+
+## 8. 前端变更
+
+本卡无前端变更。
+
+---
+
+## 9. 测试清单
+
+### 9.1 验证矩阵总览
 
 | 验收条目 | 来源 | 类型 |
 | --- | --- | --- |
@@ -68,11 +172,36 @@ web/tests/e2e/mvp.spec.ts                                                       
 | 9. 端到端 happy path | 13 §5 T11 | 自动化 |
 | 10. 失败路径(13 §5 T11 列) | 13 §5 T11 | 自动化 |
 
+### 9.2 手工验收清单(07 §10)
+
+> 提交人需逐项核对,产出截图与 curl 输出。
+
+- [ ] 是否能完成注册登录
+- [ ] 是否能创建简历
+- [ ] 是否能编辑和保存版本
+- [ ] 是否能维护职业资料,并按 JD 生成岗位定制简历
+- [ ] 是否能输入 JD 并获得优化结果(此处指 confirm 后生成版本)
+- [ ] 是否能查看评分、ATS 风险与建议(本卡只验证评分;ATS 在 M3)
+- [ ] 是否能生成沟通文案、记录投递进度并复习面试答案资产(本卡不验证;M3/M4)
+- [ ] 是否能成功导出 PDF
+
+> 截图与 curl 输出归档到 `docs/agent-tasks/evidence/T11-<日期>/` 目录(由实施时创建)。
+
+### 9.3 阶段门禁自检(09 §6)
+
+- [ ] 当前阶段(M2)主流程闭环:是(happy path 跑通)
+- [ ] 存在 P0 缺陷:否
+- [ ] 当前阶段涉及的认证、资源归属、AI 同意、限流、私有文件控制全部通过:是
+- [ ] 数据模型、接口、实现、测试文档一致:是(已交叉验证)
+- [ ] 当前阶段验收清单存在未验证条目:否
+
 ---
 
-## 5. Happy Path 验证脚本(curl + 浏览器)
+## 10. 验证命令
 
-### 5.1 Happy path 完整步骤
+### 10.1 Happy Path 验证脚本(curl + 浏览器)
+
+#### 10.1.1 Happy path 完整步骤
 
 ```bash
 # === Step 0: 准备 ===
@@ -247,7 +376,7 @@ curl -s -X POST $API/api/auth/logout -H "$AUTH" -b /tmp/e2e_cookies.txt | jq
 # 期望: code=0
 ```
 
-### 5.2 Happy path 通过判据
+#### 10.1.2 Happy path 通过判据
 
 - [ ] 每一步响应 `code=0`
 - [ ] JD 解析返回的 keywords 包含至少 2 个期望词(spring boot / mysql / redis / 微服务)
@@ -256,11 +385,9 @@ curl -s -X POST $API/api/auth/logout -H "$AUTH" -b /tmp/e2e_cookies.txt | jq
 - [ ] 评分 `totalScore` ∈ [0, 100],`disclaimer` 文案与配置一致
 - [ ] 导出任务最终 `status=SUCCESS`,下载文件 `file` 命令识别为 PDF
 
----
+### 10.2 失败路径必测场景(13 §5 T11)
 
-## 6. 失败路径必测场景(13 §5 T11)
-
-### 6.1 未授权
+#### 10.2.1 未授权
 
 ```bash
 # 不带 token 调用任意受保护接口
@@ -268,7 +395,7 @@ curl -s -i $API/api/resumes
 # 期望: 40101
 ```
 
-### 6.2 跨用户
+#### 10.2.2 跨用户
 
 ```bash
 # 注册 bob
@@ -292,7 +419,7 @@ curl -s -i -X POST $API/api/ai/generate-resume-for-job \
 # 期望: 40401
 ```
 
-### 6.3 AI 未同意
+#### 10.2.3 AI 未同意
 
 ```bash
 # bob 未同意就创建任务
@@ -303,7 +430,7 @@ curl -s -i -X POST $API/api/ai/generate-resume-for-job \
 # 期望: 40302
 ```
 
-### 6.4 重复提交(幂等键)
+#### 10.2.4 重复提交(幂等键)
 
 ```bash
 IDEM="e2e-gen-2-$(date +%s)"
@@ -325,14 +452,14 @@ curl -s -X POST $API/api/ai/generate-resume-for-job \
 diff /tmp/task1.txt /tmp/task2.txt && echo "IDEMPOTENT OK"
 ```
 
-### 6.5 提供商失败(Mock 模拟)
+#### 10.2.5 提供商失败(Mock 模拟)
 
 ```bash
 # 在 application.yml 临时配置 mock.fail-rate=1.0
 # 重启后端,发起任务,期望任务最终 FAILED,error_message 含可识别错误
 ```
 
-### 6.6 工作器重启恢复
+#### 10.2.6 工作器重启恢复
 
 ```bash
 # 创建一个任务,在 worker 抢占前 kill 后端
@@ -347,7 +474,7 @@ docker exec intelligent-resume-mysql mysql -uroot -proot_dev_only intelligent_re
 # 期望: 任务最终 SUCCESS 或被 worker 重新抢占
 ```
 
-### 6.7 资料不足
+#### 10.2.7 资料不足
 
 ```bash
 # 创建一个空资料库的账号
@@ -355,7 +482,7 @@ docker exec intelligent-resume-mysql mysql -uroot -proot_dev_only intelligent_re
 # 期望: resultJson.missing 非空,草稿仅含 _pending 字段
 ```
 
-### 6.8 PDF 服务失败
+#### 10.2.8 PDF 服务失败
 
 ```bash
 # 关闭 pdf-service (kill 进程)
@@ -363,7 +490,7 @@ docker exec intelligent-resume-mysql mysql -uroot -proot_dev_only intelligent_re
 # 期望: export_task.status=FAILED,error_message 含 "PDF 渲染失败"
 ```
 
-### 6.9 文件过期
+#### 10.2.9 文件过期
 
 ```bash
 # 把 export_task.expires_at 改到过去
@@ -377,112 +504,20 @@ curl -s -i $API/api/exports/files/$EXPORT_TASK -H "$AUTH"
 
 ---
 
-## 7. 测试代码骨架
+## 11. 停止条件
 
-### 7.1 MvpHappyPathIT
+补充 `T00 §6`:
 
-```java
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
-class MvpHappyPathIT {
-
-    @LocalServerPort int port;
-    @Autowired MockMvc mvc;
-    // 或用 TestRestTemplate
-
-    @Test
-    @DisplayName("Happy Path: 注册 → 资料 → JD → AI → 评分 → PDF")
-    void happyPath_fullCycle() {
-        // 1. 注册 + 登录
-        // 2. 创建 2 条 career_material
-        // 3. 创建 1 条 job_description,parse
-        // 4. 创建 resume + 1 个手动版本
-        // 5. AI 同意
-        // 6. 创建 generate 任务 → 轮询 → SUCCESS
-        // 7. confirm → versionNo=2
-        // 8. 评分 → totalScore 数字,disclaimer 文案一致
-        // 9. 导出 → 轮询 → 下载 PDF 字节
-    }
-}
-```
-
-### 7.2 MvpFailurePathIT
-
-```java
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
-class MvpFailurePathIT {
-
-    @Test
-    @DisplayName("未授权访问受保护接口返回 40101")
-    void unauthenticated_returns40101() {}
-
-    @Test
-    @DisplayName("跨用户访问返回 40401")
-    void crossUser_returns40401() {}
-
-    @Test
-    @DisplayName("未 AI 同意创建任务返回 40302")
-    void notConsented_returns40302() {}
-
-    @Test
-    @DisplayName("幂等键重放返回原 taskId")
-    void idempotentReplay_returnsSameTask() {}
-
-    @Test
-    @DisplayName("撤回 AI 同意后创建任务返回 40302")
-    void withdrawThenCreate_returns40302() {}
-
-    @Test
-    @DisplayName("租约过期任务可被工作器恢复")
-    void expiredLease_recoverable() {}
-
-    @Test
-    @DisplayName("空资料库生成返回 missing")
-    void emptyMaterials_returnsMissing() {}
-
-    @Test
-    @DisplayName("PDF 服务不可用时导出任务 FAILED")
-    void pdfServiceDown_exportFailed() {}
-
-    @Test
-    @DisplayName("PDF 文件过期后下载返回 40401")
-    void pdfExpired_downloadNotFound() {}
-}
-```
+- [ ] 跳过任一必测场景
+- [ ] 在本卡直接修补业务代码(应回退到对应 Tnn)
+- [ ] 验收报告存在空字段
+- [ ] P0/P1 缺陷未解决就报告 DONE
 
 ---
 
-## 8. 手工验收清单(07 §10)
+## 12. 完成报告
 
-> 提交人需逐项核对,产出截图与 curl 输出。
-
-- [ ] 是否能完成注册登录
-- [ ] 是否能创建简历
-- [ ] 是否能编辑和保存版本
-- [ ] 是否能维护职业资料,并按 JD 生成岗位定制简历
-- [ ] 是否能输入 JD 并获得优化结果(此处指 confirm 后生成版本)
-- [ ] 是否能查看评分、ATS 风险与建议(本卡只验证评分;ATS 在 M3)
-- [ ] 是否能生成沟通文案、记录投递进度并复习面试答案资产(本卡不验证;M3/M4)
-- [ ] 是否能成功导出 PDF
-
-> 截图与 curl 输出归档到 `docs/agent-tasks/evidence/T11-<日期>/` 目录(由实施时创建)。
-
----
-
-## 9. 阶段门禁自检(09 §6)
-
-- [ ] 当前阶段(M2)主流程闭环:是(happy path 跑通)
-- [ ] 存在 P0 缺陷:否
-- [ ] 当前阶段涉及的认证、资源归属、AI 同意、限流、私有文件控制全部通过:是
-- [ ] 数据模型、接口、实现、测试文档一致:是(已交叉验证)
-- [ ] 当前阶段验收清单存在未验证条目:否
-
----
-
-## 10. 验收报告模板
+### 12.1 验收报告模板
 
 实施完成后输出到 `docs/agent-tasks/evidence/T11-<日期>/report.md`:
 
@@ -544,20 +579,7 @@ PDF 服务版本: <commit hash>
 验收通过 / 不通过
 ```
 
----
-
-## 11. 停止条件
-
-补充 `T00 §6`:
-
-- [ ] 跳过任一必测场景
-- [ ] 在本卡直接修补业务代码(应回退到对应 Tnn)
-- [ ] 验收报告存在空字段
-- [ ] P0/P1 缺陷未解决就报告 DONE
-
----
-
-## 12. 完成报告
+### 12.2 完成报告
 
 ```text
 任务 ID:T11-MVP 端到端验收
@@ -589,7 +611,7 @@ PDF 服务版本: <commit hash>
   - 性能指标 5 项全部达标
 
 权限/归属/幂等/失败场景证据:
-  - 必测 1-10 见 §6
+  - 必测 1-10 见 §10.2
 
 文档是否需要同步: 是 / 否,原因: ...
 

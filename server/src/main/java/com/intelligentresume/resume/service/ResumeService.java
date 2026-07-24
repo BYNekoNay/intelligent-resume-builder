@@ -1,16 +1,12 @@
 package com.intelligentresume.resume.service;
 
-import com.intelligentresume.resume.domain.Resume;
-import com.intelligentresume.resume.domain.ResumeVersion;
-import com.intelligentresume.resume.dto.ResumeCreateRequest;
-import com.intelligentresume.resume.dto.ResumeResponse;
-import com.intelligentresume.resume.dto.ResumeVersionCreateRequest;
-import com.intelligentresume.resume.dto.ResumeVersionResponse;
-import com.intelligentresume.resume.repository.ResumeRepository;
-import com.intelligentresume.resume.repository.ResumeVersionRepository;
-import com.intelligentresume.resume.validation.JsonResumeValidator;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.resume.domain.Resume;
+import com.intelligentresume.resume.domain.ResumeVersion;
+import com.intelligentresume.resume.dto.*;
+import com.intelligentresume.resume.repository.ResumeRepository;
+import com.intelligentresume.resume.repository.ResumeVersionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,11 +14,17 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 简历与版本领域服务。
+ * 简历 CRUD + 当前版本切换。
  *
- * <p>权限:所有读写都按 userId 过滤,跨用户通过 {@link ErrorCode#NOT_FOUND} 兜底。
- * 版本号:每个 resume 的 version_no 单调递增,利用 {@code uk_resume_version_no} 唯一约束兜底并发。
+ * <p>关键约定：
+ * <ul>
+ *     <li>所有查询带 userId 条件，杜绝跨用户访问。</li>
+ *     <li>软删设置 deleted_at，版本不删除以保留历史快照。</li>
+ * </ul>
  */
+import com.intelligentresume.resume.domain.ResumeSourceType;
+import java.util.Map;
+
 @Service
 public class ResumeService {
 
@@ -39,116 +41,100 @@ public class ResumeService {
     }
 
     @Transactional
-    public ResumeResponse create(ResumeCreateRequest request, Long userId) {
-        jsonResumeValidator.validate(request.resumeJson());
+    public ResumeDetail create(CreateResumeRequest req, Long userId) {
         Resume resume = new Resume();
         resume.setUserId(userId);
-        resume.setTitle(request.title());
-        Resume saved = resumeRepository.save(resume);
+        resume.setTitle(req.title());
+        resumeRepository.save(resume);
 
-        ResumeVersion initialVersion = new ResumeVersion();
-        initialVersion.setResumeId(saved.getId());
-        initialVersion.setVersionNo(1);
-        initialVersion.setSourceType(ResumeVersion.SourceType.MANUAL);
-        initialVersion.setResumeJson(request.resumeJson());
-        initialVersion.setOptimizationSummary("初始简历内容");
-        initialVersion.setCreatedBy(userId);
-        ResumeVersion persistedVersion = resumeVersionRepository.save(initialVersion);
+        if (req.resumeJson() != null && !req.resumeJson().isEmpty()) {
+            jsonResumeValidator.validate(req.resumeJson());
+            int versionNo = 1;
+            ResumeVersion version = new ResumeVersion();
+            version.setResumeId(resume.getId());
+            version.setVersionNo(versionNo);
+            version.setSourceType(ResumeSourceType.MANUAL);
+            version.setResumeJson(req.resumeJson());
+            version.setCreatedBy(userId);
+            resumeVersionRepository.save(version);
+            resume.setCurrentVersionId(version.getId());
+            resumeRepository.save(resume);
+        }
 
-        saved.setCurrentVersionId(persistedVersion.getId());
-        return toResponse(resumeRepository.save(saved));
+        return toDetail(resume);
     }
 
-    public List<ResumeResponse> list(Long userId) {
-        return resumeRepository.findByUserIdOrderByUpdatedAtDesc(userId).stream()
-                .map(this::toResponse)
+    @Transactional(readOnly = true)
+    public List<ResumeSummary> list(Long userId) {
+        return resumeRepository.findByUserIdOrderByUpdatedAtDesc(userId)
+                .stream()
+                .map(this::toSummary)
                 .toList();
     }
 
-    public ResumeResponse get(Long resumeId, Long userId) {
-        Resume resume = resumeRepository.findByIdAndUserId(resumeId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        return toResponse(resume);
+    /**
+     * 查询某 JD 关联的岗位简历。用于"同 JD 再次生成"时判断新建/更新。
+     */
+    @Transactional(readOnly = true)
+    public List<ResumeSummary> listByJobDescription(Long jdId, Long userId) {
+        return resumeRepository.findByUserIdAndJobDescriptionIdAndDeletedAtIsNull(userId, jdId)
+                .stream()
+                .map(this::toSummary)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public ResumeDetail get(Long id, Long userId) {
+        Resume resume = findOwned(id, userId);
+        return toDetail(resume);
     }
 
     @Transactional
-    public ResumeResponse updateTitle(Long resumeId, String title, Long userId) {
-        Resume resume = resumeRepository.findByIdAndUserId(resumeId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        resume.setTitle(title);
-        return toResponse(resumeRepository.save(resume));
+    public ResumeDetail update(Long id, UpdateResumeRequest req, Long userId) {
+        Resume resume = findOwned(id, userId);
+        if (req.title() != null && !req.title().isBlank()) {
+            resume.setTitle(req.title());
+        }
+        resumeRepository.save(resume);
+        return toDetail(resume);
     }
 
     @Transactional
-    public void softDelete(Long resumeId, Long userId) {
-        Resume resume = resumeRepository.findByIdAndUserId(resumeId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    public void softDelete(Long id, Long userId) {
+        Resume resume = findOwned(id, userId);
         resume.setDeletedAt(LocalDateTime.now());
         resumeRepository.save(resume);
     }
 
     @Transactional
-    public ResumeVersionResponse createVersion(Long resumeId, ResumeVersionCreateRequest request, Long userId) {
-        jsonResumeValidator.validate(request.resumeJson());
-        Resume resume = resumeRepository.findByIdAndUserId(resumeId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-
-        // 版本号 = max + 1(MVP 串行,UNIQUE 兜底并发)
-        int nextVersionNo = resumeVersionRepository.findFirstByResumeIdOrderByVersionNoDesc(resumeId)
-                .map(v -> v.getVersionNo() + 1)
-                .orElse(1);
-
-        ResumeVersion version = new ResumeVersion();
-        version.setResumeId(resume.getId());
-        version.setVersionNo(nextVersionNo);
-        version.setSourceType(request.sourceType());
-        version.setResumeJson(request.resumeJson());
-        version.setOptimizationSummary(request.optimizationSummary());
-        version.setCreatedBy(userId);
-        ResumeVersion saved = resumeVersionRepository.save(version);
-
-        resume.setCurrentVersionId(saved.getId());
-        resumeRepository.save(resume);
-
-        return toResponse(saved);
-    }
-
-    public List<ResumeVersionResponse> listVersions(Long resumeId, Long userId) {
-        resumeRepository.findByIdAndUserId(resumeId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        return resumeVersionRepository.findByResumeIdOrderByVersionNoDesc(resumeId).stream()
-                .map(this::toResponse)
-                .toList();
-    }
-
-    public ResumeVersionResponse getVersion(Long resumeId, Long versionId, Long userId) {
-        Resume resume = resumeRepository.findByIdAndUserId(resumeId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        ResumeVersion v = resumeVersionRepository.findByIdAndResumeId(versionId, resume.getId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        return toResponse(v);
-    }
-
-    @Transactional
-    public ResumeResponse setCurrentVersion(Long resumeId, Long versionId, Long userId) {
-        Resume resume = resumeRepository.findByIdAndUserId(resumeId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        ResumeVersion v = resumeVersionRepository.findByIdAndResumeId(versionId, resume.getId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        if (!v.getResumeId().equals(resume.getId())) {
-            throw new BusinessException(ErrorCode.NOT_FOUND);
+    public void setCurrentVersion(Long resumeId, Long versionId, Long userId) {
+        Resume resume = findOwned(resumeId, userId);
+        ResumeVersion version = resumeVersionRepository.findById(versionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "版本不存在"));
+        if (!version.getResumeId().equals(resumeId)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "版本不属于该简历");
         }
-        resume.setCurrentVersionId(v.getId());
-        return toResponse(resumeRepository.save(resume));
+        if (version.getDeletedAt() != null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "归档版本不能设为当前版本");
+        }
+        resume.setCurrentVersionId(versionId);
+        resumeRepository.save(resume);
     }
 
-    private ResumeResponse toResponse(Resume resume) {
-        return new ResumeResponse(resume.getId(), resume.getTitle(), resume.getCurrentVersionId(),
-                resume.getCreatedAt(), resume.getUpdatedAt());
+    // ---- helpers ----
+
+    private Resume findOwned(Long id, Long userId) {
+        return resumeRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
     }
 
-    private ResumeVersionResponse toResponse(ResumeVersion v) {
-        return new ResumeVersionResponse(v.getId(), v.getResumeId(), v.getVersionNo(),
-                v.getSourceType(), v.getResumeJson(), v.getOptimizationSummary(), v.getCreatedAt());
+    private ResumeSummary toSummary(Resume r) {
+        return new ResumeSummary(r.getId(), r.getTitle(), r.getCurrentVersionId(),
+                r.getJobDescriptionId(), r.getUpdatedAt());
+    }
+
+    private ResumeDetail toDetail(Resume r) {
+        return new ResumeDetail(r.getId(), r.getTitle(), r.getCurrentVersionId(), r.getJobDescriptionId(),
+                r.getCreatedAt(), r.getUpdatedAt());
     }
 }

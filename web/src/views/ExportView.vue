@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { getExportTask, downloadExport, retryExport, type ExportTask } from '@/api/export'
+import { useLocale } from '@/i18n'
 
+const { t } = useLocale()
 const props = defineProps<{ exportTaskId: string }>()
 const task = ref<ExportTask | null>(null)
 const error = ref('')
@@ -17,16 +19,10 @@ async function load() {
       attempt += 1
       timer = window.setTimeout(load, delay)
     }
-  } catch {
-    error.value = '导出任务状态无法获取，请检查网络后刷新。'
-  }
+  } catch { error.value = t('export.error') }
 }
 
-onMounted(() => {
-  attempt = 0
-  void load()
-})
-
+onMounted(() => { attempt = 0; void load() })
 onBeforeUnmount(() => { if (timer !== null) window.clearTimeout(timer) })
 
 async function download() {
@@ -34,32 +30,32 @@ async function download() {
     const blob = (await downloadExport(Number(props.exportTaskId))).data
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
-    link.href = url
-    link.download = 'resume.pdf'
-    link.click()
+    link.href = url; link.download = 'resume.pdf'; link.click()
     URL.revokeObjectURL(url)
-  } catch {
-    error.value = 'PDF 下载失败，文件可能已过期。'
-  }
+  } catch { error.value = t('export.downloadError') }
 }
 
 async function retry() {
   try {
     error.value = ''
     task.value = (await retryExport(Number(props.exportTaskId))).data.data
-    attempt = 0
-    await load()
-  } catch {
-    error.value = '导出重试失败，请稍后再试。'
-  }
+    attempt = 0; await load()
+  } catch { error.value = t('export.retryError') }
 }
 </script>
 
 <template>
   <section class="workspace-page">
-    <h1>PDF 导出任务 #{{ props.exportTaskId }}</h1>
+    <h1>{{ t('export.title') }} #{{ props.exportTaskId }}</h1>
     <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-    <div v-if="task" class="workspace-card"><p>状态: {{ task.status }}</p><p v-if="task.status === 'FAILED'" class="form-error">{{ task.errorMessage || 'PDF 渲染失败。' }}</p><p v-else-if="task.status === 'EXPIRED'" class="form-error">文件已过期，请重新生成。</p><p v-if="task.expiresAt">过期时间: {{ task.expiresAt }}</p><button v-if="task.status === 'FAILED'" class="btn-neon btn-secondary" @click="retry">重试导出</button><button class="btn-neon btn-primary" :disabled="task.status !== 'SUCCESS'" @click="download">下载 PDF</button></div>
-    <p v-else>正在获取导出任务…</p>
+    <div v-if="task" class="workspace-card">
+      <p>{{ t('export.status') }}: {{ task.status }}</p>
+      <p v-if="task.status === 'FAILED'" class="form-error">{{ task.errorMessage || t('export.pdfRenderFailed') }}</p>
+      <p v-else-if="task.status === 'EXPIRED'" class="form-error">{{ t('export.expired') }}</p>
+      <p v-if="task.expiresAt">{{ t('export.expiresAt') }}: {{ task.expiresAt }}</p>
+      <button v-if="task.status === 'FAILED'" class="btn-neon btn-secondary" @click="retry">{{ t('export.retry') }}</button>
+      <button class="btn-neon btn-primary" :disabled="task.status !== 'SUCCESS'" @click="download">{{ t('export.download') }}</button>
+    </div>
+    <p v-else>{{ t('export.loading') }}</p>
   </section>
 </template>

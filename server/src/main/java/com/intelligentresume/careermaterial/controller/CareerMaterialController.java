@@ -1,29 +1,29 @@
 package com.intelligentresume.careermaterial.controller;
 
 import com.intelligentresume.careermaterial.domain.MaterialType;
-import com.intelligentresume.careermaterial.dto.CareerMaterialCreateRequest;
-import com.intelligentresume.careermaterial.dto.CareerMaterialResponse;
+import com.intelligentresume.careermaterial.dto.*;
 import com.intelligentresume.careermaterial.service.CareerMaterialService;
-import com.intelligentresume.resume.dto.ResumeMaterialReferenceResponse;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * 职业资料 CRUD 控制器。
+ *
+ * <p>路由与前端 {@code careerMaterial.ts} 契约一致:
+ * <ul>
+ *     <li>GET /api/career-materials?type=SKILL — 列表(可选类型过滤,参数名 type)</li>
+ *     <li>PATCH /api/career-materials/{id} — 更新(前端使用 PATCH)</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/career-materials")
 public class CareerMaterialController {
@@ -35,39 +35,28 @@ public class CareerMaterialController {
     }
 
     @PostMapping
-    public ApiResponse<CareerMaterialResponse> create(@Valid @RequestBody CareerMaterialCreateRequest request,
-                                                     HttpServletRequest httpRequest) {
-        return ApiResponse.success(service.create(request, currentUserId(httpRequest)), traceId(httpRequest));
+    public ResponseEntity<ApiResponse<CareerMaterialDetail>> create(
+            @Valid @RequestBody CreateCareerMaterialRequest request, HttpServletRequest httpRequest) {
+        CareerMaterialDetail detail = service.create(request, currentUserId(httpRequest));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(detail, traceId(httpRequest)));
     }
 
     @GetMapping
-    public ApiResponse<List<CareerMaterialResponse>> list(@RequestParam(required = false) MaterialType type,
-                                                          HttpServletRequest httpRequest) {
+    public ApiResponse<List<CareerMaterialSummary>> list(
+            @RequestParam(required = false) MaterialType type, HttpServletRequest httpRequest) {
         return ApiResponse.success(service.list(currentUserId(httpRequest), type), traceId(httpRequest));
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<CareerMaterialResponse> get(@PathVariable Long id, HttpServletRequest httpRequest) {
+    public ApiResponse<CareerMaterialDetail> get(@PathVariable Long id, HttpServletRequest httpRequest) {
         return ApiResponse.success(service.get(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
     @PatchMapping("/{id}")
-    public ApiResponse<CareerMaterialResponse> update(@PathVariable Long id,
-                                                     @Valid @RequestBody CareerMaterialCreateRequest request,
-                                                     HttpServletRequest httpRequest) {
-        return updateMaterial(id, request, httpRequest);
-    }
-
-    @PutMapping("/{id}")
-    public ApiResponse<CareerMaterialResponse> replace(@PathVariable Long id,
-                                                       @Valid @RequestBody CareerMaterialCreateRequest request,
-                                                       HttpServletRequest httpRequest) {
-        return updateMaterial(id, request, httpRequest);
-    }
-
-    private ApiResponse<CareerMaterialResponse> updateMaterial(Long id,
-                                                                CareerMaterialCreateRequest request,
-                                                                HttpServletRequest httpRequest) {
+    public ApiResponse<CareerMaterialDetail> update(
+            @PathVariable Long id, @Valid @RequestBody UpdateCareerMaterialRequest request,
+            HttpServletRequest httpRequest) {
         return ApiResponse.success(service.update(id, request, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
@@ -75,12 +64,6 @@ public class CareerMaterialController {
     public ApiResponse<Void> delete(@PathVariable Long id, HttpServletRequest httpRequest) {
         service.softDelete(id, currentUserId(httpRequest));
         return ApiResponse.success(null, traceId(httpRequest));
-    }
-
-    @GetMapping("/{id}/references")
-    public ApiResponse<List<ResumeMaterialReferenceResponse>> references(@PathVariable Long id,
-                                                                          HttpServletRequest request) {
-        return ApiResponse.success(service.references(id, currentUserId(request)), traceId(request));
     }
 
     private Long currentUserId(HttpServletRequest request) {

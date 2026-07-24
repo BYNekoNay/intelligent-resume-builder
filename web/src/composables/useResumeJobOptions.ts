@@ -1,12 +1,12 @@
 import { computed, ref } from 'vue'
 import { listJobs, type JobDescription } from '@/api/jobDescription'
-import { listResumes, listVersions, type ResumeSummary, type ResumeVersion } from '@/api/resume'
+import { listResumes, listVersions, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
 
 /** Loads the choices shared by workflows that need a resume version and a target job. */
 export function useResumeJobOptions() {
   const resumes = ref<ResumeSummary[]>([])
   const jobs = ref<JobDescription[]>([])
-  const versions = ref<ResumeVersion[]>([])
+  const versions = ref<ResumeVersionSummary[]>([])
   const selectedResumeId = ref<number | null>(null)
   const loading = ref(false)
   const error = ref('')

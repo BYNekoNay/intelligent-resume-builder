@@ -3,7 +3,9 @@ package com.intelligentresume.scoring.service;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.domain.JobDescription;
+import com.intelligentresume.jobdescription.dto.ParsedKeywordsResponse;
 import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
+import com.intelligentresume.jobdescription.service.JdKeywordParser;
 import com.intelligentresume.resume.domain.ResumeVersion;
 import com.intelligentresume.resume.repository.ResumeRepository;
 import com.intelligentresume.resume.repository.ResumeVersionRepository;
@@ -12,191 +14,179 @@ import com.intelligentresume.scoring.dto.Explanation;
 import com.intelligentresume.scoring.dto.MatchRequest;
 import com.intelligentresume.scoring.dto.MatchResponse;
 import com.intelligentresume.scoring.repository.MatchResultRepository;
-import com.intelligentresume.scoring.rule.ExperienceRule;
-import com.intelligentresume.scoring.rule.KeywordRule;
-import com.intelligentresume.scoring.rule.Normalizer;
-import com.intelligentresume.scoring.rule.RuleVersion;
-import com.intelligentresume.scoring.rule.SkillRule;
+import com.intelligentresume.scoring.rule.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
- * JD 规则覆盖度评分。
+ * 评分服务。纯规则计算，严禁调用 LLM。
  *
- * <p>三维度加权:keyword × 0.4 + skill × 0.4 + experience × 0.2。
- * 固定显示「非企业 ATS 结果、非录用概率」。
+ * <p>流程：校验归属 → 读/解析 JD 关键词 → 抽取简历 token →
+ * 三项规则评分 → 加权总分 → 写 match_result → 返回响应。
  */
 @Service
 public class ScoringService {
 
-    private final MatchResultRepository repository;
-    private final ResumeKeywordExtractor extractor;
-    private final ResumeVersionRepository resumeVersionRepository;
+    private final ResumeVersionRepository versionRepository;
     private final ResumeRepository resumeRepository;
-    private final JobDescriptionRepository jobDescriptionRepository;
-    private final Normalizer normalizer;
-    private final KeywordRule keywordRule;
-    private final SkillRule skillRule;
-    private final ExperienceRule experienceRule;
-    private final BigDecimal weightKeyword;
-    private final BigDecimal weightSkill;
-    private final BigDecimal weightExperience;
-    private final String disclaimer;
+    private final JobDescriptionRepository jdRepository;
+    private final MatchResultRepository matchResultRepository;
+    private final JdKeywordParser jdKeywordParser;
+    private final ResumeKeywordExtractor keywordExtractor;
+    private final RuleRegistry ruleRegistry;
 
-    public ScoringService(MatchResultRepository repository,
-                          ResumeKeywordExtractor extractor,
-                          ResumeVersionRepository resumeVersionRepository,
+    @Value("${app.scoring.rule-version:v1.0.0}")
+    private String ruleVersion;
+
+    @Value("${app.scoring.user-disclaimer:本结果为 JD 规则覆盖度，非企业 ATS 结果、非录用概率}")
+    private String disclaimer;
+
+    public ScoringService(ResumeVersionRepository versionRepository,
                           ResumeRepository resumeRepository,
-                          JobDescriptionRepository jobDescriptionRepository,
-                          Normalizer normalizer,
-                          KeywordRule keywordRule,
-                          SkillRule skillRule,
-                          ExperienceRule experienceRule,
-                          @Value("${app.scoring.weights.keyword:0.4}") BigDecimal weightKeyword,
-                          @Value("${app.scoring.weights.skill:0.4}") BigDecimal weightSkill,
-                          @Value("${app.scoring.weights.experience:0.2}") BigDecimal weightExperience,
-                          @Value("${app.scoring.user-disclaimer:本结果为 JD 规则覆盖度,非企业 ATS 结果、非录用概率}") String disclaimer) {
-        this.repository = repository;
-        this.extractor = extractor;
-        this.resumeVersionRepository = resumeVersionRepository;
+                          JobDescriptionRepository jdRepository,
+                          MatchResultRepository matchResultRepository,
+                          JdKeywordParser jdKeywordParser,
+                          ResumeKeywordExtractor keywordExtractor,
+                          RuleRegistry ruleRegistry) {
+        this.versionRepository = versionRepository;
         this.resumeRepository = resumeRepository;
-        this.jobDescriptionRepository = jobDescriptionRepository;
-        this.normalizer = normalizer;
-        this.keywordRule = keywordRule;
-        this.skillRule = skillRule;
-        this.experienceRule = experienceRule;
-        this.weightKeyword = weightKeyword;
-        this.weightSkill = weightSkill;
-        this.weightExperience = weightExperience;
-        this.disclaimer = disclaimer;
+        this.jdRepository = jdRepository;
+        this.matchResultRepository = matchResultRepository;
+        this.jdKeywordParser = jdKeywordParser;
+        this.keywordExtractor = keywordExtractor;
+        this.ruleRegistry = ruleRegistry;
     }
 
+    /**
+     * 计算并保存评分。
+     */
     @Transactional
-    public MatchResponse score(MatchRequest request, Long userId) {
-        ResumeVersion version = findOwnedVersion(request.resumeVersionId(), userId);
-        JobDescription jd = jobDescriptionRepository.findByIdAndUserId(request.jobDescriptionId(), userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+    @SuppressWarnings("unchecked")
+    public MatchResponse score(MatchRequest req, Long userId) {
+        // 1. 校验简历版本归属
+        ResumeVersion version = versionRepository.findById(req.resumeVersionId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在"));
+        resumeRepository.findByIdAndUserId(version.getResumeId(), userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
 
-        // 抽 token
-        Set<String> resumeTokens = extractor.extract(version);
-        Set<String> jdTokens = normalizer.distinctTokens(jd.getJdText());
+        // 2. 校验 JD 归属
+        JobDescription jd = jdRepository.findByIdAndUserId(req.jobDescriptionId(), userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位描述不存在"));
 
-        Map<String, Object> jdMeta = new LinkedHashMap<>();
-        Object parsedKeywordsJson = jd.getParsedKeywordsJson();
-        if (parsedKeywordsJson instanceof Map<?, ?>) {
-            jdMeta.putAll((Map<String, Object>) parsedKeywordsJson);
+        // 3. 读取/解析 JD 关键词
+        List<String> jdKeywords;
+        List<String> jdRequirements;
+        Map<String, Object> parsed = jd.getParsedKeywordsJson();
+        if (parsed != null && parsed.containsKey("keywords")) {
+            jdKeywords = toStringList(parsed.get("keywords"));
+            jdRequirements = toStringList(parsed.get("requirements"));
+        } else {
+            // 自动解析
+            ParsedKeywordsResponse parsedResult = jdKeywordParser.parse(jd.getJdText());
+            jdKeywords = parsedResult.keywords();
+            jdRequirements = parsedResult.requirements();
         }
 
-        BigDecimal keywordScore = keywordRule.score(jdTokens, resumeTokens, jdMeta);
-        BigDecimal skillScore = skillRule.score(jdTokens, resumeTokens, jdMeta);
-        BigDecimal experienceScore = experienceRule.score(jdTokens, resumeTokens, jdMeta);
+        // 4. 抽取简历 token
+        Set<String> resumeTokens = keywordExtractor.extract(version);
+        Set<String> resumeRawTokens = keywordExtractor.extractRaw(version);
+        Set<String> skillTokens = keywordExtractor.extractSkillTokens(version);
+        Set<String> skillRawTokens = keywordExtractor.extractSkillRaw(version);
 
-        BigDecimal total = keywordScore.multiply(weightKeyword)
-                .add(skillScore.multiply(weightSkill))
-                .add(experienceScore.multiply(weightExperience))
+        // 5. 三项规则评分
+        KeywordRule.RuleResult keywordResult =
+                ruleRegistry.keywordRule().evaluate(jdKeywords, resumeTokens, resumeRawTokens);
+        KeywordRule.RuleResult skillResult =
+                ruleRegistry.skillRule().evaluate(jdKeywords, skillTokens, skillRawTokens);
+        BigDecimal experienceScore =
+                ruleRegistry.experienceRule().evaluate(jdRequirements, version.getResumeJson());
+
+        // 6. 加权总分
+        BigDecimal totalScore = keywordResult.score()
+                .multiply(ruleRegistry.keywordWeight())
+                .add(skillResult.score().multiply(ruleRegistry.skillWeight()))
+                .add(experienceScore.multiply(ruleRegistry.experienceWeight()))
                 .setScale(2, RoundingMode.HALF_UP);
 
-        Map<String, Object> explanation = new LinkedHashMap<>();
-        explanation.put("matched", keywordRule.matched(jdTokens, resumeTokens));
-        explanation.put("partialMatched", keywordRule.partialMatched(jdTokens, resumeTokens));
-        explanation.put("missing", keywordRule.missing(jdTokens, resumeTokens));
-        explanation.put("skillsMatched", skillRule.matched(jdTokens, resumeTokens));
-        explanation.put("skillsMissing", skillRule.missing(jdTokens, resumeTokens));
-        explanation.put("experience", Map.of(
-                "matched", experienceRule.matched(jdTokens, resumeTokens),
-                "partialMatched", experienceRule.partialMatched(jdTokens, resumeTokens),
-                "missing", experienceRule.missing(jdTokens, resumeTokens)
-        ));
-        explanation.put("suggestions", buildSuggestions(keywordRule.missing(jdTokens, resumeTokens),
-                skillRule.missing(jdTokens, resumeTokens),
-                experienceRule.missing(jdTokens, resumeTokens)));
-        explanation.put("disclaimer", disclaimer);
+        // 7. 构建解释
+        List<String> suggestions = buildSuggestions(keywordResult, skillResult);
+        Explanation explanation = new Explanation(
+                keywordResult.matched(),
+                keywordResult.partialMatched(),
+                keywordResult.missing(),
+                suggestions,
+                disclaimer
+        );
 
-        MatchResult saved = new MatchResult();
-        saved.setResumeVersionId(version.getId());
-        saved.setJobDescriptionId(jd.getId());
-        saved.setTotalScore(total);
-        saved.setKeywordScore(keywordScore);
-        saved.setSkillScore(skillScore);
-        saved.setExperienceScore(experienceScore);
-        saved.setExplanationJson(explanation);
-        saved.setRuleVersion(RuleVersion.CURRENT);
-        repository.save(saved);
+        // 8. 写 match_result
+        MatchResult result = new MatchResult();
+        result.setResumeVersionId(req.resumeVersionId());
+        result.setJobDescriptionId(req.jobDescriptionId());
+        result.setTotalScore(totalScore);
+        result.setKeywordScore(keywordResult.score());
+        result.setSkillScore(skillResult.score());
+        result.setExperienceScore(experienceScore);
+        result.setExplanationJson(buildExplanationJson(explanation));
+        result.setRuleVersion(ruleVersion);
+        matchResultRepository.save(result);
 
-        return new MatchResponse(saved.getId(), total, keywordScore, skillScore, experienceScore,
-                new Explanation(
-                        joinList(explanation.get("matched")),
-                        joinList(explanation.get("partialMatched")),
-                        joinList(explanation.get("missing")),
-                        joinList(explanation.get("suggestions")),
-                        disclaimer
-                ),
-                RuleVersion.CURRENT);
+        // 9. 返回
+        return new MatchResponse(
+                result.getId(), totalScore,
+                keywordResult.score(), skillResult.score(), experienceScore,
+                explanation, ruleVersion
+        );
     }
 
-    public MatchResponse get(Long id, Long userId) {
-        MatchResult result = repository.findById(id)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        findOwnedVersion(result.getResumeVersionId(), userId);
-        jobDescriptionRepository.findByIdAndUserId(result.getJobDescriptionId(), userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        return toResponse(result);
+    /**
+     * 查询评分结果（跨用户安全）。
+     */
+    @Transactional(readOnly = true)
+    public MatchResult getResult(Long matchResultId, Long userId) {
+        return matchResultRepository.findByIdAndUserId(matchResultId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "评分结果不存在"));
     }
 
-    private ResumeVersion findOwnedVersion(Long versionId, Long userId) {
-        ResumeVersion version = resumeVersionRepository.findById(versionId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        resumeRepository.findByIdAndUserId(version.getResumeId(), userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        return version;
-    }
+    // ---- helpers ----
 
-    private List<String> joinList(Object raw) {
-        if (!(raw instanceof List<?> list)) return List.of();
-        List<String> out = new ArrayList<>(list.size());
-        for (Object o : list) out.add(String.valueOf(o));
-        return out;
-    }
-
-    private List<String> buildSuggestions(List<String> missingKeywords,
-                                          List<String> missingSkills,
-                                          List<String> missingExperience) {
-        List<String> out = new ArrayList<>();
-        if (!missingKeywords.isEmpty()) {
-            out.add("尝试在简历中显式提及以下关键词:" + String.join("、", missingKeywords));
+    private List<String> buildSuggestions(KeywordRule.RuleResult keyword,
+                                           KeywordRule.RuleResult skill) {
+        List<String> suggestions = new ArrayList<>();
+        if (!keyword.missing().isEmpty()) {
+            suggestions.add("建议补充以下关键词: " + String.join(", ", keyword.missing()));
         }
-        if (!missingSkills.isEmpty()) {
-            out.add("补充以下技能证据(项目或工作经历):" + String.join("、", missingSkills));
+        if (!skill.missing().isEmpty()) {
+            suggestions.add("建议在技能部分补充: " + String.join(", ", skill.missing()));
         }
-        if (!missingExperience.isEmpty()) {
-            out.add("经验差距:" + String.join("; ", missingExperience));
+        if (suggestions.isEmpty()) {
+            suggestions.add("关键词覆盖良好，可继续优化项目描述量化成果");
         }
-        if (out.isEmpty()) {
-            out.add("已较好覆盖 JD 关键词,可以再人工润色细节");
-        }
-        return out;
+        return suggestions;
     }
 
-    private MatchResponse toResponse(MatchResult r) {
-        Map<String, Object> explanation = r.getExplanationJson();
-        List<String> matched = joinList(explanation == null ? null : explanation.get("matched"));
-        List<String> partial = joinList(explanation == null ? null : explanation.get("partialMatched"));
-        List<String> missing = joinList(explanation == null ? null : explanation.get("missing"));
-        List<String> suggestions = joinList(explanation == null ? null : explanation.get("suggestions"));
-        String disclaimerText = explanation == null ? this.disclaimer
-                : String.valueOf(explanation.getOrDefault("disclaimer", this.disclaimer));
-        return new MatchResponse(r.getId(), r.getTotalScore(), r.getKeywordScore(),
-                r.getSkillScore(), r.getExperienceScore(),
-                new Explanation(matched, partial, missing, suggestions, disclaimerText),
-                r.getRuleVersion());
+    private Map<String, Object> buildExplanationJson(Explanation explanation) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("matched", explanation.matched());
+        json.put("partialMatched", explanation.partialMatched());
+        json.put("missing", explanation.missing());
+        json.put("suggestions", explanation.suggestions());
+        json.put("disclaimer", explanation.disclaimer());
+        return json;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> toStringList(Object value) {
+        if (value instanceof List) {
+            return ((List<Object>) value).stream()
+                    .filter(item -> item instanceof String)
+                    .map(item -> (String) item)
+                    .toList();
+        }
+        return List.of();
     }
 }

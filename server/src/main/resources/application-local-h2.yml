@@ -1,4 +1,4 @@
-# 本地浏览器联调用。使用内存 H2 与 mock AI，避免消耗真实模型额度。
+# 本地浏览器联调用。使用内存 H2，并通过环境变量配置百炼密钥。
 spring:
   datasource:
     url: jdbc:h2:mem:intelligent_resume_local;MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=USER,KEY,VALUE,ORDER,DATABASE
@@ -31,15 +31,11 @@ app:
       register-per-minute: 1000
       refresh-per-minute: 1000
   ai:
-    provider: mock
     worker:
       poll-interval-ms: 200
       lease-seconds: 60
       max-retries: 1
       batch-size: 1
-    mock-provider:
-      fail-rate: 0.0
-      latency-ms: 0
   pdf:
     service-base-url: http://localhost:3010
     service-token: dev-pdf-token-change-me

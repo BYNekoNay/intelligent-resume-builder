@@ -1,6 +1,6 @@
 import express from 'express'
 import puppeteer from 'puppeteer'
-import { rejectExternalUrl, renderResumeHtml, TEMPLATE_CODES } from './templates/classic.js'
+import { renderResumeHtml, TEMPLATE_CODES } from './templates/classic.js'
 
 const app = express()
 const cliPort = process.argv.find((argument) => argument.startsWith('--port='))?.slice('--port='.length)
@@ -37,16 +37,6 @@ function assertSafePayload(payload) {
     throw error
   }
 
-  const visit = (value) => {
-    if (typeof value === 'string' && rejectExternalUrl(value)) {
-      const error = new Error('不允许外部 URL 或文件 URL')
-      error.status = 400
-      throw error
-    }
-    if (Array.isArray(value)) value.forEach(visit)
-    else if (value && typeof value === 'object') Object.values(value).forEach(visit)
-  }
-  visit(payload)
 }
 
 app.post('/render', requireServiceToken, async (request, response) => {

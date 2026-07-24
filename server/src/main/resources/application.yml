@@ -47,6 +47,49 @@ app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5176,http://127.0.0.1:5176}
 
+  # T03 简历 JSON 校验
+  resume:
+    json-schema:
+      max-bytes: ${RESUME_JSON_MAX_BYTES:262144}
+      require-top-level: basics
+      allow-sections: basics,work,education,skills,projects,certificates,languages,awards,template,layout
+
+  # T04 职业资料
+  career-material:
+    content-json:
+      max-bytes: ${CAREER_MATERIAL_JSON_MAX_BYTES:65536}
+
+  # T05 JD 管理
+  job:
+    jd-text:
+      max-length: ${JD_TEXT_MAX_LENGTH:5000}
+      min-length: ${JD_TEXT_MIN_LENGTH:20}
+    parser:
+      rule-version: "v1.0.0"
+      keyword-dictionary:
+        - "Java"
+        - "Spring Boot"
+        - "Spring Cloud"
+        - "MySQL"
+        - "PostgreSQL"
+        - "Redis"
+        - "Kafka"
+        - "Docker"
+        - "Kubernetes"
+        - "微服务"
+        - "分布式"
+        - "高并发"
+        - "JVM"
+        - "多线程"
+      education-keywords:
+        - "本科"
+        - "硕士"
+        - "博士"
+        - "Bachelor"
+        - "Master"
+        - "PhD"
+      experience-pattern: "(\\d+)\\s*年(以上)?(?:经验|工作)"
+
   # T02 JWT
   jwt:
     secret: ${JWT_SECRET:dev-only-change-me-please-32bytes-min-length-required}
@@ -69,27 +112,68 @@ app:
 
   # T06 AI 同意与任务
   ai:
-    # `mock` is the safe default. Set AI_PROVIDER=bailian and BAILIAN_API_KEY locally to enable live calls.
-    provider: ${AI_PROVIDER:mock}
     bailian:
       base-url: ${BAILIAN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
       api-key: ${BAILIAN_API_KEY:}
+      model: ${BAILIAN_MODEL:deepseek-v3.2}
       models: ${BAILIAN_MODELS:deepseek-v3.2,deepseek-v3.2-exp,deepseek-v3.1,deepseek-r1-0528,deepseek-v3,deepseek-r1,deepseek-r1-distill-qwen-32b,deepseek-r1-distill-qwen-14b}
       connect-timeout-seconds: ${BAILIAN_CONNECT_TIMEOUT_S:10}
-      read-timeout-seconds: ${BAILIAN_READ_TIMEOUT_S:60}
+      read-timeout-seconds: ${BAILIAN_READ_TIMEOUT_S:120}
     worker:
       poll-interval-ms: ${AI_WORKER_POLL_MS:1000}
       lease-seconds: ${AI_WORKER_LEASE_S:60}
       max-retries: ${AI_WORKER_MAX_RETRIES:3}
       batch-size: ${AI_WORKER_BATCH:5}
-    mock-provider:
-      fail-rate: ${AI_MOCK_FAIL_RATE:0.0}
-      latency-ms: ${AI_MOCK_LATENCY_MS:50}
+    consent:
+      policy-version: "v1.0.0"
+    quota:
+      JOB_GENERATION: 30
+      RESUME_OPTIMIZE: 30
+      INLINE_OPTIMIZE: 60
+      MATERIAL_IMPORT: 5
+      ACHIEVEMENT_GUIDANCE: 10
+      COMMUNICATION_GENERATE: 10
+    # T07 岗位定制生成
+    generation:
+      prompt-version: "v1.0.0"
+      schema-version: "v1.0.0"
+      max-selected-materials: 30
+      max-output-bytes: 65536
+      injection-detection:
+        suspicious-patterns:
+          - "(?i)ignore (?:all )?(?:previous|above|system) (?:rules|instructions)"
+          - "(?i)you are now"
+          - "(?i)system prompt"
+          - "(?i)developer mode"
+          - "(?i)\\bjailbreak\\b"
+    # T08 来源确认与版本落地
+    confirmation:
+      require-explicit-source: true
+      allow-user-new-fact: true
+      max-confirmed-items: 200
+
+  # T09 JD 规则覆盖度
+  scoring:
+    rule-version: "v1.0.0"
+    weights:
+      keyword: 0.4
+      skill: 0.4
+      experience: 0.2
+    synonym-dictionary:
+      java: ["java", "jdk", "openjdk"]
+      spring: ["spring", "spring boot", "spring cloud"]
+      mysql: ["mysql", "mariadb"]
+      postgres: ["postgres", "postgresql"]
+      redis: ["redis"]
+      k8s: ["k8s", "kubernetes"]
+      microservice: ["microservice", "微服务"]
+    user-disclaimer: "本结果为 JD 规则覆盖度，非企业 ATS 结果、非录用概率"
 
   # T10 PDF
   pdf:
     worker:
       poll-interval-ms: ${PDF_WORKER_POLL_MS:1000}
+      batch-size: ${PDF_WORKER_BATCH:3}
     service-base-url: ${PDF_SERVICE_BASE_URL:http://localhost:3001}
     service-token: ${PDF_SERVICE_TOKEN:dev-pdf-token-change-me}
     render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:15}
@@ -98,12 +182,3 @@ app:
     file-ttl-hours: ${PDF_FILE_TTL_HOURS:24}
     allowed-template-codes: classic,modern,minimal
     output-dir: ${PDF_OUTPUT_DIR:./pdf-output}
-
-  # T09 评分
-  scoring:
-    rule-version: v1.0.0
-    weights:
-      keyword: 0.4
-      skill: 0.4
-      experience: 0.2
-    user-disclaimer: "本结果为 JD 规则覆盖度,非企业 ATS 结果、非录用概率"

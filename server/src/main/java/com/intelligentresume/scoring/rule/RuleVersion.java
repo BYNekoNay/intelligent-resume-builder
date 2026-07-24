@@ -1,9 +1,8 @@
 package com.intelligentresume.scoring.rule;
 
 /**
- * 评分规则版本常量。
- *
- * <p>与 application.yml {@code app.scoring.rule-version} 严格一致。
+ * 规则版本常量。每次评分写入 match_result.rule_version，
+ * 必须与 {@code app.scoring.rule-version} 配置一致。
  */
 public final class RuleVersion {
 

@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
-import { Sparkles, WandSparkles, X } from 'lucide-vue-next'
-import { createManualVersion, listVersions } from '@/api/resume'
+import { BookOpen, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sparkles, WandSparkles, X } from 'lucide-vue-next'
+import type { AxiosError } from 'axios'
+import { createManualVersion, getResume, getResumeVersion, listVersions } from '@/api/resume'
 import { inlineOptimize, type InlineOptimizeResponse } from '@/api/ai'
+import { useLocale } from '@/i18n'
+import sampleResume from '@/data/sampleResume'
 
+const { t } = useLocale()
 const props = defineProps<{ id: string }>()
 const router = useRouter()
 const content = ref('')
@@ -15,6 +19,34 @@ const error = ref('')
 const initialContent = ref('')
 const showSource = ref(false)
 const previewOnly = ref(false)
+const sidebarCollapsed = ref(false)
+const editorPanelCollapsed = ref(false)
+const splitRatio = ref(55)
+const isDragging = ref(false)
+const gridRef = ref<HTMLElement | null>(null)
+const previewPaperRef = ref<HTMLElement | null>(null)
+const previewPageCount = ref(1)
+let previewResizeObserver: ResizeObserver | undefined
+
+function onSplitterDown(e: MouseEvent) {
+  e.preventDefault()
+  isDragging.value = true
+  document.addEventListener('mousemove', onDrag)
+  document.addEventListener('mouseup', onDragEnd)
+}
+
+function onDrag(e: MouseEvent) {
+  if (!isDragging.value || !gridRef.value) return
+  const rect = gridRef.value.getBoundingClientRect()
+  const pct = ((e.clientX - rect.left) / rect.width) * 100
+  splitRatio.value = Math.min(75, Math.max(40, pct))
+}
+
+function onDragEnd() {
+  isDragging.value = false
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', onDragEnd)
+}
 const currentVersionId = ref<number | null>(null)
 const sectionKeys = ['basics', 'work', 'skills', 'projects', 'education', 'certificates', 'languages'] as const
 type SectionKey = typeof sectionKeys[number]
@@ -32,14 +64,34 @@ type AiAssistantState = {
 const aiAssistant = ref<AiAssistantState | null>(null)
 const undoRemoval = ref<{ content: string; label: string } | null>(null)
 let undoTimer: ReturnType<typeof setTimeout> | undefined
-const templateOptions = [
-  { code: 'classic', name: '经典', description: '稳重分隔线，适合通用岗位' },
-  { code: 'modern', name: '现代', description: '蓝色侧栏感，突出技能与成果' },
-  { code: 'minimal', name: '极简', description: '高留白排版，适合设计与管理岗位' },
-] as const
-const resume = computed<Record<string, any>>(() => {
-  try { return JSON.parse(content.value || '{}') } catch { return {} }
+const showSampleConfirm = ref(false)
+
+function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value }
+function toggleEditorPanel() { editorPanelCollapsed.value = !editorPanelCollapsed.value }
+watch(sidebarCollapsed, (collapsed) => {
+  try { localStorage.setItem('resume-editor-sidebar-collapsed', String(collapsed)) } catch { /* storage is optional */ }
 })
+watch(editorPanelCollapsed, (collapsed) => {
+  try { localStorage.setItem('resume-editor-property-panel-collapsed', String(collapsed)) } catch { /* storage is optional */ }
+})
+
+function loadSample() {
+  if (dirty.value && !showSampleConfirm.value) {
+    showSampleConfirm.value = true
+    return
+  }
+  content.value = JSON.stringify(sampleResume, null, 2)
+  initialContent.value = content.value
+  showSampleConfirm.value = false
+}
+
+const templateOptions = [
+  { code: 'classic', name: () => t('resumeEditor.templateClassic'), description: () => t('resumeEditor.templateClassicDesc') },
+  { code: 'modern', name: () => t('resumeEditor.templateModern'), description: () => t('resumeEditor.templateModernDesc') },
+  { code: 'minimal', name: () => t('resumeEditor.templateMinimal'), description: () => t('resumeEditor.templateMinimalDesc') },
+] as const
+
+const resume = computed<Record<string, any>>(() => { try { return JSON.parse(content.value || '{}') } catch { return {} } })
 const basics = computed<Record<string, any>>(() => resume.value.basics ?? {})
 const skills = computed<any[]>(() => Array.isArray(resume.value.skills) ? resume.value.skills : [])
 const work = computed<any[]>(() => Array.isArray(resume.value.work) ? resume.value.work : [])
@@ -49,34 +101,54 @@ const certificates = computed<any[]>(() => Array.isArray(resume.value.certificat
 const languages = computed<any[]>(() => Array.isArray(resume.value.languages) ? resume.value.languages : [])
 const templateCode = computed(() => {
   const code = resume.value.template?.code
-  return templateOptions.some((option) => option.code === code) ? code : 'classic'
+  return templateOptions.some((opt) => opt.code === code) ? code : 'classic'
 })
-const templateName = computed(() => templateOptions.find((option) => option.code === templateCode.value)?.name ?? '经典')
-const sourceValid = computed(() => {
-  try { JSON.parse(content.value); return true } catch { return false }
-})
+const templateName = computed(() => templateOptions.find((opt) => opt.code === templateCode.value)?.name() ?? 'Classic')
+const fontOptions = [
+  { code: 'sans', name: '现代黑体', family: '"Microsoft YaHei", Arial, sans-serif' },
+  { code: 'songti', name: '雅宋', family: '"Songti SC", SimSun, serif' },
+  { code: 'serif', name: '经典衬线', family: 'Georgia, "Times New Roman", serif' },
+  { code: 'mono', name: '简洁等宽', family: '"Cascadia Mono", "Courier New", monospace' },
+] as const
+const defaultLayout = {
+  fontFamily: 'sans',
+  bodyFontSize: 13,
+  headingFontSize: 13,
+  lineHeight: 1.65,
+  sectionSpacing: 20,
+  entrySpacing: 12,
+  pagePadding: 58,
+}
+const layout = computed(() => ({ ...defaultLayout, ...(resume.value.layout ?? {}) }))
+const layoutStyle = computed(() => ({
+  '--resume-font-family': fontOptions.find((option) => option.code === layout.value.fontFamily)?.family ?? fontOptions[0].family,
+  '--resume-body-size': `${layout.value.bodyFontSize}px`,
+  '--resume-heading-size': `${layout.value.headingFontSize}px`,
+  '--resume-name-size': `${layout.value.headingFontSize * 30 / 13}px`,
+  '--resume-role-size': `${layout.value.headingFontSize * 14 / 13}px`,
+  '--resume-line-height': String(layout.value.lineHeight),
+  '--resume-section-gap': `${layout.value.sectionSpacing}px`,
+  '--resume-entry-gap': `${layout.value.entrySpacing}px`,
+  '--paper-pad': `${layout.value.pagePadding}px`,
+}))
+const sourceValid = computed(() => { try { JSON.parse(content.value); return true } catch { return false } })
 const dirty = computed(() => !loading.value && (content.value !== initialContent.value || summary.value.trim().length > 0))
 const previewItemCount = computed(() => work.value.length + projects.value.length + education.value.length + skills.value.length + certificates.value.length + languages.value.length)
 const previewTextLength = computed(() => {
   const values = [basics.value.summary, ...work.value, ...projects.value, ...education.value, ...skills.value, ...certificates.value, ...languages.value]
-  return values.reduce((total, value) => total + JSON.stringify(value ?? '').length, 0)
+  return values.reduce((total, val) => total + JSON.stringify(val ?? '').length, 0)
 })
 const previewDensity = computed(() => previewItemCount.value + previewTextLength.value / 180)
 const previewMayOverflow = computed(() => previewDensity.value > 12)
 const hasBodyContent = computed(() => Boolean(basics.value.summary) || previewItemCount.value > 0)
 const completionChecks = computed(() => [
-  Boolean(basics.value.name),
-  Boolean(basics.value.title || basics.value.position),
-  Boolean(basics.value.email || basics.value.phone),
-  Boolean(basics.value.summary),
-  work.value.length > 0,
-  projects.value.length > 0,
-  skills.value.length > 0,
-  education.value.length > 0,
+  Boolean(basics.value.name), Boolean(basics.value.title || basics.value.position),
+  Boolean(basics.value.email || basics.value.phone), Boolean(basics.value.summary),
+  work.value.length > 0, projects.value.length > 0, skills.value.length > 0, education.value.length > 0,
 ])
 const completionScore = computed(() => Math.round(completionChecks.value.filter(Boolean).length / completionChecks.value.length * 100))
 const nextSuggestion = computed(() => {
-  if (!basics.value.name) return '先填写姓名，让简历拥有明确的主人。'
+  if (!basics.value.name) return t('resumeEditor.nameRequired')
   if (!basics.value.title && !basics.value.position) return '补充目标岗位，让内容有清晰方向。'
   if (!basics.value.summary) return '用三句话概括经验、专业方向与核心优势。'
   if (!work.value.length && !projects.value.length) return '添加一段最能证明能力的经历或项目。'
@@ -84,25 +156,14 @@ const nextSuggestion = computed(() => {
   return '主体内容已经完整，继续精炼成果表达。'
 })
 
-function isSectionCollapsed(section: SectionKey) {
-  return collapsedSections.value.has(section)
-}
-
+function isSectionCollapsed(section: SectionKey) { return collapsedSections.value.has(section) }
 function toggleSection(section: SectionKey) {
-  if (isSectionCollapsed(section)) {
-    collapsedSections.value = new Set(sectionKeys.filter((key) => key !== section))
-    return
-  }
+  if (isSectionCollapsed(section)) { collapsedSections.value = new Set(sectionKeys.filter((k) => k !== section)); return }
   collapsedSections.value = new Set(sectionKeys)
 }
-
-function expandSection(section: SectionKey) {
-  collapsedSections.value = new Set(sectionKeys.filter((key) => key !== section))
-}
-
+function expandSection(section: SectionKey) { collapsedSections.value = new Set(sectionKeys.filter((k) => k !== section)) }
 async function jumpToSection(section: SectionKey) {
-  expandSection(section)
-  await nextTick()
+  expandSection(section); await nextTick()
   document.getElementById(`resume-${section}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
@@ -112,23 +173,15 @@ async function openAiAssistant(scope: 'field' | 'section', label: string, sectio
   if (!contentValue || !currentVersionId.value) return
   aiAssistant.value.loading = true
   try {
-    const response = await inlineOptimize({
-      resumeVersionId: currentVersionId.value,
-      section,
-      content: contentValue,
-    })
-    if (aiAssistant.value?.section === section && aiAssistant.value.content === contentValue) {
-      aiAssistant.value.result = response.data.data
-    }
+    const response = await inlineOptimize({ resumeVersionId: currentVersionId.value, section, content: contentValue })
+    if (aiAssistant.value?.section === section && aiAssistant.value.content === contentValue) aiAssistant.value.result = response.data.data
   } catch (requestError: any) {
     if (aiAssistant.value?.section === section) {
       aiAssistant.value.error = requestError?.response?.data?.code === 40302
-        ? '请先完成 AI 数据处理授权，再使用润色功能。'
+        ? t('resumeEditor.consentRequired')
         : 'AI 润色暂时不可用，请稍后重试。'
     }
-  } finally {
-    if (aiAssistant.value?.section === section) aiAssistant.value.loading = false
-  }
+  } finally { if (aiAssistant.value?.section === section) aiAssistant.value.loading = false }
 }
 
 function applyAiCandidate(value: string) {
@@ -138,10 +191,7 @@ function applyAiCandidate(value: string) {
   summary.value = summary.value || `采纳 AI 润色：${assistant.label}`
   closeAiAssistant()
 }
-
-function closeAiAssistant() {
-  aiAssistant.value = null
-}
+function closeAiAssistant() { aiAssistant.value = null }
 
 function sectionAiContent(section: 'basics' | 'work' | 'skills' | 'projects') {
   if (section === 'basics') return basics.value.summary ?? ''
@@ -150,33 +200,30 @@ function sectionAiContent(section: 'basics' | 'work' | 'skills' | 'projects') {
   return collection.flatMap((item) => [item.description, ...(Array.isArray(item.highlights) ? item.highlights : [])]).filter(Boolean)
 }
 
-function handleBeforeUnload(event: BeforeUnloadEvent) {
-  if (!dirty.value) return
-  event.preventDefault()
-  event.returnValue = ''
+function handleBeforeUnload(event: BeforeUnloadEvent) { if (!dirty.value) return; event.preventDefault(); event.returnValue = '' }
+
+function updatePreviewPageCount() {
+  const paper = previewPaperRef.value
+  if (!paper) return
+  const a4Height = paper.clientWidth * 297 / 210
+  previewPageCount.value = Math.max(1, Math.ceil(paper.scrollHeight / a4Height))
 }
 
+watch(content, async () => { await nextTick(); updatePreviewPageCount() })
 function handleKeydown(event: KeyboardEvent) {
   if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
   event.preventDefault()
   if (dirty.value && sourceValid.value && !saving.value) void save()
 }
-
-function goBack() {
-  router.back()
-}
+function goBack() { router.back() }
 
 onBeforeRouteLeave(() => {
   if (!dirty.value) return true
-  return window.confirm('当前修改尚未保存，确定离开编辑器吗？')
+  return window.confirm(t('resumeEditor.leaveConfirm'))
 })
 
 function updateResume(mutator: (draft: Record<string, any>) => void) {
-  if (!sourceValid.value) {
-    showSource.value = true
-    error.value = '源数据 JSON 格式有误，请先修复后再继续可视化编辑。'
-    return
-  }
+  if (!sourceValid.value) { showSource.value = true; error.value = '源数据 JSON 格式有误，请先修复后再继续可视化编辑。'; return }
   const draft = JSON.parse(JSON.stringify(resume.value || {})) as Record<string, any>
   mutator(draft)
   content.value = JSON.stringify(draft, null, 2)
@@ -184,223 +231,168 @@ function updateResume(mutator: (draft: Record<string, any>) => void) {
 }
 
 function removeWithUndo(label: string, mutator: (draft: Record<string, any>) => void) {
-  if (!sourceValid.value) {
-    updateResume(() => undefined)
-    return
-  }
-  const previousContent = content.value
+  if (!sourceValid.value) { updateResume(() => undefined); return }
+  const prev = content.value
   updateResume(mutator)
-  undoRemoval.value = { content: previousContent, label }
+  undoRemoval.value = { content: prev, label }
   if (undoTimer) clearTimeout(undoTimer)
   undoTimer = setTimeout(() => { undoRemoval.value = null }, 6000)
 }
-
 function restoreRemoval() {
   if (!undoRemoval.value) return
-  content.value = undoRemoval.value.content
-  undoRemoval.value = null
+  content.value = undoRemoval.value.content; undoRemoval.value = null
   if (undoTimer) clearTimeout(undoTimer)
 }
 
-function setBasic(field: string, value: string) {
-  updateResume((draft) => { draft.basics = { ...(draft.basics ?? {}), [field]: value } })
+function setBasic(field: string, value: string) { updateResume((d) => { d.basics = { ...(d.basics ?? {}), [field]: value } }) }
+function setTemplate(code: string) { updateResume((d) => { d.template = { code } }) }
+function setLayout<K extends keyof typeof defaultLayout>(field: K, value: typeof defaultLayout[K]) {
+  updateResume((d) => { d.layout = { ...defaultLayout, ...(d.layout ?? {}), [field]: value } })
 }
-
-function setTemplate(code: string) {
-  updateResume((draft) => { draft.template = { code } })
-}
-
-function addWork() {
-  expandSection('work')
-  updateResume((draft) => { draft.work = [...(Array.isArray(draft.work) ? draft.work : []), { company: '', position: '', startDate: '', endDate: '' }] })
-}
-
-function setWork(index: number, field: string, value: unknown) {
-  updateResume((draft) => {
-    const items = Array.isArray(draft.work) ? [...draft.work] : []
-    items[index] = { ...(items[index] ?? {}), [field]: value }
-    draft.work = items
-  })
-}
-
-function removeWork(index: number) {
-  const label = work.value[index]?.company || work.value[index]?.position || `经历 ${index + 1}`
-  removeWithUndo(label, (draft) => { draft.work = (Array.isArray(draft.work) ? draft.work : []).filter((_: unknown, itemIndex: number) => itemIndex !== index) })
-}
-
-function setWorkHighlights(index: number, value: string) {
-  setWork(index, 'highlights', value.split('\n').map((item) => item.trim()).filter(Boolean))
-}
-
-function addSkill() {
-  expandSection('skills')
-  updateResume((draft) => { draft.skills = [...(Array.isArray(draft.skills) ? draft.skills : []), { name: '' }] })
-}
-
-function setSkill(index: number, value: string) {
-  updateResume((draft) => {
-    const items = Array.isArray(draft.skills) ? [...draft.skills] : []
-    items[index] = typeof items[index] === 'string' ? value : { ...(items[index] ?? {}), name: value }
-    draft.skills = items
-  })
-}
-
-function removeSkill(index: number) {
-  const item = skills.value[index]
-  const label = (typeof item === 'string' ? item : item?.name || item?.keyword) || `技能 ${index + 1}`
-  removeWithUndo(label, (draft) => { draft.skills = (Array.isArray(draft.skills) ? draft.skills : []).filter((_: unknown, itemIndex: number) => itemIndex !== index) })
-}
-
-function addEducation() {
-  expandSection('education')
-  updateResume((draft) => { draft.education = [...(Array.isArray(draft.education) ? draft.education : []), { school: '', degree: '', major: '', startDate: '', endDate: '' }] })
-}
-
-function setEducation(index: number, field: string, value: string) {
-  updateResume((draft) => {
-    const items = Array.isArray(draft.education) ? [...draft.education] : []
-    items[index] = { ...(items[index] ?? {}), [field]: value }
-    draft.education = items
-  })
-}
-
-function removeEducation(index: number) {
-  const label = education.value[index]?.school || `教育经历 ${index + 1}`
-  removeWithUndo(label, (draft) => { draft.education = (Array.isArray(draft.education) ? draft.education : []).filter((_: unknown, itemIndex: number) => itemIndex !== index) })
-}
-
-function addProject() {
-  expandSection('projects')
-  updateResume((draft) => { draft.projects = [...(Array.isArray(draft.projects) ? draft.projects : []), { name: '', role: '', description: '', highlights: [] }] })
-}
-
-function setProject(index: number, field: string, value: unknown) {
-  updateResume((draft) => {
-    const items = Array.isArray(draft.projects) ? [...draft.projects] : []
-    items[index] = { ...(items[index] ?? {}), [field]: value }
-    draft.projects = items
-  })
-}
-
-function removeProject(index: number) {
-  const label = projects.value[index]?.name || `项目 ${index + 1}`
-  removeWithUndo(label, (draft) => { draft.projects = (Array.isArray(draft.projects) ? draft.projects : []).filter((_: unknown, itemIndex: number) => itemIndex !== index) })
-}
-
-function moveItem(section: 'work' | 'projects' | 'skills' | 'education' | 'certificates' | 'languages', index: number, direction: -1 | 1) {
-  updateResume((draft) => {
-    const items = Array.isArray(draft[section]) ? [...draft[section]] : []
-    const targetIndex = index + direction
-    if (targetIndex < 0 || targetIndex >= items.length) return
-    ;[items[index], items[targetIndex]] = [items[targetIndex], items[index]]
-    draft[section] = items
-  })
-}
-
-function addSimpleItem(section: 'certificates' | 'languages') {
-  expandSection(section)
-  updateResume((draft) => {
-    const item = section === 'certificates' ? { name: '', issuer: '', date: '' } : { name: '', level: '' }
-    draft[section] = [...(Array.isArray(draft[section]) ? draft[section] : []), item]
-  })
-}
-
-function setSimpleItem(section: 'certificates' | 'languages', index: number, field: string, value: string) {
-  updateResume((draft) => {
-    const items = Array.isArray(draft[section]) ? [...draft[section]] : []
-    items[index] = { ...(items[index] ?? {}), [field]: value }
-    draft[section] = items
-  })
-}
-
-function removeSimpleItem(section: 'certificates' | 'languages', index: number) {
-  const collection = section === 'certificates' ? certificates.value : languages.value
-  const label = collection[index]?.name || `${section === 'certificates' ? '证书' : '语言'} ${index + 1}`
-  removeWithUndo(label, (draft) => { draft[section] = (Array.isArray(draft[section]) ? draft[section] : []).filter((_: unknown, itemIndex: number) => itemIndex !== index) })
-}
-
-function defaultResumeJson() {
-  return {
-    basics: { name: '' },
-    work: [],
-    education: [],
-    skills: [],
-    projects: [],
-    certificates: [],
-    languages: [],
-    template: { code: 'classic' },
+function applyLayoutPreset(preset: 'compact' | 'balanced' | 'spacious') {
+  const presets = {
+    compact: { bodyFontSize: 12, headingFontSize: 12, lineHeight: 1.45, sectionSpacing: 14, entrySpacing: 8, pagePadding: 42 },
+    balanced: defaultLayout,
+    spacious: { bodyFontSize: 14, headingFontSize: 14, lineHeight: 1.85, sectionSpacing: 28, entrySpacing: 16, pagePadding: 68 },
   }
+  updateResume((d) => { d.layout = { ...presets[preset], fontFamily: d.layout?.fontFamily ?? defaultLayout.fontFamily } })
 }
+function resetLayout() { updateResume((d) => { d.layout = defaultLayout }) }
+function addWork() { expandSection('work'); updateResume((d) => { d.work = [...(Array.isArray(d.work) ? d.work : []), { company: '', position: '', startDate: '', endDate: '' }] }) }
+function setWork(index: number, field: string, value: unknown) { updateResume((d) => { const items = Array.isArray(d.work) ? [...d.work] : []; items[index] = { ...(items[index] ?? {}), [field]: value }; d.work = items }) }
+function removeWork(index: number) { const label = work.value[index]?.company || work.value[index]?.position || `Work ${index + 1}`; removeWithUndo(label, (d) => { d.work = (Array.isArray(d.work) ? d.work : []).filter((_: unknown, i: number) => i !== index) }) }
+function setWorkHighlights(index: number, value: string) { setWork(index, 'highlights', value.split('\n').map((i) => i.trim()).filter(Boolean)) }
+function addSkill() { expandSection('skills'); updateResume((d) => { d.skills = [...(Array.isArray(d.skills) ? d.skills : []), { name: '' }] }) }
+function setSkill(index: number, value: string) { updateResume((d) => { const items = Array.isArray(d.skills) ? [...d.skills] : []; items[index] = typeof items[index] === 'string' ? value : { ...(items[index] ?? {}), name: value }; d.skills = items }) }
+function removeSkill(index: number) { const item = skills.value[index]; const label = (typeof item === 'string' ? item : item?.name || item?.keyword) || `Skill ${index + 1}`; removeWithUndo(label, (d) => { d.skills = (Array.isArray(d.skills) ? d.skills : []).filter((_: unknown, i: number) => i !== index) }) }
+function addEducation() { expandSection('education'); updateResume((d) => { d.education = [...(Array.isArray(d.education) ? d.education : []), { school: '', degree: '', major: '', startDate: '', endDate: '' }] }) }
+function setEducation(index: number, field: string, value: string) { updateResume((d) => { const items = Array.isArray(d.education) ? [...d.education] : []; items[index] = { ...(items[index] ?? {}), [field]: value }; d.education = items }) }
+function removeEducation(index: number) { const label = education.value[index]?.school || `Education ${index + 1}`; removeWithUndo(label, (d) => { d.education = (Array.isArray(d.education) ? d.education : []).filter((_: unknown, i: number) => i !== index) }) }
+function addProject() { expandSection('projects'); updateResume((d) => { d.projects = [...(Array.isArray(d.projects) ? d.projects : []), { name: '', role: '', description: '', highlights: [] }] }) }
+function setProject(index: number, field: string, value: unknown) { updateResume((d) => { const items = Array.isArray(d.projects) ? [...d.projects] : []; items[index] = { ...(items[index] ?? {}), [field]: value }; d.projects = items }) }
+function removeProject(index: number) { const label = projects.value[index]?.name || `Project ${index + 1}`; removeWithUndo(label, (d) => { d.projects = (Array.isArray(d.projects) ? d.projects : []).filter((_: unknown, i: number) => i !== index) }) }
+function moveItem(section: 'work' | 'projects' | 'skills' | 'education' | 'certificates' | 'languages', index: number, direction: -1 | 1) {
+  updateResume((d) => { const items = Array.isArray(d[section]) ? [...d[section]] : []; const ti = index + direction; if (ti < 0 || ti >= items.length) return; [items[index], items[ti]] = [items[ti], items[index]]; d[section] = items })
+}
+function addSimpleItem(section: 'certificates' | 'languages') { expandSection(section); updateResume((d) => { const item = section === 'certificates' ? { name: '', issuer: '', date: '' } : { name: '', level: '' }; d[section] = [...(Array.isArray(d[section]) ? d[section] : []), item] }) }
+function setSimpleItem(section: 'certificates' | 'languages', index: number, field: string, value: string) { updateResume((d) => { const items = Array.isArray(d[section]) ? [...d[section]] : []; items[index] = { ...(items[index] ?? {}), [field]: value }; d[section] = items }) }
+function removeSimpleItem(section: 'certificates' | 'languages', index: number) { const col = section === 'certificates' ? certificates.value : languages.value; const label = col[index]?.name || `${section === 'certificates' ? 'Certificate' : 'Language'} ${index + 1}`; removeWithUndo(label, (d) => { d[section] = (Array.isArray(d[section]) ? d[section] : []).filter((_: unknown, i: number) => i !== index) }) }
+function defaultResumeJson() { return { basics: { name: '' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [], template: { code: 'classic' }, layout: defaultLayout } }
 
 onMounted(async () => {
-  window.addEventListener('beforeunload', handleBeforeUnload)
-  window.addEventListener('keydown', handleKeydown)
+  try { sidebarCollapsed.value = localStorage.getItem('resume-editor-sidebar-collapsed') === 'true' } catch { /* storage is optional */ }
+  try { editorPanelCollapsed.value = localStorage.getItem('resume-editor-property-panel-collapsed') === 'true' } catch { /* storage is optional */ }
+  window.addEventListener('beforeunload', handleBeforeUnload); window.addEventListener('keydown', handleKeydown)
   try {
-    const response = await listVersions(Number(props.id))
-    const latest = response.data.data[0]
-    currentVersionId.value = latest?.id ?? null
-    content.value = JSON.stringify(latest?.resumeJson ?? defaultResumeJson(), null, 2)
+    const resumeResponse = await getResume(Number(props.id))
+    currentVersionId.value = resumeResponse.data.data.currentVersionId
+    if (currentVersionId.value == null) {
+      const versionsResponse = await listVersions(Number(props.id))
+      currentVersionId.value = versionsResponse.data.data[0]?.id ?? null
+    }
+    const currentVersion = currentVersionId.value
+      ? (await getResumeVersion(currentVersionId.value)).data.data
+      : null
+    content.value = JSON.stringify(currentVersion?.resumeJson ?? defaultResumeJson(), null, 2)
     initialContent.value = content.value
-  } catch {
-    error.value = '简历版本无法加载，请返回列表后重试。'
-  } finally {
+  } catch { error.value = '简历版本无法加载，请返回列表后重试。' }
+  finally {
     loading.value = false
+    await nextTick()
+    updatePreviewPageCount()
+    if (previewPaperRef.value) {
+      previewResizeObserver = new ResizeObserver(updatePreviewPageCount)
+      previewResizeObserver.observe(previewPaperRef.value)
+    }
   }
 })
 
-onBeforeUnmount(() => {
-  window.removeEventListener('beforeunload', handleBeforeUnload)
-  window.removeEventListener('keydown', handleKeydown)
-  if (undoTimer) clearTimeout(undoTimer)
-})
+onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeUnload); window.removeEventListener('keydown', handleKeydown); document.removeEventListener('mousemove', onDrag); document.removeEventListener('mouseup', onDragEnd); previewResizeObserver?.disconnect(); if (undoTimer) clearTimeout(undoTimer) })
 
 async function save() {
   let resumeJson: Record<string, unknown>
-  try {
-    resumeJson = JSON.parse(content.value) as Record<string, unknown>
-  } catch {
-    error.value = '简历 JSON 格式无效。'
-    return
-  }
-
-  saving.value = true
-  error.value = ''
+  try { resumeJson = JSON.parse(content.value) as Record<string, unknown> } catch { error.value = '简历 JSON 格式无效。'; return }
+  saving.value = true; error.value = ''
   try {
     await createManualVersion(Number(props.id), resumeJson, summary.value.trim() || undefined)
     initialContent.value = content.value
     await router.push({ name: 'resume-detail', params: { id: props.id } })
-  } catch {
-    error.value = '版本保存失败，请确认 basics 字段和 JSON 结构后重试。'
-  } finally {
-    saving.value = false
+  } catch (requestError) {
+    const apiMessage = (requestError as AxiosError<{ message?: string }>).response?.data?.message?.trim()
+    error.value = apiMessage || '版本保存失败，请稍后重试。'
   }
+  finally { saving.value = false }
 }
 </script>
 
 <template>
   <section class="resume-studio" :class="{ 'preview-mode': previewOnly }">
     <header class="studio-head">
-      <div><p class="eyebrow">Resume studio</p><h1>把经历写成一页好简历</h1><p>左侧编辑，右侧即时预览。保存后会创建新的历史版本。</p></div>
-      <div class="studio-actions"><button class="btn-neon btn-ghost" type="button" @click="previewOnly = !previewOnly">{{ previewOnly ? '返回编辑' : '专注预览' }}</button><button v-if="!previewOnly" class="btn-neon btn-ghost" type="button" @click="showSource = !showSource">{{ showSource ? '收起源数据' : '查看源数据' }}</button><button class="btn-neon btn-ghost" type="button" @click="goBack">返回</button><button v-if="!previewOnly" form="resume-form" class="btn-neon btn-primary" :disabled="saving || !sourceValid || !dirty">{{ saving ? '正在保存…' : dirty ? '保存新版本' : '没有待保存修改' }}</button></div>
+      <div><p class="eyebrow">Resume studio</p><h1>{{ t('resumeEditor.title') }}</h1><p>左侧编辑，右侧即时预览。保存后会创建新的历史版本。</p></div>
+      <div class="studio-actions">
+        <button class="btn-neon btn-ghost btn-sample" type="button" @click="loadSample"><BookOpen :size="16" /> {{ t('resumeEditor.loadSample') }}</button>
+        <button class="btn-neon btn-ghost" type="button" @click="previewOnly = !previewOnly">{{ previewOnly ? '返回编辑' : '专注预览' }}</button>
+        <button v-if="!previewOnly" class="btn-neon btn-ghost" type="button" @click="showSource = !showSource">{{ showSource ? '收起源数据' : '查看源数据' }}</button>
+        <button class="btn-neon btn-ghost" type="button" @click="goBack">{{ t('common.back') }}</button>
+        <button v-if="!previewOnly" form="resume-form" class="btn-neon btn-primary" :disabled="saving || !sourceValid || !dirty">{{ saving ? t('common.saving') : dirty ? '保存新版本' : '没有待保存修改' }}</button>
+      </div>
     </header>
     <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-    <p v-if="loading">加载中...</p>
-    <div v-else class="studio-grid">
-      <form id="resume-form" class="studio-editor" @submit.prevent="save">
-        <div class="editor-command-center">
+    <div v-if="showSampleConfirm" class="sample-confirm-overlay" @click.self="showSampleConfirm = false">
+      <div class="sample-confirm-card">
+        <h3>{{ t('resumeEditor.loadSampleTitle') }}</h3>
+        <p>{{ t('resumeEditor.loadSampleDesc') }}</p>
+        <div class="sample-confirm-actions">
+          <button class="btn-neon btn-ghost" type="button" @click="showSampleConfirm = false">{{ t('common.cancel') }}</button>
+          <button class="btn-neon btn-primary" type="button" @click="loadSample">确认加载示例</button>
+        </div>
+      </div>
+    </div>
+    <p v-if="loading">{{ t('common.loading') }}</p>
+    <div v-else class="studio-grid" :class="{ 'sidebar-collapsed': sidebarCollapsed, 'editor-panel-collapsed': editorPanelCollapsed }" ref="gridRef">
+      <div v-if="!previewOnly" class="editor-shell">
+        <aside class="editor-sidebar" :class="{ 'is-collapsed': sidebarCollapsed }" aria-label="简历编辑控制台">
+          <button class="sidebar-toggle" type="button" :aria-expanded="!sidebarCollapsed" :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="toggleSidebar">
+            <PanelLeftOpen v-if="sidebarCollapsed" :size="16" /><PanelLeftClose v-else :size="16" />
+            <span>{{ sidebarCollapsed ? '展开' : '收起' }}</span>
+          </button>
+          <div class="editor-command-center">
           <label class="version-note">本次版本说明<input v-model.trim="summary" maxlength="1000" placeholder="例如：针对 Java 后端岗位调整" /></label>
-          <fieldset class="template-picker"><legend>简历样式</legend><div class="template-options"><button v-for="option in templateOptions" :key="option.code" type="button" :class="{ active: templateCode === option.code }" :aria-pressed="templateCode === option.code" @click="setTemplate(option.code)"><span class="template-swatch" :class="`swatch-${option.code}`" /><strong>{{ option.name }}</strong><small>{{ option.description }}</small></button></div></fieldset>
+          <fieldset class="template-picker"><legend>{{ t('resumeEditor.templateLabel') }}</legend><div class="template-options"><button v-for="opt in templateOptions" :key="opt.code" type="button" :class="{ active: templateCode === opt.code }" :aria-pressed="templateCode === opt.code" @click="setTemplate(opt.code)"><span class="template-swatch" :class="`swatch-${opt.code}`" /><strong>{{ opt.name() }}</strong><small>{{ opt.description() }}</small></button></div></fieldset>
+          <fieldset class="layout-controls">
+            <legend>版式设置</legend>
+            <div class="layout-presets" role="group" aria-label="内容密度预设">
+              <button type="button" @click="applyLayoutPreset('compact')">紧凑</button>
+              <button type="button" @click="applyLayoutPreset('balanced')">均衡</button>
+              <button type="button" @click="applyLayoutPreset('spacious')">舒展</button>
+            </div>
+            <label class="font-family-select">字体风格
+              <select aria-label="字体风格" :value="layout.fontFamily" @change="setLayout('fontFamily', ($event.target as HTMLSelectElement).value)">
+                <option v-for="option in fontOptions" :key="option.code" :value="option.code">{{ option.name }}</option>
+              </select>
+            </label>
+            <label>正文字号 <output>{{ layout.bodyFontSize }} px</output><input aria-label="正文字号滑杆" type="range" min="11" max="16" step="1" :value="layout.bodyFontSize" @input="setLayout('bodyFontSize', Number(($event.target as HTMLInputElement).value))" /></label>
+            <label>标题字号 <output>{{ layout.headingFontSize }} px</output><input aria-label="标题字号滑杆" type="range" min="11" max="18" step="1" :value="layout.headingFontSize" @input="setLayout('headingFontSize', Number(($event.target as HTMLInputElement).value))" /></label>
+            <label>行距 <output>{{ layout.lineHeight.toFixed(2) }}</output><input aria-label="行距滑杆" type="range" min="1.30" max="2.00" step="0.05" :value="layout.lineHeight" @input="setLayout('lineHeight', Number(($event.target as HTMLInputElement).value))" /></label>
+            <label>模块间距 <output>{{ layout.sectionSpacing }} px</output><input aria-label="模块间距滑杆" type="range" min="10" max="32" step="2" :value="layout.sectionSpacing" @input="setLayout('sectionSpacing', Number(($event.target as HTMLInputElement).value))" /></label>
+            <label>条目间距 <output>{{ layout.entrySpacing }} px</output><input aria-label="条目间距滑杆" type="range" min="6" max="22" step="2" :value="layout.entrySpacing" @input="setLayout('entrySpacing', Number(($event.target as HTMLInputElement).value))" /></label>
+            <label>页面留白 <output>{{ layout.pagePadding }} px</output><input aria-label="页面留白滑杆" type="range" min="32" max="80" step="2" :value="layout.pagePadding" @input="setLayout('pagePadding', Number(($event.target as HTMLInputElement).value))" /></label>
+            <button class="layout-reset" type="button" @click="resetLayout">恢复默认</button>
+          </fieldset>
           <div class="editor-progress" role="status"><div class="progress-heading"><span>内容完成度</span><strong>{{ completionScore }}%</strong></div><div class="progress-track"><span :style="{ width: `${completionScore}%` }" /></div><small>{{ nextSuggestion }}</small></div>
           <nav class="editor-outline" aria-label="简历内容目录">
-            <a href="#resume-basics" :class="{ complete: basics.name && (basics.title || basics.position), active: !isSectionCollapsed('basics') }" @click.prevent="jumpToSection('basics')"><span>个人信息</span><small>{{ basics.name ? '已填写' : '待填写' }}</small></a>
-            <a href="#resume-work" :class="{ complete: work.length, active: !isSectionCollapsed('work') }" @click.prevent="jumpToSection('work')"><span>工作经历</span><small>{{ work.length }} 段</small></a>
-            <a href="#resume-skills" :class="{ complete: skills.length, active: !isSectionCollapsed('skills') }" @click.prevent="jumpToSection('skills')"><span>专业技能</span><small>{{ skills.length }} 项</small></a>
-            <a href="#resume-projects" :class="{ complete: projects.length, active: !isSectionCollapsed('projects') }" @click.prevent="jumpToSection('projects')"><span>项目经历</span><small>{{ projects.length }} 个</small></a>
-            <a href="#resume-education" :class="{ complete: education.length, active: !isSectionCollapsed('education') }" @click.prevent="jumpToSection('education')"><span>教育经历</span><small>{{ education.length }} 段</small></a>
-            <a href="#resume-certificates" :class="{ complete: certificates.length, active: !isSectionCollapsed('certificates') }" @click.prevent="jumpToSection('certificates')"><span>专业证书</span><small>{{ certificates.length }} 项</small></a>
-            <a href="#resume-languages" :class="{ complete: languages.length, active: !isSectionCollapsed('languages') }" @click.prevent="jumpToSection('languages')"><span>语言能力</span><small>{{ languages.length }} 项</small></a>
+            <a href="#resume-basics" title="基本信息" :class="{ complete: basics.name && (basics.title || basics.position), active: !isSectionCollapsed('basics') }" @click.prevent="jumpToSection('basics')"><span data-short="基">{{ t('resumeEditor.basicsLabel') }}</span><small>{{ basics.name ? t('resumeEditor.basicsFilled') : t('resumeEditor.basicsEmpty') }}</small></a>
+            <a href="#resume-work" title="工作经历" :class="{ complete: work.length, active: !isSectionCollapsed('work') }" @click.prevent="jumpToSection('work')"><span data-short="工">{{ t('resumeEditor.workLabel') }}</span><small>{{ work.length }} 段</small></a>
+            <a href="#resume-skills" title="专业技能" :class="{ complete: skills.length, active: !isSectionCollapsed('skills') }" @click.prevent="jumpToSection('skills')"><span data-short="技">{{ t('resumeEditor.skillsLabel') }}</span><small>{{ skills.length }} 项</small></a>
+            <a href="#resume-projects" title="项目经历" :class="{ complete: projects.length, active: !isSectionCollapsed('projects') }" @click.prevent="jumpToSection('projects')"><span data-short="项">{{ t('resumeEditor.projectsLabel') }}</span><small>{{ projects.length }} 个</small></a>
+            <a href="#resume-education" title="教育经历" :class="{ complete: education.length, active: !isSectionCollapsed('education') }" @click.prevent="jumpToSection('education')"><span data-short="教">{{ t('resumeEditor.educationLabel') }}</span><small>{{ education.length }} 段</small></a>
+            <a href="#resume-certificates" title="专业证书" :class="{ complete: certificates.length, active: !isSectionCollapsed('certificates') }" @click.prevent="jumpToSection('certificates')"><span data-short="证">专业证书</span><small>{{ certificates.length }} 项</small></a>
+            <a href="#resume-languages" title="语言能力" :class="{ complete: languages.length, active: !isSectionCollapsed('languages') }" @click.prevent="jumpToSection('languages')"><span data-short="语">语言能力</span><small>{{ languages.length }} 项</small></a>
           </nav>
-        </div>
+          </div>
+        </aside>
+        <form id="resume-form" class="studio-editor" :class="{ 'is-collapsed': editorPanelCollapsed }" @submit.prevent="save">
+        <header class="property-panel-heading"><div><span>内容属性</span><strong>编辑简历内容</strong><small>从左侧选择章节，在此修改字段。</small></div><button class="property-toggle" type="button" :aria-expanded="!editorPanelCollapsed" :title="editorPanelCollapsed ? '展开编辑器' : '收起编辑器'" @click="toggleEditorPanel"><PanelRightOpen v-if="editorPanelCollapsed" :size="16" /><PanelRightClose v-else :size="16" /></button></header>
         <aside v-if="aiAssistant" class="ai-assistant-panel" aria-live="polite">
           <header><span class="ai-orb"><Sparkles :size="15" /></span><div><small>{{ aiAssistant.scope === 'field' ? '字段润色' : '模块优化' }}</small><strong>{{ aiAssistant.label }}</strong></div><button type="button" aria-label="关闭 AI 助手" @click="closeAiAssistant"><X :size="16" /></button></header>
           <p v-if="aiAssistant.content">AI 将基于当前内容和简历上下文优化表达；候选文本必须由你确认后才会写回。</p>
@@ -409,15 +401,16 @@ async function save() {
           <div v-if="aiAssistant.loading" class="ai-candidate-placeholder"><WandSparkles :size="16" /><div><strong>正在生成候选表达</strong><small>仅调整措辞，不补充原文之外的事实。</small></div></div>
           <p v-else-if="aiAssistant.error" class="ai-inline-error" role="alert">{{ aiAssistant.error }}</p>
           <div v-else-if="aiAssistant.result" class="ai-candidate-list">
-            <article v-for="(candidate, candidateIndex) in aiAssistant.result.candidates" :key="candidateIndex">
-              <span>候选 {{ candidateIndex + 1 }}</span><p>{{ candidate.content }}</p><small>{{ candidate.suggestion }}</small>
-              <button v-if="aiAssistant.apply" type="button" @click="applyAiCandidate(candidate.content)">采纳并写回</button>
+            <article v-for="(c, ci) in aiAssistant.result.candidates" :key="ci">
+              <span>候选 {{ ci + 1 }}</span><p>{{ c.content }}</p><small>{{ c.suggestion }}</small>
+              <button v-if="aiAssistant.apply" type="button" @click="applyAiCandidate(c.content)">采纳并写回</button>
             </article>
           </div>
           <div v-else class="ai-candidate-placeholder"><WandSparkles :size="16" /><div><strong>{{ aiAssistant.content ? '等待 AI 服务' : '等待填写内容' }}</strong><small>{{ aiAssistant.content ? '确认已完成 AI 数据授权后重试。' : '填写真实内容后即可生成 3 个候选版本。' }}</small></div></div>
           <footer><RouterLink class="text-link" to="/ai-consent">管理 AI 数据授权</RouterLink><small v-if="aiAssistant.result">记录 #{{ aiAssistant.result.recordId }} · 已追溯</small></footer>
         </aside>
-        <fieldset id="resume-basics" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('basics') }"><legend><span>个人信息</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '个人概要', 'summary', sectionAiContent('basics'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('basics')" @click="toggleSection('basics')">{{ isSectionCollapsed('basics') ? '展开' : '收起' }}</button></span></legend><div class="field-grid">
+        <!-- Basics -->
+        <fieldset id="resume-basics" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('basics') }"><legend><span>{{ t('resumeEditor.basicsLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '个人概要', 'summary', sectionAiContent('basics'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('basics')" @click="toggleSection('basics')">{{ isSectionCollapsed('basics') ? '展开' : '收起' }}</button></span></legend><div class="field-grid">
           <label>姓名<input :value="basics.name ?? ''" placeholder="张明远" @input="setBasic('name', ($event.target as HTMLInputElement).value)" /></label>
           <label>目标岗位<input :value="basics.title ?? basics.position ?? ''" placeholder="高级后端工程师" @input="setBasic('title', ($event.target as HTMLInputElement).value)" /></label>
           <label>邮箱<input :value="basics.email ?? ''" type="email" placeholder="name@example.com" @input="setBasic('email', ($event.target as HTMLInputElement).value)" /></label>
@@ -425,9 +418,10 @@ async function save() {
           <label class="span-two">所在地<input :value="basics.location ?? ''" placeholder="上海" @input="setBasic('location', ($event.target as HTMLInputElement).value)" /></label>
           <label class="span-two"><span class="field-label-row"><span>个人概要</span><button type="button" class="ai-field-action" @click="openAiAssistant('field', '个人概要', 'summary', basics.summary, value => setBasic('summary', value))"><WandSparkles :size="13" /> 润色</button></span><textarea :value="basics.summary ?? ''" rows="4" placeholder="概括专业方向、经验与优势。" @input="setBasic('summary', ($event.target as HTMLTextAreaElement).value)" /></label>
         </div></fieldset>
-        <fieldset id="resume-work" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('work') }"><legend><span>工作经历</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '工作经历', 'workDescription', sectionAiContent('work'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('work')" @click="toggleSection('work')">{{ isSectionCollapsed('work') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addWork">＋ 添加经历</button></span></legend>
+        <!-- Work -->
+        <fieldset id="resume-work" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('work') }"><legend><span>{{ t('resumeEditor.workLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '工作经历', 'workDescription', sectionAiContent('work'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('work')" @click="toggleSection('work')">{{ isSectionCollapsed('work') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addWork">＋ {{ t('resumeEditor.addWork') }}</button></span></legend>
           <p v-if="!work.length" class="editor-empty">添加第一段经历后，它会立即出现在右侧预览。</p>
-          <article v-for="(item, index) in work" :key="index" class="work-editor"><div class="work-editor-head"><strong>经历 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" :aria-label="`上移经历 ${index + 1}`" title="上移" @click="moveItem('work', index, -1)">↑</button><button type="button" :disabled="index === work.length - 1" :aria-label="`下移经历 ${index + 1}`" title="下移" @click="moveItem('work', index, 1)">↓</button><button type="button" :aria-label="`删除经历 ${index + 1}`" @click="removeWork(index)">删除</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in work" :key="index" class="work-editor"><div class="work-editor-head"><strong>经历 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('work', index, -1)">↑</button><button type="button" :disabled="index === work.length - 1" title="下移" @click="moveItem('work', index, 1)">↓</button><button type="button" @click="removeWork(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>公司<input :value="item.company ?? item.name ?? ''" @input="setWork(index, 'company', ($event.target as HTMLInputElement).value)" /></label>
             <label>职位<input :value="item.position ?? item.role ?? ''" @input="setWork(index, 'position', ($event.target as HTMLInputElement).value)" /></label>
             <label>开始时间<input :value="item.startDate ?? ''" placeholder="2022-03" @input="setWork(index, 'startDate', ($event.target as HTMLInputElement).value)" /></label>
@@ -436,22 +430,25 @@ async function save() {
             <label class="span-two"><span class="field-label-row"><span>成果要点</span><button type="button" class="ai-field-action" @click="openAiAssistant('field', `经历 ${index + 1} · 成果要点`, 'workHighlights', item.highlights, value => setWorkHighlights(index, value))"><WandSparkles :size="13" /> 强化成果</button></span><textarea :value="Array.isArray(item.highlights) ? item.highlights.join('\n') : ''" rows="4" placeholder="每行一条，优先写动作、规模和结果。" @input="setWorkHighlights(index, ($event.target as HTMLTextAreaElement).value)" /></label>
           </div></article>
         </fieldset>
-        <fieldset id="resume-skills" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('skills') }"><legend><span>专业技能</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '专业技能', 'skillDescription', sectionAiContent('skills'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('skills')" @click="toggleSection('skills')">{{ isSectionCollapsed('skills') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSkill">＋ 添加技能</button></span></legend>
+        <!-- Skills -->
+        <fieldset id="resume-skills" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('skills') }"><legend><span>{{ t('resumeEditor.skillsLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '专业技能', 'skillDescription', sectionAiContent('skills'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('skills')" @click="toggleSection('skills')">{{ isSectionCollapsed('skills') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSkill">＋ {{ t('resumeEditor.addSkill') }}</button></span></legend>
           <p v-if="!skills.length" class="editor-empty">添加与你目标岗位相关、并且可以被经历证明的技能。</p>
-          <div v-for="(skill, index) in skills" :key="index" class="inline-editor"><input :value="typeof skill === 'string' ? skill : skill.name ?? skill.keyword ?? ''" placeholder="例如：Spring Boot" @input="setSkill(index, ($event.target as HTMLInputElement).value)" /><div class="inline-editor-actions"><button type="button" class="ai-inline-action" :aria-label="`润色技能 ${index + 1}`" title="AI 润色" @click="openAiAssistant('field', `技能 ${index + 1}`, 'skillDescription', typeof skill === 'string' ? skill : skill.name ?? skill.keyword, value => setSkill(index, value))"><WandSparkles :size="13" /></button><button type="button" :disabled="index === 0" :aria-label="`上移技能 ${index + 1}`" title="上移" @click="moveItem('skills', index, -1)">↑</button><button type="button" :disabled="index === skills.length - 1" :aria-label="`下移技能 ${index + 1}`" title="下移" @click="moveItem('skills', index, 1)">↓</button><button type="button" :aria-label="`删除技能 ${index + 1}`" @click="removeSkill(index)">删除</button></div></div>
+          <div v-for="(skill, index) in skills" :key="index" class="inline-editor"><input :value="typeof skill === 'string' ? skill : skill.name ?? skill.keyword ?? ''" placeholder="例如：Spring Boot" @input="setSkill(index, ($event.target as HTMLInputElement).value)" /><div class="inline-editor-actions"><button type="button" class="ai-inline-action" title="AI 润色" @click="openAiAssistant('field', `技能 ${index + 1}`, 'skillDescription', typeof skill === 'string' ? skill : skill.name ?? skill.keyword, value => setSkill(index, value))"><WandSparkles :size="13" /></button><button type="button" :disabled="index === 0" title="上移" @click="moveItem('skills', index, -1)">↑</button><button type="button" :disabled="index === skills.length - 1" title="下移" @click="moveItem('skills', index, 1)">↓</button><button type="button" @click="removeSkill(index)">{{ t('common.delete') }}</button></div></div>
         </fieldset>
-        <fieldset id="resume-projects" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('projects') }"><legend><span>项目经历</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '项目经历', 'projectDescription', sectionAiContent('projects'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('projects')" @click="toggleSection('projects')">{{ isSectionCollapsed('projects') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addProject">＋ 添加项目</button></span></legend>
+        <!-- Projects -->
+        <fieldset id="resume-projects" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('projects') }"><legend><span>{{ t('resumeEditor.projectsLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '项目经历', 'projectDescription', sectionAiContent('projects'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('projects')" @click="toggleSection('projects')">{{ isSectionCollapsed('projects') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addProject">＋ {{ t('resumeEditor.addProject') }}</button></span></legend>
           <p v-if="!projects.length" class="editor-empty">选择最能证明能力的项目，写清你负责什么以及产生了什么结果。</p>
-          <article v-for="(item, index) in projects" :key="index" class="work-editor"><div class="work-editor-head"><strong>项目 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" :aria-label="`上移项目 ${index + 1}`" title="上移" @click="moveItem('projects', index, -1)">↑</button><button type="button" :disabled="index === projects.length - 1" :aria-label="`下移项目 ${index + 1}`" title="下移" @click="moveItem('projects', index, 1)">↓</button><button type="button" :aria-label="`删除项目 ${index + 1}`" @click="removeProject(index)">删除</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in projects" :key="index" class="work-editor"><div class="work-editor-head"><strong>项目 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('projects', index, -1)">↑</button><button type="button" :disabled="index === projects.length - 1" title="下移" @click="moveItem('projects', index, 1)">↓</button><button type="button" @click="removeProject(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>项目名称<input :value="item.name ?? ''" @input="setProject(index, 'name', ($event.target as HTMLInputElement).value)" /></label>
             <label>担任角色<input :value="item.role ?? item.position ?? ''" @input="setProject(index, 'role', ($event.target as HTMLInputElement).value)" /></label>
             <label class="span-two"><span class="field-label-row"><span>项目说明</span><button type="button" class="ai-field-action" @click="openAiAssistant('field', `项目 ${index + 1} · 项目说明`, 'projectDescription', item.description, value => setProject(index, 'description', value))"><WandSparkles :size="13" /> 润色</button></span><textarea :value="item.description ?? ''" rows="3" @input="setProject(index, 'description', ($event.target as HTMLTextAreaElement).value)" /></label>
-            <label class="span-two"><span class="field-label-row"><span>项目成果</span><button type="button" class="ai-field-action" @click="openAiAssistant('field', `项目 ${index + 1} · 项目成果`, 'projectHighlights', item.highlights, value => setProject(index, 'highlights', value.split('\n').map(item => item.trim()).filter(Boolean)))"><WandSparkles :size="13" /> 强化成果</button></span><textarea :value="Array.isArray(item.highlights) ? item.highlights.join('\n') : ''" rows="4" placeholder="每行一条成果。" @input="setProject(index, 'highlights', ($event.target as HTMLTextAreaElement).value.split('\n').map(value => value.trim()).filter(Boolean))" /></label>
+            <label class="span-two"><span class="field-label-row"><span>项目成果</span><button type="button" class="ai-field-action" @click="openAiAssistant('field', `项目 ${index + 1} · 项目成果`, 'projectHighlights', item.highlights, value => setProject(index, 'highlights', value.split('\n').map(i => i.trim()).filter(Boolean)))"><WandSparkles :size="13" /> 强化成果</button></span><textarea :value="Array.isArray(item.highlights) ? item.highlights.join('\n') : ''" rows="4" placeholder="每行一条成果。" @input="setProject(index, 'highlights', ($event.target as HTMLTextAreaElement).value.split('\n').map(v => v.trim()).filter(Boolean))" /></label>
           </div></article>
         </fieldset>
-        <fieldset id="resume-education" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('education') }"><legend><span>教育经历</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('education')" @click="toggleSection('education')">{{ isSectionCollapsed('education') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addEducation">＋ 添加教育经历</button></span></legend>
+        <!-- Education -->
+        <fieldset id="resume-education" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('education') }"><legend><span>{{ t('resumeEditor.educationLabel') }}</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('education')" @click="toggleSection('education')">{{ isSectionCollapsed('education') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addEducation">＋ {{ t('resumeEditor.addEducation') }}</button></span></legend>
           <p v-if="!education.length" class="editor-empty">添加学校、专业和学历信息。</p>
-          <article v-for="(item, index) in education" :key="index" class="work-editor"><div class="work-editor-head"><strong>教育经历 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" :aria-label="`上移教育经历 ${index + 1}`" title="上移" @click="moveItem('education', index, -1)">↑</button><button type="button" :disabled="index === education.length - 1" :aria-label="`下移教育经历 ${index + 1}`" title="下移" @click="moveItem('education', index, 1)">↓</button><button type="button" :aria-label="`删除教育经历 ${index + 1}`" @click="removeEducation(index)">删除</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in education" :key="index" class="work-editor"><div class="work-editor-head"><strong>教育经历 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('education', index, -1)">↑</button><button type="button" :disabled="index === education.length - 1" title="下移" @click="moveItem('education', index, 1)">↓</button><button type="button" @click="removeEducation(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>学校<input :value="item.school ?? item.name ?? ''" @input="setEducation(index, 'school', ($event.target as HTMLInputElement).value)" /></label>
             <label>学历<input :value="item.degree ?? ''" placeholder="本科" @input="setEducation(index, 'degree', ($event.target as HTMLInputElement).value)" /></label>
             <label class="span-two">专业<input :value="item.major ?? item.area ?? ''" @input="setEducation(index, 'major', ($event.target as HTMLInputElement).value)" /></label>
@@ -459,38 +456,44 @@ async function save() {
             <label>结束时间<input :value="item.endDate ?? ''" placeholder="2022-06" @input="setEducation(index, 'endDate', ($event.target as HTMLInputElement).value)" /></label>
           </div></article>
         </fieldset>
+        <!-- Certificates -->
         <fieldset id="resume-certificates" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('certificates') }"><legend><span>专业证书</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('certificates')" @click="toggleSection('certificates')">{{ isSectionCollapsed('certificates') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSimpleItem('certificates')">＋ 添加证书</button></span></legend>
           <p v-if="!certificates.length" class="editor-empty">填写与目标岗位相关、仍然有效的专业认证。</p>
-          <article v-for="(item, index) in certificates" :key="index" class="work-editor"><div class="work-editor-head"><strong>证书 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" :aria-label="`上移证书 ${index + 1}`" title="上移" @click="moveItem('certificates', index, -1)">↑</button><button type="button" :disabled="index === certificates.length - 1" :aria-label="`下移证书 ${index + 1}`" title="下移" @click="moveItem('certificates', index, 1)">↓</button><button type="button" :aria-label="`删除证书 ${index + 1}`" @click="removeSimpleItem('certificates', index)">删除</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in certificates" :key="index" class="work-editor"><div class="work-editor-head"><strong>证书 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('certificates', index, -1)">↑</button><button type="button" :disabled="index === certificates.length - 1" title="下移" @click="moveItem('certificates', index, 1)">↓</button><button type="button" @click="removeSimpleItem('certificates', index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>证书名称<input :value="item.name ?? ''" placeholder="例如：AWS Solutions Architect" @input="setSimpleItem('certificates', index, 'name', ($event.target as HTMLInputElement).value)" /></label>
             <label>颁发机构<input :value="item.issuer ?? ''" placeholder="Amazon Web Services" @input="setSimpleItem('certificates', index, 'issuer', ($event.target as HTMLInputElement).value)" /></label>
             <label class="span-two">获得时间<input :value="item.date ?? ''" placeholder="2024-06" @input="setSimpleItem('certificates', index, 'date', ($event.target as HTMLInputElement).value)" /></label>
           </div></article>
         </fieldset>
+        <!-- Languages -->
         <fieldset id="resume-languages" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('languages') }"><legend><span>语言能力</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('languages')" @click="toggleSection('languages')">{{ isSectionCollapsed('languages') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSimpleItem('languages')">＋ 添加语言</button></span></legend>
           <p v-if="!languages.length" class="editor-empty">仅保留能为岗位加分的语言与熟练程度。</p>
-          <article v-for="(item, index) in languages" :key="index" class="work-editor"><div class="work-editor-head"><strong>语言 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" :aria-label="`上移语言 ${index + 1}`" title="上移" @click="moveItem('languages', index, -1)">↑</button><button type="button" :disabled="index === languages.length - 1" :aria-label="`下移语言 ${index + 1}`" title="下移" @click="moveItem('languages', index, 1)">↓</button><button type="button" :aria-label="`删除语言 ${index + 1}`" @click="removeSimpleItem('languages', index)">删除</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in languages" :key="index" class="work-editor"><div class="work-editor-head"><strong>语言 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('languages', index, -1)">↑</button><button type="button" :disabled="index === languages.length - 1" title="下移" @click="moveItem('languages', index, 1)">↓</button><button type="button" @click="removeSimpleItem('languages', index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>语言<input :value="item.name ?? item.language ?? ''" placeholder="例如：英语" @input="setSimpleItem('languages', index, 'name', ($event.target as HTMLInputElement).value)" /></label>
             <label>熟练程度<input :value="item.level ?? item.fluency ?? ''" placeholder="例如：专业工作沟通" @input="setSimpleItem('languages', index, 'level', ($event.target as HTMLInputElement).value)" /></label>
           </div></article>
         </fieldset>
         <div class="editor-note"><strong>高级编辑</strong><span>兴趣等少用扩展字段可通过标准 JSON 精确调整。</span></div>
         <label v-if="showSource" class="source-editor open"><span>简历源数据</span><textarea v-model="content" :rows="28" required spellcheck="false" /><small :class="sourceValid ? 'source-ok' : 'source-invalid'">{{ sourceValid ? 'JSON 格式有效' : 'JSON 格式有误，修复后才能保存' }}</small></label>
-        <div v-if="undoRemoval" class="editor-undo" role="status"><span>已移除“{{ undoRemoval.label }}”</span><button type="button" @click="restoreRemoval">撤销</button></div>
-        <div class="editor-save-dock"><span><strong>{{ dirty ? '有未保存修改' : '当前内容已同步' }}</strong><small>快捷键 Ctrl / Cmd + S</small></span><button class="btn-neon btn-primary" :disabled="saving || !sourceValid || !dirty">{{ saving ? '正在保存…' : '保存新版本' }}</button></div>
-      </form>
-      <aside class="preview-rail"><div class="preview-label"><span>{{ previewOnly ? '专注预览 · 保存后可在版本页导出 PDF' : `${templateName}样式 · 实时预览` }}</span><span :class="{ 'preview-warning': previewMayOverflow }">{{ previewMayOverflow ? '内容较多，可能超过一页' : `A4 / ${basics.name || '未命名'}` }}</span></div>
-        <article class="resume-paper" :class="`template-${templateCode}`">
+        <div v-if="undoRemoval" class="editor-undo" role="status"><span>已移除"{{ undoRemoval.label }}"</span><button type="button" @click="restoreRemoval">撤销</button></div>
+        <div class="editor-save-dock"><span><strong>{{ dirty ? '有未保存修改' : '当前内容已同步' }}</strong><small>快捷键 Ctrl / Cmd + S</small></span><button class="btn-neon btn-primary" :disabled="saving || !sourceValid || !dirty">{{ saving ? t('common.saving') : t('resumeEditor.saveDraft') }}</button></div>
+        </form>
+      </div>
+      <div v-if="!previewOnly" class="studio-splitter" :class="{ dragging: isDragging }" @mousedown="onSplitterDown" />
+      <aside class="preview-rail"><div class="preview-label"><span>{{ previewOnly ? '专注预览 · 保存后可在版本页导出 PDF' : `${templateName}样式 · 实时预览` }}</span><span :class="{ 'preview-warning': previewPageCount > 1 }">{{ `预计 ${previewPageCount} 页 · A4` }}</span></div>
+        <div class="preview-scroll">
+        <article ref="previewPaperRef" class="resume-paper" :class="`template-${templateCode}`" :style="layoutStyle">
           <header class="paper-header"><h2 :class="{ 'paper-placeholder': !basics.name }">{{ basics.name || '你的姓名' }}</h2><p :class="{ 'paper-placeholder': !(basics.title || basics.position) }">{{ basics.title || basics.position || '目标岗位' }}</p><div :class="{ 'paper-placeholder': ![basics.phone, basics.email, basics.location].some(Boolean) }">{{ [basics.phone, basics.email, basics.location].filter(Boolean).join('  ·  ') || '电话 · 邮箱 · 城市' }}</div></header>
           <div v-if="!hasBodyContent" class="paper-empty-guide"><span>从左侧开始</span><h3>先写内容，再追求版式</h3><ol><li><strong>说明你是谁</strong><small>姓名、目标岗位和联系方式</small></li><li><strong>证明你做成过什么</strong><small>经历、项目和可量化成果</small></li><li><strong>匹配目标岗位</strong><small>专业技能与教育背景</small></li></ol></div>
           <section v-if="basics.summary"><h3>个人概要</h3><p>{{ basics.summary }}</p></section>
-          <section v-if="work.length"><h3>工作经历</h3><div v-for="(item, index) in work" :key="index" class="paper-entry"><strong>{{ item.company || item.name || '公司名称' }}</strong><span>{{ item.position || item.role || '' }}</span><small>{{ item.startDate || '' }}{{ item.endDate ? ` — ${item.endDate}` : '' }}</small><p v-if="item.description">{{ item.description }}</p><ul v-if="item.highlights"><li v-for="(point, pointIndex) in item.highlights" :key="pointIndex">{{ point }}</li></ul></div></section>
-          <section v-if="skills.length"><h3>专业技能</h3><div class="skill-chips"><span v-for="(skill, index) in skills" :key="index">{{ typeof skill === 'string' ? skill : skill.name || skill.keyword }}</span></div></section>
-          <section v-if="projects.length"><h3>项目经历</h3><div v-for="(item, index) in projects" :key="index" class="paper-entry"><strong>{{ item.name || '项目名称' }}</strong><span>{{ item.role || item.position || '' }}</span><p v-if="item.description">{{ item.description }}</p><ul v-if="item.highlights"><li v-for="(point, pointIndex) in item.highlights" :key="pointIndex">{{ point }}</li></ul></div></section>
-          <section v-if="education.length"><h3>教育经历</h3><div v-for="(item, index) in education" :key="index" class="paper-entry"><strong>{{ item.school || item.name }}</strong><span>{{ [item.degree, item.major || item.area].filter(Boolean).join(' · ') }}</span><small>{{ item.startDate || '' }}{{ item.endDate ? ` — ${item.endDate}` : '' }}</small></div></section>
+          <section v-if="work.length"><h3>{{ t('resumeEditor.workLabel') }}</h3><div v-for="(item, index) in work" :key="index" class="paper-entry"><strong>{{ item.company || item.name || '公司名称' }}</strong><span>{{ item.position || item.role || '' }}</span><small>{{ item.startDate || '' }}{{ item.endDate ? ` — ${item.endDate}` : '' }}</small><p v-if="item.description">{{ item.description }}</p><ul v-if="item.highlights"><li v-for="(p, pi) in item.highlights" :key="pi">{{ p }}</li></ul></div></section>
+          <section v-if="skills.length"><h3>{{ t('resumeEditor.skillsLabel') }}</h3><div class="skill-chips"><span v-for="(skill, index) in skills" :key="index">{{ typeof skill === 'string' ? skill : skill.name || skill.keyword }}</span></div></section>
+          <section v-if="projects.length"><h3>{{ t('resumeEditor.projectsLabel') }}</h3><div v-for="(item, index) in projects" :key="index" class="paper-entry"><strong>{{ item.name || '项目名称' }}</strong><span>{{ item.role || item.position || '' }}</span><p v-if="item.description">{{ item.description }}</p><ul v-if="item.highlights"><li v-for="(p, pi) in item.highlights" :key="pi">{{ p }}</li></ul></div></section>
+          <section v-if="education.length"><h3>{{ t('resumeEditor.educationLabel') }}</h3><div v-for="(item, index) in education" :key="index" class="paper-entry"><strong>{{ item.school || item.name }}</strong><span>{{ [item.degree, item.major || item.area].filter(Boolean).join(' · ') }}</span><small>{{ item.startDate || '' }}{{ item.endDate ? ` — ${item.endDate}` : '' }}</small></div></section>
           <section v-if="certificates.length"><h3>专业证书</h3><div v-for="(item, index) in certificates" :key="index" class="paper-entry compact"><strong>{{ item.name || '证书名称' }}</strong><span>{{ item.issuer || '' }}</span><small>{{ item.date || '' }}</small></div></section>
           <section v-if="languages.length"><h3>语言能力</h3><div class="skill-chips"><span v-for="(item, index) in languages" :key="index">{{ [item.name || item.language, item.level || item.fluency].filter(Boolean).join(' · ') }}</span></div></section>
         </article>
+        </div>
       </aside>
     </div>
   </section>
