@@ -1,0 +1,30 @@
+# Overlay for a small, no-domain test server. It is not for public production.
+services:
+  edge:
+    ports:
+      - "443:443"
+    volumes:
+      - ${TEST_TLS_DIR:?TEST_TLS_DIR is required}:/etc/nginx/tls:ro
+      - ./nginx/edge-ip-test.conf.template:/etc/nginx/templates/default.conf.template:ro
+    mem_limit: 128m
+
+  web:
+    mem_limit: 128m
+
+  api:
+    env_file: ${DEPLOY_ENV_FILE:-production.ip-test.env}
+    environment:
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx512m
+    mem_limit: 800m
+
+  pdf-service:
+    env_file: ${DEPLOY_ENV_FILE:-production.ip-test.env}
+    mem_limit: 768m
+
+  mysql:
+    command: >-
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=256M
+      --performance-schema=OFF
+    mem_limit: 700m

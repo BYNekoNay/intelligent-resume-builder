@@ -7,6 +7,7 @@ const cliPort = process.argv.find((argument) => argument.startsWith('--port='))?
 const configuredPort = process.env.PDF_SERVICE_PORT ?? cliPort ?? '3001'
 const port = Number(configuredPort)
 const expectedServiceToken = process.env.PDF_SERVICE_TOKEN ?? 'dev-pdf-token-change-me'
+const production = process.env.NODE_ENV === 'production'
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error('PDF_SERVICE_PORT must be an integer between 1 and 65535')
@@ -37,6 +38,11 @@ function assertSafePayload(payload) {
     throw error
   }
 
+}
+
+if (production && (expectedServiceToken.length < 32 || expectedServiceToken.toLowerCase().includes('change-me') || expectedServiceToken.toLowerCase().includes('replace-with'))) {
+  console.error('PDF_SERVICE_TOKEN must be a non-default secret with at least 32 characters in production')
+  process.exit(1)
 }
 
 app.post('/render', requireServiceToken, async (request, response) => {

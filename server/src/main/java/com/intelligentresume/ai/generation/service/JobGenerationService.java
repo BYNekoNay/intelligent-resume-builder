@@ -144,7 +144,10 @@ public class JobGenerationService {
         result.put("draftResumeJson", draft);
         result.put("selected", selected.stream().distinct().toList());
         result.put("unselected", List.of());
-        result.put("missing", buildMissing(draft));
+        List<MissingItem> missing = buildMissing(draft);
+        result.put("missing", missing);
+        result.put("qualitySummary", buildQualitySummary(draft, missing,
+                stringList(snapshot.get("missingRequirements")), hasTrustedProfile(profile)));
         result.put("warnings", warnings);
         result.put("promptVersion", promptVersion);
         result.put("schemaVersion", schemaVersion);
@@ -178,8 +181,11 @@ public class JobGenerationService {
         materials.addAll(selection.preferred());
         materials.addAll(selection.normal());
         if (materials.isEmpty()) {
-            return Map.of("draftResumeJson", Map.of(), "selected", List.of(), "unselected", List.of(),
-                    "missing", List.of(Map.of("section", "basics", "reason", "No eligible career materials")),
+            Map<String, Object> emptyDraft = Map.of();
+            List<Map<String, Object>> missing = List.of(
+                    Map.of("section", "basics", "reason", "No eligible career materials"));
+            return Map.of("draftResumeJson", emptyDraft, "selected", List.of(), "unselected", List.of(),
+                    "missing", missing, "qualitySummary", buildQualitySummary(emptyDraft, missing, List.of(), false),
                     "warnings", List.of("InsufficientMaterials"), "promptVersion", promptVersion,
                     "schemaVersion", schemaVersion);
         }
@@ -218,7 +224,9 @@ public class JobGenerationService {
         result.put("draftResumeJson", draft);
         result.put("selected", selected.stream().distinct().toList());
         result.put("unselected", selection.excluded());
-        result.put("missing", buildMissing(draft));
+        List<MissingItem> missing = buildMissing(draft);
+        result.put("missing", missing);
+        result.put("qualitySummary", buildQualitySummary(draft, missing, List.of(), false));
         result.put("warnings", warnings);
         result.put("promptVersion", promptVersion);
         result.put("schemaVersion", schemaVersion);
@@ -272,13 +280,80 @@ public class JobGenerationService {
         List<MissingItem> missing = new ArrayList<>();
         for (String section : List.of("basics", "work", "education", "skills")) {
             Object value = draft.get(section);
-            if (value == null || value instanceof Collection<?> collection && collection.isEmpty()) {
+            if (isEmptySection(value)) {
                 missing.add(new MissingItem(section, "No supported content"));
             } else {
                 collectPending(value, section, missing);
             }
         }
         return missing;
+    }
+
+    private boolean isEmptySection(Object value) {
+        return value == null
+                || value instanceof Collection<?> collection && collection.isEmpty()
+                || value instanceof Map<?, ?> map && map.isEmpty();
+    }
+
+    /**
+     * Produces a small, user-facing review summary. It intentionally measures
+     * only top-level resume entries because those are the items users can
+     * accept, edit, or reject on the confirmation page.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> buildQualitySummary(Map<String, Object> draft, Collection<?> draftGaps,
+                                                    Collection<?> missingRequirements, boolean personalProfileAvailable) {
+        int total = 0;
+        int sourced = 0;
+        int pending = 0;
+        int unsupported = 0;
+        for (String section : List.of("basics", "work", "education", "skills", "projects", "certificates")) {
+            Object value = draft.get(section);
+            List<Map<String, Object>> entries = new ArrayList<>();
+            if (value instanceof Map<?, ?> raw) {
+                entries.add((Map<String, Object>) raw);
+            } else if (value instanceof List<?> list) {
+                for (Object entry : list) {
+                    if (entry instanceof Map<?, ?> raw) entries.add((Map<String, Object>) raw);
+                }
+            }
+            for (Map<String, Object> entry : entries) {
+                total++;
+                boolean hasSource = hasSource(section, entry, personalProfileAvailable);
+                boolean hasPending = containsPending(entry);
+                if (hasSource) sourced++;
+                if (hasPending) pending++;
+                if (!hasSource && !hasPending) unsupported++;
+            }
+        }
+        String readiness = pending > 0 || unsupported > 0 ? "REQUIRES_ACTION"
+                : !draftGaps.isEmpty() || !missingRequirements.isEmpty() ? "REVIEW_RECOMMENDED" : "READY";
+        return Map.of(
+                "totalDraftItems", total,
+                "sourcedItems", sourced,
+                "pendingItems", pending,
+                "unsupportedItems", unsupported,
+                "draftGapCount", draftGaps.size(),
+                "missingRequirementCount", missingRequirements.size(),
+                "readiness", readiness);
+    }
+
+    private boolean hasSource(String section, Map<String, Object> entry, boolean personalProfileAvailable) {
+        return entry.containsKey("_source") || entry.containsKey("_sources")
+                || "basics".equals(section) && personalProfileAvailable;
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean containsPending(Object value) {
+        if (value instanceof Map<?, ?> raw) {
+            Map<String, Object> map = (Map<String, Object>) raw;
+            if (map.containsKey("_pending")) return true;
+            return map.entrySet().stream()
+                    .filter(entry -> !entry.getKey().startsWith("_"))
+                    .anyMatch(entry -> containsPending(entry.getValue()));
+        }
+        if (value instanceof List<?> list) return list.stream().anyMatch(this::containsPending);
+        return false;
     }
 
     @SuppressWarnings("unchecked")
@@ -369,6 +444,18 @@ public class JobGenerationService {
     }
 
     private String stringValue(Object value) { return value == null ? null : value.toString(); }
+
+    private List<String> stringList(Object value) {
+        if (!(value instanceof Collection<?> values)) return List.of();
+        return values.stream().filter(String.class::isInstance).map(String.class::cast)
+                .map(String::trim).filter(text -> !text.isEmpty()).toList();
+    }
+
+    private boolean hasTrustedProfile(Map<String, Object> profile) {
+        return List.of("fullName", "email", "phone", "location", "website").stream()
+                .map(profile::get)
+                .anyMatch(value -> value != null && !value.toString().isBlank());
+    }
 
     private Map<String, Object> careerProfileContext(Map<String, Object> profile) {
         Map<String, Object> context = new LinkedHashMap<>();

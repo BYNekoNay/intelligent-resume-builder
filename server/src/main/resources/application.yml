@@ -34,14 +34,27 @@ server:
     context-path: /
 
 management:
+  defaults:
+    metrics:
+      export:
+        enabled: true
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 
 app:
   cors:
@@ -175,6 +188,7 @@ app:
     worker:
       poll-interval-ms: ${PDF_WORKER_POLL_MS:1000}
       batch-size: ${PDF_WORKER_BATCH:3}
+      lease-seconds: ${PDF_WORKER_LEASE_S:90}
     service-base-url: ${PDF_SERVICE_BASE_URL:http://localhost:3001}
     service-token: ${PDF_SERVICE_TOKEN:dev-pdf-token-change-me}
     render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:15}

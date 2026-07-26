@@ -11,11 +11,12 @@ async function mockAuthenticatedApi(page: Page) {
   await page.route('**/api/auth/me', route => route.fulfill({ json: response({ id: 99, username: 'e2e-user', email: 'e2e@example.com' }) }))
   await page.route('**/api/resumes', route => route.fulfill({ json: response([resume]) }))
   await page.route('**/api/resumes/1', route => route.fulfill({ json: response(resume) }))
-  await page.route('**/api/resumes/1/versions', route => route.fulfill({ json: response([version]) }))
+  await page.route('**/api/resumes/1/versions**', route => route.fulfill({ json: response([version]) }))
   await page.route('**/api/jobs', route => route.fulfill({ json: response([job]) }))
   await page.route('**/api/career-materials*', route => route.fulfill({ json: response([]) }))
   await page.route('**/api/personal-profile*', route => route.fulfill({ json: response({ fullName: '', email: '', phone: '', location: '', website: '', profileSummary: '' }) }))
   await page.route('**/api/applications', route => route.fulfill({ json: response([]) }))
+  await page.route('**/api/interview-answer-assets**', route => route.fulfill({ json: response([]) }))
 }
 
 test('takes an authenticated user from the home start action to the generation workbench', async ({ page }) => {
@@ -148,13 +149,14 @@ test('persists resume typography and spacing controls with the edited version', 
   }
   let saved: any
   await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
-  await page.route('**/api/resumes/1/versions', async route => {
+  await page.route('**/api/resumes/1/versions**', async route => {
     if (route.request().method() === 'GET') return route.fulfill({ json: response([version]) })
     saved = route.request().postDataJSON()
     return route.fulfill({ json: response(editorVersion) })
   })
 
   await page.goto('/resumes/1/edit')
+  await expect(page.locator('.studio-grid')).toBeVisible()
   const bodySize = page.getByLabel('正文字号滑杆')
   await expect(bodySize).toHaveValue('13')
   await bodySize.fill('16')
@@ -176,7 +178,7 @@ test('switches the application chrome and answer library between Chinese and Eng
 
   await page.getByRole('button', { name: 'EN' }).click()
 
-  await expect(page.getByRole('link', { name: 'Workspace' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Organize' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Interview Answer Assets' })).toBeVisible()
   await expect(page.getByRole('button', { name: '中文' })).toHaveAttribute('aria-pressed', 'false')
 
@@ -343,6 +345,15 @@ test('renders the generated resume draft as readable fields instead of JSON', as
         selected: [],
         unselected: [],
         missing: [],
+        qualitySummary: {
+          totalDraftItems: 2,
+          sourcedItems: 1,
+          pendingItems: 0,
+          unsupportedItems: 1,
+          draftGapCount: 0,
+          missingRequirementCount: 0,
+          readiness: 'REQUIRES_ACTION',
+        },
         warnings: [],
       },
     }),
@@ -357,6 +368,10 @@ test('renders the generated resume draft as readable fields instead of JSON', as
   await expect(draft).not.toContainText('work[0]')
   await expect(draft).not.toContainText('"company"')
   await expect(draft).not.toContainText('materialId=62')
+  const qualitySummary = draft.locator('.quality-summary')
+  await expect(qualitySummary.getByRole('heading', { name: '草稿质量摘要' })).toBeVisible()
+  await expect(qualitySummary).toContainText('需要处理')
+  await expect(qualitySummary).toContainText('待核实内容')
 
   const workSection = page.locator('.draft-section').filter({ hasText: '工作经历' })
   await expect(workSection.locator('.action-btn')).toHaveCount(3)
@@ -383,14 +398,18 @@ test('generates an editable communication draft and carries it into an applicati
     await route.fulfill({ json: response({ type: 'EMAIL', draft: 'Hello Example Systems, I would like to apply.', sentAutomatically: false, requiresManualConfirmation: true }) })
   })
   await page.goto('/communications')
-  await page.locator('select').nth(1).selectOption('11')
+  const versionSelect = page.locator('select').nth(1)
+  await expect(versionSelect).toBeEnabled()
+  await expect(versionSelect.locator('option[value="11"]')).toHaveCount(1)
+  await versionSelect.selectOption('11')
   await page.locator('select').nth(2).selectOption('20')
   await page.locator('select').nth(3).selectOption('EMAIL')
-  await page.getByRole('button', { name: 'Generate draft' }).click()
+  const communicationForm = page.locator('form.compact-form')
+  await communicationForm.locator('button').click()
   await expect.poll(() => generationPayload).toEqual({ resumeVersionId: 11, jobDescriptionId: 20, type: 'EMAIL' })
-  const editor = page.getByLabel('Editable draft')
+  const editor = page.locator('article.workspace-card textarea')
   await editor.fill('Edited email body')
-  await page.getByRole('button', { name: 'Use in application' }).click()
+  await page.locator('article.workspace-card .job-actions button').nth(1).click()
   await expect(page).toHaveURL(/\/applications$/)
   await expect(page.locator('textarea').nth(1)).toHaveValue('Edited email body')
 })
@@ -412,4 +431,88 @@ test('retries a failed PDF export through polling and downloads the completed do
   const download = page.waitForEvent('download')
   await actions.first().click()
   expect((await download).suggestedFilename()).toBe('resume.pdf')
+})
+
+test('restores an authenticated session after a page refresh', async ({ page }) => {
+  let refreshCount = 0
+  await page.route('**/api/auth/refresh', route => {
+    refreshCount += 1
+    return route.fulfill({ json: response({ accessToken: `refresh-token-${refreshCount}` }) })
+  })
+  await page.route('**/api/auth/me', route => route.fulfill({ json: response({ id: 99, username: 'e2e-user', email: 'e2e@example.com' }) }))
+  await page.route('**/api/resumes', route => route.fulfill({ json: response([resume]) }))
+
+  await page.goto('/resumes')
+  await expect(page).toHaveURL(/\/resumes$/)
+  await expect(page.getByText(resume.title)).toBeVisible()
+
+  await page.reload()
+  await expect(page).toHaveURL(/\/resumes$/)
+  await expect(page.getByText(resume.title)).toBeVisible()
+  await expect.poll(() => refreshCount).toBe(2)
+})
+
+test('archives a historical version and restores it to the visible history', async ({ page }) => {
+  const activeVersions = [
+    version,
+    { ...version, id: 12, versionNo: 2, sourceType: 'MANUAL', archivedAt: null, restoredFromVersionId: null },
+  ]
+  const archivedVersions = [{ ...activeVersions[1], archivedAt: now }]
+  let archived = false
+  let archiveCalls = 0
+  let unarchiveCalls = 0
+
+  await mockAuthenticatedApi(page)
+  await page.route('**/api/resumes/1/versions**', route => {
+    const url = new URL(route.request().url())
+    if (route.request().method() === 'POST' && url.pathname.endsWith('/12/archive')) {
+      archived = true
+      archiveCalls += 1
+      return route.fulfill({ json: response(null) })
+    }
+    if (route.request().method() === 'POST' && url.pathname.endsWith('/12/unarchive')) {
+      archived = false
+      unarchiveCalls += 1
+      return route.fulfill({ json: response(null) })
+    }
+    const requestedArchived = url.searchParams.get('archived') === 'true'
+    return route.fulfill({ json: response(requestedArchived ? (archived ? archivedVersions : []) : (archived ? [activeVersions[0]] : activeVersions)) })
+  })
+  page.on('dialog', dialog => dialog.accept())
+
+  await page.goto('/resumes/1')
+  const historicalCard = page.locator('.version-card').filter({ hasText: 'v2' })
+  await expect(historicalCard).toBeVisible()
+  await historicalCard.locator('button').nth(2).click()
+  await expect.poll(() => archiveCalls).toBe(1)
+  await expect(historicalCard).toHaveCount(0)
+
+  await page.locator('.version-history-tabs button').nth(1).click()
+  const archivedCard = page.locator('.version-card').filter({ hasText: 'v2' })
+  await expect(archivedCard).toBeVisible()
+  await archivedCard.locator('button').first().click()
+  await expect.poll(() => unarchiveCalls).toBe(1)
+  await expect(archivedCard).toHaveCount(0)
+})
+
+test('keeps mobile resume editor controls collapsible without hiding the preview', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = {
+    ...version,
+    resumeJson: {
+      basics: { name: 'Mobile Candidate', title: 'Engineer', summary: 'Builds reliable systems.' },
+      work: [], education: [], skills: [], projects: [], certificates: [], languages: [], template: { code: 'classic' },
+    },
+  }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/resumes/1/edit')
+
+  await expect(page.locator('.preview-rail')).toBeVisible()
+  await page.locator('.sidebar-toggle').click()
+  await expect(page.locator('.editor-sidebar')).toHaveClass(/is-collapsed/)
+  await expect(page.locator('.preview-rail')).toBeVisible()
+  await page.locator('.property-toggle').click()
+  await expect(page.locator('.studio-editor')).toHaveClass(/is-collapsed/)
+  await expect(page.locator('.preview-rail')).toBeVisible()
 })

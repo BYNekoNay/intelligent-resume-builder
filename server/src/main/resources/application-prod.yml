@@ -1,0 +1,28 @@
+spring:
+  config:
+    import: optional:file:../.env[.properties],optional:file:.env[.properties]
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  jwt:
+    secret: ${JWT_SECRET}
+    refresh-cookie:
+      secure: ${COOKIE_SECURE:true}
+  ai:
+    bailian:
+      api-key: ${BAILIAN_API_KEY}
+  pdf:
+    service-base-url: ${PDF_SERVICE_BASE_URL}
+    service-token: ${PDF_SERVICE_TOKEN}
+    output-dir: ${PDF_OUTPUT_DIR:/var/lib/intelligent-resume/pdf-output}

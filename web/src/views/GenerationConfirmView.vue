@@ -32,11 +32,22 @@ interface DraftItem {
   editedValue: any
 }
 
+interface QualitySummary {
+  totalDraftItems: number
+  sourcedItems: number
+  pendingItems: number
+  unsupportedItems: number
+  draftGapCount: number
+  missingRequirementCount: number
+  readiness: 'READY' | 'REVIEW_RECOMMENDED' | 'REQUIRES_ACTION'
+}
+
 const draftItems = ref<DraftItem[]>([])
 const selectedInfo = ref<any[]>([])
 const unselectedInfo = ref<any[]>([])
 const missingInfo = ref<any[]>([])
 const warnings = ref<string[]>([])
+const qualitySummary = ref<QualitySummary | null>(null)
 
 // Same-JD dialog
 const showJdDialog = ref(false)
@@ -119,6 +130,7 @@ function parseDraft() {
   unselectedInfo.value = resultJson.value.unselected ?? []
   missingInfo.value = resultJson.value.missing ?? []
   warnings.value = resultJson.value.warnings ?? []
+  qualitySummary.value = normalizeQualitySummary(resultJson.value.qualitySummary)
 
   // Flatten draft into items by section
   const items: DraftItem[] = []
@@ -155,6 +167,24 @@ function parseDraft() {
     }
   }
   draftItems.value = items
+}
+
+function normalizeQualitySummary(value: unknown): QualitySummary | null {
+  if (!value || typeof value !== 'object') return null
+  const summary = value as Partial<QualitySummary>
+  const numericKeys: Array<keyof Pick<QualitySummary,
+    'totalDraftItems' | 'sourcedItems' | 'pendingItems' | 'unsupportedItems' | 'draftGapCount' | 'missingRequirementCount'>> = [
+    'totalDraftItems', 'sourcedItems', 'pendingItems', 'unsupportedItems', 'draftGapCount', 'missingRequirementCount',
+  ]
+  if (!numericKeys.every(key => typeof summary[key] === 'number') || typeof summary.readiness !== 'string') return null
+  if (!['READY', 'REVIEW_RECOMMENDED', 'REQUIRES_ACTION'].includes(summary.readiness)) return null
+  return summary as QualitySummary
+}
+
+const QUALITY_READINESS: Record<QualitySummary['readiness'], { label: string; hint: string }> = {
+  READY: { label: '资料依据完整', hint: '草稿内容均有已确认资料依据，可继续逐项审核。' },
+  REVIEW_RECOMMENDED: { label: '建议补充后审核', hint: '草稿可继续审核，但仍有 JD 要求或简历栏目尚未覆盖。' },
+  REQUIRES_ACTION: { label: '需要处理', hint: '存在待补充或没有资料依据的内容，请逐项编辑、接受或删除。' },
 }
 
 function stripMeta(value: any): any {
@@ -361,6 +391,26 @@ async function handleRetry() {
         <p v-for="w in warnings" :key="w" class="warning-item">{{ w }}</p>
       </div>
 
+      <section
+        v-if="qualitySummary"
+        :class="['quality-summary', `quality-summary--${qualitySummary.readiness.toLowerCase()}`]"
+        aria-label="草稿质量摘要"
+      >
+        <div class="quality-summary__heading">
+          <div>
+            <h3>草稿质量摘要</h3>
+            <p>{{ QUALITY_READINESS[qualitySummary.readiness].hint }}</p>
+          </div>
+          <span class="quality-summary__status">{{ QUALITY_READINESS[qualitySummary.readiness].label }}</span>
+        </div>
+        <div class="quality-summary__metrics">
+          <div><strong>{{ qualitySummary.sourcedItems }}</strong><span>有资料依据</span></div>
+          <div><strong>{{ qualitySummary.draftGapCount }}</strong><span>草稿待补充</span></div>
+          <div><strong>{{ qualitySummary.unsupportedItems }}</strong><span>待核实内容</span></div>
+          <div><strong>{{ qualitySummary.missingRequirementCount }}</strong><span>未覆盖项</span></div>
+        </div>
+      </section>
+
       <!-- Missing info -->
       <div v-if="missingInfo.length" class="missing-section">
         <h3>缺失信息（JD 要求但资料库未覆盖）</h3>
@@ -514,6 +564,87 @@ header h1 {
 .warning-item {
   font-size: 0.85rem;
   color: #92400e;
+}
+.quality-summary {
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.quality-summary--review_recommended {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+.quality-summary--requires_action {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.quality-summary__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+.quality-summary__heading h3 {
+  margin: 0 0 0.25rem;
+  color: #0f3d75;
+  font-size: 0.95rem;
+}
+.quality-summary--review_recommended .quality-summary__heading h3 { color: #92400e; }
+.quality-summary--requires_action .quality-summary__heading h3 { color: #991b1b; }
+.quality-summary__heading p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.quality-summary__status {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.quality-summary--review_recommended .quality-summary__status {
+  color: #92400e;
+  background: #fef3c7;
+}
+.quality-summary--requires_action .quality-summary__status {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+.quality-summary__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.quality-summary__metrics > div {
+  min-width: 0;
+  padding: 0.55rem;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.65);
+}
+.quality-summary__metrics strong,
+.quality-summary__metrics span {
+  display: block;
+}
+.quality-summary__metrics strong {
+  color: #1e293b;
+  font-size: 1.05rem;
+}
+.quality-summary__metrics span {
+  margin-top: 0.15rem;
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+@media (max-width: 560px) {
+  .quality-summary__heading { flex-direction: column; gap: 0.5rem; }
+  .quality-summary__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .missing-section {
   background: #fef2f2;

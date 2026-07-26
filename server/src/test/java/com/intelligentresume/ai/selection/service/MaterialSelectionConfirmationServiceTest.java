@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -108,6 +109,23 @@ class MaterialSelectionConfirmationServiceTest {
 
         assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
         verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void carriesSelectionGapsIntoTheImmutableGenerationSnapshot() {
+        selection.setResultJson(Map.of(
+                "recommended", List.of(Map.of("materialId", 1L)),
+                "unselected", List.of(),
+                "excluded", List.of(),
+                "missingRequirements", List.of("Kafka production experience")));
+        doAnswer(invocation -> invocation.getArgument(0)).when(taskRepository).save(any(AiTask.class));
+        ConfirmMaterialsRequest request = new ConfirmMaterialsRequest(
+                selection.getUpdatedAt(), List.of(1L), List.of(), "Job resume");
+
+        AiTask generation = service.confirm(10L, request, "confirm-3", 7L);
+
+        assertEquals(List.of("Kafka production experience"),
+                generation.getInputSnapshotJson().get("missingRequirements"));
     }
 
     private CareerMaterial material(Long id, UsagePreference preference) {

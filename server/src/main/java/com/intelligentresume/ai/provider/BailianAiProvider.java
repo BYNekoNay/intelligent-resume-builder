@@ -1,8 +1,13 @@
 package com.intelligentresume.ai.provider;
 
 import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.common.api.TraceIdFilter;
+import com.intelligentresume.common.observability.AiFailureCategory;
+import com.intelligentresume.common.observability.AppObservability;
+import com.intelligentresume.common.observability.FailureCategoryClassifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -10,6 +15,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
 import java.util.*;
@@ -36,6 +42,8 @@ public class BailianAiProvider implements AiProvider {
     private final String apiKey;
     private final String model;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final AppObservability observability;
+    private final FailureCategoryClassifier failureCategoryClassifier;
 
     public BailianAiProvider(
             @Value("${app.ai.bailian.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String baseUrl,
@@ -43,10 +51,14 @@ public class BailianAiProvider implements AiProvider {
             @Value("${app.ai.bailian.model:qwen-plus}") String model,
             @Value("${app.ai.bailian.connect-timeout-seconds:10}") int connectTimeout,
             @Value("${app.ai.bailian.read-timeout-seconds:60}") int readTimeout,
-            com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper,
+            AppObservability observability,
+            FailureCategoryClassifier failureCategoryClassifier) {
         this.apiKey = apiKey;
         this.model = model;
         this.objectMapper = objectMapper;
+        this.observability = observability;
+        this.failureCategoryClassifier = failureCategoryClassifier;
 
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(connectTimeout));
@@ -76,10 +88,12 @@ public class BailianAiProvider implements AiProvider {
     @Override
     @SuppressWarnings("unchecked")
     public AiCallResult call(AiCallContext ctx) {
+        long startedAt = System.nanoTime();
         String requestId = UUID.randomUUID().toString();
 
         if (apiKey == null || apiKey.isBlank()) {
-            return AiCallResult.fail("百炼 API Key 未配置 (app.ai.bailian.api-key)", false, requestId);
+            return complete(ctx, AiCallResult.fail("百炼 API Key 未配置 (app.ai.bailian.api-key)", false, requestId),
+                    AiFailureCategory.PROVIDER_4XX, startedAt);
         }
 
         try {
@@ -96,12 +110,14 @@ public class BailianAiProvider implements AiProvider {
 
             Map<String, Object> response = restClient.post()
                     .uri("/chat/completions")
+                    .header(TraceIdFilter.TRACE_ID_HEADER, traceId())
                     .body(requestBody)
                     .retrieve()
                     .body(Map.class);
 
             if (response == null) {
-                return AiCallResult.fail("百炼 API 返回空响应", true, requestId);
+                return complete(ctx, AiCallResult.fail("百炼 API 返回空响应", true, requestId),
+                        AiFailureCategory.PROVIDER_RESPONSE_INVALID, startedAt);
             }
 
             // 提取 provider request id
@@ -111,29 +127,55 @@ public class BailianAiProvider implements AiProvider {
             // 提取 choices[0].message.content
             List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
             if (choices == null || choices.isEmpty()) {
-                return AiCallResult.fail("百炼 API 返回空 choices", true, apiRequestId);
+                return complete(ctx, AiCallResult.fail("百炼 API 返回空 choices", true, apiRequestId),
+                        AiFailureCategory.PROVIDER_RESPONSE_INVALID, startedAt);
             }
 
             Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
             if (message == null || message.get("content") == null) {
-                return AiCallResult.fail("百炼 API 返回空 message content", true, apiRequestId);
+                return complete(ctx, AiCallResult.fail("百炼 API 返回空 message content", true, apiRequestId),
+                        AiFailureCategory.PROVIDER_RESPONSE_INVALID, startedAt);
             }
 
             String content = (String) message.get("content");
             Map<String, Object> data = parseResponseContent(content, ctx.type());
 
             log.debug("Bailian API call success: taskType={}, requestId={}", ctx.type(), apiRequestId);
-            return AiCallResult.ok(data, apiRequestId);
+            return complete(ctx, AiCallResult.ok(data, apiRequestId), AiFailureCategory.NONE, startedAt);
 
         } catch (ResourceAccessException e) {
-            log.error("Bailian API timeout/connection error for taskType={}: {}",
-                    ctx.type(), e.getMessage());
-            return AiCallResult.fail("百炼 API 网络超时: " + e.getMessage(), true, requestId);
+            AiFailureCategory category = failureCategoryClassifier.ai(e);
+            log.warn("Bailian API transport failure: taskType={}, category={}, exception={}",
+                    ctx.type(), category, e.getClass().getSimpleName());
+            return complete(ctx, AiCallResult.fail("百炼 API 网络异常", true, requestId), category, startedAt);
+        } catch (RestClientResponseException e) {
+            AiFailureCategory category = failureCategoryClassifier.ai(e);
+            log.warn("Bailian API response failure: taskType={}, category={}, status={}",
+                    ctx.type(), category, e.getStatusCode().value());
+            return complete(ctx, AiCallResult.fail("百炼 API 调用失败", isRetryableError(e), requestId), category, startedAt);
         } catch (Exception e) {
-            log.error("Bailian API call failed for taskType={}: {}", ctx.type(), e.getMessage(), e);
+            AiFailureCategory category = failureCategoryClassifier.ai(e);
+            log.warn("Bailian API call failure: taskType={}, category={}, exception={}",
+                    ctx.type(), category, e.getClass().getSimpleName());
             boolean retryable = isRetryableError(e);
-            return AiCallResult.fail("百炼 API 调用失败: " + e.getMessage(), retryable, requestId);
+            return complete(ctx, AiCallResult.fail("百炼 API 调用失败", retryable, requestId), category, startedAt);
         }
+    }
+
+    private AiCallResult complete(AiCallContext ctx, AiCallResult result,
+                                  AiFailureCategory category, long startedAt) {
+        observability.recordAiProviderCall(ctx.type(), code(), model, result.success(), category,
+                Duration.ofNanos(System.nanoTime() - startedAt));
+        try (MDC.MDCCloseable ignored = MDC.putCloseable("providerRequestId", result.providerRequestId())) {
+            log.info("AI provider call completed: taskType={}, outcome={}, category={}",
+                    ctx.type(), result.success() ? "success" : "failure", category);
+        }
+        return result;
+    }
+
+    private String traceId() {
+        String traceId = MDC.get(TraceIdFilter.TRACE_ID_MDC_KEY);
+        return traceId == null || traceId.isBlank() ? UUID.randomUUID().toString() : traceId;
     }
 
     /**

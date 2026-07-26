@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: Intelligent Resume
+    orgId: 1
+    folder: Intelligent Resume
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

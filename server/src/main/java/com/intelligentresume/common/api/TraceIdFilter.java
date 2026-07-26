@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.util.UUID;
@@ -20,6 +21,7 @@ public class TraceIdFilter implements Filter {
 
     public static final String TRACE_ID_HEADER = "X-Trace-Id";
     public static final String TRACE_ID_ATTRIBUTE = "traceId";
+    public static final String TRACE_ID_MDC_KEY = "traceId";
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
@@ -32,6 +34,8 @@ public class TraceIdFilter implements Filter {
         }
         request.setAttribute(TRACE_ID_ATTRIBUTE, traceId);
         httpResponse.setHeader(TRACE_ID_HEADER, traceId);
-        chain.doFilter(request, response);
+        try (MDC.MDCCloseable ignored = MDC.putCloseable(TRACE_ID_MDC_KEY, traceId)) {
+            chain.doFilter(request, response);
+        }
     }
 }

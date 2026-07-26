@@ -1,0 +1,18 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {"type":"stat","title":"AI success rate (10m)","targets":[{"expr":"sum(rate(resume_ai_provider_calls_total{outcome=\"success\"}[10m])) / clamp_min(sum(rate(resume_ai_provider_calls_total[10m])), 0.001)","refId":"A"}]},
+    {"type":"timeseries","title":"AI failures by category","targets":[{"expr":"sum(rate(resume_ai_provider_calls_total{outcome=\"failure\"}[5m])) by (failure_category)","refId":"A"}]},
+    {"type":"timeseries","title":"AI p95 provider duration","targets":[{"expr":"histogram_quantile(0.95, sum(rate(resume_ai_provider_duration_seconds_bucket[5m])) by (le))","refId":"A"}]},
+    {"type":"timeseries","title":"AI retries and schema rejections","targets":[{"expr":"sum(rate(resume_ai_task_retries_total[5m])) by (task_type)","refId":"A"},{"expr":"sum(rate(resume_ai_schema_rejections_total[5m])) by (task_type)","refId":"B"}]},
+    {"type":"timeseries","title":"PDF export failures","targets":[{"expr":"sum(rate(resume_pdf_export_tasks_total{outcome=\"failure\"}[5m])) by (failure_category)","refId":"A"}]},
+    {"type":"timeseries","title":"Queue depth","targets":[{"expr":"resume_ai_queue_depth","refId":"A"},{"expr":"resume_pdf_queue_depth","refId":"B"}]},
+    {"type":"timeseries","title":"Oldest pending task (seconds)","targets":[{"expr":"resume_ai_queue_oldest_pending_seconds","refId":"A"},{"expr":"resume_pdf_queue_oldest_pending_seconds","refId":"B"}]},
+    {"type":"timeseries","title":"AI quota consumption and rejections","targets":[{"expr":"resume_ai_quota_daily_tasks_created","refId":"A"},{"expr":"sum(rate(resume_ai_quota_rejections_total[5m])) by (task_type)","refId":"B"}]}
+  ],
+  "schemaVersion": 39,
+  "title": "Intelligent Resume Operations",
+  "uid": "intelligent-resume-operations",
+  "version": 1
+}

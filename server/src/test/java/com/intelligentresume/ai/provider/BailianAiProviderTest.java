@@ -2,6 +2,8 @@ package com.intelligentresume.ai.provider;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.common.observability.AppObservability;
+import com.intelligentresume.common.observability.FailureCategoryClassifier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,8 @@ class BailianAiProviderTest {
 
     private BailianAiProvider provider;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final AppObservability observability = org.mockito.Mockito.mock(AppObservability.class);
+    private final FailureCategoryClassifier failureCategoryClassifier = new FailureCategoryClassifier();
 
     @BeforeEach
     void setUp() {
@@ -29,7 +33,7 @@ class BailianAiProviderTest {
                 "qwen-plus",
                 10,
                 60,
-                objectMapper
+                objectMapper, observability, failureCategoryClassifier
         );
     }
 
@@ -54,7 +58,7 @@ class BailianAiProviderTest {
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "",
                 "qwen-plus",
-                10, 60, objectMapper
+                10, 60, objectMapper, observability, failureCategoryClassifier
         );
         AiCallContext ctx = new AiCallContext(AiTaskType.RESUME_OPTIMIZE, Map.of(), 60000);
         AiCallResult result = noKeyProvider.call(ctx);

@@ -100,6 +100,7 @@ public class MaterialSelectionConfirmationService {
         childSnapshot.put("jobDescriptionId", jobId);
         childSnapshot.put("jobSnapshot", snapshot(job));
         childSnapshot.put("materialSnapshots", selectedIds.stream().map(id -> snapshot(owned.get(id))).toList());
+        childSnapshot.put("missingRequirements", stringList(selection.getResultJson().get("missingRequirements")));
         childSnapshot.put("personalProfileSnapshot", profileRepository.findByUserId(userId)
                 .map(this::snapshot).orElseGet(LinkedHashMap::new));
         String resumeTitle = request.resumeTitle();
@@ -180,6 +181,16 @@ public class MaterialSelectionConfirmationService {
             if (id != null) ids.add(id);
         }
         return ids;
+    }
+
+    private List<String> stringList(Object raw) {
+        if (!(raw instanceof Collection<?> collection)) return List.of();
+        return collection.stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .toList();
     }
 
     private Map<String, Object> snapshot(JobDescription job) {

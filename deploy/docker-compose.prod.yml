@@ -1,0 +1,124 @@
+name: intelligent-resume
+
+services:
+  edge:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.nginx
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?PUBLIC_HOST is required}
+    ports:
+      - "80:80"
+    depends_on:
+      web:
+        condition: service_started
+    networks: [public, private]
+
+  web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [private]
+
+  api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    env_file: ${DEPLOY_ENV_FILE:-production.env}
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+    volumes:
+      - pdf-output:/var/lib/intelligent-resume/pdf-output
+    depends_on:
+      mysql:
+        condition: service_healthy
+      pdf-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness | grep -q UP"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks: [private]
+
+  pdf-service:
+    build:
+      context: ..
+      dockerfile: pdf-service/Dockerfile
+    restart: unless-stopped
+    env_file: ${DEPLOY_ENV_FILE:-production.env}
+    environment:
+      NODE_ENV: production
+      PDF_SERVICE_PORT: 3001
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [private]
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    env_file: ${DEPLOY_ENV_FILE:-production.env}
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [private]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: [monitoring]
+    restart: unless-stopped
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [private]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    profiles: [monitoring]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_SERVER_ROOT_URL: https://${PUBLIC_HOST:?PUBLIC_HOST is required}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks: [private]
+
+networks:
+  public:
+  private:
+    internal: true
+
+volumes:
+  mysql-data:
+  pdf-output:
+  prometheus-data:
+  grafana-data:

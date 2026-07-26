@@ -4,6 +4,7 @@ import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.common.observability.AppObservability;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +21,7 @@ public class AiQuotaService {
 
     private final AiTaskRepository taskRepository;
     private final Map<AiTaskType, Integer> quotas;
+    private final AppObservability observability;
 
     public AiQuotaService(
             AiTaskRepository taskRepository,
@@ -28,8 +30,10 @@ public class AiQuotaService {
             @Value("${app.ai.quota.INLINE_OPTIMIZE:60}") int inlineOptimize,
             @Value("${app.ai.quota.MATERIAL_IMPORT:5}") int materialImport,
             @Value("${app.ai.quota.ACHIEVEMENT_GUIDANCE:10}") int achievementGuidance,
-            @Value("${app.ai.quota.COMMUNICATION_GENERATE:10}") int communicationGenerate) {
+            @Value("${app.ai.quota.COMMUNICATION_GENERATE:10}") int communicationGenerate,
+            AppObservability observability) {
         this.taskRepository = taskRepository;
+        this.observability = observability;
         this.quotas = Map.of(
                 AiTaskType.JOB_MATERIAL_SELECTION, jobGeneration,
                 AiTaskType.JOB_GENERATION, jobGeneration,
@@ -39,6 +43,7 @@ public class AiQuotaService {
                 AiTaskType.ACHIEVEMENT_GUIDANCE, achievementGuidance,
                 AiTaskType.COMMUNICATION_GENERATE, communicationGenerate
         );
+        quotas.forEach(this.observability::registerQuotaLimit);
     }
 
     /**
@@ -50,6 +55,7 @@ public class AiQuotaService {
         LocalDateTime startOfToday = LocalDate.now().atStartOfDay();
         long count = taskRepository.countByUserIdAndTaskTypeAndCreatedAtAfter(userId, type, startOfToday);
         if (count >= limit) {
+            observability.recordQuotaRejected(type);
             throw new BusinessException(ErrorCode.RATE_LIMITED, "AI 任务配额已用完");
         }
     }

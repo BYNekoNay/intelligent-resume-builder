@@ -2,6 +2,7 @@ package com.intelligentresume.ai.task.repository;
 
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.ai.task.domain.AiTaskStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -30,6 +31,13 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
     Optional<AiTask> findByUserIdAndTaskTypeAndIdempotencyKey(Long userId, AiTaskType taskType, String idempotencyKey);
 
     long countByUserIdAndTaskTypeAndCreatedAtAfter(Long userId, AiTaskType taskType, LocalDateTime after);
+
+    long countByTaskTypeAndCreatedAtAfter(AiTaskType taskType, LocalDateTime after);
+
+    long countByStatus(AiTaskStatus status);
+
+    @Query("SELECT MIN(t.createdAt) FROM AiTask t WHERE t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING")
+    LocalDateTime findOldestPendingCreatedAt();
 
     /**
      * 查询可领取的任务:PENDING 或租约过期的 RUNNING。

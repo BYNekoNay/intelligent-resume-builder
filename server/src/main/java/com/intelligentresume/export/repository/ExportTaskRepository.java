@@ -6,6 +6,7 @@ import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -24,4 +25,17 @@ public interface ExportTaskRepository extends JpaRepository<ExportTask, Long> {
     List<ExportTask> findByStatusForUpdate(@Param("status") ExportStatus status, Pageable pageable);
 
     List<ExportTask> findByStatus(ExportStatus status);
+
+    @Query(value = "SELECT * FROM export_task WHERE status = 'PENDING' OR (status = 'RUNNING' AND lease_expires_at < NOW()) ORDER BY id ASC LIMIT :batchSize FOR UPDATE", nativeQuery = true)
+    List<ExportTask> claimableTasks(@Param("batchSize") int batchSize);
+
+    @Modifying
+    @Query(value = "UPDATE export_task SET status = 'RUNNING', lease_owner = :owner, lease_expires_at = :leaseUntil, retry_count = retry_count + 1, updated_at = NOW() WHERE id = :id AND (status = 'PENDING' OR (status = 'RUNNING' AND lease_expires_at < NOW()))", nativeQuery = true)
+    int acquireLease(@Param("id") Long id, @Param("owner") String owner,
+                     @Param("leaseUntil") java.time.LocalDateTime leaseUntil);
+
+    long countByStatus(ExportStatus status);
+
+    @Query("SELECT MIN(e.createdAt) FROM ExportTask e WHERE e.status = com.intelligentresume.export.domain.ExportStatus.PENDING")
+    java.time.LocalDateTime findOldestPendingCreatedAt();
 }

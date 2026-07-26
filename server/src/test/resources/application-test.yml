@@ -123,6 +123,7 @@ app:
     worker:
       poll-interval-ms: 60000
       batch-size: 1
+      lease-seconds: 90
     service-base-url: http://localhost:0
     service-token: test-token
     render-timeout-seconds: 5

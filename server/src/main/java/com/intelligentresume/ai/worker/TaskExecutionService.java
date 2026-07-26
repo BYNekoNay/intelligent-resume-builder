@@ -9,12 +9,18 @@ import com.intelligentresume.ai.provider.AiProviderRegistry;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.domain.ConfirmationStatus;
+import com.intelligentresume.ai.task.domain.AiTaskStatus;
+import com.intelligentresume.common.observability.AiFailureCategory;
+import com.intelligentresume.common.observability.AppObservability;
+import com.intelligentresume.common.observability.FailureCategoryClassifier;
+import com.intelligentresume.common.observability.WorkerTraceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
 import java.util.List;
+import java.time.Duration;
 
 /**
  * 任务执行服务。按 taskType 分发:JOB_GENERATION(含 jobDescriptionId)
@@ -31,35 +37,60 @@ public class TaskExecutionService {
     private final JobGenerationService jobGenerationService;
     private final JobMaterialSelectionService materialSelectionService;
     private final AiConsentService consentService;
+    private final AppObservability observability;
+    private final FailureCategoryClassifier failureCategoryClassifier;
 
     public TaskExecutionService(AiProviderRegistry providerRegistry,
                                 TaskLeaseService leaseService,
                                 JobGenerationService jobGenerationService,
                                 JobMaterialSelectionService materialSelectionService,
-                                AiConsentService consentService) {
+                                AiConsentService consentService,
+                                AppObservability observability,
+                                FailureCategoryClassifier failureCategoryClassifier) {
         this.providerRegistry = providerRegistry;
         this.leaseService = leaseService;
         this.jobGenerationService = jobGenerationService;
         this.materialSelectionService = materialSelectionService;
         this.consentService = consentService;
+        this.observability = observability;
+        this.failureCategoryClassifier = failureCategoryClassifier;
     }
 
     /**
      * 执行单个 AI 任务。
      */
     public void execute(AiTask task, String owner) {
-        log.debug("Executing task {} (type={}, owner={})", task.getId(), task.getTaskType(), owner);
-        if (!hasExecutionConsent(task)) {
-            leaseService.releaseFailed(task, "AI authorization was withdrawn or no longer covers this task", false);
-            return;
+        long startedAt = System.nanoTime();
+        try (WorkerTraceContext ignored = WorkerTraceContext.open(task.getId())) {
+            try {
+                log.debug("Executing AI task: type={}, owner={}", task.getTaskType(), owner);
+                if (!hasExecutionConsent(task)) {
+                    leaseService.releaseFailed(task, "AI authorization was withdrawn or no longer covers this task", false);
+                    return;
+                }
+                if (task.getTaskType() == AiTaskType.JOB_MATERIAL_SELECTION) {
+                    executeMaterialSelection(task);
+                } else if (task.getTaskType() == AiTaskType.JOB_GENERATION && hasJobDescriptionId(task)) {
+                    executeJobGeneration(task);
+                } else {
+                    executeDefault(task);
+                }
+            } finally {
+                String outcome = outcome(task.getStatus());
+                AiFailureCategory category = "success".equals(outcome)
+                        ? AiFailureCategory.NONE : failureCategoryClassifier.aiMessage(task.getErrorMessage());
+                observability.recordAiTaskAttempt(task.getTaskType(), outcome, category, task.getRetryCount(),
+                        Duration.ofNanos(System.nanoTime() - startedAt));
+                log.info("AI task execution completed: type={}, outcome={}, category={}, retryCount={}",
+                        task.getTaskType(), outcome, category, task.getRetryCount());
+            }
         }
-        if (task.getTaskType() == AiTaskType.JOB_MATERIAL_SELECTION) {
-            executeMaterialSelection(task);
-        } else if (task.getTaskType() == AiTaskType.JOB_GENERATION && hasJobDescriptionId(task)) {
-            executeJobGeneration(task);
-        } else {
-            executeDefault(task);
-        }
+    }
+
+    private String outcome(AiTaskStatus status) {
+        if (status == AiTaskStatus.SUCCESS) return "success";
+        if (status == AiTaskStatus.PENDING) return "retry";
+        return "failed";
     }
 
     private boolean hasExecutionConsent(AiTask task) {
@@ -77,7 +108,7 @@ public class TaskExecutionService {
             task.setConfirmationStatus(ConfirmationStatus.PENDING);
             leaseService.releaseSuccess(task, result);
         } catch (Exception e) {
-            log.error("Material selection failed for task {}", task.getId(), e);
+            log.warn("Material selection execution failed: exception={}", e.getClass().getSimpleName());
             leaseService.releaseFailed(task, "Material selection failed: " + e.getMessage(), false);
         }
     }
@@ -97,7 +128,7 @@ public class TaskExecutionService {
             task.setConfirmationStatus(ConfirmationStatus.PENDING);
             leaseService.releaseSuccess(task, result);
         } catch (Exception e) {
-            log.error("Job generation failed for task {}", task.getId(), e);
+            log.warn("Job generation execution failed: exception={}", e.getClass().getSimpleName());
             leaseService.releaseFailed(task, "Generation failed: " + e.getMessage(), false);
         }
     }
@@ -118,8 +149,8 @@ public class TaskExecutionService {
                 leaseService.releaseFailed(task, result.errorMessage(), result.retryable());
             }
         } catch (Exception e) {
-            log.error("Unexpected error executing task {}", task.getId(), e);
-            leaseService.releaseFailed(task, "Internal error: " + e.getMessage(), true);
+            log.warn("Unexpected AI task execution error: exception={}", e.getClass().getSimpleName());
+            leaseService.releaseFailed(task, "Internal AI task error", true);
         }
     }
 

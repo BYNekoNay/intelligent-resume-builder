@@ -9,6 +9,8 @@ import com.intelligentresume.ai.provider.AiProvider;
 import com.intelligentresume.ai.provider.AiProviderRegistry;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.common.observability.AppObservability;
+import com.intelligentresume.common.observability.FailureCategoryClassifier;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -29,7 +31,8 @@ class TaskExecutionServiceTest {
         when(provider.call(any())).thenReturn(AiCallResult.ok(Map.of("expandedMaterial", "reference"), "request-1"));
         TaskExecutionService service = new TaskExecutionService(
                 new AiProviderRegistry(List.of(provider)), leaseService, mock(JobGenerationService.class),
-                mock(JobMaterialSelectionService.class), consentService);
+                mock(JobMaterialSelectionService.class), consentService, mock(AppObservability.class),
+                new FailureCategoryClassifier());
         AiTask task = new AiTask();
         task.setId(1L);
         task.setUserId(1L);

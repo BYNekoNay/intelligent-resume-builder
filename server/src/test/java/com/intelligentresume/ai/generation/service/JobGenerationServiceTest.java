@@ -1,5 +1,6 @@
 package com.intelligentresume.ai.generation.service;
 
+import com.intelligentresume.ai.generation.dto.MissingItem;
 import com.intelligentresume.ai.provider.AiCallResult;
 import com.intelligentresume.ai.provider.AiProvider;
 import com.intelligentresume.ai.provider.AiProviderRegistry;
@@ -116,6 +117,14 @@ class JobGenerationServiceTest {
         assertEquals("v1.0.0", result.get("promptVersion"));
         assertEquals("v1.0.0", result.get("schemaVersion"));
         assertTrue(((List<String>) result.get("warnings")).isEmpty());
+        Map<String, Object> qualitySummary = (Map<String, Object>) result.get("qualitySummary");
+        assertEquals(2, qualitySummary.get("totalDraftItems"));
+        assertEquals(2, qualitySummary.get("sourcedItems"));
+        assertEquals(0, qualitySummary.get("pendingItems"));
+        assertEquals(0, qualitySummary.get("unsupportedItems"));
+        assertEquals(2, qualitySummary.get("draftGapCount"));
+        assertEquals(0, qualitySummary.get("missingRequirementCount"));
+        assertEquals("REVIEW_RECOMMENDED", qualitySummary.get("readiness"));
         // schema 校验被调用
         verify(schemaValidator).validate(eq(draft), eq("v1.0.0"), eq(Set.of(1L)));
     }
@@ -255,6 +264,54 @@ class JobGenerationServiceTest {
     }
 
     // ---- 辅助方法 ----
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void qualitySummary_marksPendingAndUnattributedItemsForReview() {
+        Map<String, Object> draft = Map.of(
+                "basics", Map.of("name", "Test", "_sources", List.of(Map.of("materialId", 1L))),
+                "work", List.of(Map.of("_pending", Map.of("reason", "Need measurable outcome"))),
+                "projects", List.of(Map.of("name", "Unattributed project")));
+
+        Map<String, Object> summary = ReflectionTestUtils.invokeMethod(
+                service, "buildQualitySummary", draft, List.of(), List.of(), false);
+
+        assertEquals(3, summary.get("totalDraftItems"));
+        assertEquals(1, summary.get("sourcedItems"));
+        assertEquals(1, summary.get("pendingItems"));
+        assertEquals(1, summary.get("unsupportedItems"));
+        assertEquals(0, summary.get("draftGapCount"));
+        assertEquals(0, summary.get("missingRequirementCount"));
+        assertEquals("REQUIRES_ACTION", summary.get("readiness"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void qualitySummary_treatsConfirmedPersonalProfileAsBasicsEvidence() {
+        Map<String, Object> draft = Map.of("basics", Map.of("name", "Test Candidate"));
+
+        Map<String, Object> summary = ReflectionTestUtils.invokeMethod(
+                service, "buildQualitySummary", draft, List.of(), List.of("Kafka experience"), true);
+
+        assertEquals(1, summary.get("sourcedItems"));
+        assertEquals(0, summary.get("unsupportedItems"));
+        assertEquals(1, summary.get("missingRequirementCount"));
+        assertEquals("REVIEW_RECOMMENDED", summary.get("readiness"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void emptyBasicsIsReportedAsAGapWithoutContactProfileData() {
+        Map<String, Object> draft = Map.of("basics", Map.of());
+
+        List<MissingItem> gaps = ReflectionTestUtils.invokeMethod(service, "buildMissing", draft);
+        Map<String, Object> summary = ReflectionTestUtils.invokeMethod(
+                service, "buildQualitySummary", draft, gaps, List.of(), false);
+
+        assertEquals("basics", gaps.get(0).section());
+        assertEquals(0, summary.get("sourcedItems"));
+        assertEquals("REQUIRES_ACTION", summary.get("readiness"));
+    }
 
     private AiTask buildTask(Long userId, Long resumeId, Long jdId, List<Long> materialIds) {
         AiTask task = new AiTask();

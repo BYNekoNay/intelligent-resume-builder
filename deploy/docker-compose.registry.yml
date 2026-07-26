@@ -1,0 +1,20 @@
+# Use only images published by the cloud build. Apply after docker-compose.prod.yml.
+services:
+  edge:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/${IMAGE_NAMESPACE:?IMAGE_NAMESPACE is required}/intelligent-resume-edge:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+
+  web:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/${IMAGE_NAMESPACE:?IMAGE_NAMESPACE is required}/intelligent-resume-web:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+
+  api:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/${IMAGE_NAMESPACE:?IMAGE_NAMESPACE is required}/intelligent-resume-api:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+
+  pdf-service:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/${IMAGE_NAMESPACE:?IMAGE_NAMESPACE is required}/intelligent-resume-pdf:${IMAGE_TAG:?IMAGE_TAG is required}
+    build: !reset null
+
+  mysql:
+    image: ${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}/${IMAGE_NAMESPACE:?IMAGE_NAMESPACE is required}/intelligent-resume-mysql:${IMAGE_TAG:?IMAGE_TAG is required}
