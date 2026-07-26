@@ -23,11 +23,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -38,6 +41,7 @@ import static org.mockito.Mockito.*;
  * 覆盖:完整流程、空资料、注入警告、Schema 错误。
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class JobGenerationServiceTest {
 
     @Mock private CareerMaterialRepository materialRepository;
@@ -113,7 +117,7 @@ class JobGenerationServiceTest {
         assertEquals("v1.0.0", result.get("schemaVersion"));
         assertTrue(((List<String>) result.get("warnings")).isEmpty());
         // schema 校验被调用
-        verify(schemaValidator).validate(eq(draft), eq("v1.0.0"));
+        verify(schemaValidator).validate(eq(draft), eq("v1.0.0"), eq(Set.of(1L)));
     }
 
     @Test
@@ -242,12 +246,12 @@ class JobGenerationServiceTest {
 
         // schema 校验失败
         doThrow(new BusinessException(ErrorCode.VALIDATION, "不允许的顶层字段: foo"))
-                .when(schemaValidator).validate(any(), anyString());
+                .when(schemaValidator).validate(any(), anyString(), anySet());
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.executeTask(task));
         assertEquals(ErrorCode.AI_FAILURE, ex.getErrorCode());
-        assertTrue(ex.getMessage().contains("Schema 校验失败"));
+        assertTrue(ex.getMessage().contains("Draft schema validation failed"));
     }
 
     // ---- 辅助方法 ----

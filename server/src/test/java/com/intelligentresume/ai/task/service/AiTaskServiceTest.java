@@ -43,6 +43,8 @@ class AiTaskServiceTest {
     void setUp() {
         idempotencyService = new IdempotencyService();
         service = new AiTaskService(taskRepository, consentService, quotaService, idempotencyService);
+        lenient().when(consentService.hasValidConsent(anyLong(), anyString(), anyCollection()))
+                .thenReturn(true);
     }
 
     @Test
@@ -125,8 +127,6 @@ class AiTaskServiceTest {
     @DisplayName("幂等: 相同 key + 相同指纹 → 返回已有任务")
     void create_sameKeySameFingerprint_returnsExisting() {
         when(consentService.hasValidConsent(100L)).thenReturn(true);
-        doNothing().when(quotaService).check(eq(100L), any());
-
         CreateAiTaskRequest req = new CreateAiTaskRequest(
                 AiTaskType.JOB_GENERATION, Map.of("key", "value"), null, null, null, null, null, null);
 
@@ -149,8 +149,6 @@ class AiTaskServiceTest {
     @DisplayName("幂等: 相同 key + 不同指纹 → CONFLICT")
     void create_sameKeyDifferentFingerprint_throwsConflict() {
         when(consentService.hasValidConsent(100L)).thenReturn(true);
-        doNothing().when(quotaService).check(eq(100L), any());
-
         CreateAiTaskRequest req = new CreateAiTaskRequest(
                 AiTaskType.JOB_GENERATION, Map.of("key", "new-value"), null, null, null, null, null, null);
 
@@ -176,6 +174,18 @@ class AiTaskServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.create(req, "key", 100L));
         assertEquals(ErrorCode.RATE_LIMITED, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("重试任务必须按当前用户校验归属")
+    void retry_crossUser_returnsNotFound() {
+        when(taskRepository.findByIdAndUserId(9L, 100L)).thenReturn(Optional.empty());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.retry(9L, 100L));
+
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+        verify(taskRepository, never()).save(any());
     }
 
     private AiTask task(Long id, Long userId, AiTaskType type, String fingerprint) {

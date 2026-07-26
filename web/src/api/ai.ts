@@ -10,7 +10,7 @@ export interface ConsentRequest {
 
 export interface ConsentResponse {
   id: number
-  eventType: 'GRANTED' | 'WITHDRAWN'
+  status: 'GRANTED' | 'WITHDRAWN'
   createdAt: string
   policyVersion: string
   providerCode: string
@@ -34,11 +34,43 @@ export interface GenerateTaskRequest {
   additionalInput?: Record<string, unknown>
 }
 
+export const JOB_GENERATION_POLICY_VERSION = 'v1.1.0'
+export const JOB_GENERATION_DATA_CATEGORIES = ['CAREER_MATERIAL', 'JOB_DESCRIPTION', 'PERSONAL_PROFILE'] as const
+
+export function hasJobGenerationConsent(consent: ConsentResponse | null | undefined) {
+  return consent?.status === 'GRANTED'
+    && consent.policyVersion === JOB_GENERATION_POLICY_VERSION
+    && consent.taskScopes.includes('JOB_MATERIAL_SELECTION')
+    && consent.taskScopes.includes('JOB_GENERATION')
+    && JOB_GENERATION_DATA_CATEGORIES.every(category => consent.dataCategories.includes(category))
+}
+
+export type MaterialSelectionRequest = GenerateTaskRequest
+
+export interface MaterialSelectionItem {
+  materialId: number
+  title: string
+  materialType: string
+  relevanceScore?: number
+  reason?: string
+  matchedRequirements?: string[]
+  usagePreference?: 'NORMAL' | 'PREFERRED' | 'EXCLUDED'
+  exclusionReason?: 'GLOBAL' | 'MANUAL'
+}
+
+export interface MaterialSelectionResult {
+  recommended: MaterialSelectionItem[]
+  unselected: MaterialSelectionItem[]
+  missingRequirements: string[]
+  excluded: MaterialSelectionItem[]
+}
+
 export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
 
 export interface AiTask {
   id: number
-  taskType: 'JOB_GENERATION' | 'EXPORT_PDF'
+  taskType: 'JOB_MATERIAL_SELECTION' | 'JOB_GENERATION' | 'EXPORT_PDF'
+  parentTaskId?: number | null
   jobDescriptionId: number | null
   status: TaskStatus
   confirmationStatus: 'PENDING' | 'CONFIRMED' | 'REJECTED' | null
@@ -90,8 +122,33 @@ export function withdrawConsent() {
   return apiClient.delete<ApiResponse<ConsentResponse>>('/api/ai/consent')
 }
 
-export function generateForJob(payload: GenerateTaskRequest, idempotencyKey: string) {
-  return apiClient.post<ApiResponse<AiTask>>('/api/ai/generate-resume-for-job', payload, {
+export function selectMaterialsForJob(payload: MaterialSelectionRequest, idempotencyKey: string) {
+  const request = {
+    jobDescriptionId: payload.jobDescriptionId,
+    jdText: payload.jdText,
+    companyName: payload.companyName,
+    positionTitle: payload.positionTitle,
+    includedMaterialIds: payload.input?.includedMaterialIds ?? [],
+    preferredMaterialIds: payload.input?.preferredMaterialIds ?? [],
+    excludedMaterialIds: payload.input?.excludedMaterialIds ?? [],
+    resumeTitle: payload.resumeTitle,
+  }
+  return apiClient.post<ApiResponse<AiTask>>('/api/ai/select-materials-for-job', request, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
+}
+
+export function confirmMaterials(
+  id: number,
+  payload: {
+    taskUpdatedAt: string
+    selectedMaterialIds: number[]
+    forcedIncludedMaterialIds?: number[]
+    resumeTitle?: string
+  },
+  idempotencyKey: string,
+) {
+  return apiClient.post<ApiResponse<AiTask>>(`/api/ai/tasks/${id}/confirm-materials`, payload, {
     headers: { 'Idempotency-Key': idempotencyKey },
   })
 }

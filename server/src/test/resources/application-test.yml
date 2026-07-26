@@ -80,7 +80,7 @@ app:
       max-retries: 1
       batch-size: 1
     consent:
-      policy-version: "v1.0.0"
+      policy-version: "v1.1.0"
     quota:
       JOB_GENERATION: 30
       RESUME_OPTIMIZE: 30

@@ -14,7 +14,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 职业资料 CRUD + 类型过滤 + 引用偏好。
@@ -44,6 +47,7 @@ public class CareerMaterialService {
     @Transactional
     public CareerMaterialDetail create(CreateCareerMaterialRequest req, Long userId) {
         validateContentJsonSize(req.contentJson());
+        validateTypeSpecificContent(req.materialType(), req.contentJson(), userId);
 
         CareerMaterial material = new CareerMaterial();
         material.setUserId(userId);
@@ -77,6 +81,7 @@ public class CareerMaterialService {
         }
         if (req.contentJson() != null) {
             validateContentJsonSize(req.contentJson());
+            validateTypeSpecificContent(material.getMaterialType(), req.contentJson(), userId);
             material.setContentJson(req.contentJson());
         }
         if (req.sourceText() != null) {
@@ -113,6 +118,120 @@ public class CareerMaterialService {
         } catch (JsonProcessingException e) {
             throw new BusinessException(ErrorCode.VALIDATION, "contentJson 序列化失败");
         }
+    }
+
+    /**
+     * Validates the structured fields introduced for reusable career assets.
+     * Related material IDs are resolved through the current user to prevent
+     * cross-user links as well as links to unrelated material categories.
+     */
+    private void validateTypeSpecificContent(MaterialType type, Map<String, Object> content, Long userId) {
+        if (content == null) {
+            throw validation("contentJson is required");
+        }
+        switch (type) {
+            case ACHIEVEMENT -> validateAchievement(content, userId);
+            case LEADERSHIP_EXPERIENCE -> validateLeadership(content, userId);
+            case SKILL_EVIDENCE -> validateSkillEvidence(content, userId);
+            default -> {
+                // Existing material types remain backward compatible.
+            }
+        }
+    }
+
+    private void validateAchievement(Map<String, Object> content, Long userId) {
+        validateRelatedExperience(requiredId(content, "relatedMaterialId"), userId, "relatedMaterialId");
+        requireText(content, "scenario");
+        requireText(content, "action");
+        requireText(content, "outcome");
+        requireText(content, "period");
+        requireText(content, "metricName");
+        String mode = requireText(content, "metricDisplayMode");
+        if (!Set.of("EXACT", "RANGE", "QUALITATIVE").contains(mode)) {
+            throw validation("metricDisplayMode must be EXACT, RANGE, or QUALITATIVE");
+        }
+        switch (mode) {
+            case "EXACT" -> requireText(content, "metricExactValue");
+            case "RANGE" -> requireText(content, "metricDisplayValue");
+            case "QUALITATIVE" -> requireText(content, "metricDisplayValue");
+            default -> throw validation("Unsupported metricDisplayMode");
+        }
+    }
+
+    private void validateLeadership(Map<String, Object> content, Long userId) {
+        validateRelatedExperience(requiredId(content, "relatedMaterialId"), userId, "relatedMaterialId");
+        requireText(content, "responsibilityScope");
+        requireText(content, "collaborationTargets");
+        requireText(content, "teamSize");
+        requireText(content, "crossFunctionalRelationship");
+        requireText(content, "keyDecision");
+        requireText(content, "result");
+    }
+
+    private void validateSkillEvidence(Map<String, Object> content, Long userId) {
+        requireText(content, "skillName");
+        requireText(content, "category");
+        requireText(content, "proficiency");
+        requireText(content, "yearsOfExperience");
+        requireText(content, "lastUsedAt");
+        requireText(content, "applicationDescription");
+        requireText(content, "outcomeEvidence");
+
+        Object relatedValues = content.get("relatedMaterialIds");
+        if (relatedValues == null) {
+            return;
+        }
+        if (!(relatedValues instanceof Collection<?> relatedIds)) {
+            throw validation("relatedMaterialIds must be an array");
+        }
+        for (Object relatedId : relatedIds) {
+            validateRelatedExperience(toId(relatedId, "relatedMaterialIds"), userId, "relatedMaterialIds");
+        }
+    }
+
+    private void validateRelatedExperience(Long materialId, Long userId, String field) {
+        CareerMaterial related = repository.findByIdAndUserId(materialId, userId)
+                .orElseThrow(() -> validation(field + " must reference one of your materials"));
+        if (related.getMaterialType() != MaterialType.WORK_EXPERIENCE
+                && related.getMaterialType() != MaterialType.PROJECT_EXPERIENCE) {
+            throw validation(field + " must reference WORK_EXPERIENCE or PROJECT_EXPERIENCE");
+        }
+    }
+
+    private Long requiredId(Map<String, Object> content, String field) {
+        if (!content.containsKey(field)) {
+            throw validation(field + " is required");
+        }
+        return toId(content.get(field), field);
+    }
+
+    private Long toId(Object value, String field) {
+        if (value instanceof Number number && number.longValue() > 0) {
+            return number.longValue();
+        }
+        if (value instanceof String text) {
+            try {
+                long id = Long.parseLong(text.trim());
+                if (id > 0) {
+                    return id;
+                }
+            } catch (NumberFormatException ignored) {
+                // Report the same user-facing validation error below.
+            }
+        }
+        throw validation(field + " must be a positive material ID");
+    }
+
+    private String requireText(Map<String, Object> content, String field) {
+        Object value = content.get(field);
+        if (value instanceof String text && !text.trim().isEmpty()) {
+            return text.trim();
+        }
+        throw validation(field + " is required");
+    }
+
+    private BusinessException validation(String message) {
+        return new BusinessException(ErrorCode.VALIDATION, message);
     }
 
     private CareerMaterialSummary toSummary(CareerMaterial m) {

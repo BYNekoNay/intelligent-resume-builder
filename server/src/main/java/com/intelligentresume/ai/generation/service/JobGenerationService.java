@@ -1,19 +1,18 @@
 package com.intelligentresume.ai.generation.service;
 
-import com.intelligentresume.ai.generation.dto.*;
-import com.intelligentresume.ai.provider.AiCallContext;
-import com.intelligentresume.ai.provider.AiCallResult;
-import com.intelligentresume.ai.provider.AiProviderRegistry;
+import com.intelligentresume.ai.generation.dto.JobGenerationRequest;
+import com.intelligentresume.ai.generation.dto.MissingItem;
+import com.intelligentresume.ai.generation.dto.SelectedMaterialEntry;
+import com.intelligentresume.ai.provider.*;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
-import com.intelligentresume.careermaterial.domain.CareerMaterial;
+import com.intelligentresume.careermaterial.domain.*;
 import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.domain.JobDescription;
 import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
-import com.intelligentresume.resume.domain.Resume;
 import com.intelligentresume.resume.repository.ResumeRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,28 +20,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-/**
- * 岗位定制生成服务。编排资料选择、Prompt 构建、AI 调用、Schema 校验。
- *
- * <p>关键不变量:
- * <ul>
- *   <li>不创建 resume_version(留给 T08)</li>
- *   <li>成功后 confirmation_status=PENDING</li>
- *   <li>跨用户资料/简历/JD → NOT_FOUND(不泄露存在性)</li>
- *   <li>Prompt Injection 警告但不阻止</li>
- * </ul>
- */
 @Service
 public class JobGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(JobGenerationService.class);
     private static final long DEFAULT_TIMEOUT_MS = 60_000;
+    private static final Pattern LEGACY_SOURCE_ID = Pattern.compile("materialId\\s*=\\s*(\\d+)");
 
     private final CareerMaterialRepository materialRepository;
-    private final JobDescriptionRepository jdRepository;
+    private final JobDescriptionRepository jobRepository;
     private final ResumeRepository resumeRepository;
-    private final AiTaskRepository taskRepository;
     private final MaterialSelector materialSelector;
     private final PromptInjectionDetector injectionDetector;
     private final JobGenerationPromptBuilder promptBuilder;
@@ -51,23 +41,22 @@ public class JobGenerationService {
 
     @Value("${app.ai.generation.prompt-version:v1.0.0}")
     private String promptVersion;
-
     @Value("${app.ai.generation.schema-version:v1.0.0}")
     private String schemaVersion;
 
+    // Keep the established constructor shape so existing tests and wiring remain compatible.
     public JobGenerationService(CareerMaterialRepository materialRepository,
-                                JobDescriptionRepository jdRepository,
+                                JobDescriptionRepository jobRepository,
                                 ResumeRepository resumeRepository,
-                                AiTaskRepository taskRepository,
+                                AiTaskRepository ignoredTaskRepository,
                                 MaterialSelector materialSelector,
                                 PromptInjectionDetector injectionDetector,
                                 JobGenerationPromptBuilder promptBuilder,
                                 JobGenerationSchemaValidator schemaValidator,
                                 AiProviderRegistry providerRegistry) {
         this.materialRepository = materialRepository;
-        this.jdRepository = jdRepository;
+        this.jobRepository = jobRepository;
         this.resumeRepository = resumeRepository;
-        this.taskRepository = taskRepository;
         this.materialSelector = materialSelector;
         this.injectionDetector = injectionDetector;
         this.promptBuilder = promptBuilder;
@@ -75,229 +64,330 @@ public class JobGenerationService {
         this.providerRegistry = providerRegistry;
     }
 
-    /**
-     * 校验生成请求中的资料 ID 归属。供 Controller 在创建任务前同步调用。
-     * 跨用户或不存在的 included/preferred ID → NOT_FOUND。
-     */
     public void validateMaterialIds(Long userId, List<Long> includedIds,
                                     List<Long> preferredIds, List<Long> excludedIds) {
-        List<CareerMaterial> userMaterials = materialRepository.findByUserIdOrderByUpdatedAtDesc(userId);
         Set<Long> ownedIds = new HashSet<>();
-        for (CareerMaterial m : userMaterials) {
-            ownedIds.add(m.getId());
-        }
-        if (includedIds != null) {
-            for (Long id : includedIds) {
-                if (!ownedIds.contains(id)) {
-                    throw new BusinessException(ErrorCode.NOT_FOUND, "资料不存在: " + id);
-                }
-            }
-        }
-        if (preferredIds != null) {
-            for (Long id : preferredIds) {
-                if (!ownedIds.contains(id)) {
-                    throw new BusinessException(ErrorCode.NOT_FOUND, "资料不存在: " + id);
-                }
-            }
-        }
-        // excluded: 不存在的 ID 静默忽略
+        materialRepository.findByUserIdOrderByUpdatedAtDesc(userId)
+                .forEach(material -> ownedIds.add(material.getId()));
+        validateOwned(includedIds, ownedIds);
+        validateOwned(preferredIds, ownedIds);
     }
 
-    /**
-     * 执行岗位定制生成任务。由 TaskExecutionService 分发调用。
-     *
-     * @return result_json 内容(草稿 + 选中/未选/缺失 + 版本 + 警告)
-     * @throws BusinessException 校验失败时抛出(AI_FAILURE)
-     */
+    private void validateOwned(List<Long> ids, Set<Long> ownedIds) {
+        if (ids != null && !ownedIds.containsAll(ids)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "Career material not found");
+        }
+    }
+
     @SuppressWarnings("unchecked")
     public Map<String, Object> executeTask(AiTask task) {
-        Long userId = task.getUserId();
         Map<String, Object> snapshot = task.getInputSnapshotJson();
-
-        // 1. 解析输入
-        Long jdId = toLong(snapshot.get("jobDescriptionId"));
+        if (!snapshot.containsKey("jobSnapshot")) {
+            return executeLegacyTask(task, snapshot);
+        }
         Long resumeId = toLong(snapshot.get("targetResumeId"));
-
-        // 2. 校验简历归属（targetResumeId 可选：不传时确认后自动创建岗位简历）
         if (resumeId != null) {
-            resumeRepository.findByIdAndUserId(resumeId, userId)
-                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
+            resumeRepository.findByIdAndUserId(resumeId, task.getUserId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Resume not found"));
+        }
+        JobDescription job = jobFromSnapshot(snapshot.get("jobSnapshot"));
+        List<CareerMaterial> materials = materialsFromSnapshot(snapshot.get("materialSnapshots"));
+        Map<String, Object> profile = mapValue(snapshot.get("personalProfileSnapshot"));
+        Long jobId = toLong(snapshot.get("jobDescriptionId"));
+        if (job == null || !Objects.equals(job.getId(), jobId)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "Generation task has no confirmed job snapshot");
+        }
+        if (materials.isEmpty()) {
+            throw new BusinessException(ErrorCode.VALIDATION, "No confirmed career materials");
         }
 
-        // 3. 校验 JD 归属
-        JobDescription jd = jdRepository.findByIdAndUserId(jdId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位描述不存在"));
-
-        // 4. Prompt Injection 检测
-        PromptInjectionDetector.DetectionResult detection =
-                injectionDetector.detect(jd.getJdText(), List.of());
+        List<String> sourceTexts = materials.stream().map(CareerMaterial::getSourceText)
+                .filter(Objects::nonNull).toList();
+        PromptInjectionDetector.DetectionResult detection = injectionDetector.detect(job.getJdText(), sourceTexts);
         List<String> warnings = new ArrayList<>();
         if (detection.suspicious()) {
             warnings.add("PromptInjectionDetected");
             log.warn("Prompt injection detected for task {}: {}", task.getId(), detection.matchedPatterns());
         }
 
-        // 5. 加载资料并选择
-        List<CareerMaterial> allMaterials = materialRepository.findByUserIdOrderByUpdatedAtDesc(userId);
-        JobGenerationRequest genReq = parseRequest(snapshot);
-        MaterialSelector.SelectionResult selection = materialSelector.select(userId, allMaterials, genReq);
-
-        // 6. 空资料库处理
-        boolean hasMaterials = !selection.fixed().isEmpty()
-                || !selection.preferred().isEmpty()
-                || !selection.normal().isEmpty();
-        if (!hasMaterials) {
-            warnings.add("InsufficientMaterials");
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("provider", "none");
-            result.put("draftResumeJson", Map.of(
-                    "basics", Map.of("_pending", Map.of("reason", "无资料"))));
-            result.put("selected", List.of());
-            result.put("unselected", List.of());
-            result.put("missing", List.of(Map.of("section", "basics", "reason", "资料库为空")));
-            result.put("warnings", warnings);
-            result.put("promptVersion", promptVersion);
-            result.put("schemaVersion", schemaVersion);
-            return result;
+        JobGenerationPromptBuilder.Prompt prompt = promptBuilder.build(job, materials, List.of(), List.of(),
+                careerProfileContext(profile), promptVersion);
+        Map<String, Object> providerInput = new LinkedHashMap<>();
+        providerInput.put("_systemPrompt", prompt.system());
+        providerInput.put("_taskPrompt", prompt.task());
+        providerInput.put("_dataPrompt", prompt.data());
+        AiCallResult response = providerRegistry.route(AiTaskType.JOB_GENERATION)
+                .call(new AiCallContext(AiTaskType.JOB_GENERATION, providerInput, DEFAULT_TIMEOUT_MS));
+        if (!response.success()) {
+            throw new BusinessException(ErrorCode.AI_FAILURE, "Resume generation failed: " + response.errorMessage());
         }
-
-        // 7. 构建 Prompt
-        JobGenerationPromptBuilder.Prompt prompt = promptBuilder.build(
-                jd, selection.fixed(), selection.preferred(), selection.normal(), promptVersion);
-
-        // 8. 调用 AI Provider(将构建好的 prompt 传入 context,供真实 Provider 使用)
-        Map<String, Object> ctxInput = new HashMap<>(snapshot);
-        ctxInput.put("_systemPrompt", prompt.system());
-        ctxInput.put("_taskPrompt", prompt.task());
-        ctxInput.put("_dataPrompt", prompt.data());
-        AiCallContext ctx = new AiCallContext(AiTaskType.JOB_GENERATION, ctxInput, DEFAULT_TIMEOUT_MS);
-        AiCallResult callResult = providerRegistry.route(AiTaskType.JOB_GENERATION).call(ctx);
-        if (!callResult.success()) {
-            throw new BusinessException(ErrorCode.AI_FAILURE,
-                    "AI 调用失败: " + callResult.errorMessage());
+        Object rawDraft = response.data().get("draftResumeJson");
+        if (!(rawDraft instanceof Map<?, ?> rawMap)) {
+            throw new BusinessException(ErrorCode.AI_FAILURE, "AI output has no draftResumeJson");
         }
-
-        // 9. Schema 校验
-        Map<String, Object> data = callResult.data();
-        Map<String, Object> draft = (Map<String, Object>) data.get("draftResumeJson");
-        if (draft == null) {
-            throw new BusinessException(ErrorCode.AI_FAILURE, "AI 输出缺少 draftResumeJson");
-        }
+        Map<String, Object> draft = (Map<String, Object>) rawMap;
+        normalizeAliases(draft);
         try {
-            schemaValidator.validate(draft, schemaVersion);
+            schemaValidator.validate(draft, schemaVersion,
+                    materials.stream().map(CareerMaterial::getId).collect(java.util.stream.Collectors.toSet()));
         } catch (BusinessException e) {
-            throw new BusinessException(ErrorCode.AI_FAILURE, "草稿 Schema 校验失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.AI_FAILURE, "Draft schema validation failed: " + e.getMessage());
         }
+        mergePersonalProfile(draft, profile);
 
-        // 10. 构建 selected/unselected/missing
-        List<SelectedMaterialEntry> selected = buildSelected(selection);
-        List<UnselectedMaterialEntry> unselected = buildUnselected(selection);
-        List<MissingItem> missing = buildMissing(draft);
-
-        // 11. 组装结果
+        Map<String, CareerMaterial> byId = new HashMap<>();
+        materials.forEach(material -> byId.put(String.valueOf(material.getId()), material));
+        List<SelectedMaterialEntry> selected = new ArrayList<>();
+        collectSources(draft, "", byId, selected);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("provider", providerRegistry.route(AiTaskType.JOB_GENERATION).code());
         result.put("draftResumeJson", draft);
-        result.put("selected", selected);
-        result.put("unselected", unselected);
-        result.put("missing", missing);
+        result.put("selected", selected.stream().distinct().toList());
+        result.put("unselected", List.of());
+        result.put("missing", buildMissing(draft));
         result.put("warnings", warnings);
         result.put("promptVersion", promptVersion);
         result.put("schemaVersion", schemaVersion);
         return result;
     }
 
-    private JobGenerationRequest parseRequest(Map<String, Object> snapshot) {
+    /**
+     * Older queued tasks predate the material-selection snapshot. Keep them
+     * executable during the migration, while every new task must use the
+     * immutable snapshot path above.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> executeLegacyTask(AiTask task, Map<String, Object> snapshot) {
         Long resumeId = toLong(snapshot.get("targetResumeId"));
-        Long jdId = toLong(snapshot.get("jobDescriptionId"));
-        Map<String, Object> input = snapshot.get("input") instanceof Map<?, ?> rawInput
-                ? rawInput.entrySet().stream().collect(HashMap::new,
-                        (map, entry) -> map.put(String.valueOf(entry.getKey()), entry.getValue()),
-                        HashMap::putAll)
-                : snapshot;
-        List<Long> included = toLongList(input.get("includedMaterialIds"));
-        List<Long> preferred = toLongList(input.get("preferredMaterialIds"));
-        List<Long> excluded = toLongList(input.get("excludedMaterialIds"));
-        return new JobGenerationRequest(resumeId, jdId, included, preferred, excluded);
-    }
-
-    private List<SelectedMaterialEntry> buildSelected(MaterialSelector.SelectionResult selection) {
+        if (resumeId != null) {
+            resumeRepository.findByIdAndUserId(resumeId, task.getUserId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Resume not found"));
+        }
+        Long jobId = toLong(snapshot.get("jobDescriptionId"));
+        JobDescription job = jobRepository.findByIdAndUserId(jobId, task.getUserId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Job description not found"));
+        Map<String, Object> input = snapshot.get("input") instanceof Map<?, ?> raw
+                ? (Map<String, Object>) raw : snapshot;
+        JobGenerationRequest request = new JobGenerationRequest(resumeId, jobId,
+                longList(input.get("includedMaterialIds")), longList(input.get("preferredMaterialIds")),
+                longList(input.get("excludedMaterialIds")));
+        List<CareerMaterial> allMaterials = materialRepository.findByUserIdOrderByUpdatedAtDesc(task.getUserId());
+        MaterialSelector.SelectionResult selection = materialSelector.select(task.getUserId(), allMaterials, request);
+        List<CareerMaterial> materials = new ArrayList<>();
+        materials.addAll(selection.fixed());
+        materials.addAll(selection.preferred());
+        materials.addAll(selection.normal());
+        if (materials.isEmpty()) {
+            return Map.of("draftResumeJson", Map.of(), "selected", List.of(), "unselected", List.of(),
+                    "missing", List.of(Map.of("section", "basics", "reason", "No eligible career materials")),
+                    "warnings", List.of("InsufficientMaterials"), "promptVersion", promptVersion,
+                    "schemaVersion", schemaVersion);
+        }
+        PromptInjectionDetector.DetectionResult detection = injectionDetector.detect(job.getJdText(),
+                materials.stream().map(CareerMaterial::getSourceText).filter(Objects::nonNull).toList());
+        List<String> warnings = detection.suspicious() ? List.of("PromptInjectionDetected") : List.of();
+        JobGenerationPromptBuilder.Prompt prompt = promptBuilder.build(job, selection.fixed(), selection.preferred(),
+                selection.normal(), promptVersion);
+        Map<String, Object> providerInput = new LinkedHashMap<>();
+        providerInput.put("_systemPrompt", prompt.system());
+        providerInput.put("_taskPrompt", prompt.task());
+        providerInput.put("_dataPrompt", prompt.data());
+        AiCallResult response = providerRegistry.route(AiTaskType.JOB_GENERATION)
+                .call(new AiCallContext(AiTaskType.JOB_GENERATION, providerInput, DEFAULT_TIMEOUT_MS));
+        if (!response.success()) {
+            throw new BusinessException(ErrorCode.AI_FAILURE, "Resume generation failed: " + response.errorMessage());
+        }
+        Object rawDraft = response.data().get("draftResumeJson");
+        if (!(rawDraft instanceof Map<?, ?> rawMap)) {
+            throw new BusinessException(ErrorCode.AI_FAILURE, "AI output has no draftResumeJson");
+        }
+        Map<String, Object> draft = (Map<String, Object>) rawMap;
+        normalizeAliases(draft);
+        try {
+            schemaValidator.validate(draft, schemaVersion,
+                    materials.stream().map(CareerMaterial::getId).collect(java.util.stream.Collectors.toSet()));
+        } catch (BusinessException e) {
+            throw new BusinessException(ErrorCode.AI_FAILURE, "Draft schema validation failed: " + e.getMessage());
+        }
+        Map<String, CareerMaterial> byId = new HashMap<>();
+        materials.forEach(material -> byId.put(String.valueOf(material.getId()), material));
         List<SelectedMaterialEntry> selected = new ArrayList<>();
-        Map<String, Integer> sectionCounters = new HashMap<>();
-        for (CareerMaterial m : selection.fixed()) {
-            selected.add(toSelectedEntry(m, sectionCounters, "USER_FIXED"));
-        }
-        for (CareerMaterial m : selection.preferred()) {
-            selected.add(toSelectedEntry(m, sectionCounters, "PREFERRED"));
-        }
-        for (CareerMaterial m : selection.normal()) {
-            selected.add(toSelectedEntry(m, sectionCounters, "AUTO_SELECTED"));
-        }
-        return selected;
+        collectSources(draft, "", byId, selected);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("provider", providerRegistry.route(AiTaskType.JOB_GENERATION).code());
+        result.put("draftResumeJson", draft);
+        result.put("selected", selected.stream().distinct().toList());
+        result.put("unselected", selection.excluded());
+        result.put("missing", buildMissing(draft));
+        result.put("warnings", warnings);
+        result.put("promptVersion", promptVersion);
+        result.put("schemaVersion", schemaVersion);
+        return result;
     }
 
-    private SelectedMaterialEntry toSelectedEntry(CareerMaterial m,
-                                                   Map<String, Integer> sectionCounters,
-                                                   String reason) {
-        String section = sectionForType(m);
-        int index = sectionCounters.getOrDefault(section, 0);
-        sectionCounters.put(section, index + 1);
-        return new SelectedMaterialEntry(m.getId(), section + "[" + index + "]", reason);
+    @SuppressWarnings("unchecked")
+    private void normalizeAliases(Map<String, Object> draft) {
+        renameEach(draft.get("work"), Map.of("title", "position", "role", "position"));
+        renameEach(draft.get("projects"), Map.of("title", "name", "position", "role"));
+        renameEach(draft.get("education"), Map.of("institution", "school", "field", "major", "studyType", "degree"));
+        renameEach(draft.get("certificates"), Map.of("title", "name", "organization", "issuer"));
+        renameEach(draft.get("skills"), Map.of("keywords", "items"));
     }
 
-    private List<UnselectedMaterialEntry> buildUnselected(MaterialSelector.SelectionResult selection) {
-        List<UnselectedMaterialEntry> unselected = new ArrayList<>();
-        selection.unselectedReasons().forEach((id, reason) ->
-                unselected.add(new UnselectedMaterialEntry(id, reason, reason)));
-        return unselected;
+    @SuppressWarnings("unchecked")
+    private void renameEach(Object value, Map<String, String> aliases) {
+        if (!(value instanceof List<?> list)) return;
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> raw)) continue;
+            Map<String, Object> map = (Map<String, Object>) raw;
+            aliases.forEach((from, to) -> {
+                if (!map.containsKey(to) && map.containsKey(from)) map.put(to, map.remove(from));
+            });
+            Object highlights = map.get("highlights");
+            if (highlights instanceof String text) map.put("highlights", List.of(text));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void mergePersonalProfile(Map<String, Object> draft, Map<String, Object> profile) {
+        Map<String, Object> basics = draft.get("basics") instanceof Map<?, ?> raw
+                ? (Map<String, Object>) raw : new LinkedHashMap<>();
+        for (String key : List.of("name", "email", "phone", "location", "website")) {
+            basics.remove(key);
+        }
+        putKnown(basics, "name", profile.get("fullName"));
+        putKnown(basics, "email", profile.get("email"));
+        putKnown(basics, "phone", profile.get("phone"));
+        putKnown(basics, "location", profile.get("location"));
+        putKnown(basics, "website", profile.get("website"));
+        if (!basics.isEmpty()) basics.remove("_pending");
+        draft.put("basics", basics);
+    }
+
+    private void putKnown(Map<String, Object> target, String key, Object value) {
+        if (value != null && !value.toString().isBlank()) target.put(key, value);
     }
 
     private List<MissingItem> buildMissing(Map<String, Object> draft) {
         List<MissingItem> missing = new ArrayList<>();
-        Set<String> expectedSections = Set.of("basics", "work", "education", "skills");
-        for (String section : expectedSections) {
-            if (!draft.containsKey(section)) {
-                missing.add(new MissingItem(section, "资料库缺少" + section + "相关内容"));
+        for (String section : List.of("basics", "work", "education", "skills")) {
+            Object value = draft.get(section);
+            if (value == null || value instanceof Collection<?> collection && collection.isEmpty()) {
+                missing.add(new MissingItem(section, "No supported content"));
+            } else {
+                collectPending(value, section, missing);
             }
         }
         return missing;
     }
 
-    private String sectionForType(CareerMaterial m) {
-        return switch (m.getMaterialType()) {
-            case WORK_EXPERIENCE -> "work";
-            case PROJECT_EXPERIENCE -> "projects";
-            case SKILL -> "skills";
-            case EDUCATION -> "education";
-            case CERTIFICATE -> "certificates";
-            case HIGHLIGHT, AWARD -> "basics";
-        };
-    }
-
-    private Long toLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Number n) {
-            return n.longValue();
-        }
-        try {
-            return Long.parseLong(value.toString());
-        } catch (NumberFormatException e) {
-            return null;
+    @SuppressWarnings("unchecked")
+    private void collectPending(Object value, String path, List<MissingItem> missing) {
+        if (value instanceof Map<?, ?> raw) {
+            Map<String, Object> map = (Map<String, Object>) raw;
+            if (map.containsKey("_pending")) {
+                Object pending = map.get("_pending");
+                String reason = pending instanceof Map<?, ?> detail
+                        ? Objects.toString(detail.get("reason"), "Missing information")
+                        : Objects.toString(pending, "Missing information");
+                missing.add(new MissingItem(path, reason));
+            }
+            map.forEach((key, child) -> {
+                if (!key.startsWith("_")) collectPending(child, path + "." + key, missing);
+            });
+        } else if (value instanceof List<?> list) {
+            for (int i = 0; i < list.size(); i++) collectPending(list.get(i), path + "[" + i + "]", missing);
         }
     }
 
     @SuppressWarnings("unchecked")
-    private List<Long> toLongList(Object value) {
-        if (value == null) {
-            return List.of();
+    private void collectSources(Object value, String path, Map<String, CareerMaterial> byId,
+                                List<SelectedMaterialEntry> selected) {
+        if (value instanceof Map<?, ?> raw) {
+            Map<String, Object> map = (Map<String, Object>) raw;
+            Object sources = map.get("_sources");
+            if (sources instanceof List<?> list) {
+                for (Object source : list) {
+                    if (source instanceof Map<?, ?> detail) addSource(detail.get("materialId"), path, byId, selected);
+                }
+            }
+            Object legacy = map.get("_source");
+            if (legacy != null) {
+                Matcher matcher = LEGACY_SOURCE_ID.matcher(legacy.toString());
+                while (matcher.find()) addSource(matcher.group(1), path, byId, selected);
+            }
+            map.forEach((key, child) -> {
+                if (!key.startsWith("_")) collectSources(child, path.isBlank() ? key : path + "." + key, byId, selected);
+            });
+        } else if (value instanceof List<?> list) {
+            for (int i = 0; i < list.size(); i++) collectSources(list.get(i), path + "[" + i + "]", byId, selected);
         }
-        if (value instanceof List<?> list) {
-            return list.stream()
-                    .map(item -> item instanceof Number n ? n.longValue() : Long.parseLong(item.toString()))
-                    .toList();
+    }
+
+    private void addSource(Object rawId, String path, Map<String, CareerMaterial> byId,
+                           List<SelectedMaterialEntry> selected) {
+        CareerMaterial material = byId.get(String.valueOf(rawId));
+        if (material != null) selected.add(new SelectedMaterialEntry(material.getId(), path, "AI_REFERENCED"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private JobDescription jobFromSnapshot(Object raw) {
+        Map<String, Object> value = mapValue(raw);
+        if (value.isEmpty()) return null;
+        JobDescription job = new JobDescription();
+        job.setId(toLong(value.get("id")));
+        job.setTitle(stringValue(value.get("title")));
+        job.setCompanyName(stringValue(value.get("companyName")));
+        job.setJdText(stringValue(value.get("jdText")));
+        return job;
+    }
+
+    private List<CareerMaterial> materialsFromSnapshot(Object raw) {
+        if (!(raw instanceof List<?> list)) return List.of();
+        List<CareerMaterial> materials = new ArrayList<>();
+        for (Object item : list) {
+            Map<String, Object> value = mapValue(item);
+            if (value.isEmpty()) continue;
+            CareerMaterial material = new CareerMaterial();
+            material.setId(toLong(value.get("id")));
+            material.setTitle(stringValue(value.get("title")));
+            material.setMaterialType(MaterialType.valueOf(stringValue(value.get("materialType"))));
+            material.setUsagePreference(UsagePreference.valueOf(stringValue(value.get("usagePreference"))));
+            material.setSourceText(stringValue(value.get("sourceText")));
+            material.setContentJson(mapValue(value.get("contentJson")));
+            materials.add(material);
         }
-        return List.of();
+        return materials;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        if (!(value instanceof Map<?, ?> raw)) return new LinkedHashMap<>();
+        Map<String, Object> result = new LinkedHashMap<>();
+        raw.forEach((key, child) -> result.put(String.valueOf(key), child));
+        return result;
+    }
+
+    private String stringValue(Object value) { return value == null ? null : value.toString(); }
+
+    private Map<String, Object> careerProfileContext(Map<String, Object> profile) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        for (String key : List.of("profileSummary", "targetRoleTitles", "targetSeniority", "targetIndustries",
+                "targetWorkPreferences", "careerPositioningSummary")) {
+            Object value = profile.get(key);
+            if (value instanceof Collection<?> collection && collection.isEmpty()) continue;
+            if (value != null && !value.toString().isBlank()) context.put(key, value);
+        }
+        return context;
+    }
+    private Long toLong(Object value) {
+        if (value instanceof Number number) return number.longValue();
+        try { return value == null ? null : Long.valueOf(value.toString()); }
+        catch (NumberFormatException ignored) { return null; }
+    }
+
+    private List<Long> longList(Object value) {
+        if (!(value instanceof Collection<?> values)) return List.of();
+        return values.stream().map(this::toLong).filter(Objects::nonNull).toList();
     }
 }

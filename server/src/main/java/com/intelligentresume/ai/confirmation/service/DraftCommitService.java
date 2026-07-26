@@ -158,8 +158,18 @@ public class DraftCommitService {
             resumeId = resume.getId();
         } else {
             // 校验目标简历归属
-            resumeRepository.findByIdAndUserId(resumeId, userId)
+            Resume target = resumeRepository.findByIdAndUserId(resumeId, userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
+        }
+
+        if (targetResumeIdOverride != null) {
+            Resume target = resumeRepository.findByIdAndUserId(resumeId, userId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Resume not found"));
+            Long jobDescriptionId = toLong(snapshot.get("jobDescriptionId"));
+            if (jobDescriptionId == null || !jobDescriptionId.equals(target.getJobDescriptionId())) {
+                throw new BusinessException(ErrorCode.VALIDATION,
+                        "A generated job resume can only update a resume linked to the same job description");
+            }
         }
 
         Map<String, Object> genContext = new LinkedHashMap<>();

@@ -37,7 +37,7 @@ class AiConsentServiceTest {
 
     private AiConsentService service;
 
-    private static final String POLICY_VERSION = "v1.0.0";
+    private static final String POLICY_VERSION = "v1.1.0";
 
     @BeforeEach
     void setUp() {
@@ -153,6 +153,21 @@ class AiConsentServiceTest {
         when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
                 .thenReturn(Optional.empty());
         assertFalse(service.hasValidConsent(100L));
+    }
+
+    @Test
+    void scopedConsentRequiresCurrentPolicyScopeAndEveryCategory() {
+        AiConsent granted = consent(1L, 100L, ConsentStatus.GRANTED);
+        granted.setTaskScopesJson(List.of("JOB_GENERATION"));
+        granted.setDataCategoriesJson(List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE"));
+        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L)).thenReturn(Optional.of(granted));
+
+        assertTrue(service.hasValidConsent(100L, "JOB_GENERATION",
+                List.of("JOB_DESCRIPTION", "PERSONAL_PROFILE")));
+        assertFalse(service.hasValidConsent(100L, "JOB_MATERIAL_SELECTION",
+                List.of("JOB_DESCRIPTION")));
+        assertFalse(service.hasValidConsent(100L, "JOB_GENERATION",
+                List.of("UNKNOWN_CATEGORY")));
     }
 
     private AiConsent consent(Long id, Long userId, ConsentStatus status) {

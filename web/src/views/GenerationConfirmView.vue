@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed } from 'vue'
+import { onMounted, onUnmounted, ref, computed, toRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAiTaskStore } from '@/stores/aiTask'
 import { getTask, confirmTask, rejectTask, retryTask } from '@/api/ai'
 import { listResumesByJd, type ResumeSummary } from '@/api/resume'
+import DraftContentFields from '@/components/DraftContentFields.vue'
+import { Check, Pencil, Trash2 } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +25,7 @@ interface DraftItem {
   path: string
   section: string
   content: any
+  provenance: Record<string, unknown>
   source: string | null
   pending: string | null
   decision: 'ACCEPT' | 'EDIT' | 'REJECT' | null
@@ -43,7 +46,7 @@ const resumeTitle = ref('')
 // Edit dialog
 const showEditDialog = ref(false)
 const editingItem = ref<DraftItem | null>(null)
-const editText = ref('')
+const editValue = ref<unknown>(null)
 
 // Resume title input
 const customTitle = ref('')
@@ -130,7 +133,8 @@ function parseDraft() {
           path,
           section,
           content: stripMeta(entry),
-          source: entry._source ?? null,
+          provenance: sourceMeta(entry),
+          source: entry._source ?? (entry._sources ? '资料库' : null),
           pending: entry._pending?.reason ?? (typeof entry._pending === 'string' ? entry._pending : null),
           decision: entry._pending ? null : 'ACCEPT',
           editedValue: null,
@@ -142,7 +146,8 @@ function parseDraft() {
         path,
         section,
         content: stripMeta(data),
-        source: data._source ?? null,
+        provenance: sourceMeta(data),
+        source: data._source ?? (data._sources ? '资料库' : null),
         pending: data._pending?.reason ?? (typeof data._pending === 'string' ? data._pending : null),
         decision: data._pending ? null : 'ACCEPT',
         editedValue: null,
@@ -152,10 +157,21 @@ function parseDraft() {
   draftItems.value = items
 }
 
-function stripMeta(obj: any): any {
-  if (obj === null || typeof obj !== 'object') return obj
-  const { _source, _pending, ...rest } = obj
-  return rest
+function stripMeta(value: any): any {
+  if (Array.isArray(value)) return value.map(stripMeta)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== '_source' && key !== '_sources' && key !== '_pending')
+      .map(([key, nestedValue]) => [key, stripMeta(nestedValue)]),
+  )
+}
+
+function sourceMeta(value: any): Record<string, unknown> {
+  if (value?._source) return { _source: value._source }
+  if (value?._sources) return { _sources: value._sources }
+  if (value?._pending) return { _pending: value._pending }
+  return {}
 }
 
 const SECTION_LABELS: Record<string, string> = {
@@ -165,6 +181,15 @@ const SECTION_LABELS: Record<string, string> = {
   skills: '技能',
   projects: '项目经历',
   certificates: '证书',
+}
+
+const SECTION_EDIT_TEMPLATES: Record<string, Record<string, unknown>> = {
+  basics: { name: '', title: '', email: '', phone: '', location: '', summary: '' },
+  work: { company: '', position: '', period: '', description: '', highlights: [] },
+  education: { school: '', degree: '', major: '', period: '' },
+  skills: { name: '', level: '' },
+  projects: { name: '', role: '', period: '', description: '', highlights: [] },
+  certificates: { name: '', issuer: '', date: '', credentialId: '' },
 }
 
 const groupedItems = computed(() => {
@@ -182,24 +207,41 @@ const pendingCount = computed(() =>
 
 function openEdit(item: DraftItem) {
   editingItem.value = item
-  editText.value = JSON.stringify(item.content, null, 2)
+  const content = structuredClone(toRaw(item.content))
+  editValue.value = content !== null && typeof content === 'object' && !Array.isArray(content)
+    ? { ...(SECTION_EDIT_TEMPLATES[item.section] ?? {}), ...content }
+    : content
   showEditDialog.value = true
 }
 
 function saveEdit() {
   if (!editingItem.value) return
-  try {
-    const parsed = JSON.parse(editText.value)
-    editingItem.value.editedValue = parsed
-    editingItem.value.content = parsed
-    editingItem.value.decision = 'EDIT'
-  } catch {
-    // keep as string edit
-    editingItem.value.editedValue = { text: editText.value }
-    editingItem.value.decision = 'EDIT'
-  }
+  const cleanedValue = removeEmptyFields(editValue.value)
+  editingItem.value.editedValue = Object.assign({}, cleanedValue as Record<string, unknown>, editingItem.value.provenance)
+  editingItem.value.content = cleanedValue
+  editingItem.value.decision = 'EDIT'
   showEditDialog.value = false
   editingItem.value = null
+}
+
+function removeEmptyFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(removeEmptyFields).filter(item => !isEmptyValue(item))
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, nestedValue]) => [key, removeEmptyFields(nestedValue)])
+        .filter(([, nestedValue]) => !isEmptyValue(nestedValue)),
+    )
+  }
+  return value
+}
+
+function isEmptyValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return true
+  if (Array.isArray(value)) return value.length === 0
+  return typeof value === 'object' && Object.keys(value).length === 0
 }
 
 function setDecision(item: DraftItem, decision: 'ACCEPT' | 'REJECT') {
@@ -332,23 +374,25 @@ async function handleRetry() {
       <!-- Draft items by section -->
       <div v-for="(items, section) in groupedItems" :key="section" class="draft-section">
         <h3>{{ SECTION_LABELS[section as string] ?? section }}</h3>
-        <div v-for="item in items" :key="item.path" :class="['draft-item', item.decision?.toLowerCase()]">
-          <div class="item-header">
-            <span class="item-path">{{ item.path }}</span>
-            <span v-if="item.source" class="source-badge">来源：资料 #{{ item.source }}</span>
+        <div v-for="(item, itemIndex) in items" :key="item.path" :class="['draft-item', item.decision?.toLowerCase()]">
+          <div v-if="items.length > 1 || item.source || item.pending" class="item-header">
+            <span v-if="items.length > 1" class="item-number">第 {{ itemIndex + 1 }} 条</span>
+            <span v-if="item.source" class="source-badge">来源：资料库</span>
             <span v-if="item.pending" class="pending-badge">待补充：{{ item.pending }}</span>
           </div>
-          <pre class="item-content">{{ JSON.stringify(item.content, null, 2) }}</pre>
+          <DraftContentFields :model-value="item.content" />
           <div class="item-actions">
             <button
               :class="['action-btn accept', { active: item.decision === 'ACCEPT' }]"
+              :aria-pressed="item.decision === 'ACCEPT'"
               @click="setDecision(item, 'ACCEPT')"
-            >接受</button>
-            <button class="action-btn edit" @click="openEdit(item)">编辑</button>
+            ><Check :size="15" /><span>接受</span></button>
+            <button class="action-btn edit" @click="openEdit(item)"><Pencil :size="15" /><span>编辑</span></button>
             <button
               :class="['action-btn reject', { active: item.decision === 'REJECT' }]"
+              :aria-pressed="item.decision === 'REJECT'"
               @click="setDecision(item, 'REJECT')"
-            >删除</button>
+            ><Trash2 :size="15" /><span>删除</span></button>
           </div>
         </div>
       </div>
@@ -358,7 +402,7 @@ async function handleRetry() {
         <summary>未使用的资料（{{ unselectedInfo.length }} 条）</summary>
         <ul>
           <li v-for="(u, i) in unselectedInfo" :key="i">
-            资料 #{{ u.materialId }}：{{ u.unselectedReason }}
+            {{ u.title || '未命名资料' }}：{{ u.unselectedReason }}
           </li>
         </ul>
       </details>
@@ -407,9 +451,9 @@ async function handleRetry() {
     <!-- Edit Dialog -->
     <Teleport to="body">
       <div v-if="showEditDialog" class="dialog-overlay" @click.self="showEditDialog = false">
-        <div class="dialog">
-          <h3>编辑内容</h3>
-          <textarea v-model="editText" class="edit-textarea" rows="12"></textarea>
+        <div class="dialog edit-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-edit-title">
+          <h3 id="draft-edit-title">编辑内容</h3>
+          <DraftContentFields v-model="editValue" editable />
           <div class="dialog-actions">
             <button class="btn-primary" @click="saveEdit">保存</button>
             <button class="btn-secondary" @click="showEditDialog = false">取消</button>
@@ -521,10 +565,10 @@ header h1 {
   margin-bottom: 0.4rem;
   flex-wrap: wrap;
 }
-.item-path {
+.item-number {
   font-size: 0.75rem;
-  color: #9ca3af;
-  font-family: monospace;
+  color: #64748b;
+  font-weight: 600;
 }
 .source-badge {
   font-size: 0.7rem;
@@ -540,43 +584,69 @@ header h1 {
   color: #92400e;
   border-radius: 3px;
 }
-.item-content {
-  font-size: 0.8rem;
-  background: #f9fafb;
-  padding: 0.5rem;
-  border-radius: 4px;
-  overflow-x: auto;
-  max-height: 150px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
 .item-actions {
   display: flex;
-  gap: 0.4rem;
-  margin-top: 0.5rem;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #edf1f5;
 }
 .action-btn {
-  font-size: 0.75rem;
-  padding: 0.25rem 0.6rem;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 76px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #d9e0e8;
+  border-radius: 6px;
   background: #fff;
+  color: #475569;
+  font: 600 13px/1 inherit;
+  white-space: nowrap;
   cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.action-btn svg {
+  flex: 0 0 auto;
+}
+.action-btn:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+  transform: translateY(-1px);
+}
+.action-btn:focus-visible {
+  outline: 2px solid rgba(14, 116, 144, 0.28);
+  outline-offset: 2px;
+}
+.action-btn.accept {
+  color: #047857;
+}
+.action-btn.accept:hover {
+  border-color: #6ee7b7;
+  background: #ecfdf5;
 }
 .action-btn.accept.active {
-  background: #10b981;
-  border-color: #10b981;
+  background: #059669;
+  border-color: #059669;
   color: #fff;
+}
+.action-btn.edit {
+  color: #1d4ed8;
 }
 .action-btn.reject.active {
-  background: #ef4444;
-  border-color: #ef4444;
+  background: #dc2626;
+  border-color: #dc2626;
   color: #fff;
 }
-.action-btn.edit:hover {
-  border-color: #3b82f6;
-  color: #3b82f6;
+.action-btn.reject {
+  color: #b91c1c;
+}
+.action-btn.reject:hover {
+  border-color: #fca5a5;
+  background: #fef2f2;
 }
 .unselected-details {
   margin-bottom: 1.5rem;
@@ -680,6 +750,9 @@ header h1 {
 .dialog h3 {
   margin-bottom: 0.75rem;
 }
+.edit-dialog {
+  max-width: 640px;
+}
 .existing-list {
   margin: 1rem 0;
 }
@@ -695,13 +768,23 @@ header h1 {
   gap: 0.75rem;
   margin-top: 1rem;
 }
-.edit-textarea {
-  width: 100%;
-  font-family: monospace;
-  font-size: 0.85rem;
-  padding: 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  resize: vertical;
+@media (max-width: 560px) {
+  .item-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .action-btn {
+    width: 100%;
+    min-width: 0;
+    padding: 0 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .action-btn {
+    transition: none;
+  }
+  .action-btn:hover {
+    transform: none;
+  }
 }
 </style>

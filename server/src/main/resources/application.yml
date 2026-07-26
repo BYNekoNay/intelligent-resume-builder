@@ -125,8 +125,9 @@ app:
       max-retries: ${AI_WORKER_MAX_RETRIES:3}
       batch-size: ${AI_WORKER_BATCH:5}
     consent:
-      policy-version: "v1.0.0"
+      policy-version: "v1.1.0"
     quota:
+      JOB_MATERIAL_SELECTION: 30
       JOB_GENERATION: 30
       RESUME_OPTIMIZE: 30
       INLINE_OPTIMIZE: 60

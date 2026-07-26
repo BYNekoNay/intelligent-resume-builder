@@ -52,7 +52,7 @@ class AiTaskControllerIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "policyVersion": "v1.0.0",
+                                  "policyVersion": "v1.1.0",
                                   "providerCode": "bailian",
                                   "taskScopes": ["JOB_GENERATION", "RESUME_OPTIMIZE"],
                                   "dataCategories": ["resume", "career_material"],
@@ -89,20 +89,20 @@ class AiTaskControllerIT {
     @Order(3)
     @DisplayName("POST /api/ai/generate-resume-for-job 已授权 → 202 PENDING")
     void createTask_consented_202() throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/ai/generate-resume-for-job")
+        MvcResult result = mockMvc.perform(post("/api/ai/tasks")
                         .header("Authorization", "Bearer " + tokenA)
                         .header("Idempotency-Key", "test-idem-key-001")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "taskType": "JOB_GENERATION",
+                                  "taskType": "RESUME_OPTIMIZE",
                                   "input": {"prompt": "生成简历"}
                                 }
                                 """))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.id").isNumber())
-                .andExpect(jsonPath("$.data.taskType").value("JOB_GENERATION"))
+                .andExpect(jsonPath("$.data.taskType").value("RESUME_OPTIMIZE"))
                 .andExpect(jsonPath("$.data.status").value("PENDING"))
                 .andReturn();
 
@@ -116,11 +116,11 @@ class AiTaskControllerIT {
     @Order(4)
     @DisplayName("未授权 AI 同意创建任务 → 403 + 40302")
     void createTask_notConsented_40302() throws Exception {
-        mockMvc.perform(post("/api/ai/generate-resume-for-job")
+        mockMvc.perform(post("/api/ai/tasks")
                         .header("Authorization", "Bearer " + tokenB)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"taskType": "JOB_GENERATION"}
+                                {"taskType": "RESUME_OPTIMIZE"}
                                 """))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(40302));
@@ -144,13 +144,13 @@ class AiTaskControllerIT {
     @Order(6)
     @DisplayName("幂等: 相同 Idempotency-Key + 相同内容 → 返回同一任务 ID")
     void createTask_idempotent_sameFingerprint_returnsSameTask() throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/ai/generate-resume-for-job")
+        MvcResult result = mockMvc.perform(post("/api/ai/tasks")
                         .header("Authorization", "Bearer " + tokenA)
                         .header("Idempotency-Key", "test-idem-key-001")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "taskType": "JOB_GENERATION",
+                                  "taskType": "RESUME_OPTIMIZE",
                                   "input": {"prompt": "生成简历"}
                                 }
                                 """))
@@ -174,7 +174,7 @@ class AiTaskControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.status").value("GRANTED"))
-                .andExpect(jsonPath("$.data.policyVersion").value("v1.0.0"));
+                .andExpect(jsonPath("$.data.policyVersion").value("v1.1.0"));
     }
 
     // ---- 6. 未登录 → 403 ----
@@ -183,10 +183,10 @@ class AiTaskControllerIT {
     @Order(8)
     @DisplayName("未登录访问 AI 接口 → 403（Spring Security 拦截）")
     void withoutAuth_403() throws Exception {
-        mockMvc.perform(post("/api/ai/generate-resume-for-job")
+        mockMvc.perform(post("/api/ai/tasks")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"taskType": "JOB_GENERATION"}
+                                {"taskType": "RESUME_OPTIMIZE"}
                                 """))
                 .andExpect(status().isForbidden());
     }

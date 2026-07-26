@@ -13,6 +13,7 @@ import java.util.Map;
 public record AiTaskStatusResponse(
         Long id,
         AiTaskType taskType,
+        Long parentTaskId,
         Long jobDescriptionId,
         AiTaskStatus status,
         Map<String, Object> resultJson,

@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.List;
 
 /**
  * AI 任务服务。处理任务创建(含幂等性检查)和查询。
@@ -54,10 +55,17 @@ public class AiTaskService {
         if (!consentService.hasValidConsent(userId)) {
             throw new BusinessException(ErrorCode.CONSENT_REQUIRED);
         }
+        List<String> requiredCategories = switch (req.taskType()) {
+            case JOB_MATERIAL_SELECTION, JOB_GENERATION ->
+                    List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE");
+            default -> List.of();
+        };
+        if (!consentService.hasValidConsent(userId, req.taskType().name(), requiredCategories)) {
+            throw new BusinessException(ErrorCode.CONSENT_REQUIRED,
+                    "AI authorization does not cover this task or its data categories");
+        }
 
         // 2. 校验配额
-        quotaService.check(userId, req.taskType());
-
         // 3. 计算指纹
         Map<String, Object> inputSnapshot = buildInputSnapshot(req);
         String fingerprint = idempotencyService.fingerprint(inputSnapshot);
@@ -73,6 +81,8 @@ public class AiTaskService {
             throw new BusinessException(ErrorCode.CONFLICT,
                     "相同幂等键的请求内容不一致");
         }
+
+        quotaService.check(userId, req.taskType());
 
         // 5. 创建任务
         AiTask task = new AiTask();
@@ -125,10 +135,11 @@ public class AiTaskService {
         return snapshot;
     }
 
-    private AiTaskStatusResponse toResponse(AiTask task) {
+    public AiTaskStatusResponse toResponse(AiTask task) {
         return new AiTaskStatusResponse(
                 task.getId(),
                 task.getTaskType(),
+                task.getParentTaskId(),
                 toLong(task.getInputSnapshotJson().get("jobDescriptionId")),
                 task.getStatus(),
                 task.getResultJson(),
@@ -157,7 +168,7 @@ public class AiTaskService {
 
     @Transactional
     public AiTaskStatusResponse retry(Long taskId, Long userId) {
-        AiTask task = taskRepository.findById(taskId)
+        AiTask task = taskRepository.findByIdAndUserId(taskId, userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "AI 任务不存在"));
         if (!com.intelligentresume.ai.task.domain.AiTaskStatus.FAILED.equals(task.getStatus())) {
             throw new BusinessException(ErrorCode.VALIDATION, "只有失败的任务可以重试");

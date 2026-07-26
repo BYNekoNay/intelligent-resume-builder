@@ -29,6 +29,8 @@ pdf-output/
 
 # Local tooling and OS files
 .omc/
+.workbuddy/
+*.bak
 .DS_Store
 Thumbs.db
 

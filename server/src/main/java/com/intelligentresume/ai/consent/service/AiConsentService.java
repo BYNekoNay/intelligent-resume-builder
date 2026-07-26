@@ -11,6 +11,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+
 /**
  * AI 同意服务。事件溯源模型:每次操作追加新事件,不修改历史。
  */
@@ -96,6 +98,17 @@ public class AiConsentService {
         return repository.findFirstByUserIdOrderByCreatedAtDesc(userId)
                 .map(c -> c.getEventType() == ConsentStatus.GRANTED)
                 .orElse(false);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean hasValidConsent(Long userId, String taskScope, Collection<String> dataCategories) {
+        return repository.findFirstByUserIdOrderByCreatedAtDesc(userId)
+                .filter(c -> c.getEventType() == ConsentStatus.GRANTED)
+                .filter(c -> policyVersion.equals(c.getPolicyVersion()))
+                .filter(c -> c.getTaskScopesJson() != null && c.getTaskScopesJson().contains(taskScope))
+                .filter(c -> c.getDataCategoriesJson() != null
+                        && c.getDataCategoriesJson().containsAll(dataCategories))
+                .isPresent();
     }
 
     private ConsentResponse toResponse(AiConsent c) {

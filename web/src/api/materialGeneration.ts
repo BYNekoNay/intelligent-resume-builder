@@ -41,7 +41,7 @@ export async function generateMaterialAssociation(rawMaterialText: string) {
 }
 
 async function createMaterialTask(input: Record<string, unknown>) {
-  const createResp = await apiClient.post<ApiResponse<{ id: number; status: string }>>('/api/ai/generate-resume-for-job', { taskType: 'MATERIAL_IMPORT', input })
+  const createResp = await apiClient.post<ApiResponse<{ id: number; status: string }>>('/api/ai/tasks', { taskType: 'MATERIAL_IMPORT', input })
   return createResp.data.data.id
 }
 

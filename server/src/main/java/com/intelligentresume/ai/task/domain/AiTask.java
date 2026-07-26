@@ -33,6 +33,9 @@ public class AiTask {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "parent_task_id")
+    private Long parentTaskId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "task_type", nullable = false, length = 32)
     private AiTaskType taskType;
@@ -98,6 +101,8 @@ public class AiTask {
     public void setId(Long id) { this.id = id; }
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }
+    public Long getParentTaskId() { return parentTaskId; }
+    public void setParentTaskId(Long parentTaskId) { this.parentTaskId = parentTaskId; }
     public AiTaskType getTaskType() { return taskType; }
     public void setTaskType(AiTaskType taskType) { this.taskType = taskType; }
     public String getIdempotencyKey() { return idempotencyKey; }

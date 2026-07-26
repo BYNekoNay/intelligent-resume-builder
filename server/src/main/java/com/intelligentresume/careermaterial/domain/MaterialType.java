@@ -12,5 +12,8 @@ public enum MaterialType {
     EDUCATION,
     CERTIFICATE,
     HIGHLIGHT,
-    AWARD
+    AWARD,
+    ACHIEVEMENT,
+    LEADERSHIP_EXPERIENCE,
+    SKILL_EVIDENCE
 }

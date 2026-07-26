@@ -1,6 +1,8 @@
 package com.intelligentresume.ai.worker;
 
+import com.intelligentresume.ai.consent.service.AiConsentService;
 import com.intelligentresume.ai.generation.service.JobGenerationService;
+import com.intelligentresume.ai.selection.service.JobMaterialSelectionService;
 import com.intelligentresume.ai.provider.AiCallContext;
 import com.intelligentresume.ai.provider.AiCallResult;
 import com.intelligentresume.ai.provider.AiProviderRegistry;
@@ -12,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.List;
 
 /**
  * 任务执行服务。按 taskType 分发:JOB_GENERATION(含 jobDescriptionId)
@@ -26,13 +29,19 @@ public class TaskExecutionService {
     private final AiProviderRegistry providerRegistry;
     private final TaskLeaseService leaseService;
     private final JobGenerationService jobGenerationService;
+    private final JobMaterialSelectionService materialSelectionService;
+    private final AiConsentService consentService;
 
     public TaskExecutionService(AiProviderRegistry providerRegistry,
                                 TaskLeaseService leaseService,
-                                JobGenerationService jobGenerationService) {
+                                JobGenerationService jobGenerationService,
+                                JobMaterialSelectionService materialSelectionService,
+                                AiConsentService consentService) {
         this.providerRegistry = providerRegistry;
         this.leaseService = leaseService;
         this.jobGenerationService = jobGenerationService;
+        this.materialSelectionService = materialSelectionService;
+        this.consentService = consentService;
     }
 
     /**
@@ -40,10 +49,36 @@ public class TaskExecutionService {
      */
     public void execute(AiTask task, String owner) {
         log.debug("Executing task {} (type={}, owner={})", task.getId(), task.getTaskType(), owner);
-        if (task.getTaskType() == AiTaskType.JOB_GENERATION && hasJobDescriptionId(task)) {
+        if (!hasExecutionConsent(task)) {
+            leaseService.releaseFailed(task, "AI authorization was withdrawn or no longer covers this task", false);
+            return;
+        }
+        if (task.getTaskType() == AiTaskType.JOB_MATERIAL_SELECTION) {
+            executeMaterialSelection(task);
+        } else if (task.getTaskType() == AiTaskType.JOB_GENERATION && hasJobDescriptionId(task)) {
             executeJobGeneration(task);
         } else {
             executeDefault(task);
+        }
+    }
+
+    private boolean hasExecutionConsent(AiTask task) {
+        List<String> categories = switch (task.getTaskType()) {
+            case JOB_MATERIAL_SELECTION, JOB_GENERATION ->
+                    List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE");
+            default -> List.of();
+        };
+        return consentService.hasValidConsent(task.getUserId(), task.getTaskType().name(), categories);
+    }
+
+    private void executeMaterialSelection(AiTask task) {
+        try {
+            Map<String, Object> result = materialSelectionService.executeTask(task);
+            task.setConfirmationStatus(ConfirmationStatus.PENDING);
+            leaseService.releaseSuccess(task, result);
+        } catch (Exception e) {
+            log.error("Material selection failed for task {}", task.getId(), e);
+            leaseService.releaseFailed(task, "Material selection failed: " + e.getMessage(), false);
         }
     }
 

@@ -54,7 +54,7 @@ class DatabaseTaskWorkerIT {
     }
 
     private Long createTask(String taskType) throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/ai/generate-resume-for-job")
+        MvcResult result = mockMvc.perform(post("/api/ai/tasks")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -80,9 +80,9 @@ class DatabaseTaskWorkerIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "policyVersion": "v1.0.0",
+                                  "policyVersion": "v1.1.0",
                                   "providerCode": "bailian",
-                                  "taskScopes": ["JOB_GENERATION"],
+                                  "taskScopes": ["MATERIAL_IMPORT", "RESUME_OPTIMIZE"],
                                   "dataCategories": ["resume"],
                                   "noticeHash": "hash"
                                 }
@@ -94,7 +94,7 @@ class DatabaseTaskWorkerIT {
     @Order(2)
     @DisplayName("工作器领取 PENDING 任务，未配置密钥时标记为 FAILED")
     void workerPoll_claimsAndExecutesToFailedWithoutApiKey() throws Exception {
-        Long taskId = createTask("JOB_GENERATION");
+        Long taskId = createTask("MATERIAL_IMPORT");
 
         // 手动触发工作器轮询
         worker.poll();

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -68,6 +69,41 @@ class JobGenerationSchemaValidatorTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> validator.validate(draft, "v1.0.0"));
         assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("failure: source outside confirmed material snapshot is rejected")
+    void sourceOutsideConfirmedSnapshot_fails() {
+        Map<String, Object> draft = Map.of(
+                "basics", Map.of("_sources", List.of(Map.of("materialId", 2L)), "name", "Candidate"),
+                "work", List.of(Map.of("_sources", List.of(Map.of("materialId", 2L)), "company", "Example"))
+        );
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> validator.validate(draft, "v1.0.0", Set.of(1L)));
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("confirmed material snapshot"));
+    }
+
+    @Test
+    @DisplayName("success: source inside confirmed material snapshot is accepted")
+    void sourceInsideConfirmedSnapshot_passes() {
+        Map<String, Object> draft = Map.of(
+                "basics", Map.of("_sources", List.of(Map.of("materialId", 1L)), "name", "Candidate"),
+                "work", List.of(Map.of("_sources", List.of(Map.of("materialId", 1L)), "company", "Example"))
+        );
+
+        assertDoesNotThrow(() -> validator.validate(draft, "v1.0.0", Set.of(1L)));
+    }
+
+    @Test
+    void basicsMayUseConfirmedPersonalProfileWithoutMaterialProvenance() {
+        Map<String, Object> draft = Map.of(
+                "basics", Map.of("summary", "Backend engineer focused on reliable services"),
+                "work", List.of(Map.of("_sources", List.of(Map.of("materialId", 1L)), "company", "Example"))
+        );
+
+        assertDoesNotThrow(() -> validator.validate(draft, "v1.0.0", Set.of(1L)));
     }
 
     @Test

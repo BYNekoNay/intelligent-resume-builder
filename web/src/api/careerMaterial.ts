@@ -6,19 +6,26 @@ export type MaterialType =
   | 'EDUCATION'
   | 'SKILL'
   | 'CERTIFICATE'
+  | 'HIGHLIGHT'
   | 'AWARD'
+  | 'ACHIEVEMENT'
+  | 'LEADERSHIP_EXPERIENCE'
+  | 'SKILL_EVIDENCE'
 
 export type UsagePreference = 'NORMAL' | 'PREFERRED' | 'EXCLUDED'
 
-export interface CareerMaterial {
+export interface CareerMaterialSummary {
   id: number
   materialType: MaterialType
   title: string
+  usagePreference: UsagePreference
+  updatedAt: string
+}
+
+export interface CareerMaterial extends CareerMaterialSummary {
   contentJson: Record<string, unknown>
   sourceText: string | null
-  usagePreference: UsagePreference
   createdAt: string
-  updatedAt: string
 }
 
 export interface CareerMaterialPayload {
@@ -30,7 +37,11 @@ export interface CareerMaterialPayload {
 }
 
 export function listMaterials(type?: MaterialType) {
-  return apiClient.get<ApiResponse<CareerMaterial[]>>('/api/career-materials', { params: { type } })
+  return apiClient.get<ApiResponse<CareerMaterialSummary[]>>('/api/career-materials', { params: { type } })
+}
+
+export function getMaterial(id: number) {
+  return apiClient.get<ApiResponse<CareerMaterial>>(`/api/career-materials/${id}`)
 }
 
 export function createMaterial(payload: CareerMaterialPayload) {

@@ -12,6 +12,7 @@ import ResumeEditorView from '@/views/ResumeEditorView.vue'
 import CareerMaterialView from '@/views/CareerMaterialView.vue'
 import JobDescriptionView from '@/views/JobDescriptionView.vue'
 import GenerationWorkbenchView from '@/views/GenerationWorkbenchView.vue'
+import MaterialSelectionConfirmView from '@/views/MaterialSelectionConfirmView.vue'
 import GenerationConfirmView from '@/views/GenerationConfirmView.vue'
 import MatchResultView from '@/views/MatchResultView.vue'
 import ExportView from '@/views/ExportView.vue'
@@ -39,6 +40,7 @@ const router = createRouter({
         { path: 'resumes/:id/edit', name: 'resume-editor', component: ResumeEditorView, props: true, meta: { requiresAuth: true } },
         { path: 'career-materials', name: 'career-materials', component: CareerMaterialView, meta: { requiresAuth: true } },
         { path: 'generate', name: 'generate', component: GenerationWorkbenchView, meta: { requiresAuth: true } },
+        { path: 'generate/materials', name: 'generate-materials', component: MaterialSelectionConfirmView, meta: { requiresAuth: true } },
         { path: 'generate/confirm', name: 'generate-confirm', component: GenerationConfirmView, meta: { requiresAuth: true } },
         { path: 'jobs', name: 'jobs', component: JobDescriptionView, meta: { requiresAuth: true } },
         { path: 'ai-consent', name: 'ai-consent', component: AiConsentView, meta: { requiresAuth: true } },

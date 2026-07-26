@@ -175,6 +175,80 @@ class CareerMaterialServiceTest {
         verify(repository, never()).save(any());
     }
 
+    @Test
+    void achievementRequiresAnOwnedWorkOrProjectRelationAndMetricValueForItsDisplayMode() {
+        CareerMaterial related = material(21L, 100L, MaterialType.WORK_EXPERIENCE, "Platform work");
+        when(repository.findByIdAndUserId(21L, 100L)).thenReturn(Optional.of(related));
+        when(repository.save(any(CareerMaterial.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        CareerMaterialDetail created = service.create(new CreateCareerMaterialRequest(
+                MaterialType.ACHIEVEMENT, "Latency improvement", Map.of(
+                "relatedMaterialId", 21L, "scenario", "Peak traffic", "action", "Introduced caching",
+                "outcome", "Improved responsiveness", "period", "2025 Q1", "metricName", "P99 latency",
+                "metricDisplayMode", "RANGE", "metricDisplayValue", "35%-45%"), null, null), 100L);
+
+        assertEquals(MaterialType.ACHIEVEMENT, created.materialType());
+        BusinessException missingMetric = assertThrows(BusinessException.class, () -> service.create(
+                new CreateCareerMaterialRequest(MaterialType.ACHIEVEMENT, "Invalid", Map.of(
+                        "relatedMaterialId", 21L, "scenario", "a", "action", "b", "outcome", "c",
+                        "period", "2025", "metricName", "latency", "metricDisplayMode", "EXACT"), null, null), 100L));
+        assertEquals(ErrorCode.VALIDATION, missingMetric.getErrorCode());
+    }
+
+    @Test
+    void newAssetRelationsRejectAnotherUsersAndUnsupportedMaterialTypes() {
+        when(repository.findByIdAndUserId(22L, 100L)).thenReturn(Optional.empty());
+        BusinessException otherUser = assertThrows(BusinessException.class, () -> service.create(
+                achievement(22L, "QUALITATIVE", "Significantly improved"), 100L));
+        assertEquals(ErrorCode.VALIDATION, otherUser.getErrorCode());
+
+        when(repository.findByIdAndUserId(22L, 100L))
+                .thenReturn(Optional.of(material(22L, 100L, MaterialType.SKILL, "Java")));
+        BusinessException wrongType = assertThrows(BusinessException.class, () -> service.create(
+                achievement(22L, "QUALITATIVE", "Significantly improved"), 100L));
+        assertEquals(ErrorCode.VALIDATION, wrongType.getErrorCode());
+    }
+
+    @Test
+    void skillEvidenceAllowsNoRelationButValidatesEveryProvidedRelation() {
+        when(repository.save(any(CareerMaterial.class))).thenAnswer(inv -> inv.getArgument(0));
+        CareerMaterialDetail standalone = service.create(new CreateCareerMaterialRequest(
+                MaterialType.SKILL_EVIDENCE, "Java delivery", Map.of(
+                "skillName", "Java", "category", "Backend", "proficiency", "Advanced",
+                "yearsOfExperience", "5", "lastUsedAt", "2026-07",
+                "applicationDescription", "Built resilient APIs", "outcomeEvidence", "Supported launch"), null, null), 100L);
+        assertEquals(MaterialType.SKILL_EVIDENCE, standalone.materialType());
+
+        when(repository.findByIdAndUserId(23L, 100L))
+                .thenReturn(Optional.of(material(23L, 100L, MaterialType.PROJECT_EXPERIENCE, "Payments")));
+        assertDoesNotThrow(() -> service.create(new CreateCareerMaterialRequest(
+                MaterialType.SKILL_EVIDENCE, "Java delivery", Map.of(
+                "skillName", "Java", "category", "Backend", "proficiency", "Advanced",
+                "yearsOfExperience", "5", "lastUsedAt", "2026-07",
+                "applicationDescription", "Built resilient APIs", "outcomeEvidence", "Supported launch",
+                "relatedMaterialIds", List.of(23L)), null, null), 100L));
+    }
+
+    @Test
+    void leadershipRequiresMeaningfulFieldsAndOwnedExperience() {
+        when(repository.findByIdAndUserId(24L, 100L))
+                .thenReturn(Optional.of(material(24L, 100L, MaterialType.WORK_EXPERIENCE, "Engineering")));
+        when(repository.save(any(CareerMaterial.class))).thenAnswer(inv -> inv.getArgument(0));
+        assertDoesNotThrow(() -> service.create(new CreateCareerMaterialRequest(
+                MaterialType.LEADERSHIP_EXPERIENCE, "Service migration", Map.of(
+                "relatedMaterialId", 24L, "responsibilityScope", "Led delivery",
+                "collaborationTargets", "Platform and product", "teamSize", "6 engineers",
+                "crossFunctionalRelationship", "Product and operations", "keyDecision", "Introduced weekly risk reviews",
+                "result", "Completed migration"), null, null), 100L));
+    }
+
+    private CreateCareerMaterialRequest achievement(long relatedId, String mode, String displayValue) {
+        return new CreateCareerMaterialRequest(MaterialType.ACHIEVEMENT, "Achievement", Map.of(
+                "relatedMaterialId", relatedId, "scenario", "a", "action", "b", "outcome", "c",
+                "period", "2025", "metricName", "impact", "metricDisplayMode", mode,
+                "metricDisplayValue", displayValue), null, null);
+    }
+
     private CareerMaterial material(Long id, Long userId, MaterialType type, String title) {
         CareerMaterial m = new CareerMaterial();
         m.setId(id);

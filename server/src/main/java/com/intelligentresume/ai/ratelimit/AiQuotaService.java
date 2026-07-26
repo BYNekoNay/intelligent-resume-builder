@@ -31,6 +31,7 @@ public class AiQuotaService {
             @Value("${app.ai.quota.COMMUNICATION_GENERATE:10}") int communicationGenerate) {
         this.taskRepository = taskRepository;
         this.quotas = Map.of(
+                AiTaskType.JOB_MATERIAL_SELECTION, jobGeneration,
                 AiTaskType.JOB_GENERATION, jobGeneration,
                 AiTaskType.RESUME_OPTIMIZE, resumeOptimize,
                 AiTaskType.INLINE_OPTIMIZE, inlineOptimize,

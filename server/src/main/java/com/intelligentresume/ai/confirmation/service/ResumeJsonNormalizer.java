@@ -76,6 +76,7 @@ public class ResumeJsonNormalizer {
 
             // 剥离 _source
             map.remove("_source");
+            map.remove("_sources");
 
             // 检查 _pending
             if (map.containsKey("_pending")) {

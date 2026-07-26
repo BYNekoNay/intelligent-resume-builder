@@ -2,12 +2,12 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
   listMaterials,
-  type CareerMaterial,
+  type CareerMaterialSummary,
   type MaterialType,
 } from '@/api/careerMaterial'
 
 export const useCareerMaterialStore = defineStore('career-material', () => {
-  const items = ref<CareerMaterial[]>([])
+  const items = ref<CareerMaterialSummary[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
