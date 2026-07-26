@@ -21,19 +21,20 @@ printf '%s' "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" --username "$ACR_USER
 build_and_push() {
   local image_name="$1"
   local dockerfile="$2"
+  local context_dir="$3"
 
   docker buildx build \
     --platform "$platform" \
     --push \
     --file "$dockerfile" \
     --tag "${registry_path}/${image_name}:${IMAGE_TAG}" \
-    .
+    "$context_dir"
 }
 
-build_and_push intelligent-resume-api server/Dockerfile
-build_and_push intelligent-resume-web web/Dockerfile
-build_and_push intelligent-resume-pdf pdf-service/Dockerfile
-build_and_push intelligent-resume-edge deploy/Dockerfile.nginx
+build_and_push intelligent-resume-api server/Dockerfile server
+build_and_push intelligent-resume-web web/Dockerfile web
+build_and_push intelligent-resume-pdf pdf-service/Dockerfile pdf-service
+build_and_push intelligent-resume-edge deploy/Dockerfile deploy
 
 # The database image is mirrored by the cloud builder, so ECS never contacts Docker Hub.
 docker buildx imagetools create \

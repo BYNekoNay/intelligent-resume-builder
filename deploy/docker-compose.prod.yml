@@ -3,8 +3,8 @@ name: intelligent-resume
 services:
   edge:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile.nginx
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       PUBLIC_HOST: ${PUBLIC_HOST:?PUBLIC_HOST is required}
@@ -17,8 +17,8 @@ services:
 
   web:
     build:
-      context: ..
-      dockerfile: web/Dockerfile
+      context: ../web
+      dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       api:
@@ -27,8 +27,8 @@ services:
 
   api:
     build:
-      context: ..
-      dockerfile: server/Dockerfile
+      context: ../server
+      dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ${DEPLOY_ENV_FILE:-production.env}
     environment:
@@ -51,8 +51,8 @@ services:
 
   pdf-service:
     build:
-      context: ..
-      dockerfile: pdf-service/Dockerfile
+      context: ../pdf-service
+      dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ${DEPLOY_ENV_FILE:-production.env}
     environment:
