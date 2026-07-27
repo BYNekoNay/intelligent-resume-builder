@@ -157,17 +157,282 @@ test('persists resume typography and spacing controls with the edited version', 
 
   await page.goto('/resumes/1/edit')
   await expect(page.locator('.studio-grid')).toBeVisible()
-  const bodySize = page.getByLabel('正文字号滑杆')
+  await page.locator('.studio-actions').getByRole('button', { name: '选择模板' }).click()
+  await page.getByRole('dialog', { name: '选择简历模板' }).getByRole('button', { name: /现代/ }).click()
+  await page.getByRole('dialog', { name: '选择简历模板' }).getByRole('button', { name: '关闭' }).click()
+  await page.locator('.studio-actions').getByRole('button', { name: '设计与高级' }).click()
+  await expect(page.locator('.editor-sidebar')).toBeVisible()
+  await expect(page.locator('.design-live-preview .resume-paper')).toBeVisible()
+  await expect(page.locator('.design-workspace-layout > .editor-command-center')).toHaveCSS('position', 'sticky')
+  await expect(page.locator('.design-live-preview-stage')).toHaveCSS('overflow-y', 'visible')
+  await expect(page.locator('#resume-form')).toHaveCount(0)
+  const bodySize = page.getByRole('slider', { name: '正文字号' })
   await expect(bodySize).toHaveValue('13')
   await bodySize.fill('16')
-  await expect(page.locator('.resume-paper')).toHaveCSS('--resume-body-size', '16px')
-  const headingSize = page.getByLabel('标题字号滑杆')
+  const headingSize = page.getByRole('slider', { name: '标题字号' })
   await headingSize.fill('18')
-  await expect(page.locator('.paper-header h2')).toHaveCSS('font-size', '41.5385px')
+  const pagePadding = page.getByRole('slider', { name: '页面留白' })
+  await pagePadding.fill('72')
+  await expect(page.locator('.design-live-preview .resume-paper')).toHaveCSS('padding-top', '72px')
   await page.getByLabel('字体风格').selectOption('songti')
+  await expect(page.locator('.design-live-preview .resume-paper')).toHaveCSS('--resume-body-size', '16px')
+  await page.getByRole('button', { name: '预览', exact: true }).click()
+  await expect(page.locator('.resume-paper')).toHaveCSS('--resume-body-size', '16px')
+  await expect(page.locator('.paper-header h2')).toHaveCSS('font-size', '41.5385px')
   await expect(page.locator('.resume-paper')).toHaveCSS('--resume-font-family', '"Songti SC", SimSun, serif')
-  await page.getByRole('button', { name: '保存新版本' }).click()
+  await page.locator('.resume-preview-workspace').getByRole('button', { name: '保存新版本' }).click()
   await expect.poll(() => saved).toMatchObject({ resumeJson: { layout: { bodyFontSize: 16, headingFontSize: 18, fontFamily: 'songti' } } })
+})
+
+test('keeps return and preview actions inside the design workspace', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = { ...version, resumeJson: { basics: { name: 'Alice' }, work: [], education: [], skills: [], projects: [], certificates: [], awards: [], languages: [] } }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+
+  await page.goto('/resumes/1/edit')
+  await page.evaluate(() => window.scrollTo(0, 320))
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: '设计与高级' }).click()
+  const actions = page.locator('.design-workspace-actions')
+  await expect(actions.getByRole('button', { name: '返回内容' })).toBeVisible()
+  await expect(actions.getByRole('button', { name: '预览简历' })).toBeVisible()
+  await actions.getByRole('button', { name: '预览简历' }).click()
+  await expect(page.locator('.resume-preview-workspace')).toBeVisible()
+  await page.getByRole('button', { name: '返回编辑' }).click()
+  await actions.getByRole('button', { name: '返回内容' }).click()
+  await expect(page.locator('#resume-form')).toBeVisible()
+  await expect(page.locator('#resume-basics')).toBeVisible()
+})
+
+test('opens template selection as an independent workspace entry', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = { ...version, resumeJson: { basics: { name: 'Alice' }, work: [], education: [], skills: [], projects: [], certificates: [], awards: [], languages: [], template: { code: 'classic' } } }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+  await page.goto('/resumes/1/edit')
+  await page.locator('.studio-actions').getByRole('button', { name: '选择模板' }).click()
+  await expect(page.getByRole('dialog', { name: '选择简历模板' })).toBeVisible()
+  await page.getByRole('dialog', { name: '选择简历模板' }).getByRole('button', { name: /现代/ }).click()
+  await expect(page.getByRole('dialog', { name: '选择简历模板' })).toContainText('当前使用')
+  await page.getByRole('dialog', { name: '选择简历模板' }).getByRole('button', { name: '关闭' }).click()
+  await expect(page.getByRole('dialog', { name: '选择简历模板' })).toHaveCount(0)
+})
+
+test('shows extended resume sections and renders their structured content in preview', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = { ...version, resumeJson: { basics: { name: 'Alice', title: 'Engineer' }, work: [], education: [], skills: [], projects: [], certificates: [], awards: [], languages: [] } }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+  await page.goto('/resumes/1/edit')
+  const navigation = page.locator('.resume-editor-navigation')
+  for (const name of ['职业目标', '个人链接', '实习 / 志愿经历', '培训课程', '研究成果', '自定义模块']) {
+    await expect(navigation.getByRole('button', { name: new RegExp(name) })).toBeVisible()
+  }
+  await navigation.getByRole('button', { name: /职业目标/ }).click()
+  await page.locator('#resume-objective textarea').fill('面向可靠分布式系统的后端岗位。')
+  await navigation.getByRole('button', { name: /个人链接/ }).click()
+  await page.getByRole('button', { name: '添加链接' }).click()
+  await page.getByLabel('链接名称').fill('GitHub')
+  await page.getByLabel('链接地址').fill('https://github.com/alice')
+  await page.getByRole('button', { name: '预览简历' }).click()
+  await expect(page.locator('.resume-preview-workspace .resume-paper')).toContainText('职业目标')
+  await expect(page.locator('.resume-preview-workspace .resume-paper')).toContainText('GitHub')
+  await expect(page.locator('.resume-preview-workspace .resume-paper')).toContainText('https://github.com/alice')
+})
+
+test('blocks editing after a resume load failure and recovers through retry', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let failLoad = true
+  await page.route('**/api/resumes/1', route => {
+    if (failLoad) return route.fulfill({ status: 500, json: { code: 500, message: 'service unavailable', data: null } })
+    return route.fulfill({ json: response(resume) })
+  })
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response({ ...version, resumeJson: { basics: { name: 'Alice' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [] } }) }))
+
+  await page.goto('/resumes/1/edit')
+  await expect(page.getByRole('heading', { name: '无法加载简历' })).toBeVisible()
+  await expect(page.locator('#resume-form')).toHaveCount(0)
+  await expect(page.locator('.resume-editor-navigation')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: '返回简历列表' })).toHaveAttribute('href', '/resumes')
+
+  failLoad = false
+  await page.getByRole('button', { name: '重试加载' }).click()
+  await expect(page.locator('.resume-editor-navigation')).toBeVisible()
+  await expect(page.getByLabel('姓名')).toHaveValue('Alice')
+})
+
+test('keeps an empty editor available when a resume has no current version', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const emptyResume = { ...resume, currentVersionId: null }
+  await page.route('**/api/resumes/1', route => route.fulfill({ json: response(emptyResume) }))
+  await page.route('**/api/resumes/1/versions**', route => route.fulfill({ json: response([]) }))
+
+  await page.goto('/resumes/1/edit')
+  await expect(page.getByRole('heading', { name: '无法加载简历' })).toHaveCount(0)
+  await expect(page.locator('#resume-form')).toBeVisible()
+  await expect(page.getByLabel('姓名')).toHaveValue('')
+})
+
+test('saves content and design changes through the manual version endpoint', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = {
+    ...version,
+    resumeJson: {
+      basics: { name: 'Alice', title: 'Engineer', summary: '' }, work: [], education: [], skills: [], projects: [], certificates: [], awards: [], languages: [],
+      template: { code: 'classic' },
+    },
+  }
+  let saved: any
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+  await page.route('**/api/resumes/1/versions**', async route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: response([version]) })
+    saved = route.request().postDataJSON()
+    return route.fulfill({ json: response({ ...version, id: 12, versionNo: 2, resumeJson: saved.resumeJson }) })
+  })
+
+  await page.goto('/resumes/1/edit')
+  await page.getByLabel('姓名').fill('Alice Chen')
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: /工作经历/ }).click()
+  await page.getByRole('button', { name: '添加工作经历' }).click()
+  await page.getByLabel('公司').fill('ACME')
+  await page.getByLabel('职位').fill('Platform Engineer')
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: /技能/ }).click()
+  await page.locator('#resume-skills').getByRole('button', { name: '添加技能' }).click()
+  await page.getByPlaceholder('例如：Spring Boot').fill('Kubernetes')
+  await page.locator('.studio-actions').getByRole('button', { name: '选择模板' }).click()
+  await page.getByRole('dialog', { name: '选择简历模板' }).getByRole('button', { name: /现代/ }).click()
+  await page.getByRole('dialog', { name: '选择简历模板' }).getByRole('button', { name: '关闭' }).click()
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: /奖项荣誉/ }).click()
+  await page.locator('#resume-awards').getByRole('button', { name: '添加奖项' }).click()
+  await page.getByLabel('奖项名称').fill('Outstanding Engineer')
+  await expect(page.locator('#resume-awards')).toContainText('奖项 1')
+  await page.locator('.studio-actions').getByRole('button', { name: '设计与高级' }).click()
+  await page.getByRole('button', { name: '预览', exact: true }).click()
+  await expect(page.locator('.resume-preview-workspace')).toBeVisible()
+  await page.getByRole('button', { name: '返回编辑' }).click()
+  await page.locator('.studio-actions').getByRole('button', { name: '保存新版本' }).click()
+
+  await expect.poll(() => saved).toMatchObject({
+    resumeJson: {
+      basics: { name: 'Alice Chen' },
+      work: [{ company: 'ACME', position: 'Platform Engineer' }],
+      skills: [{ name: 'Kubernetes' }],
+      awards: [{ name: 'Outstanding Engineer' }],
+      template: { code: 'modern' },
+    },
+  })
+  await expect(page).toHaveURL(/\/resumes\/1$/)
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('intelligent-resume.editor-draft.99.1'))).toBeNull()
+})
+
+test('adds a saved award material to the matching resume section', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = {
+    ...version,
+    resumeJson: { basics: { name: 'Alice' }, work: [], education: [], skills: [], projects: [], certificates: [], awards: [], languages: [], template: { code: 'classic' } },
+  }
+  const award = { id: 88, materialType: 'AWARD', title: 'Engineering Excellence', usagePreference: 'PREFERRED', updatedAt: now }
+  let saved: any
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+  await page.route('**/api/career-materials', route => route.fulfill({ json: response([award]) }))
+  await page.route('**/api/career-materials/88', route => route.fulfill({ json: response({ ...award, contentJson: { issuer: 'ACME', date: '2025-06', description: 'Recognized for a reliable platform launch.' }, sourceText: null, createdAt: now }) }))
+  await page.route('**/api/resumes/1/versions**', async route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: response([version]) })
+    saved = route.request().postDataJSON()
+    return route.fulfill({ json: response({ ...version, id: 12, versionNo: 2, resumeJson: saved.resumeJson }) })
+  })
+
+  await page.goto('/resumes/1/edit')
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: /奖项荣誉/ }).click()
+  await page.getByRole('button', { name: '从资料库添加' }).click()
+  await page.getByLabel('选择资料').selectOption('88')
+  await page.getByRole('button', { name: '写入当前章节' }).click()
+  await expect(page.getByLabel('奖项名称')).toHaveValue('Engineering Excellence')
+  await expect(page.getByLabel('授予机构')).toHaveValue('ACME')
+  await page.locator('.editor-save-dock').getByRole('button', { name: '保存新版本' }).click()
+  await expect.poll(() => saved).toMatchObject({ resumeJson: { awards: [{ name: 'Engineering Excellence', issuer: 'ACME', date: '2025-06' }] } })
+})
+
+test('replaces the editor with a full-page resume preview and restores the editing context', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = {
+    ...version,
+    resumeJson: {
+      basics: { name: 'Alice', title: 'Engineer', summary: 'Builds reliable systems.' },
+      work: [{ company: 'ACME', position: 'Engineer' }], education: [], skills: [], projects: [], certificates: [], languages: [],
+      template: { code: 'classic' },
+    },
+  }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+
+  await page.goto('/resumes/1/edit')
+  await expect(page.locator('.resume-editor-navigation')).toBeVisible()
+  await expect(page.locator('.resume-editor-navigation')).toContainText('完成进度')
+  await expect(page.locator('.resume-editor-navigation')).toContainText('专业证书')
+  await expect(page.locator('.resume-editor-navigation')).not.toContainText('Completion')
+  await expect(page.locator('#resume-basics')).toBeVisible()
+  await expect(page.locator('#resume-work')).toBeHidden()
+
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: /工作经历/ }).click()
+  await expect(page.locator('#resume-work')).toBeVisible()
+  await expect(page.locator('#resume-basics')).toBeHidden()
+  await page.evaluate(() => window.scrollTo(0, 300))
+  const scrollBeforePreview = await page.evaluate(() => window.scrollY)
+
+  await page.getByRole('button', { name: '预览简历' }).click()
+  await expect(page.locator('.resume-preview-workspace')).toBeVisible()
+  await expect(page.locator('.studio-grid')).toHaveCount(0)
+  await expect(page.locator('.resume-editor-navigation')).toHaveCount(0)
+  await expect(page.locator('.resume-preview-workspace .resume-paper')).toBeVisible()
+  await expect(page.locator('.resume-preview-workspace .resume-paper')).toHaveJSProperty('offsetWidth', 860)
+  await expect(page.getByRole('button', { name: '返回编辑' })).toBeFocused()
+  await page.locator('.preview-toolbar-actions').getByRole('button', { name: '选择模板' }).click()
+  await page.getByRole('dialog', { name: '选择简历模板' }).getByRole('button', { name: /现代/ }).click()
+  await page.getByRole('dialog', { name: '选择简历模板' }).getByRole('button', { name: '关闭' }).click()
+  await expect(page.locator('.resume-preview-workspace .resume-paper')).toHaveClass(/template-modern/)
+
+  await page.getByRole('button', { name: '返回编辑' }).click()
+  await expect(page.locator('.resume-editor-navigation')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollBeforePreview)
+  await expect(page.locator('#resume-work')).toBeVisible()
+
+  await page.getByRole('button', { name: 'EN' }).click()
+  await expect(page.locator('.resume-editor-navigation')).toContainText('Completion')
+  await expect(page.locator('.resume-editor-navigation').getByRole('button', { name: 'Design & advanced' })).toBeVisible()
+  await expect(page.locator('.resume-editor-navigation')).not.toContainText('完成进度')
+})
+
+test('reports one page and gives an in-context action for an otherwise empty preview', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = {
+    ...version,
+    resumeJson: {
+      basics: { name: 'Alice', title: 'Engineer' },
+      work: [], education: [], skills: [], projects: [], certificates: [], languages: [],
+      template: { code: 'classic' },
+    },
+  }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+
+  await page.setViewportSize({ width: 942, height: 720 })
+  await page.goto('/resumes/1/edit')
+  await page.getByRole('button', { name: '预览简历' }).click()
+  await expect(page.locator('.preview-page-meta')).toContainText('预计 1 页 · A4')
+  await expect(page.locator('.paper-empty-guide')).toContainText('返回编辑后开始填写')
+})
+
+test('offers to restore a locally saved resume editor draft', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = {
+    ...version,
+    resumeJson: { basics: { name: 'Alice', title: 'Engineer' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [], template: { code: 'classic' } },
+  }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+
+  await page.goto('/resumes/1/edit')
+  await page.getByLabel('姓名').fill('Alice Draft')
+  await page.waitForTimeout(700)
+  await page.reload()
+  await expect(page.getByRole('dialog', { name: '恢复未保存的草稿？' })).toBeVisible()
+  await page.getByRole('button', { name: '恢复草稿' }).click()
+  await expect(page.getByLabel('姓名')).toHaveValue('Alice Draft')
 })
 
 test('switches the application chrome and answer library between Chinese and English', async ({ page }) => {
@@ -178,7 +443,7 @@ test('switches the application chrome and answer library between Chinese and Eng
 
   await page.getByRole('button', { name: 'EN' }).click()
 
-  await expect(page.getByRole('button', { name: 'Organize' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Career records' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Interview Answer Assets' })).toBeVisible()
   await expect(page.getByRole('button', { name: '中文' })).toHaveAttribute('aria-pressed', 'false')
 
@@ -495,7 +760,7 @@ test('archives a historical version and restores it to the visible history', asy
   await expect(archivedCard).toHaveCount(0)
 })
 
-test('keeps mobile resume editor controls collapsible without hiding the preview', async ({ page }) => {
+test('opens the resume preview as a standalone mobile workspace', async ({ page }) => {
   await mockAuthenticatedApi(page)
   const editorVersion = {
     ...version,
@@ -508,11 +773,13 @@ test('keeps mobile resume editor controls collapsible without hiding the preview
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/resumes/1/edit')
 
-  await expect(page.locator('.preview-rail')).toBeVisible()
-  await page.locator('.sidebar-toggle').click()
-  await expect(page.locator('.editor-sidebar')).toHaveClass(/is-collapsed/)
-  await expect(page.locator('.preview-rail')).toBeVisible()
-  await page.locator('.property-toggle').click()
-  await expect(page.locator('.studio-editor')).toHaveClass(/is-collapsed/)
-  await expect(page.locator('.preview-rail')).toBeVisible()
+  await expect(page.locator('.resume-editor-navigation')).toBeVisible()
+  await page.getByRole('button', { name: '预览', exact: true }).click()
+  await expect(page.locator('.resume-preview-workspace')).toBeVisible()
+  await expect(page.locator('.studio-grid')).toHaveCount(0)
+  await expect(page.locator('.resume-preview-workspace .resume-paper')).toBeVisible()
+  await expect(page.locator('.resume-preview-workspace')).not.toHaveCSS('overflow-x', 'scroll')
+  await page.getByRole('button', { name: '返回编辑' }).click()
+  await expect(page.locator('.resume-preview-workspace')).toHaveCount(0)
+  await expect(page.locator('#resume-basics')).toBeVisible()
 })

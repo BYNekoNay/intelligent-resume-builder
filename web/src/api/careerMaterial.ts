@@ -11,6 +11,9 @@ export type MaterialType =
   | 'ACHIEVEMENT'
   | 'LEADERSHIP_EXPERIENCE'
   | 'SKILL_EVIDENCE'
+  | 'VOLUNTEER_EXPERIENCE'
+  | 'COURSE'
+  | 'PUBLICATION'
 
 export type UsagePreference = 'NORMAL' | 'PREFERRED' | 'EXCLUDED'
 

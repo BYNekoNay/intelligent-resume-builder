@@ -34,7 +34,7 @@ public class JsonResumeValidator {
     public JsonResumeValidator(
             @Value("${app.resume.json-schema.max-bytes:262144}") int maxBytes,
             @Value("${app.resume.json-schema.require-top-level:basics}") List<String> requireTopLevel,
-            @Value("${app.resume.json-schema.allow-sections:basics,work,education,skills,projects,certificates,languages,awards}") List<String> allowSections,
+            @Value("${app.resume.json-schema.allow-sections:basics,work,education,skills,projects,certificates,languages,awards,objective,links,volunteering,courses,publications,customSections,template,layout}") List<String> allowSections,
             ObjectMapper objectMapper) {
         this.maxBytes = maxBytes;
         this.requireTopLevel = Set.copyOf(requireTopLevel);

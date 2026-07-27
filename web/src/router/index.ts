@@ -25,6 +25,7 @@ import ResumeImportView from '@/views/ResumeImportView.vue'
 import CommunicationView from '@/views/CommunicationView.vue'
 import InterviewAssetsView from '@/views/InterviewAssetsView.vue'
 import AchievementGuidanceView from '@/views/AchievementGuidanceView.vue'
+import AccountView from '@/views/AccountView.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
@@ -44,6 +45,7 @@ const router = createRouter({
         { path: 'generate/confirm', name: 'generate-confirm', component: GenerationConfirmView, meta: { requiresAuth: true } },
         { path: 'jobs', name: 'jobs', component: JobDescriptionView, meta: { requiresAuth: true } },
         { path: 'ai-consent', name: 'ai-consent', component: AiConsentView, meta: { requiresAuth: true } },
+        { path: 'account', name: 'account', component: AccountView, meta: { requiresAuth: true } },
         { path: 'ats', name: 'ats-check', component: AtsCheckView, meta: { requiresAuth: true } },
         { path: 'applications', name: 'applications', component: ApplicationsView, meta: { requiresAuth: true } },
         { path: 'material-generation', name: 'material-generation', component: MaterialResumeGenerationView, meta: { requiresAuth: true } },

@@ -22,7 +22,7 @@ app:
     json-schema:
       max-bytes: 262144
       require-top-level: basics
-      allow-sections: basics,work,education,skills,projects,certificates,languages,awards,template
+      allow-sections: basics,work,education,skills,projects,certificates,languages,awards,objective,links,volunteering,courses,publications,customSections,template,layout
   career-material:
     content-json:
       max-bytes: 65536

@@ -72,7 +72,7 @@ public class JobGenerationPromptBuilder {
         String task = """
                 Generate a customized resume draft for the given job description using the provided career materials.
                 Output format: a JSON object with a top-level key "draftResumeJson".
-                The value of "draftResumeJson" is a resume object with keys: basics, work, education, skills, projects, certificates.
+                The value of "draftResumeJson" is a resume object with keys: basics, work, education, skills, projects, certificates, objective, volunteering, courses, publications, customSections.
 
                 Requirements for each entry:
                 - Include "_sources": [{"materialId": <ID>, "materialType": "<TYPE>"}] to cite every source material actually used.
@@ -82,6 +82,8 @@ public class JobGenerationPromptBuilder {
                 - LEADERSHIP_EXPERIENCE materials: write supported responsibility, collaboration, decision, and result into the linked work/project description or highlights.
                 - SKILL_EVIDENCE materials: produce standard skills entries and use their evidence only where it agrees with linked experience.
                 - Career profile is long-term positioning. Use it only to shape basics.summary and positioning; the job description determines the target role title.
+                - Do not create links. Generate objective, volunteering, courses, publications, or customSections only when supported by the provided materials.
+                - customSections require a stable text title and entries with explicit sources. Never infer a new achievement, organization, date, or credential from the job description.
 
                 Example output structure:
                 {
@@ -91,7 +93,12 @@ public class JobGenerationPromptBuilder {
                     "education": [...],
                     "skills": [{"name": "...", "category": "...", "items": [...], "level": "...", "_sources": [{"materialId": 2, "materialType": "SKILL"}]}],
                     "projects": [...],
-                    "certificates": {"_pending": {"reason": "No certificate materials"}}
+                    "certificates": {"_pending": {"reason": "No certificate materials"}},
+                    "objective": {"summary": "...", "_pending": {"reason": "No confirmed profile"}},
+                    "volunteering": [],
+                    "courses": [],
+                    "publications": [],
+                    "customSections": []
                   }
                 }
 

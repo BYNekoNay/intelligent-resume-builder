@@ -65,7 +65,7 @@ app:
     json-schema:
       max-bytes: ${RESUME_JSON_MAX_BYTES:262144}
       require-top-level: basics
-      allow-sections: basics,work,education,skills,projects,certificates,languages,awards,template,layout
+      allow-sections: basics,work,education,skills,projects,certificates,languages,awards,objective,links,volunteering,courses,publications,customSections,template,layout
 
   # T04 职业资料
   career-material:

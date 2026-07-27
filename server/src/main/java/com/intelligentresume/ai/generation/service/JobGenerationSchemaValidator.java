@@ -18,7 +18,7 @@ import java.util.HashSet;
  *
  * <p>规则:
  * <ol>
- *   <li>顶层键只能是 basics / work / education / skills / projects / certificates</li>
+ *   <li>顶层键必须是支持的简历内容模块</li>
  *   <li>数组元素必须包含 _source 或 _pending 之一(互斥)</li>
  *   <li>Map 类型值若含 _source 和 _pending 则互斥校验</li>
  *   <li>序列化字节数 ≤ max-output-bytes</li>
@@ -30,7 +30,8 @@ public class JobGenerationSchemaValidator {
 
     static final String CURRENT_VERSION = "v1.0.0";
     private static final Set<String> ALLOWED_TOP_KEYS =
-            Set.of("basics", "work", "education", "skills", "projects", "certificates");
+            Set.of("basics", "work", "education", "skills", "projects", "certificates",
+                    "objective", "volunteering", "courses", "publications", "customSections");
 
     private final int maxOutputBytes;
     private final ObjectMapper objectMapper;
@@ -67,7 +68,7 @@ public class JobGenerationSchemaValidator {
         for (Map.Entry<String, Object> entry : draft.entrySet()) {
             // basics can be derived from the confirmed personal-profile snapshot.
             // It is not a career material and therefore has no materialId to cite.
-            validateValue(entry.getValue(), entry.getKey(), !"basics".equals(entry.getKey()), allowedMaterialIds);
+            validateValue(entry.getValue(), entry.getKey(), !"basics".equals(entry.getKey()) && !"objective".equals(entry.getKey()), allowedMaterialIds);
         }
 
         // 3. 字节数校验

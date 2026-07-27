@@ -285,6 +285,10 @@ public class DraftCommitService {
             case "skills" -> MaterialType.SKILL;
             case "projects" -> MaterialType.PROJECT_EXPERIENCE;
             case "certificates" -> MaterialType.CERTIFICATE;
+            case "volunteering" -> MaterialType.VOLUNTEER_EXPERIENCE;
+            case "courses" -> MaterialType.COURSE;
+            case "publications" -> MaterialType.PUBLICATION;
+            case "customSections" -> MaterialType.LEADERSHIP_EXPERIENCE;
             default -> MaterialType.HIGHLIGHT;
         };
     }

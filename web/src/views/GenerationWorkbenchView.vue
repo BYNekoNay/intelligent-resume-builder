@@ -227,6 +227,9 @@ const TYPE_LABELS: Record<MaterialType, string> = {
   ACHIEVEMENT: '量化成果',
   LEADERSHIP_EXPERIENCE: '管理 / 协作经历',
   SKILL_EVIDENCE: '技能证据',
+  VOLUNTEER_EXPERIENCE: '志愿 / 实习经历',
+  COURSE: '培训课程',
+  PUBLICATION: '研究成果',
 }
 </script>
 

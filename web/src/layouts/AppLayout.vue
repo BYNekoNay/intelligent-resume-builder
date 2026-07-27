@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { FilePenLine, LayoutDashboard, Sparkles, FileText, NotebookPen, UserRoundPlus, LogIn, LogOut, Send, Activity, Target } from 'lucide-vue-next'
+import { FilePenLine, LayoutDashboard, Sparkles, FileText, NotebookPen, UserRoundPlus, UserRound, LogIn, LogOut, Send, Activity, Target } from 'lucide-vue-next'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
@@ -14,28 +14,28 @@ const { t } = useLocale()
 
 interface NavItem { to: string; key: string; icon: any }
 
-type GroupKey = 'accumulate' | 'refine' | 'match' | 'deliver'
+type GroupKey = 'career' | 'resume' | 'prepare' | 'applications'
 
 const groups: Record<GroupKey, NavItem[]> = {
-  accumulate: [
+  career: [
     { to: '/', key: 'home', icon: LayoutDashboard },
     { to: '/career-materials', key: 'materials', icon: Sparkles },
-    { to: '/resumes', key: 'resumes', icon: NotebookPen },
     { to: '/resume-import', key: 'imports', icon: FileText },
   ],
-  refine: [
+  resume: [
+    { to: '/resumes', key: 'resumes', icon: NotebookPen },
     { to: '/generate', key: 'generate', icon: Sparkles },
     { to: '/material-generation', key: 'materialGeneration', icon: Sparkles },
     { to: '/achievement-guidance', key: 'achievements', icon: Target },
-    { to: '/communications', key: 'communications', icon: Send },
   ],
-  match: [
+  prepare: [
     { to: '/jobs', key: 'jobs', icon: FileText },
     { to: '/ats', key: 'ats', icon: Activity },
     { to: '/interviews', key: 'interviews', icon: Sparkles },
     { to: '/interview-assets', key: 'answerAssets', icon: NotebookPen },
   ],
-  deliver: [
+  applications: [
+    { to: '/communications', key: 'communications', icon: Send },
     { to: '/applications', key: 'applications', icon: Send },
   ],
 }
@@ -84,6 +84,10 @@ async function signOut() {
       </nav>
 
       <div v-if="auth.accessToken" class="header-actions">
+        <RouterLink class="header-user" to="/account" :aria-label="t('account.title')" :title="t('account.title')">
+          <UserRound :size="18" />
+          <span>{{ auth.currentUser?.displayName || auth.currentUser?.username || t('account.eyebrow') }}</span>
+        </RouterLink>
         <RouterLink class="icon-action" to="/ai-consent" :aria-label="t('actions.aiConsent')" :title="t('actions.aiConsent')">
           <Sparkles :size="18" />
         </RouterLink>
