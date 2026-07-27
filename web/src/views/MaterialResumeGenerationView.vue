@@ -7,32 +7,32 @@ import { createResume } from '@/api/resume'
 import { useLocale } from '@/i18n'
 
 const { t } = useLocale()
-const raw = ref(''); const result = ref<MaterialGenerationResponse | null>(null); const association = ref<MaterialAssociationResponse | null>(null); const error = ref(''); const loading = ref(false); const associating = ref(false); const title = ref('From raw materials'); const saving = ref(false)
+const raw = ref(''); const result = ref<MaterialGenerationResponse | null>(null); const association = ref<MaterialAssociationResponse | null>(null); const error = ref(''); const consentRequired = ref(false); const loading = ref(false); const associating = ref(false); const title = ref('From raw materials'); const saving = ref(false)
 const router = useRouter()
 
 async function generate() {
-  error.value = ''; result.value = null
+  error.value = ''; consentRequired.value = false; result.value = null
   if (!raw.value.trim()) { error.value = t('materialGeneration.errorEmpty'); return }
   loading.value = true
   try { result.value = (await generateResumeFromMaterial(raw.value)).data.data }
-  catch (cause) { error.value = generationError(cause, 'errorGenerate') }
+  catch (cause) { showGenerationError(cause, 'errorGenerate') }
   finally { loading.value = false }
 }
 
 async function associate() {
-  error.value = ''; association.value = null
+  error.value = ''; consentRequired.value = false; association.value = null
   if (!raw.value.trim()) { error.value = t('materialGeneration.errorEmpty'); return }
   associating.value = true
   try { association.value = (await generateMaterialAssociation(raw.value)).data.data }
-  catch (cause) { error.value = generationError(cause, 'errorAssociation') }
+  catch (cause) { showGenerationError(cause, 'errorAssociation') }
   finally { associating.value = false }
 }
 
 async function generateFromAssociation() {
   if (!association.value?.expandedMaterial.trim()) return
-  error.value = ''; result.value = null; loading.value = true
+  error.value = ''; consentRequired.value = false; result.value = null; loading.value = true
   try { result.value = (await generateResumeFromAssociation(raw.value, association.value.expandedMaterial)).data.data }
-  catch (cause) { error.value = generationError(cause, 'errorGenerate') }
+  catch (cause) { showGenerationError(cause, 'errorGenerate') }
   finally { loading.value = false }
 }
 
@@ -49,6 +49,15 @@ async function createDraft() {
 function generationError(cause: unknown, fallbackKey: 'errorGenerate' | 'errorAssociation') {
   if (!isAxiosError(cause) || !cause.response) return t('materialGeneration.errorNetwork')
   return cause.response.data?.message || t(`materialGeneration.${fallbackKey}`)
+}
+
+function showGenerationError(cause: unknown, fallbackKey: 'errorGenerate' | 'errorAssociation') {
+  consentRequired.value = isAxiosError(cause) && cause.response?.data?.code === 40302
+  error.value = consentRequired.value ? t('materialGeneration.errorConsent') : generationError(cause, fallbackKey)
+}
+
+function manageConsent() {
+  router.push({ name: 'ai-consent', query: { redirect: '/material-generation' } })
 }
 
 onMounted(() => {
@@ -69,7 +78,10 @@ onMounted(() => {
         <button class="btn-neon btn-secondary" type="button" :disabled="loading || associating" @click="associate">{{ associating ? t('materialGeneration.associating') : t('materialGeneration.associateButton') }}</button>
       </div>
     </form>
-    <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+    <div v-if="error" class="form-error material-error" role="alert">
+      <span>{{ error }}</span>
+      <button v-if="consentRequired" class="btn-neon btn-secondary" type="button" @click="manageConsent">{{ t('materialGeneration.goToConsent') }}</button>
+    </div>
     <article v-if="association" class="workspace-card association-result">
       <p class="disclaimer">{{ association.disclaimer || t('materialGeneration.associationDisclaimer') }}</p>
       <h2>{{ t('materialGeneration.associationTitle') }}</h2>

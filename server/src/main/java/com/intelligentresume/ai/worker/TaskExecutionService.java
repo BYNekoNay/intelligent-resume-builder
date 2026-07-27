@@ -2,6 +2,7 @@ package com.intelligentresume.ai.worker;
 
 import com.intelligentresume.ai.consent.service.AiConsentService;
 import com.intelligentresume.ai.generation.service.JobGenerationService;
+import com.intelligentresume.ai.optimize.service.InlineOptimizeResultFormatter;
 import com.intelligentresume.ai.selection.service.JobMaterialSelectionService;
 import com.intelligentresume.ai.provider.AiCallContext;
 import com.intelligentresume.ai.provider.AiCallResult;
@@ -39,6 +40,7 @@ public class TaskExecutionService {
     private final AiConsentService consentService;
     private final AppObservability observability;
     private final FailureCategoryClassifier failureCategoryClassifier;
+    private final InlineOptimizeResultFormatter inlineOptimizeResultFormatter;
 
     public TaskExecutionService(AiProviderRegistry providerRegistry,
                                 TaskLeaseService leaseService,
@@ -46,7 +48,8 @@ public class TaskExecutionService {
                                 JobMaterialSelectionService materialSelectionService,
                                 AiConsentService consentService,
                                 AppObservability observability,
-                                FailureCategoryClassifier failureCategoryClassifier) {
+                                FailureCategoryClassifier failureCategoryClassifier,
+                                InlineOptimizeResultFormatter inlineOptimizeResultFormatter) {
         this.providerRegistry = providerRegistry;
         this.leaseService = leaseService;
         this.jobGenerationService = jobGenerationService;
@@ -54,6 +57,7 @@ public class TaskExecutionService {
         this.consentService = consentService;
         this.observability = observability;
         this.failureCategoryClassifier = failureCategoryClassifier;
+        this.inlineOptimizeResultFormatter = inlineOptimizeResultFormatter;
     }
 
     /**
@@ -144,7 +148,10 @@ public class TaskExecutionService {
             AiCallResult result = providerRegistry.route(task.getTaskType()).call(ctx);
 
             if (result.success()) {
-                leaseService.releaseSuccess(task, result.data());
+                Map<String, Object> taskResult = task.getTaskType() == AiTaskType.INLINE_OPTIMIZE
+                        ? inlineOptimizeResultFormatter.format(providerInput(task), result.data())
+                        : result.data();
+                leaseService.releaseSuccess(task, taskResult);
             } else {
                 leaseService.releaseFailed(task, result.errorMessage(), result.retryable());
             }

@@ -2,6 +2,7 @@ package com.intelligentresume.ai.worker;
 
 import com.intelligentresume.ai.consent.service.AiConsentService;
 import com.intelligentresume.ai.generation.service.JobGenerationService;
+import com.intelligentresume.ai.optimize.service.InlineOptimizeResultFormatter;
 import com.intelligentresume.ai.selection.service.JobMaterialSelectionService;
 import com.intelligentresume.ai.provider.AiCallContext;
 import com.intelligentresume.ai.provider.AiCallResult;
@@ -32,7 +33,7 @@ class TaskExecutionServiceTest {
         TaskExecutionService service = new TaskExecutionService(
                 new AiProviderRegistry(List.of(provider)), leaseService, mock(JobGenerationService.class),
                 mock(JobMaterialSelectionService.class), consentService, mock(AppObservability.class),
-                new FailureCategoryClassifier());
+                new FailureCategoryClassifier(), new InlineOptimizeResultFormatter());
         AiTask task = new AiTask();
         task.setId(1L);
         task.setUserId(1L);

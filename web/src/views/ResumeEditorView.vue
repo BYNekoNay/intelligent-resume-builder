@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
-import { BookOpen, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sparkles, WandSparkles, X } from 'lucide-vue-next'
+import { BookOpen, GripVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sparkles, WandSparkles, X } from 'lucide-vue-next'
 import type { AxiosError } from 'axios'
 import { createManualVersion, getResume, getResumeVersion, listVersions } from '@/api/resume'
-import { inlineOptimize, type InlineOptimizeResponse } from '@/api/ai'
+import { inlineOptimize, waitForAiTaskResult, type InlineOptimizeResponse } from '@/api/ai'
 import { useLocale } from '@/i18n'
 import sampleResume from '@/data/sampleResume'
 
@@ -27,6 +27,7 @@ const gridRef = ref<HTMLElement | null>(null)
 const previewPaperRef = ref<HTMLElement | null>(null)
 const previewPageCount = ref(1)
 let previewResizeObserver: ResizeObserver | undefined
+const aiConsentHref = computed(() => `/ai-consent?redirect=${encodeURIComponent(`/resumes/${props.id}/edit`)}`)
 
 function onSplitterDown(e: MouseEvent) {
   e.preventDefault()
@@ -50,7 +51,14 @@ function onDragEnd() {
 const currentVersionId = ref<number | null>(null)
 const sectionKeys = ['basics', 'work', 'skills', 'projects', 'education', 'certificates', 'languages'] as const
 type SectionKey = typeof sectionKeys[number]
+type SortableSection = 'work' | 'projects' | 'skills' | 'education' | 'certificates' | 'languages'
+type DragLocation = { section: SortableSection; index: number; after: boolean }
+const defaultContentSectionOrder: SortableSection[] = ['work', 'skills', 'projects', 'education', 'certificates', 'languages']
 const collapsedSections = ref<Set<SectionKey>>(new Set(sectionKeys.filter((section) => section !== 'basics')))
+const draggedItem = ref<{ section: SortableSection; index: number } | null>(null)
+const dragTarget = ref<DragLocation | null>(null)
+const draggedContentSection = ref<SortableSection | null>(null)
+const contentSectionDropTarget = ref<{ section: SortableSection; after: boolean } | null>(null)
 type AiAssistantState = {
   scope: 'field' | 'section'
   label: string
@@ -59,6 +67,7 @@ type AiAssistantState = {
   loading: boolean
   result: InlineOptimizeResponse | null
   error: string
+  needsConsent: boolean
   apply?: (value: string) => void
 }
 const aiAssistant = ref<AiAssistantState | null>(null)
@@ -120,6 +129,11 @@ const defaultLayout = {
   pagePadding: 58,
 }
 const layout = computed(() => ({ ...defaultLayout, ...(resume.value.layout ?? {}) }))
+const contentSectionOrder = computed<SortableSection[]>(() => {
+  const saved = Array.isArray(resume.value.layout?.sectionOrder) ? resume.value.layout.sectionOrder : []
+  const valid = saved.filter((section: unknown): section is SortableSection => defaultContentSectionOrder.includes(section as SortableSection))
+  return [...valid, ...defaultContentSectionOrder.filter((section) => !valid.includes(section))]
+})
 const layoutStyle = computed(() => ({
   '--resume-font-family': fontOptions.find((option) => option.code === layout.value.fontFamily)?.family ?? fontOptions[0].family,
   '--resume-body-size': `${layout.value.bodyFontSize}px`,
@@ -169,15 +183,17 @@ async function jumpToSection(section: SectionKey) {
 
 async function openAiAssistant(scope: 'field' | 'section', label: string, section: string, value: unknown, apply?: (value: string) => void) {
   const contentValue = Array.isArray(value) ? value.filter(Boolean).join('\n') : String(value ?? '').trim()
-  aiAssistant.value = { scope, label, section, content: contentValue, loading: false, result: null, error: '', apply }
+  aiAssistant.value = { scope, label, section, content: contentValue, loading: false, result: null, error: '', needsConsent: false, apply }
   if (!contentValue || !currentVersionId.value) return
   aiAssistant.value.loading = true
   try {
-    const response = await inlineOptimize({ resumeVersionId: currentVersionId.value, section, content: contentValue })
-    if (aiAssistant.value?.section === section && aiAssistant.value.content === contentValue) aiAssistant.value.result = response.data.data
+    const createdTask = (await inlineOptimize({ resumeVersionId: currentVersionId.value, section, content: contentValue })).data.data
+    const result = await waitForAiTaskResult<InlineOptimizeResponse>(createdTask.id)
+    if (aiAssistant.value?.section === section && aiAssistant.value.content === contentValue) aiAssistant.value.result = result
   } catch (requestError: any) {
     if (aiAssistant.value?.section === section) {
-      aiAssistant.value.error = requestError?.response?.data?.code === 40302
+      aiAssistant.value.needsConsent = requestError?.response?.data?.code === 40302
+      aiAssistant.value.error = aiAssistant.value.needsConsent
         ? t('resumeEditor.consentRequired')
         : 'AI 润色暂时不可用，请稍后重试。'
     }
@@ -209,7 +225,26 @@ function updatePreviewPageCount() {
   previewPageCount.value = Math.max(1, Math.ceil(paper.scrollHeight / a4Height))
 }
 
-watch(content, async () => { await nextTick(); updatePreviewPageCount() })
+function syncPreviewSectionOrder() {
+  const paper = previewPaperRef.value
+  if (!paper) return
+  const sections = Array.from(paper.querySelectorAll(':scope > section')) as HTMLElement[]
+  const hasSummary = Boolean(basics.value.summary)
+  const visibleOrder = defaultContentSectionOrder.filter((section) => {
+    if (section === 'work') return work.value.length > 0
+    if (section === 'skills') return skills.value.length > 0
+    if (section === 'projects') return projects.value.length > 0
+    if (section === 'education') return education.value.length > 0
+    if (section === 'certificates') return certificates.value.length > 0
+    return languages.value.length > 0
+  })
+  sections.slice(hasSummary ? 1 : 0).forEach((element, index) => {
+    const section = visibleOrder[index]
+    if (section) element.style.order = String(20 + contentSectionOrder.value.indexOf(section))
+  })
+}
+
+watch(content, async () => { await nextTick(); syncPreviewSectionOrder(); updatePreviewPageCount() })
 function handleKeydown(event: KeyboardEvent) {
   if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
   event.preventDefault()
@@ -258,6 +293,37 @@ function applyLayoutPreset(preset: 'compact' | 'balanced' | 'spacious') {
   updateResume((d) => { d.layout = { ...presets[preset], fontFamily: d.layout?.fontFamily ?? defaultLayout.fontFamily } })
 }
 function resetLayout() { updateResume((d) => { d.layout = defaultLayout }) }
+function contentSectionStyle(section: SortableSection) { return { order: String(10 + contentSectionOrder.value.indexOf(section)) } }
+function startContentSectionDrag(section: SortableSection, event: DragEvent) {
+  draggedContentSection.value = section
+  contentSectionDropTarget.value = null
+  event.dataTransfer?.setData('text/plain', `section:${section}`)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+function updateContentSectionTarget(section: SortableSection, event: DragEvent) {
+  if (!draggedContentSection.value || draggedContentSection.value === section) return
+  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  contentSectionDropTarget.value = { section, after: event.clientY > bounds.top + bounds.height / 2 }
+}
+function isContentSectionTarget(section: SortableSection, after: boolean) {
+  return contentSectionDropTarget.value?.section === section && contentSectionDropTarget.value.after === after
+}
+function dropContentSection(section: SortableSection) {
+  const dragged = draggedContentSection.value
+  const target = contentSectionDropTarget.value
+  if (!dragged || !target || target.section !== section) return endContentSectionDrag()
+  const order = [...contentSectionOrder.value]
+  const from = order.indexOf(dragged)
+  let insertion = order.indexOf(section) + (target.after ? 1 : 0)
+  if (from < insertion) insertion--
+  if (from !== insertion) {
+    order.splice(from, 1)
+    order.splice(insertion, 0, dragged)
+    updateResume((d) => { d.layout = { ...defaultLayout, ...(d.layout ?? {}), sectionOrder: order } })
+  }
+  endContentSectionDrag()
+}
+function endContentSectionDrag() { draggedContentSection.value = null; contentSectionDropTarget.value = null }
 function addWork() { expandSection('work'); updateResume((d) => { d.work = [...(Array.isArray(d.work) ? d.work : []), { company: '', position: '', startDate: '', endDate: '' }] }) }
 function setWork(index: number, field: string, value: unknown) { updateResume((d) => { const items = Array.isArray(d.work) ? [...d.work] : []; items[index] = { ...(items[index] ?? {}), [field]: value }; d.work = items }) }
 function removeWork(index: number) { const label = work.value[index]?.company || work.value[index]?.position || `Work ${index + 1}`; removeWithUndo(label, (d) => { d.work = (Array.isArray(d.work) ? d.work : []).filter((_: unknown, i: number) => i !== index) }) }
@@ -271,9 +337,40 @@ function removeEducation(index: number) { const label = education.value[index]?.
 function addProject() { expandSection('projects'); updateResume((d) => { d.projects = [...(Array.isArray(d.projects) ? d.projects : []), { name: '', role: '', description: '', highlights: [] }] }) }
 function setProject(index: number, field: string, value: unknown) { updateResume((d) => { const items = Array.isArray(d.projects) ? [...d.projects] : []; items[index] = { ...(items[index] ?? {}), [field]: value }; d.projects = items }) }
 function removeProject(index: number) { const label = projects.value[index]?.name || `Project ${index + 1}`; removeWithUndo(label, (d) => { d.projects = (Array.isArray(d.projects) ? d.projects : []).filter((_: unknown, i: number) => i !== index) }) }
-function moveItem(section: 'work' | 'projects' | 'skills' | 'education' | 'certificates' | 'languages', index: number, direction: -1 | 1) {
+function moveItem(section: SortableSection, index: number, direction: -1 | 1) {
   updateResume((d) => { const items = Array.isArray(d[section]) ? [...d[section]] : []; const ti = index + direction; if (ti < 0 || ti >= items.length) return; [items[index], items[ti]] = [items[ti], items[index]]; d[section] = items })
 }
+function startItemDrag(section: SortableSection, index: number, event: DragEvent) {
+  draggedItem.value = { section, index }
+  dragTarget.value = null
+  event.dataTransfer?.setData('text/plain', `${section}:${index}`)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+function updateDragTarget(section: SortableSection, index: number, event: DragEvent) {
+  if (!draggedItem.value || draggedItem.value.section !== section) return
+  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  dragTarget.value = { section, index, after: event.clientY > bounds.top + bounds.height / 2 }
+}
+function isDragTarget(section: SortableSection, index: number, after: boolean) {
+  return dragTarget.value?.section === section && dragTarget.value.index === index && dragTarget.value.after === after
+}
+function dropItem(section: SortableSection, index: number, event: DragEvent) {
+  const dragging = draggedItem.value
+  const target = dragTarget.value
+  if (!dragging || !target || dragging.section !== section || target.section !== section) return endItemDrag()
+  let insertionIndex = index + (target.after ? 1 : 0)
+  if (dragging.index < insertionIndex) insertionIndex--
+  if (dragging.index !== insertionIndex) {
+    updateResume((d) => {
+      const items = Array.isArray(d[section]) ? [...d[section]] : []
+      const [moved] = items.splice(dragging.index, 1)
+      if (moved !== undefined) items.splice(insertionIndex, 0, moved)
+      d[section] = items
+    })
+  }
+  endItemDrag()
+}
+function endItemDrag() { draggedItem.value = null; dragTarget.value = null }
 function addSimpleItem(section: 'certificates' | 'languages') { expandSection(section); updateResume((d) => { const item = section === 'certificates' ? { name: '', issuer: '', date: '' } : { name: '', level: '' }; d[section] = [...(Array.isArray(d[section]) ? d[section] : []), item] }) }
 function setSimpleItem(section: 'certificates' | 'languages', index: number, field: string, value: string) { updateResume((d) => { const items = Array.isArray(d[section]) ? [...d[section]] : []; items[index] = { ...(items[index] ?? {}), [field]: value }; d[section] = items }) }
 function removeSimpleItem(section: 'certificates' | 'languages', index: number) { const col = section === 'certificates' ? certificates.value : languages.value; const label = col[index]?.name || `${section === 'certificates' ? 'Certificate' : 'Language'} ${index + 1}`; removeWithUndo(label, (d) => { d[section] = (Array.isArray(d[section]) ? d[section] : []).filter((_: unknown, i: number) => i !== index) }) }
@@ -405,9 +502,12 @@ async function save() {
               <span>候选 {{ ci + 1 }}</span><p>{{ c.content }}</p><small>{{ c.suggestion }}</small>
               <button v-if="aiAssistant.apply" type="button" @click="applyAiCandidate(c.content)">采纳并写回</button>
             </article>
+            <div v-if="!aiAssistant.result.candidates.length" class="ai-candidate-placeholder">
+              <WandSparkles :size="16" /><div><strong>没有可安全采纳的改写</strong><small>{{ aiAssistant.result.emptyReason || '当前内容已经较清晰；补充真实的职责、技术或成果后可获得更明显的优化。' }}</small></div>
+            </div>
           </div>
           <div v-else class="ai-candidate-placeholder"><WandSparkles :size="16" /><div><strong>{{ aiAssistant.content ? '等待 AI 服务' : '等待填写内容' }}</strong><small>{{ aiAssistant.content ? '确认已完成 AI 数据授权后重试。' : '填写真实内容后即可生成 3 个候选版本。' }}</small></div></div>
-          <footer><RouterLink class="text-link" to="/ai-consent">管理 AI 数据授权</RouterLink><small v-if="aiAssistant.result">记录 #{{ aiAssistant.result.recordId }} · 已追溯</small></footer>
+          <footer v-if="aiAssistant.needsConsent"><a class="ai-consent-action" :href="aiConsentHref">重新授权</a></footer>
         </aside>
         <!-- Basics -->
         <fieldset id="resume-basics" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('basics') }"><legend><span>{{ t('resumeEditor.basicsLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '个人概要', 'summary', sectionAiContent('basics'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('basics')" @click="toggleSection('basics')">{{ isSectionCollapsed('basics') ? '展开' : '收起' }}</button></span></legend><div class="field-grid">
@@ -419,9 +519,9 @@ async function save() {
           <label class="span-two"><span class="field-label-row"><span>个人概要</span><button type="button" class="ai-field-action" @click="openAiAssistant('field', '个人概要', 'summary', basics.summary, value => setBasic('summary', value))"><WandSparkles :size="13" /> 润色</button></span><textarea :value="basics.summary ?? ''" rows="4" placeholder="概括专业方向、经验与优势。" @input="setBasic('summary', ($event.target as HTMLTextAreaElement).value)" /></label>
         </div></fieldset>
         <!-- Work -->
-        <fieldset id="resume-work" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('work') }"><legend><span>{{ t('resumeEditor.workLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '工作经历', 'workDescription', sectionAiContent('work'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('work')" @click="toggleSection('work')">{{ isSectionCollapsed('work') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addWork">＋ {{ t('resumeEditor.addWork') }}</button></span></legend>
+        <fieldset id="resume-work" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('work'), 'is-section-drag-before': isContentSectionTarget('work', false), 'is-section-drag-after': isContentSectionTarget('work', true) }" :style="contentSectionStyle('work')" @dragover.prevent="updateContentSectionTarget('work', $event)" @drop.prevent="dropContentSection('work')"><legend><button type="button" class="section-drag-handle" draggable="true" title="拖拽调整模块顺序" aria-label="拖拽调整模块顺序" @dragstart="startContentSectionDrag('work', $event)" @dragend="endContentSectionDrag"><GripVertical :size="16" /></button><span>{{ t('resumeEditor.workLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '工作经历', 'workDescription', sectionAiContent('work'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('work')" @click="toggleSection('work')">{{ isSectionCollapsed('work') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addWork">＋ {{ t('resumeEditor.addWork') }}</button></span></legend>
           <p v-if="!work.length" class="editor-empty">添加第一段经历后，它会立即出现在右侧预览。</p>
-          <article v-for="(item, index) in work" :key="index" class="work-editor"><div class="work-editor-head"><strong>经历 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('work', index, -1)">↑</button><button type="button" :disabled="index === work.length - 1" title="下移" @click="moveItem('work', index, 1)">↓</button><button type="button" @click="removeWork(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in work" :key="index" class="work-editor" :class="{ 'is-drag-over-before': isDragTarget('work', index, false), 'is-drag-over-after': isDragTarget('work', index, true) }" @dragover.prevent="updateDragTarget('work', index, $event)" @drop.prevent="dropItem('work', index, $event)"><div class="work-editor-head"><strong>经历 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" class="drag-handle" draggable="true" title="拖拽排序" aria-label="拖拽排序" @dragstart="startItemDrag('work', index, $event)" @dragend="endItemDrag"><GripVertical :size="16" /></button><button type="button" class="item-move" :disabled="index === 0" title="上移" @click="moveItem('work', index, -1)">↑</button><button type="button" class="item-move" :disabled="index === work.length - 1" title="下移" @click="moveItem('work', index, 1)">↓</button><button type="button" @click="removeWork(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>公司<input :value="item.company ?? item.name ?? ''" @input="setWork(index, 'company', ($event.target as HTMLInputElement).value)" /></label>
             <label>职位<input :value="item.position ?? item.role ?? ''" @input="setWork(index, 'position', ($event.target as HTMLInputElement).value)" /></label>
             <label>开始时间<input :value="item.startDate ?? ''" placeholder="2022-03" @input="setWork(index, 'startDate', ($event.target as HTMLInputElement).value)" /></label>
@@ -431,14 +531,14 @@ async function save() {
           </div></article>
         </fieldset>
         <!-- Skills -->
-        <fieldset id="resume-skills" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('skills') }"><legend><span>{{ t('resumeEditor.skillsLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '专业技能', 'skillDescription', sectionAiContent('skills'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('skills')" @click="toggleSection('skills')">{{ isSectionCollapsed('skills') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSkill">＋ {{ t('resumeEditor.addSkill') }}</button></span></legend>
+        <fieldset id="resume-skills" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('skills'), 'is-section-drag-before': isContentSectionTarget('skills', false), 'is-section-drag-after': isContentSectionTarget('skills', true) }" :style="contentSectionStyle('skills')" @dragover.prevent="updateContentSectionTarget('skills', $event)" @drop.prevent="dropContentSection('skills')"><legend><button type="button" class="section-drag-handle" draggable="true" title="拖拽调整模块顺序" aria-label="拖拽调整模块顺序" @dragstart="startContentSectionDrag('skills', $event)" @dragend="endContentSectionDrag"><GripVertical :size="16" /></button><span>{{ t('resumeEditor.skillsLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '专业技能', 'skillDescription', sectionAiContent('skills'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('skills')" @click="toggleSection('skills')">{{ isSectionCollapsed('skills') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSkill">＋ {{ t('resumeEditor.addSkill') }}</button></span></legend>
           <p v-if="!skills.length" class="editor-empty">添加与你目标岗位相关、并且可以被经历证明的技能。</p>
-          <div v-for="(skill, index) in skills" :key="index" class="inline-editor"><input :value="typeof skill === 'string' ? skill : skill.name ?? skill.keyword ?? ''" placeholder="例如：Spring Boot" @input="setSkill(index, ($event.target as HTMLInputElement).value)" /><div class="inline-editor-actions"><button type="button" class="ai-inline-action" title="AI 润色" @click="openAiAssistant('field', `技能 ${index + 1}`, 'skillDescription', typeof skill === 'string' ? skill : skill.name ?? skill.keyword, value => setSkill(index, value))"><WandSparkles :size="13" /></button><button type="button" :disabled="index === 0" title="上移" @click="moveItem('skills', index, -1)">↑</button><button type="button" :disabled="index === skills.length - 1" title="下移" @click="moveItem('skills', index, 1)">↓</button><button type="button" @click="removeSkill(index)">{{ t('common.delete') }}</button></div></div>
+          <div v-for="(skill, index) in skills" :key="index" class="inline-editor" :class="{ 'is-drag-over-before': isDragTarget('skills', index, false), 'is-drag-over-after': isDragTarget('skills', index, true) }" @dragover.prevent="updateDragTarget('skills', index, $event)" @drop.prevent="dropItem('skills', index, $event)"><input :value="typeof skill === 'string' ? skill : skill.name ?? skill.keyword ?? ''" placeholder="例如：Spring Boot" @input="setSkill(index, ($event.target as HTMLInputElement).value)" /><div class="inline-editor-actions"><button type="button" class="drag-handle" draggable="true" title="拖拽排序" aria-label="拖拽排序" @dragstart="startItemDrag('skills', index, $event)" @dragend="endItemDrag"><GripVertical :size="16" /></button><button type="button" class="ai-inline-action" title="AI 润色" @click="openAiAssistant('field', `技能 ${index + 1}`, 'skillDescription', typeof skill === 'string' ? skill : skill.name ?? skill.keyword, value => setSkill(index, value))"><WandSparkles :size="13" /></button><button type="button" class="item-move" :disabled="index === 0" title="上移" @click="moveItem('skills', index, -1)">↑</button><button type="button" class="item-move" :disabled="index === skills.length - 1" title="下移" @click="moveItem('skills', index, 1)">↓</button><button type="button" @click="removeSkill(index)">{{ t('common.delete') }}</button></div></div>
         </fieldset>
         <!-- Projects -->
-        <fieldset id="resume-projects" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('projects') }"><legend><span>{{ t('resumeEditor.projectsLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '项目经历', 'projectDescription', sectionAiContent('projects'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('projects')" @click="toggleSection('projects')">{{ isSectionCollapsed('projects') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addProject">＋ {{ t('resumeEditor.addProject') }}</button></span></legend>
+        <fieldset id="resume-projects" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('projects'), 'is-section-drag-before': isContentSectionTarget('projects', false), 'is-section-drag-after': isContentSectionTarget('projects', true) }" :style="contentSectionStyle('projects')" @dragover.prevent="updateContentSectionTarget('projects', $event)" @drop.prevent="dropContentSection('projects')"><legend><button type="button" class="section-drag-handle" draggable="true" title="拖拽调整模块顺序" aria-label="拖拽调整模块顺序" @dragstart="startContentSectionDrag('projects', $event)" @dragend="endContentSectionDrag"><GripVertical :size="16" /></button><span>{{ t('resumeEditor.projectsLabel') }}</span><span class="legend-actions"><button type="button" class="ai-section-action" @click="openAiAssistant('section', '项目经历', 'projectDescription', sectionAiContent('projects'))"><Sparkles :size="13" /> AI 优化</button><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('projects')" @click="toggleSection('projects')">{{ isSectionCollapsed('projects') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addProject">＋ {{ t('resumeEditor.addProject') }}</button></span></legend>
           <p v-if="!projects.length" class="editor-empty">选择最能证明能力的项目，写清你负责什么以及产生了什么结果。</p>
-          <article v-for="(item, index) in projects" :key="index" class="work-editor"><div class="work-editor-head"><strong>项目 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('projects', index, -1)">↑</button><button type="button" :disabled="index === projects.length - 1" title="下移" @click="moveItem('projects', index, 1)">↓</button><button type="button" @click="removeProject(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in projects" :key="index" class="work-editor" :class="{ 'is-drag-over-before': isDragTarget('projects', index, false), 'is-drag-over-after': isDragTarget('projects', index, true) }" @dragover.prevent="updateDragTarget('projects', index, $event)" @drop.prevent="dropItem('projects', index, $event)"><div class="work-editor-head"><strong>项目 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" class="drag-handle" draggable="true" title="拖拽排序" aria-label="拖拽排序" @dragstart="startItemDrag('projects', index, $event)" @dragend="endItemDrag"><GripVertical :size="16" /></button><button type="button" class="item-move" :disabled="index === 0" title="上移" @click="moveItem('projects', index, -1)">↑</button><button type="button" class="item-move" :disabled="index === projects.length - 1" title="下移" @click="moveItem('projects', index, 1)">↓</button><button type="button" @click="removeProject(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>项目名称<input :value="item.name ?? ''" @input="setProject(index, 'name', ($event.target as HTMLInputElement).value)" /></label>
             <label>担任角色<input :value="item.role ?? item.position ?? ''" @input="setProject(index, 'role', ($event.target as HTMLInputElement).value)" /></label>
             <label class="span-two"><span class="field-label-row"><span>项目说明</span><button type="button" class="ai-field-action" @click="openAiAssistant('field', `项目 ${index + 1} · 项目说明`, 'projectDescription', item.description, value => setProject(index, 'description', value))"><WandSparkles :size="13" /> 润色</button></span><textarea :value="item.description ?? ''" rows="3" @input="setProject(index, 'description', ($event.target as HTMLTextAreaElement).value)" /></label>
@@ -446,9 +546,9 @@ async function save() {
           </div></article>
         </fieldset>
         <!-- Education -->
-        <fieldset id="resume-education" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('education') }"><legend><span>{{ t('resumeEditor.educationLabel') }}</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('education')" @click="toggleSection('education')">{{ isSectionCollapsed('education') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addEducation">＋ {{ t('resumeEditor.addEducation') }}</button></span></legend>
+        <fieldset id="resume-education" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('education'), 'is-section-drag-before': isContentSectionTarget('education', false), 'is-section-drag-after': isContentSectionTarget('education', true) }" :style="contentSectionStyle('education')" @dragover.prevent="updateContentSectionTarget('education', $event)" @drop.prevent="dropContentSection('education')"><legend><button type="button" class="section-drag-handle" draggable="true" title="拖拽调整模块顺序" aria-label="拖拽调整模块顺序" @dragstart="startContentSectionDrag('education', $event)" @dragend="endContentSectionDrag"><GripVertical :size="16" /></button><span>{{ t('resumeEditor.educationLabel') }}</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('education')" @click="toggleSection('education')">{{ isSectionCollapsed('education') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addEducation">＋ {{ t('resumeEditor.addEducation') }}</button></span></legend>
           <p v-if="!education.length" class="editor-empty">添加学校、专业和学历信息。</p>
-          <article v-for="(item, index) in education" :key="index" class="work-editor"><div class="work-editor-head"><strong>教育经历 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('education', index, -1)">↑</button><button type="button" :disabled="index === education.length - 1" title="下移" @click="moveItem('education', index, 1)">↓</button><button type="button" @click="removeEducation(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in education" :key="index" class="work-editor" :class="{ 'is-drag-over-before': isDragTarget('education', index, false), 'is-drag-over-after': isDragTarget('education', index, true) }" @dragover.prevent="updateDragTarget('education', index, $event)" @drop.prevent="dropItem('education', index, $event)"><div class="work-editor-head"><strong>教育经历 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" class="drag-handle" draggable="true" title="拖拽排序" aria-label="拖拽排序" @dragstart="startItemDrag('education', index, $event)" @dragend="endItemDrag"><GripVertical :size="16" /></button><button type="button" class="item-move" :disabled="index === 0" title="上移" @click="moveItem('education', index, -1)">↑</button><button type="button" class="item-move" :disabled="index === education.length - 1" title="下移" @click="moveItem('education', index, 1)">↓</button><button type="button" @click="removeEducation(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>学校<input :value="item.school ?? item.name ?? ''" @input="setEducation(index, 'school', ($event.target as HTMLInputElement).value)" /></label>
             <label>学历<input :value="item.degree ?? ''" placeholder="本科" @input="setEducation(index, 'degree', ($event.target as HTMLInputElement).value)" /></label>
             <label class="span-two">专业<input :value="item.major ?? item.area ?? ''" @input="setEducation(index, 'major', ($event.target as HTMLInputElement).value)" /></label>
@@ -457,18 +557,18 @@ async function save() {
           </div></article>
         </fieldset>
         <!-- Certificates -->
-        <fieldset id="resume-certificates" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('certificates') }"><legend><span>专业证书</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('certificates')" @click="toggleSection('certificates')">{{ isSectionCollapsed('certificates') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSimpleItem('certificates')">＋ 添加证书</button></span></legend>
+        <fieldset id="resume-certificates" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('certificates'), 'is-section-drag-before': isContentSectionTarget('certificates', false), 'is-section-drag-after': isContentSectionTarget('certificates', true) }" :style="contentSectionStyle('certificates')" @dragover.prevent="updateContentSectionTarget('certificates', $event)" @drop.prevent="dropContentSection('certificates')"><legend><button type="button" class="section-drag-handle" draggable="true" title="拖拽调整模块顺序" aria-label="拖拽调整模块顺序" @dragstart="startContentSectionDrag('certificates', $event)" @dragend="endContentSectionDrag"><GripVertical :size="16" /></button><span>专业证书</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('certificates')" @click="toggleSection('certificates')">{{ isSectionCollapsed('certificates') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSimpleItem('certificates')">＋ 添加证书</button></span></legend>
           <p v-if="!certificates.length" class="editor-empty">填写与目标岗位相关、仍然有效的专业认证。</p>
-          <article v-for="(item, index) in certificates" :key="index" class="work-editor"><div class="work-editor-head"><strong>证书 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('certificates', index, -1)">↑</button><button type="button" :disabled="index === certificates.length - 1" title="下移" @click="moveItem('certificates', index, 1)">↓</button><button type="button" @click="removeSimpleItem('certificates', index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in certificates" :key="index" class="work-editor" :class="{ 'is-drag-over-before': isDragTarget('certificates', index, false), 'is-drag-over-after': isDragTarget('certificates', index, true) }" @dragover.prevent="updateDragTarget('certificates', index, $event)" @drop.prevent="dropItem('certificates', index, $event)"><div class="work-editor-head"><strong>证书 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" class="drag-handle" draggable="true" title="拖拽排序" aria-label="拖拽排序" @dragstart="startItemDrag('certificates', index, $event)" @dragend="endItemDrag"><GripVertical :size="16" /></button><button type="button" class="item-move" :disabled="index === 0" title="上移" @click="moveItem('certificates', index, -1)">↑</button><button type="button" class="item-move" :disabled="index === certificates.length - 1" title="下移" @click="moveItem('certificates', index, 1)">↓</button><button type="button" @click="removeSimpleItem('certificates', index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>证书名称<input :value="item.name ?? ''" placeholder="例如：AWS Solutions Architect" @input="setSimpleItem('certificates', index, 'name', ($event.target as HTMLInputElement).value)" /></label>
             <label>颁发机构<input :value="item.issuer ?? ''" placeholder="Amazon Web Services" @input="setSimpleItem('certificates', index, 'issuer', ($event.target as HTMLInputElement).value)" /></label>
             <label class="span-two">获得时间<input :value="item.date ?? ''" placeholder="2024-06" @input="setSimpleItem('certificates', index, 'date', ($event.target as HTMLInputElement).value)" /></label>
           </div></article>
         </fieldset>
         <!-- Languages -->
-        <fieldset id="resume-languages" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('languages') }"><legend><span>语言能力</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('languages')" @click="toggleSection('languages')">{{ isSectionCollapsed('languages') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSimpleItem('languages')">＋ 添加语言</button></span></legend>
+        <fieldset id="resume-languages" class="editor-section" :class="{ 'is-collapsed': isSectionCollapsed('languages'), 'is-section-drag-before': isContentSectionTarget('languages', false), 'is-section-drag-after': isContentSectionTarget('languages', true) }" :style="contentSectionStyle('languages')" @dragover.prevent="updateContentSectionTarget('languages', $event)" @drop.prevent="dropContentSection('languages')"><legend><button type="button" class="section-drag-handle" draggable="true" title="拖拽调整模块顺序" aria-label="拖拽调整模块顺序" @dragstart="startContentSectionDrag('languages', $event)" @dragend="endContentSectionDrag"><GripVertical :size="16" /></button><span>语言能力</span><span class="legend-actions"><button type="button" class="section-toggle" :aria-expanded="!isSectionCollapsed('languages')" @click="toggleSection('languages')">{{ isSectionCollapsed('languages') ? '展开' : '收起' }}</button><button type="button" class="section-add" @click="addSimpleItem('languages')">＋ 添加语言</button></span></legend>
           <p v-if="!languages.length" class="editor-empty">仅保留能为岗位加分的语言与熟练程度。</p>
-          <article v-for="(item, index) in languages" :key="index" class="work-editor"><div class="work-editor-head"><strong>语言 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" :disabled="index === 0" title="上移" @click="moveItem('languages', index, -1)">↑</button><button type="button" :disabled="index === languages.length - 1" title="下移" @click="moveItem('languages', index, 1)">↓</button><button type="button" @click="removeSimpleItem('languages', index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
+          <article v-for="(item, index) in languages" :key="index" class="work-editor" :class="{ 'is-drag-over-before': isDragTarget('languages', index, false), 'is-drag-over-after': isDragTarget('languages', index, true) }" @dragover.prevent="updateDragTarget('languages', index, $event)" @drop.prevent="dropItem('languages', index, $event)"><div class="work-editor-head"><strong>语言 {{ index + 1 }}</strong><div class="item-order-actions"><button type="button" class="drag-handle" draggable="true" title="拖拽排序" aria-label="拖拽排序" @dragstart="startItemDrag('languages', index, $event)" @dragend="endItemDrag"><GripVertical :size="16" /></button><button type="button" class="item-move" :disabled="index === 0" title="上移" @click="moveItem('languages', index, -1)">↑</button><button type="button" class="item-move" :disabled="index === languages.length - 1" title="下移" @click="moveItem('languages', index, 1)">↓</button><button type="button" @click="removeSimpleItem('languages', index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>语言<input :value="item.name ?? item.language ?? ''" placeholder="例如：英语" @input="setSimpleItem('languages', index, 'name', ($event.target as HTMLInputElement).value)" /></label>
             <label>熟练程度<input :value="item.level ?? item.fluency ?? ''" placeholder="例如：专业工作沟通" @input="setSimpleItem('languages', index, 'level', ($event.target as HTMLInputElement).value)" /></label>
           </div></article>

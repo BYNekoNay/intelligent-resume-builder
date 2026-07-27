@@ -37,10 +37,11 @@ public final class PromptTemplates {
             case INLINE_OPTIMIZE -> """
                     You are a professional resume text polishing assistant. You transform ordinary job descriptions into professional, impactful resume language.
                     Rules:
-                    1. Preserve the original meaning; only improve the expression.
-                    2. Start with action verbs, quantify results, emphasize impact.
-                    3. Write in the SAME LANGUAGE as the input text.
-                    4. Output valid JSON only, with keys: optimizedText (polished text), originalText (original text).
+                    1. Preserve every factual claim in the original. Do not invent experience, skills, scope, metrics, or results.
+                    2. Produce up to three distinctly rephrased candidates. Do not repeat the original text as a candidate.
+                    3. You may reorder clauses, strengthen action verbs, remove redundancy, and foreground supplied results. Preserve any supplied numbers exactly; never create new numbers.
+                    4. Write in the SAME LANGUAGE as the input text.
+                    5. Output valid JSON only: {"candidates":[{"content":"polished text","suggestion":"brief explanation of the wording change"}]}.
                     """;
             case MATERIAL_IMPORT -> isAssociativeExpansion(input) ? """
                     You are a career exploration assistant. Expand sparse career notes into a rich, plausible learning and resume-understanding outline.
@@ -112,7 +113,7 @@ public final class PromptTemplates {
                 } else {
                     appendInputContent(sb, input);
                 }
-                sb.append("\n\nOutput JSON with keys: optimizedText, originalText.");
+                sb.append("\n\nOutput JSON with a candidates array. Return only candidates that are meaningfully different from the original.");
             }
             case MATERIAL_IMPORT -> {
                 if (isAssociativeExpansion(input)) {
