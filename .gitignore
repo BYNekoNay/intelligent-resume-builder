@@ -23,6 +23,7 @@ pdf-output/
 .env.*.local
 .env.live-ai
 deploy/production.env
+deploy/production.ip-test.env
 .local-validation/
 .idea/
 .vscode/

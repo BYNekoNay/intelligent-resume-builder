@@ -88,15 +88,17 @@ npm test
 .\scripts\Test-LocalFullFlow.ps1 -VerifyPdfRecovery
 ```
 
-## 当前部署状态
+## 云端部署
 
-项目当前以本地验证拓扑作为可执行交付，并计划采用单机 Docker Compose 作为第一版正式部署方向：Nginx 作为唯一公网入口，Web、API、PDF 服务与 MySQL 使用私有网络。
+当前可复现发布链路为 GitHub Actions 构建 Linux/amd64 镜像、阿里云 ACR 保存成品镜像、ECS 仅拉取运行。Edge Nginx 是唯一公网入口，Web、API、PDF 和 MySQL 保持在容器私有网络中。
 
-Docker 镜像、Nginx、TLS 证书、域名、生产密钥注入和正式监控尚未在本仓库实现；部署时不得把 MySQL、PDF 服务或管理端口直接暴露到公网。
+无域名测试环境可以使用公网 IP 与自签名 HTTPS；正式环境仍应配置可信域名证书、备份策略与告警接收渠道。完整操作、回滚、故障排查和注销 ECS 前备份要求见[部署运行手册](docs/DEPLOYMENT.md)。
 
 ## 文档入口
 
+- [项目上下文（后续 AI / 新开发者先读）](PROJECT_CONTEXT.md)
 - [文档索引](docs/README.md)
+- [部署运行手册](docs/DEPLOYMENT.md)
 - [本地验证指南](docs/LOCAL_VALIDATION.md)
 - [系统架构设计](docs/03-系统架构设计说明书.md)
 - [接口设计](docs/05-接口设计说明书.md)
