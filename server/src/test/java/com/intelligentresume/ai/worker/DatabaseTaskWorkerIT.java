@@ -114,7 +114,9 @@ class DatabaseTaskWorkerIT {
         AiTask task = taskRepository.findById(taskId).orElseThrow();
         task.setStatus(AiTaskStatus.RUNNING);
         task.setLeaseOwner("dead-worker");
-        task.setLeaseExpiresAt(LocalDateTime.now().minusMinutes(5));
+        // Use an unambiguously expired timestamp so H2's NOW() implementation and
+        // the JVM/database clock cannot make this recovery-path test flaky.
+        task.setLeaseExpiresAt(LocalDateTime.of(2000, 1, 1, 0, 0));
         task.setRetryCount(1);
         taskRepository.saveAndFlush(task);
 
