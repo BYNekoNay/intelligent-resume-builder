@@ -13,7 +13,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
@@ -108,7 +107,6 @@ class DatabaseTaskWorkerIT {
     @Test
     @Order(3)
     @DisplayName("过期租约的 RUNNING 任务被重新领取，未配置密钥时标记为 FAILED")
-    @Transactional
     void workerPoll_recoversExpiredLease() throws Exception {
         Long taskId = createTask("RESUME_OPTIMIZE");
 
