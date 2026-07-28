@@ -2,6 +2,16 @@
 
 本文说明仓库当前的 GitHub Actions 校验与镜像发布流程。流水线不保存业务密钥，不执行自动投递，也不直接部署或修改 ECS。
 
+## 已验证状态
+
+2026-07-28，Pull Request [#1](https://github.com/BYNekoNay/intelligent-resume-builder/pull/1) 的 GitHub Actions Run `30356150416` 已通过以下三个检查：
+
+- `CI / Server tests (pull_request)`：310 个测试通过；
+- `CI / Web build and browser tests (pull_request)`：生产构建和浏览器回归通过；
+- `CI / PDF service checks (pull_request)`：语法检查和 9 个服务测试通过。
+
+这只证明该提交的 CI 运行结果。2026-07-28 检查 `Settings -> Branches` 时，仓库尚未配置 Classic branch protection 或分支规则，因此这些检查当前不会被 GitHub 强制为合并前门禁；仓库管理员仍需按下文配置 required status checks。
+
 ## 持续集成
 
 工作流文件：`.github/workflows/ci.yml`。
@@ -45,6 +55,8 @@ GitHub 仓库需要配置以下 Actions Secrets：
 - 发布工作流缺少变量：在仓库 Actions Secrets 中补齐缺失项，不要把值写入 workflow、日志或提交。
 - 工作流没有触发：确认 PR 的目标分支或推送分支是 `master`，并检查仓库是否启用 GitHub Actions。
 
-## 当前边界
+## GitHub 与 Gitee 的职责边界
 
-GitHub Actions 是 GitHub 仓库的权威 CI/CD 执行面。Gitee 用于代码镜像和协作备份，不配置重复的云端流水线，以免同一提交重复消耗资源或产生发布竞态。
+GitHub Actions 是 Pull Request 门禁和镜像发布的权威执行面：`master` 的 PR 检查、分支保护状态检查和手动 ACR 发布都以 GitHub 为准。
+
+仓库同时保留 `.gitee/workflows/ci.yml` 作为 Gitee 镜像侧的质量门禁。它会在 Gitee 的推送和 PR 上运行后端、前端、PDF、Compose 静态检查和空白检查，但不读取 ACR Secrets、不发布镜像，也不部署 ECS。启用它前应在 Gitee 项目设置中确认流水线功能可用；不要把 Gitee 的检查与 GitHub 的 PR 门禁混用。
