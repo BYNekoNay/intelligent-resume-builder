@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { FilePenLine, LayoutDashboard, Sparkles, FileText, NotebookPen, UserRoundPlus, UserRound, LogIn, LogOut, Send, Activity, Target } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { Activity, FilePenLine, FileText, LayoutDashboard, LogIn, LogOut, Menu, NotebookPen, Send, Sparkles, Target, UserRound, UserRoundPlus, X } from 'lucide-vue-next'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
@@ -11,6 +11,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 const { t } = useLocale()
+const mobileMenuOpen = ref(false)
 
 interface NavItem { to: string; key: string; icon: any }
 
@@ -50,6 +51,8 @@ const routeToGroup = computed<Record<string, GroupKey>>(() => {
 
 const activeGroup = computed<GroupKey | null>(() => routeToGroup.value[route.path] ?? null)
 
+watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
+
 async function signOut() {
   await auth.signOut()
   await router.push({ name: 'home' })
@@ -75,7 +78,6 @@ async function signOut() {
             v-for="item in groups[groupKey]"
             :key="item.key"
             :to="item.to"
-            @click.stop
           >
             <component :is="item.icon" :size="15" />
             {{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}
@@ -104,7 +106,42 @@ async function signOut() {
         </RouterLink>
       </div>
       <LanguageSwitcher />
+      <button
+        class="mobile-menu-toggle"
+        type="button"
+        :aria-expanded="mobileMenuOpen"
+        :aria-label="mobileMenuOpen ? t('navigation.closeMenu') : t('navigation.openMenu')"
+        aria-controls="mobile-navigation"
+        @click="mobileMenuOpen = !mobileMenuOpen"
+      >
+        <X v-if="mobileMenuOpen" :size="20" />
+        <Menu v-else :size="20" />
+      </button>
     </header>
+
+    <div v-if="mobileMenuOpen" id="mobile-navigation" class="mobile-navigation-panel">
+      <nav :aria-label="t('navigation.label')">
+        <section v-for="groupKey in (Object.keys(groups) as GroupKey[])" :key="groupKey">
+          <p>{{ t(`navGroups.${groupKey}.label`) }}</p>
+          <RouterLink v-for="item in groups[groupKey]" :key="item.key" :to="item.to">
+            <component :is="item.icon" :size="16" />
+            <span>{{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}</span>
+          </RouterLink>
+        </section>
+      </nav>
+
+      <div class="mobile-account-actions">
+        <template v-if="auth.accessToken">
+          <RouterLink to="/account"><UserRound :size="17" /> {{ t('account.title') }}</RouterLink>
+          <RouterLink to="/ai-consent"><Sparkles :size="17" /> {{ t('actions.aiConsent') }}</RouterLink>
+          <button type="button" @click="signOut"><LogOut :size="17" /> {{ t('actions.signOut') }}</button>
+        </template>
+        <template v-else>
+          <RouterLink to="/login"><LogIn :size="17" /> {{ t('actions.signIn') }}</RouterLink>
+          <RouterLink to="/register"><UserRoundPlus :size="17" /> {{ t('actions.signUp') }}</RouterLink>
+        </template>
+      </div>
+    </div>
     <main class="app-main">
       <RouterView />
     </main>

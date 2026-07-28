@@ -5,7 +5,7 @@ import { useAiTaskStore } from '@/stores/aiTask'
 import { getTask, confirmTask, rejectTask, retryTask } from '@/api/ai'
 import { listResumesByJd, type ResumeSummary } from '@/api/resume'
 import DraftContentFields from '@/components/DraftContentFields.vue'
-import { Check, Pencil, Trash2 } from 'lucide-vue-next'
+import { Check, ClipboardCheck, Pencil, Sparkles, Trash2 } from 'lucide-vue-next'
 import { useLocale } from '@/i18n'
 
 const { t } = useLocale()
@@ -372,14 +372,17 @@ async function handleRetry() {
 
 <template>
   <div class="confirm-page">
-    <header>
+    <header class="confirm-header">
+      <p class="eyebrow"><ClipboardCheck :size="14" /> {{ t('generationConfirm.eyebrow') }}</p>
       <h1>{{ t('generationConfirm.pageTitle') }}</h1>
       <p class="subtitle">{{ t('generationConfirm.pageSubtitle') }}</p>
+      <div class="confirm-route" aria-hidden="true"><span class="done"><Check :size="12" />{{ t('generationWorkbench.stepTargetJob') }}</span><i></i><span class="done"><Check :size="12" />{{ t('generationWorkbench.stepMaterialScope') }}</span><i></i><span class="active">{{ t('generationConfirm.reviewStep') }}</span></div>
     </header>
 
     <!-- Loading / Polling -->
     <div v-if="loading" class="status-card">
       <div class="spinner-lg"></div>
+      <Sparkles :size="20" />
       <p>{{ t('generationConfirm.generating') }}</p>
       <p class="hint">{{ t('generationConfirm.generatingHint') }}</p>
     </div>
@@ -924,4 +927,80 @@ header h1 {
     transform: none;
   }
 }
+
+/* Human review surface for generated content. */
+.confirm-page { display: grid; gap: 24px; width: min(100%, 920px); max-width: 920px; margin: 0 auto; padding: 8px 0 52px; }
+.confirm-header { display: grid; gap: 0; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
+.confirm-header .eyebrow { justify-self: start; }
+.confirm-header h1 { margin: 5px 0 7px; color: var(--text-primary); font-family: var(--font-display); font-size: 34px; font-weight: 700; letter-spacing: 0; }
+.confirm-header .subtitle { max-width: 690px; margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
+.confirm-route { display: grid; grid-template-columns: auto 34px auto 34px auto; align-items: center; justify-content: end; gap: 7px; margin-top: 20px; color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; font-weight: 700; }
+.confirm-route span { display: inline-flex; align-items: center; gap: 4px; }
+.confirm-route i { height: 1px; background: var(--border); }
+.confirm-route .done { color: var(--text-primary); }
+.confirm-route .active { color: var(--accent); }
+.draft-container { display: grid; gap: 18px; }
+.status-card { display: grid; justify-items: center; gap: 9px; padding: 48px 20px; border: 1px solid var(--border); border-radius: 7px; color: var(--accent); background: var(--bg-surface); text-align: center; }
+.status-card p { margin: 0; color: var(--text-primary); font-size: 13px; font-weight: 650; }
+.status-card .hint { color: var(--text-tertiary); font-size: 10px; font-weight: 500; }
+.status-card.error { border-color: color-mix(in srgb, var(--danger) 28%, var(--border)); color: var(--danger); background: var(--danger-light); }
+.spinner-lg { width: 30px; height: 30px; margin: 0 0 5px; border-color: var(--border); border-top-color: var(--accent); }
+.warnings { display: grid; gap: 4px; margin: 0; padding: 13px 16px; border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--border)); border-radius: 6px; background: var(--warning-light); }
+.warning-item { margin: 0; color: var(--warning); font-size: 10px; }
+.quality-summary { margin: 0; padding: 20px; border: 1px solid color-mix(in srgb, var(--info) 25%, var(--border)); border-radius: 7px; background: var(--info-light); }
+.quality-summary--review_recommended { border-color: color-mix(in srgb, var(--warning) 28%, var(--border)); background: var(--warning-light); }
+.quality-summary--requires_action { border-color: color-mix(in srgb, var(--danger) 25%, var(--border)); background: var(--danger-light); }
+.quality-summary__heading { margin-bottom: 14px; }
+.quality-summary__heading h3 { color: var(--text-primary); font-size: 14px; }
+.quality-summary--review_recommended .quality-summary__heading h3, .quality-summary--requires_action .quality-summary__heading h3 { color: var(--text-primary); }
+.quality-summary__heading p { color: var(--text-secondary); font-size: 10px; }
+.quality-summary__status { border: 1px solid color-mix(in srgb, var(--info) 25%, var(--border)); border-radius: 4px; color: var(--info); background: #fff; font-size: 9px; }
+.quality-summary--review_recommended .quality-summary__status { border-color: color-mix(in srgb, var(--warning) 25%, var(--border)); color: var(--warning); background: #fff; }
+.quality-summary--requires_action .quality-summary__status { border-color: color-mix(in srgb, var(--danger) 25%, var(--border)); color: var(--danger); background: #fff; }
+.quality-summary__metrics { gap: 7px; }
+.quality-summary__metrics > div { padding: 9px; border: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: 5px; background: color-mix(in srgb, #fff 82%, transparent); }
+.quality-summary__metrics strong { color: var(--text-primary); font-family: var(--font-utility); font-size: 15px; }
+.quality-summary__metrics span { color: var(--text-secondary); font-size: 9px; }
+.missing-section { margin: 0; padding: 15px 18px; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border)); border-left: 4px solid var(--danger); border-radius: 7px; background: var(--danger-light); }
+.missing-section h3 { margin: 0 0 7px; color: var(--text-primary); font-size: 12px; }
+.missing-section ul { margin: 0; padding-left: 18px; }
+.missing-section li { color: var(--text-secondary); font-size: 10px; }
+.draft-section { display: grid; gap: 0; margin: 0; padding: 20px 22px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); box-shadow: var(--shadow-sm); }
+.draft-section > h3 { margin: 0; padding: 0 0 13px; border-bottom: 1px solid var(--border); color: var(--text-primary); font-size: 14px; }
+.draft-item { margin: 0; padding: 16px 4px; border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0; background: transparent; }
+.draft-item:last-child { border-bottom: 0; }
+.draft-item.accept { border-color: var(--border-soft); background: color-mix(in srgb, var(--success-light) 38%, transparent); box-shadow: inset 3px 0 0 var(--success); }
+.draft-item.reject { border-color: var(--border-soft); background: color-mix(in srgb, var(--danger-light) 45%, transparent); box-shadow: inset 3px 0 0 var(--danger); opacity: .68; }
+.draft-item.edit { border-color: var(--border-soft); background: color-mix(in srgb, var(--info-light) 40%, transparent); box-shadow: inset 3px 0 0 var(--info); }
+.item-header { margin-bottom: 8px; }
+.item-number { color: var(--text-tertiary); font-size: 9px; }
+.source-badge, .pending-badge { min-height: 20px; padding: 3px 6px; border-radius: 3px; font-size: 9px; }
+.source-badge { color: var(--info); background: var(--info-light); }
+.pending-badge { color: var(--warning); background: var(--warning-light); }
+.item-actions { margin-top: 13px; padding-top: 10px; border-top-color: var(--border-soft); }
+.action-btn { min-width: 74px; height: 32px; padding: 0 10px; border-color: var(--border); border-radius: 5px; color: var(--text-secondary); background: var(--bg-surface); font-size: 10px; }
+.action-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); transform: none; }
+.action-btn.accept { color: var(--success); }
+.action-btn.accept.active { border-color: var(--success); color: #fff; background: var(--success); }
+.action-btn.edit { color: var(--info); }
+.action-btn.reject { color: var(--danger); }
+.action-btn.reject.active { border-color: var(--danger); color: #fff; background: var(--danger); }
+.unselected-details { margin: 0; padding: 13px 16px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); background: var(--bg-surface); font-size: 10px; }
+.title-input { display: grid; gap: 6px; margin: 0; padding: 18px 20px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); }
+.title-input label { margin: 0; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
+.title-input .input { padding: 10px; border-color: var(--border); border-radius: 6px; color: var(--text-primary); background: var(--bg-input); font-size: 13px; }
+.title-input .input:focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-light); }
+.error-msg { margin: 0; color: var(--danger); font-size: 11px; }
+.confirm-actions { gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); box-shadow: var(--shadow-sm); }
+.btn-primary, .btn-secondary, .btn-small { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 13px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; font-weight: 650; cursor: pointer; }
+.btn-primary, .btn-small { border-color: var(--accent); color: #fff; background: var(--accent); }
+.btn-secondary { color: var(--text-secondary); background: var(--bg-surface); }
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.dialog-overlay { padding: 20px; background: rgba(18, 36, 27, .48); backdrop-filter: blur(5px); }
+.dialog { max-width: 500px; padding: 24px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); box-shadow: var(--shadow-lg); }
+.dialog h3 { margin: 0 0 8px; color: var(--text-primary); font-family: var(--font-display); font-size: 22px; }
+.dialog p { color: var(--text-secondary); font-size: 11px; }
+.existing-item { border-bottom-color: var(--border-soft); color: var(--text-primary); font-size: 12px; }
+.dialog-actions { justify-content: flex-end; gap: 8px; }
+@media (max-width: 560px) { .confirm-page { padding-top: 0; } .confirm-header h1 { font-size: 29px; } .confirm-route { grid-template-columns: auto 15px auto 15px auto; justify-content: stretch; font-size: 8px; } .quality-summary { padding: 16px; } .draft-section { padding: 17px 14px; } .item-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); } .confirm-actions { display: grid; grid-template-columns: 1fr; } .confirm-actions button { width: 100%; } .dialog-overlay { align-items: end; padding: 0; } .dialog { width: 100%; max-width: none; border-bottom: 0; border-radius: 8px 8px 0 0; } }
 </style>

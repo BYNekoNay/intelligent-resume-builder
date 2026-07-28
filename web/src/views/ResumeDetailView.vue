@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Archive, ArrowLeft, BriefcaseBusiness, CheckCircle2, Download, FileClock, Pencil, Plus, RotateCcw } from 'lucide-vue-next'
 import { archiveResumeVersion, getResume, listVersions, restoreResumeVersion, setCurrentVersion, unarchiveResumeVersion, updateResumeTitle, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
 import { listJobs, type JobDescription } from '@/api/jobDescription'
 import { scoreMatch } from '@/api/scoring'
 import { createExport, type ResumeTemplateCode } from '@/api/export'
 import { useLocale } from '@/i18n'
 
-const { t } = useLocale()
+const { locale, t } = useLocale()
 const props = defineProps<{ id: string }>()
 const resume = ref<ResumeSummary | null>(null)
 const versions = ref<ResumeVersionSummary[]>([])
@@ -32,6 +33,19 @@ const templateNames: Record<ResumeTemplateCode, string> = {
 
 function versionTemplate(version: ResumeVersionSummary): ResumeTemplateCode {
   return version.templateCode ?? 'classic'
+}
+
+function formatDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(locale.value, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
+}
+
+function sourceLabel(source: ResumeVersionSummary['sourceType']) {
+  return t({
+    MANUAL: 'resumeDetail.sourceManual', AI_OPTIMIZED: 'resumeDetail.sourceAiOptimized', JD_CUSTOMIZED: 'resumeDetail.sourceJdCustomized',
+    MATERIAL_CUSTOMIZED: 'resumeDetail.sourceMaterialCustomized', RESTORED: 'resumeDetail.sourceRestored',
+  }[source])
 }
 
 async function load() {
@@ -147,51 +161,101 @@ async function exportPdf(version: ResumeVersionSummary) {
 </script>
 
 <template>
-  <section class="workspace-page">
-    <div class="page-heading">
-      <div class="resume-title-block">
-        <h1>{{ resume?.title ?? t('resumeDetail.fallbackTitle').replace('{id}', props.id) }} {{ t('resumeDetail.title') }}</h1>
-        <button v-if="!editingTitle" class="text-link" type="button" @click="startTitleEdit">{{ t('resumeDetail.rename') }}</button>
+  <section class="workspace-page resume-history-page">
+    <RouterLink class="history-back-link" :to="{ name: 'resume-list' }"><ArrowLeft :size="15" />{{ t('resumeDetail.backToList') }}</RouterLink>
+    <header class="history-heading">
+      <div>
+        <p class="eyebrow"><FileClock :size="14" /> {{ t('resumeDetail.title') }}</p>
+        <div class="resume-title-block">
+          <h1>{{ resume?.title ?? t('resumeDetail.fallbackTitle').replace('{id}', props.id) }}</h1>
+          <button v-if="!editingTitle" class="rename-action" type="button" :title="t('resumeDetail.rename')" @click="startTitleEdit"><Pencil :size="15" /><span>{{ t('resumeDetail.rename') }}</span></button>
+        </div>
+        <p class="page-lead">{{ t('resumeDetail.subtitle') }}</p>
       </div>
-      <RouterLink class="btn-neon btn-primary" :to="{ name: 'resume-editor', params: { id: props.id } }">{{ t('resumeDetail.editNewVersion') }}</RouterLink>
-    </div>
-    <form v-if="editingTitle" class="workspace-card title-edit-form" @submit.prevent="saveTitle">
+      <RouterLink class="btn-neon btn-primary" :to="{ name: 'resume-editor', params: { id: props.id } }"><Plus :size="16" />{{ t('resumeDetail.editNewVersion') }}</RouterLink>
+    </header>
+    <form v-if="editingTitle" class="title-edit-form history-edit-title" @submit.prevent="saveTitle">
       <label>{{ t('resumeDetail.resumeTitle') }}<input v-model.trim="titleDraft" required maxlength="255" autofocus /></label>
       <div class="job-actions">
         <button class="btn-neon btn-ghost" type="button" :disabled="savingTitle" @click="cancelTitleEdit">{{ t('resumeDetail.cancel') }}</button>
         <button class="btn-neon btn-primary" :disabled="savingTitle">{{ savingTitle ? t('resumeDetail.saving') : t('resumeDetail.saveTitle') }}</button>
       </div>
     </form>
-    <div v-if="associatedJob" class="workspace-card"><strong>{{ t('resumeDetail.linkedJob') }}</strong>{{ associatedJob.title }}{{ associatedJob.companyName ? ` · ${associatedJob.companyName}` : '' }}</div>
+    <div v-if="associatedJob" class="linked-job-band"><BriefcaseBusiness :size="18" /><div><small>{{ t('resumeDetail.linkedJob') }}</small><strong>{{ associatedJob.title }}{{ associatedJob.companyName ? ` · ${associatedJob.companyName}` : '' }}</strong></div></div>
     <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-    <div class="version-history-tabs" role="tablist" :aria-label="t('resumeDetail.historyFilter')">
-      <button type="button" :class="{ active: historyView === 'active' }" :aria-selected="historyView === 'active'" @click="switchHistoryView('active')">{{ t('resumeDetail.activeHistory') }}</button>
-      <button type="button" :class="{ active: historyView === 'archived' }" :aria-selected="historyView === 'archived'" @click="switchHistoryView('archived')">{{ t('resumeDetail.archivedHistory') }}</button>
-    </div>
-    <p v-if="!versions.length" class="empty-state">{{ t('resumeDetail.noVersions') }}</p>
-    <div v-else class="job-list">
-      <article v-for="v in versions" :key="v.id" class="workspace-card version-card">
-        <div>
-          <h2>v{{ v.versionNo }} · {{ v.sourceType }}
-            <span class="template-badge">{{ t(templateNames[versionTemplate(v)]) }}{{ t('resumeDetail.templateSuffix') }}</span>
-            <span v-if="resume?.currentVersionId === v.id" class="current-version">{{ t('resumeDetail.currentVersion') }}</span>
-          </h2>
-          <p>{{ v.createdAt }}</p>
+    <section class="history-collection" aria-labelledby="version-history-title">
+      <header class="history-toolbar">
+        <div><p class="section-kicker">{{ t('resumeDetail.collectionEyebrow') }}</p><h2 id="version-history-title">{{ historyView === 'active' ? t('resumeDetail.activeHistory') : t('resumeDetail.archivedHistory') }}</h2></div>
+        <div class="version-history-tabs" role="tablist" :aria-label="t('resumeDetail.historyFilter')">
+          <button type="button" :class="{ active: historyView === 'active' }" :aria-selected="historyView === 'active'" @click="switchHistoryView('active')">{{ t('resumeDetail.activeHistory') }}</button>
+          <button type="button" :class="{ active: historyView === 'archived' }" :aria-selected="historyView === 'archived'" @click="switchHistoryView('archived')">{{ t('resumeDetail.archivedHistory') }}</button>
         </div>
-        <div class="job-actions">
+      </header>
+      <p v-if="!versions.length" class="history-empty">{{ t('resumeDetail.noVersions') }}</p>
+      <div v-else class="version-list">
+        <article v-for="v in versions" :key="v.id" class="version-row version-card">
+          <div class="version-number"><span>v{{ v.versionNo }}</span><CheckCircle2 v-if="resume?.currentVersionId === v.id" :size="15" /></div>
+          <div class="version-copy">
+            <div class="version-meta"><span>{{ sourceLabel(v.sourceType) }}</span><span>{{ t(templateNames[versionTemplate(v)]) }}{{ t('resumeDetail.templateSuffix') }}</span><span v-if="resume?.currentVersionId === v.id" class="current-version">{{ t('resumeDetail.currentVersion') }}</span></div>
+            <strong>{{ v.optimizationSummary || t('resumeDetail.versionFallbackSummary') }}</strong>
+            <small>{{ formatDate(v.createdAt) }}</small>
+          </div>
+          <div class="job-actions version-actions">
           <template v-if="historyView === 'active'">
             <button v-if="resume?.currentVersionId !== v.id" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="makeCurrent(v)">{{ t('resumeDetail.setCurrent') }}</button>
-            <button class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="restore(v)">{{ t('resumeDetail.restoreAction') }}</button>
-            <button v-if="resume?.currentVersionId !== v.id" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="archive(v)">{{ t('resumeDetail.archiveAction') }}</button>
+            <button class="icon-history-action" :title="t('resumeDetail.restoreAction')" :aria-label="`${t('resumeDetail.restoreAction')} v${v.versionNo}`" :disabled="runningAction !== null" @click="restore(v)"><RotateCcw :size="15" /></button>
+            <button v-if="resume?.currentVersionId !== v.id" class="icon-history-action" :title="t('resumeDetail.archiveAction')" :aria-label="`${t('resumeDetail.archiveAction')} v${v.versionNo}`" :disabled="runningAction !== null" @click="archive(v)"><Archive :size="15" /></button>
             <button v-if="resume?.jobDescriptionId" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="score(v)">{{ t('resumeDetail.viewScore') }}</button>
-            <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="exportPdf(v)">{{ runningAction === v.id ? t('resumeDetail.creatingTask') : t('resumeDetail.exportPdf') }}</button>
+            <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="exportPdf(v)"><Download v-if="runningAction !== v.id" :size="15" />{{ runningAction === v.id ? t('resumeDetail.creatingTask') : t('resumeDetail.exportPdf') }}</button>
           </template>
           <template v-else>
             <button class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="unarchive(v)">{{ t('resumeDetail.unarchiveAction') }}</button>
-            <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="restore(v)">{{ t('resumeDetail.restoreAction') }}</button>
+            <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="restore(v)"><RotateCcw :size="15" />{{ t('resumeDetail.restoreAction') }}</button>
           </template>
-        </div>
-      </article>
-    </div>
+          </div>
+        </article>
+      </div>
+    </section>
   </section>
 </template>
+
+<style scoped>
+.resume-history-page { width: min(100%, 1040px); max-width: 1040px; gap: 24px; }
+.history-back-link { display: inline-flex; align-items: center; gap: 6px; justify-self: start; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
+.history-back-link:hover { color: var(--accent); text-decoration: none; }
+.history-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding-bottom: 23px; border-bottom: 1px solid var(--border); }
+.resume-title-block { gap: 9px; }
+.resume-title-block h1 { margin: 5px 0 6px; font-family: var(--font-display); font-size: 34px; letter-spacing: 0; }
+.rename-action { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; color: var(--text-tertiary); background: transparent; font-size: 10px; font-weight: 650; cursor: pointer; }
+.rename-action:hover { border-color: var(--border); color: var(--accent); background: var(--accent-light); }
+.history-heading .page-lead { max-width: 620px; font-size: 12px; }
+.history-edit-title { padding: 18px 20px; border: 1px solid var(--border); border-left: 4px solid var(--highlight); border-radius: 7px; background: var(--bg-surface); }
+.linked-job-band { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--info) 25%, var(--border)); border-radius: 7px; color: var(--info); background: var(--info-light); }
+.linked-job-band > svg { justify-self: center; }
+.linked-job-band div { display: grid; gap: 2px; }
+.linked-job-band small { color: var(--text-secondary); font-size: 9px; }
+.linked-job-band strong { color: var(--text-primary); font-size: 12px; }
+.history-collection { display: grid; gap: 0; }
+.history-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
+.section-kicker { margin: 0 0 3px; color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; font-weight: 700; }
+.history-toolbar h2 { margin: 0; color: var(--text-primary); font-size: 16px; }
+.version-history-tabs { padding: 3px; border-radius: 6px; box-shadow: none; }
+.version-history-tabs button { min-height: 30px; padding: 5px 9px; border-radius: 4px; font-size: 10px; font-weight: 650; }
+.history-empty { margin: 0; padding: 28px 4px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; }
+.version-list { display: grid; }
+.version-row { display: grid; grid-template-columns: 58px minmax(0, 1fr) minmax(220px, auto); align-items: center; gap: 16px; min-height: 98px; padding: 15px 4px; border-bottom: 1px solid var(--border); }
+.version-number { display: grid; justify-items: center; gap: 5px; color: var(--accent); }
+.version-number span { font-family: var(--font-utility); font-size: 15px; font-weight: 700; }
+.version-copy { display: grid; min-width: 0; gap: 4px; }
+.version-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.version-meta > span { min-height: 20px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); background: var(--bg-surface); font-size: 8px; font-weight: 700; }
+.version-meta .current-version { margin: 0; border-color: color-mix(in srgb, var(--success) 30%, var(--border)); color: var(--success); background: var(--success-light); }
+.version-copy > strong { overflow: hidden; color: var(--text-primary); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.version-copy > small { color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; }
+.version-actions { flex-wrap: wrap; }
+.version-actions .btn-neon { min-height: 32px; padding: 0 9px; font-size: 9px; }
+.icon-history-action { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); background: var(--bg-surface); cursor: pointer; }
+.icon-history-action:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+@media (max-width: 820px) { .history-heading { align-items: stretch; flex-direction: column; } .history-heading .btn-neon { align-self: start; } .version-row { grid-template-columns: 52px minmax(0, 1fr); } .version-actions { grid-column: 2; justify-content: flex-start; } }
+@media (max-width: 560px) { .resume-title-block h1 { font-size: 29px; } .rename-action span { display: none; } .history-heading .btn-neon { width: 100%; justify-content: center; } .history-toolbar { align-items: stretch; flex-direction: column; } .version-history-tabs { width: 100%; } .version-history-tabs button { flex: 1; } .version-row { align-items: start; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; } .version-actions { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .version-actions .btn-neon { width: 100%; justify-content: center; } }
+</style>

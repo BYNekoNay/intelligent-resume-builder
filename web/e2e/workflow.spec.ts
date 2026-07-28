@@ -24,13 +24,160 @@ async function mockAuthenticatedApi(page: Page) {
   await page.route('**/api/interview-answer-assets**', route => route.fulfill({ json: response([]) }))
 }
 
-test('takes an authenticated user from the home start action to the generation workbench', async ({ page }) => {
+test('takes an authenticated user from the home primary action to the generation workbench', async ({ page }) => {
   await mockAuthenticatedApi(page)
 
   await page.goto('/')
-  await page.getByRole('link', { name: '开始使用' }).click()
+  await expect(page.getByRole('heading', { name: /更有把握的下一次投递/ })).toBeVisible()
+  await expect(page.getByLabel('岗位定制简历预览')).toContainText('来源已关联')
+  await page.getByRole('link', { name: '开始岗位定制' }).click()
 
   await expect(page).toHaveURL(/\/generate$/)
+})
+
+test('keeps the complete product navigation usable on mobile', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开导航菜单' }).click()
+  const mobileNavigation = page.locator('#mobile-navigation')
+  await expect(mobileNavigation).toBeVisible()
+  await expect(mobileNavigation.getByRole('link', { name: '我的简历' })).toBeVisible()
+  await mobileNavigation.getByRole('link', { name: '我的简历' }).click()
+
+  await expect(page).toHaveURL(/\/resumes$/)
+  await expect(mobileNavigation).toHaveCount(0)
+})
+
+test('keeps application evidence visible while tracking a pipeline stage', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const application = {
+    id: 31,
+    jobDescriptionId: 20,
+    resumeVersionId: 11,
+    status: 'APPLIED',
+    coverLetterText: 'Evidence-backed cover letter',
+    emailBodyText: null,
+    openingMessageText: null,
+    feedbackText: 'Recruiter replied',
+    appliedAt: now,
+    version: 2,
+    createdAt: now,
+    updatedAt: now,
+  }
+  let statusPayload: unknown = null
+  await page.route('**/api/applications', route => route.fulfill({ json: response([application]) }))
+  await page.route('**/api/applications/31/status', async route => {
+    statusPayload = route.request().postDataJSON()
+    await route.fulfill({ json: response({ ...application, status: 'INTERVIEWING', version: 3 }) })
+  })
+
+  await page.goto('/applications')
+  await expect(page.getByRole('heading', { name: '投递记录', exact: true })).toBeVisible()
+  await expect(page.getByText('Example Systems', { exact: true })).toBeVisible()
+  await expect(page.getByText('Backend Engineer', { exact: true })).toBeVisible()
+  await expect(page.locator('.pipeline-lane')).toHaveCount(6)
+
+  const ticket = page.locator('.application-ticket')
+  await expect(ticket).toHaveCount(1)
+  const stage = ticket.getByLabel('投递阶段')
+  await stage.selectOption('INTERVIEWING')
+  await expect.poll(() => statusPayload).toEqual({ status: 'INTERVIEWING', version: 2, feedbackText: 'Recruiter replied' })
+  await expect(page.locator('.lane-interviewing .application-ticket')).toHaveCount(1)
+
+  const search = page.locator('.pipeline-search input')
+  await search.fill('No matching role')
+  await expect(page.locator('.application-ticket')).toHaveCount(0)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('.application-board')).toBeVisible()
+  expect(await page.locator('.application-board').evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+})
+
+test('keeps authentication forms clear and lets users inspect their password', async ({ page }) => {
+  await page.route('**/api/auth/refresh', route => route.fulfill({ status: 401, json: response(null) }))
+
+  await page.goto('/login')
+  await expect(page.getByRole('heading', { name: '登录', exact: true })).toBeVisible()
+  const password = page.getByLabel('密码', { exact: true })
+  await password.fill('visible-pass')
+  await expect(password).toHaveAttribute('type', 'password')
+  await page.getByRole('button', { name: '显示密码' }).click()
+  await expect(password).toHaveAttribute('type', 'text')
+
+  await page.getByRole('link', { name: '创建账户' }).click()
+  await expect(page.getByRole('heading', { name: '创建账户', exact: true })).toBeVisible()
+  await expect(page.getByText('至少 8 位字符。')).toBeVisible()
+})
+
+test('organizes account identity, security, and AI consent without hiding actions', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+
+  await page.goto('/account')
+  await expect(page.getByRole('heading', { name: '账户与个人资料' })).toBeVisible()
+  await expect(page.getByText('@e2e-user')).toBeVisible()
+  await expect(page.getByRole('button', { name: '修改邮箱' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '管理 AI 数据授权' })).toBeVisible()
+
+  await page.getByRole('button', { name: '修改邮箱' }).click()
+  const dialog = page.getByRole('dialog', { name: '修改邮箱' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByLabel('新邮箱')).toHaveValue('e2e@example.com')
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await expect(dialog).toHaveCount(0)
+})
+
+test('gives resume creation, import, and saved resumes a clear action hierarchy', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+
+  await page.goto('/resumes')
+  await expect(page.getByRole('heading', { name: '管理你的简历版本' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '导入已有简历' })).toHaveAttribute('href', '/resume-import')
+  await expect(page.getByRole('heading', { name: '创建一份基础简历' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /新建简历/ })).toBeVisible()
+  await expect(page.getByRole('link', { name: /Backend resume/ })).toContainText('2026年7月22日')
+  await expect(page.getByRole('button', { name: '删除 Backend resume' })).toBeVisible()
+})
+
+test('turns resume import into a file, parse, and review sequence', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.route('**/api/resume-imports/parse', route => route.fulfill({ json: response({
+    fileName: 'existing-resume.txt',
+    mediaType: 'text/plain',
+    extractedText: '张明远\n高级后端工程师\nSpring Boot',
+    normalizedResumeInput: { basics: { name: '张明远' }, skills: ['Spring Boot'] },
+    originalFileStored: false,
+  }) }))
+
+  await page.goto('/resume-import')
+  await expect(page.getByRole('heading', { name: '导入并整理已有简历' })).toBeVisible()
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'existing-resume.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('张明远\n高级后端工程师\nSpring Boot'),
+  })
+  await expect(page.getByText('existing-resume.txt')).toBeVisible()
+  await page.getByRole('button', { name: '解析文件内容' }).click()
+
+  await expect(page.getByRole('heading', { name: '检查提取出的内容' })).toBeVisible()
+  await expect(page.getByLabel('可编辑文本')).toHaveValue(/Spring Boot/)
+  await expect(page.getByText('源文件已保存: 否')).toBeVisible()
+  await expect(page.getByRole('button', { name: /确认文本并继续/ })).toBeVisible()
+})
+
+test('keeps the career identity, material composer, and library filter usable on mobile', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+
+  await page.goto('/career-materials')
+  await expect(page.getByRole('heading', { name: '把经历整理成可复用证据' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '个人档案' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '记录一段真实经历' })).toBeVisible()
+  await expect(page.locator('.material-form').getByLabel('资料类型')).toBeVisible()
+  await expect(page.getByLabel('筛选资料类型')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '还没有可复用资料' })).toBeVisible()
+  await expect(page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).resolves.toBe(0)
 })
 
 test('loads complete material details before editing a highlight', async ({ page }) => {
@@ -909,8 +1056,8 @@ test('retries a failed PDF export through polling and downloads the completed do
   await expect(page.getByText('renderer unavailable')).toBeVisible()
   const actions = page.locator('.workspace-card button')
   await actions.first().click()
-  await expect(page.getByText(/PENDING|RUNNING/)).toBeVisible()
-  await expect(page.getByText(/SUCCESS/)).toBeVisible()
+  await expect(page.getByText(/等待开始导出|正在生成 PDF/)).toBeVisible()
+  await expect(page.getByText('PDF 已准备好')).toBeVisible()
   const download = page.waitForEvent('download')
   await actions.first().click()
   expect((await download).suggestedFilename()).toBe('resume.pdf')

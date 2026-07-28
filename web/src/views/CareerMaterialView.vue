@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Download, Save, UserRound } from 'lucide-vue-next'
+import { Database, Download, Pencil, Plus, Save, SlidersHorizontal, Target, Trash2, UserRound } from 'lucide-vue-next'
 import { useCareerMaterialStore } from '@/stores/careerMaterial'
 import { createMaterial, deleteMaterial, getMaterial, listMaterials, updateMaterial, type CareerMaterial, type CareerMaterialSummary, type MaterialType, type UsagePreference } from '@/api/careerMaterial'
 import { emptyPersonalProfile, getPersonalProfile, getPersonalProfileImportSuggestion, normalizePersonalProfile, updatePersonalProfile, type PersonalProfile } from '@/api/personalProfile'
@@ -104,6 +104,11 @@ function splitList(value: string) {
 function typeLabel(type: MaterialType) {
   const option = TYPE_OPTIONS.find(candidate => candidate.value === type)
   return option ? t(option.key) : type
+}
+
+function usageLabel(preference: UsagePreference) {
+  const option = USAGE_OPTIONS.find(candidate => candidate.value === preference)
+  return option ? t(option.key) : preference
 }
 
 function proficiencyLabel(value: string) {
@@ -263,11 +268,21 @@ function cardSummary(item: CareerMaterialSummary) {
 </script>
 
 <template>
-  <section class="workspace-page">
-    <h1>{{ t('careerMaterial.title') }}</h1>
+  <section class="workspace-page career-material-page">
+    <header class="material-page-heading">
+      <div>
+        <p class="eyebrow"><Database :size="14" /> {{ t('careerMaterial.eyebrow') }}</p>
+        <h1>{{ t('careerMaterial.title') }}</h1>
+        <p class="page-lead">{{ t('careerMaterial.subtitle') }}</p>
+      </div>
+      <div class="evidence-route" aria-hidden="true">
+        <span class="active">{{ t('careerMaterial.routeIdentity') }}</span><i></i><span>{{ t('careerMaterial.routeEvidence') }}</span><i></i><span>{{ t('careerMaterial.routeResume') }}</span>
+      </div>
+    </header>
+
     <section class="profile-band" aria-labelledby="personal-profile-title">
       <div class="profile-heading">
-        <div><p class="eyebrow"><UserRound :size="14" /> {{ t('careerMaterial.profileEyebrow') }}</p><h2 id="personal-profile-title">{{ t('careerMaterial.profileTitle') }}</h2><p>{{ t('careerMaterial.profileDescription') }}</p></div>
+        <div class="material-section-heading"><span><UserRound :size="19" /></span><div><p class="section-kicker">{{ t('careerMaterial.profileEyebrow') }}</p><h2 id="personal-profile-title">{{ t('careerMaterial.profileTitle') }}</h2><p>{{ t('careerMaterial.profileDescription') }}</p></div></div>
         <button class="btn-neon btn-primary" type="button" :disabled="profileLoading || profileSaving" @click="saveProfile"><Save :size="16" /> {{ profileSaving ? t('careerMaterial.profileSaving') : t('careerMaterial.profileSave') }}</button>
       </div>
       <div class="profile-fields" :aria-busy="profileLoading">
@@ -279,7 +294,7 @@ function cardSummary(item: CareerMaterialSummary) {
         <label class="wide-field">{{ t('careerMaterial.profileSummary') }}<textarea v-model.trim="profile.profileSummary" rows="4" :placeholder="t('careerMaterial.profileSummaryPlaceholder')" /></label>
       </div>
       <div class="career-targets" :aria-label="t('careerMaterial.careerTargetsTitle')">
-        <h3>{{ t('careerMaterial.careerTargetsTitle') }}</h3><p>{{ t('careerMaterial.careerTargetsDescription') }}</p>
+        <div class="career-target-heading"><Target :size="17" /><div><h3>{{ t('careerMaterial.careerTargetsTitle') }}</h3><p>{{ t('careerMaterial.careerTargetsDescription') }}</p></div></div>
         <div class="profile-fields">
           <label>{{ t('careerMaterial.targetRoles') }}<input v-model.trim="targetRolesText" :placeholder="t('careerMaterial.targetRolesPlaceholder')" /></label>
           <label>{{ t('careerMaterial.targetSeniority') }}<input v-model.trim="profile.targetSeniority" :placeholder="t('careerMaterial.targetSeniorityPlaceholder')" /></label>
@@ -295,8 +310,12 @@ function cardSummary(item: CareerMaterialSummary) {
       <p v-if="profileMessage" class="profile-message" role="status">{{ profileMessage }}</p>
     </section>
 
-    <label class="workspace-card">{{ t('careerMaterial.filterLabel') }}<select v-model="filterType" @change="reload"><option value="">{{ t('careerMaterial.filterAll') }}</option><option v-for="opt in TYPE_OPTIONS" :key="opt.value" :value="opt.value">{{ t(opt.key) }}</option></select></label>
-    <form class="workspace-card material-form" @submit.prevent="create">
+    <section class="material-composer" aria-labelledby="material-composer-title">
+      <header class="composer-heading">
+        <div class="material-section-heading"><span><Plus :size="19" /></span><div><p class="section-kicker">{{ editingId ? t('careerMaterial.editEyebrow') : t('careerMaterial.createEyebrow') }}</p><h2 id="material-composer-title">{{ editingId ? t('careerMaterial.editTitle') : t('careerMaterial.createTitle') }}</h2><p>{{ t('careerMaterial.createDescription') }}</p></div></div>
+        <button v-if="editingId" class="btn-neon btn-ghost" type="button" @click="resetForm">{{ t('careerMaterial.cancelEdit') }}</button>
+      </header>
+      <form class="material-form" @submit.prevent="create">
       <label>{{ t('careerMaterial.typeLabel') }}<select v-model="materialType" @change="startNewType"><option v-for="opt in TYPE_OPTIONS" :key="opt.value" :value="opt.value">{{ t(opt.key) }}</option></select></label>
       <label>{{ t('careerMaterial.titleLabel') }}<input v-model.trim="title" required maxlength="255" :placeholder="t('careerMaterial.titlePlaceholder')" /></label>
       <label>{{ t('careerMaterial.usageLabel') }}<select v-model="usagePreference"><option v-for="opt in USAGE_OPTIONS" :key="opt.value" :value="opt.value">{{ t(opt.key) }}</option></select></label>
@@ -338,20 +357,101 @@ function cardSummary(item: CareerMaterialSummary) {
         <label class="wide-field">{{ t('careerMaterial.sourceLabel') }}<textarea v-model.trim="sourceText" rows="4" :placeholder="t('careerMaterial.sourcePlaceholder')" /></label>
         <label class="wide-field">{{ t('careerMaterial.jsonLabel') }}<textarea v-model="contentJson" rows="8" spellcheck="false" :placeholder="t('careerMaterial.jsonPlaceholder')" /></label>
       </template>
-      <div class="dialog-actions"><button v-if="editingId" class="btn-neon btn-ghost" type="button" @click="resetForm">{{ t('careerMaterial.cancelEdit') }}</button><button class="btn-neon btn-primary" :disabled="saving">{{ saving ? t('careerMaterial.saving') : editingId ? t('careerMaterial.saveEdit') : t('careerMaterial.saveNew') }}</button></div>
-    </form>
-    <p v-if="error" class="form-error" role="alert">{{ error }}</p><p v-if="store.loading">{{ t('careerMaterial.loading') }}</p><p v-else-if="!store.items.length" class="empty-state">{{ t('careerMaterial.empty') }}</p>
-    <div v-else class="job-list"><article v-for="m in store.items" :key="m.id" class="workspace-card job-card" :aria-label="m.title"><div><p class="material-kind">{{ typeLabel(m.materialType) }} · {{ m.usagePreference }}</p><h2>{{ m.title }}</h2><p v-if="cardSummary(m)" class="material-summary">{{ cardSummary(m) }}</p></div><div class="job-actions"><button class="btn-neon btn-ghost" :disabled="loadingDetail || saving" @click="edit(m)">{{ t('common.edit') }}</button><button class="danger-action" :title="t('careerMaterial.deleteAction')" @click="remove(m.id)">{{ t('common.delete') }}</button></div></article></div>
+        <div class="composer-actions"><p>{{ t('careerMaterial.truthHint') }}</p><button class="btn-neon btn-primary" :disabled="saving"><Save :size="16" /> {{ saving ? t('careerMaterial.saving') : editingId ? t('careerMaterial.saveEdit') : t('careerMaterial.saveNew') }}</button></div>
+      </form>
+    </section>
+
+    <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+
+    <section class="material-library" aria-labelledby="material-library-title">
+      <header class="library-heading">
+        <div class="material-section-heading"><span><Database :size="19" /></span><div><p class="section-kicker">{{ t('careerMaterial.libraryEyebrow') }}</p><h2 id="material-library-title">{{ t('careerMaterial.libraryTitle') }}</h2><p>{{ t('careerMaterial.libraryDescription') }}</p></div></div>
+        <label class="material-filter"><SlidersHorizontal :size="15" /><span>{{ t('careerMaterial.filterLabel') }}</span><select v-model="filterType" @change="reload"><option value="">{{ t('careerMaterial.filterAll') }}</option><option v-for="opt in TYPE_OPTIONS" :key="opt.value" :value="opt.value">{{ t(opt.key) }}</option></select></label>
+      </header>
+      <div class="library-meta"><span>{{ t('careerMaterial.visibleCount') }}</span><strong>{{ store.items.length }}</strong></div>
+      <p v-if="store.loading" class="material-loading" role="status">{{ t('careerMaterial.loading') }}</p>
+      <div v-else-if="!store.items.length" class="material-empty"><Database :size="23" /><div><h3>{{ t('careerMaterial.emptyTitle') }}</h3><p>{{ t('careerMaterial.empty') }}</p></div></div>
+      <div v-else class="material-list">
+        <article v-for="m in store.items" :key="m.id" class="material-row" :aria-label="m.title">
+          <div class="material-row-main">
+            <div class="material-meta"><span>{{ typeLabel(m.materialType) }}</span><span :class="`preference-${m.usagePreference.toLowerCase()}`">{{ usageLabel(m.usagePreference) }}</span></div>
+            <h3>{{ m.title }}</h3>
+            <p v-if="cardSummary(m)" class="material-summary">{{ cardSummary(m) }}</p>
+          </div>
+          <div class="material-actions">
+            <button class="icon-action" type="button" :disabled="loadingDetail || saving" :title="t('common.edit')" :aria-label="`${t('common.edit')} ${m.title}`" @click="edit(m)"><Pencil :size="16" /></button>
+            <button class="icon-action danger" type="button" :title="t('careerMaterial.deleteAction')" :aria-label="`${t('careerMaterial.deleteAction')} ${m.title}`" @click="remove(m.id)"><Trash2 :size="16" /></button>
+          </div>
+        </article>
+      </div>
+    </section>
   </section>
 </template>
 
 <style scoped>
-.profile-band { margin: 1.25rem 0 1.5rem; padding: 1.25rem 0 1.5rem; border-block: 1px solid rgba(100, 116, 139, 0.24); }
-.profile-heading, .profile-import { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
-.profile-heading h2 { margin: 0.15rem 0 0.3rem; font-size: 1.15rem; }.profile-heading p, .career-targets > p { margin: 0; color: var(--text-muted, #64748b); }
-.profile-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem 1rem; margin-top: 1.1rem; }.profile-fields label, .profile-import label { display: grid; gap: 0.35rem; font-size: 0.82rem; font-weight: 600; }.profile-fields input, .profile-fields textarea, .profile-import select { width: 100%; }.wide-field { grid-column: 1 / -1; }
-.career-targets { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px dashed rgba(100, 116, 139, 0.28); }.career-targets h3 { margin: 0 0 0.25rem; font-size: 1rem; }
-.profile-import { justify-content: flex-start; margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed rgba(100, 116, 139, 0.28); }.profile-import label { min-width: min(100%, 280px); }.profile-import small { color: var(--text-muted, #64748b); }.profile-message { margin: 0.8rem 0 0; color: var(--primary, #0e7490); font-size: 0.85rem; }
-.relation-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem 1rem; margin: 0; padding: 0.75rem; border: 1px solid rgba(100, 116, 139, 0.35); }.relation-group legend { padding: 0 0.25rem; font-size: 0.85rem; }.check-option { display: flex; align-items: center; gap: 0.45rem; font-size: 0.88rem; }.check-option input { width: auto; }.material-kind { margin: 0 0 0.25rem; color: var(--text-muted, #64748b); font-size: 0.78rem; }.material-summary { margin: 0.4rem 0 0; color: var(--text-muted, #64748b); white-space: pre-wrap; }
-@media (max-width: 640px) { .profile-heading, .profile-import { align-items: stretch; flex-direction: column; }.profile-fields, .relation-group { grid-template-columns: 1fr; }.wide-field { grid-column: auto; } }
+.career-material-page { width: min(100%, 1120px); max-width: 1120px; gap: 28px; }
+.material-page-heading { display: flex; align-items: end; justify-content: space-between; gap: 30px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.material-page-heading h1 { margin: 5px 0 7px; font-family: var(--font-display); font-size: 36px; letter-spacing: 0; }
+.material-page-heading .page-lead { max-width: 660px; }
+.evidence-route { display: grid; grid-template-columns: auto 34px auto 34px auto; align-items: center; gap: 7px; flex: none; color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; font-weight: 700; }
+.evidence-route i { display: block; height: 1px; background: var(--border); }
+.evidence-route span.active { color: var(--accent); }
+.profile-band, .material-composer, .material-library { display: grid; gap: 22px; padding: 26px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); box-shadow: var(--shadow-sm); }
+.profile-band { border-top: 4px solid var(--accent); }
+.profile-heading, .profile-import, .composer-heading, .library-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.material-section-heading { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: start; gap: 12px; min-width: 0; }
+.material-section-heading > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 6px; color: var(--accent); background: var(--accent-light); }
+.section-kicker { margin: 0 0 3px; color: var(--text-tertiary); font-family: var(--font-utility); font-size: 10px; font-weight: 700; }
+.material-section-heading h2 { margin: 0; color: var(--text-primary); font-size: 17px; }
+.material-section-heading p:last-child { margin: 5px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
+.profile-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.profile-fields label, .profile-import label, .material-form > label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
+.profile-fields input, .profile-fields textarea, .profile-import select, .material-form input, .material-form select, .material-form textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); background: var(--bg-input); font: inherit; font-size: 13px; }
+.profile-fields input:focus, .profile-fields textarea:focus, .profile-import select:focus, .material-form input:focus, .material-form select:focus, .material-form textarea:focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-light); }
+.profile-fields textarea, .material-form textarea { resize: vertical; }
+.wide-field { grid-column: 1 / -1; }
+.career-targets { display: grid; gap: 16px; padding-top: 20px; border-top: 1px solid var(--border-soft); }
+.career-target-heading { display: flex; align-items: start; gap: 9px; color: var(--accent); }
+.career-target-heading h3, .career-target-heading p { margin: 0; }
+.career-target-heading h3 { color: var(--text-primary); font-size: 14px; }
+.career-target-heading p { margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
+.profile-import { justify-content: flex-start; padding-top: 20px; border-top: 1px solid var(--border-soft); }
+.profile-import label { min-width: min(100%, 300px); }
+.profile-import small { max-width: 260px; color: var(--text-tertiary); font-size: 10px; line-height: 1.5; }
+.profile-message { margin: -8px 0 0; color: var(--accent); font-size: 11px; font-weight: 650; }
+.material-composer { border-left: 4px solid var(--highlight); }
+.material-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; padding-top: 20px; border-top: 1px solid var(--border-soft); }
+.relation-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: 6px; }
+.relation-group legend { padding: 0 4px; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
+.check-option { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: 12px; }
+.check-option input { width: auto; }
+.composer-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 4px; }
+.composer-actions p { max-width: 550px; margin: 0; color: var(--text-tertiary); font-size: 10px; line-height: 1.55; }
+.library-heading { align-items: end; }
+.material-filter { display: grid; grid-template-columns: 16px auto minmax(150px, 190px); align-items: center; gap: 7px; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
+.material-filter svg { color: var(--accent); }
+.material-filter select { width: 100%; min-height: 36px; padding: 7px 28px 7px 9px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-primary); background: var(--bg-input); font: inherit; }
+.material-filter select:focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-light); }
+.library-meta { display: flex; align-items: center; gap: 8px; margin: -5px 0 -10px; padding-top: 13px; border-top: 1px solid var(--border-soft); color: var(--text-tertiary); font-size: 10px; }
+.library-meta strong { color: var(--accent); font-family: var(--font-utility); font-size: 11px; }
+.material-loading { margin: 0; padding: 22px 0; color: var(--text-secondary); }
+.material-empty { display: flex; align-items: center; gap: 13px; padding: 24px 4px; border-block: 1px solid var(--border-soft); color: var(--accent); }
+.material-empty h3, .material-empty p { margin: 0; }
+.material-empty h3 { color: var(--text-primary); font-size: 14px; }
+.material-empty p { margin-top: 4px; color: var(--text-secondary); font-size: 11px; }
+.material-list { display: grid; border-top: 1px solid var(--border); }
+.material-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 20px; min-height: 96px; padding: 16px 4px; border-bottom: 1px solid var(--border); }
+.material-row-main { min-width: 0; }
+.material-row h3 { margin: 7px 0 0; color: var(--text-primary); font-size: 14px; }
+.material-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.material-meta span { display: inline-flex; min-height: 22px; align-items: center; padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); background: var(--bg-page); font-size: 9px; font-weight: 700; }
+.material-meta .preference-preferred { border-color: color-mix(in srgb, var(--highlight) 35%, var(--border)); color: var(--highlight); background: color-mix(in srgb, var(--highlight) 8%, #fff); }
+.material-meta .preference-excluded { color: var(--text-tertiary); text-decoration: line-through; }
+.material-summary { display: -webkit-box; margin: 6px 0 0; overflow: hidden; color: var(--text-secondary); font-size: 11px; line-height: 1.6; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.material-actions { display: flex; gap: 6px; }
+.icon-action { display: grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); background: var(--bg-surface); cursor: pointer; }
+.icon-action:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.icon-action.danger:hover { border-color: color-mix(in srgb, var(--danger) 30%, transparent); color: var(--danger); background: var(--danger-light); }
+@media (max-width: 820px) { .material-page-heading { align-items: stretch; flex-direction: column; } .evidence-route { align-self: start; } .library-heading { align-items: stretch; flex-direction: column; } .material-filter { grid-template-columns: 16px auto minmax(0, 1fr); } }
+@media (max-width: 640px) { .material-page-heading h1 { font-size: 30px; } .evidence-route { grid-template-columns: auto 16px auto 16px auto; width: 100%; } .profile-band, .material-composer, .material-library { padding: 20px 16px; } .profile-heading, .profile-import, .composer-heading { align-items: stretch; flex-direction: column; } .profile-fields, .material-form, .relation-group { grid-template-columns: 1fr; } .wide-field, .composer-actions { grid-column: auto; } .profile-heading .btn-neon, .profile-import .btn-neon, .composer-actions .btn-neon { justify-content: center; } .composer-actions { align-items: stretch; flex-direction: column; } .material-filter { grid-template-columns: 16px minmax(0, 1fr); } .material-filter span { display: none; } .material-row { align-items: start; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; } }
 </style>

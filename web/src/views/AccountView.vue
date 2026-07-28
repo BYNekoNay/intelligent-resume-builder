@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { KeyRound, Mail, ShieldCheck, UserRound, X } from 'lucide-vue-next'
+import { IdCard, KeyRound, Mail, ShieldCheck, UserRound, X } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { changeEmail, changePassword } from '@/api/auth'
@@ -31,6 +31,7 @@ watch(() => auth.currentUser, (user) => {
 }, { immediate: true })
 
 const user = computed(() => auth.currentUser)
+const userInitial = computed(() => (user.value?.displayName ?? user.value?.username ?? '?').trim().slice(0, 1).toUpperCase())
 const maskedEmail = computed(() => {
   const value = user.value?.email ?? ''
   const at = value.indexOf('@')
@@ -101,13 +102,22 @@ async function closeCredentialPanel() {
 </script>
 
 <template>
-  <section class="workspace-page narrow-page account-page">
-    <p class="eyebrow"><UserRound :size="14" /> {{ t('account.eyebrow') }}</p>
-    <h1>{{ t('account.title') }}</h1>
-    <p class="page-lead">{{ t('account.subtitle') }}</p>
+  <section class="workspace-page account-page">
+    <header class="account-page-heading">
+      <div>
+        <p class="eyebrow"><UserRound :size="14" /> {{ t('account.eyebrow') }}</p>
+        <h1>{{ t('account.title') }}</h1>
+        <p class="page-lead">{{ t('account.subtitle') }}</p>
+      </div>
+      <div class="account-identity">
+        <span>{{ userInitial }}</span>
+        <div><strong>{{ user?.displayName || user?.username || '-' }}</strong><small>@{{ user?.username ?? '-' }}</small></div>
+      </div>
+    </header>
 
-    <article class="workspace-card account-card">
-      <h2>{{ t('account.profileTitle') }}</h2>
+    <div class="account-grid">
+    <article class="account-panel account-profile-panel">
+      <header><span><IdCard :size="18" /></span><div><h2>{{ t('account.profileTitle') }}</h2><p>{{ t('account.profileDescription') }}</p></div></header>
       <form @submit.prevent="save">
         <label>{{ t('account.displayName') }}<input v-model="displayName" :maxlength="128" required /></label>
         <div class="account-readonly"><span>{{ t('account.username') }}</span><strong>{{ user?.username ?? '-' }}</strong></div>
@@ -117,9 +127,8 @@ async function closeCredentialPanel() {
       </form>
     </article>
 
-    <article class="workspace-card account-card">
-      <h2>{{ t('account.securityTitle') }}</h2>
-      <p>{{ t('account.securityDescription') }}</p>
+    <article class="account-panel account-security-panel">
+      <header><span><ShieldCheck :size="18" /></span><div><h2>{{ t('account.securityTitle') }}</h2><p>{{ t('account.securityDescription') }}</p></div></header>
       <div class="account-security-list">
         <section class="account-security-item">
           <div class="account-security-icon" aria-hidden="true"><Mail :size="18" /></div>
@@ -134,6 +143,7 @@ async function closeCredentialPanel() {
       </div>
       <small>{{ t('account.securityNotice') }}</small>
     </article>
+    </div>
 
     <Teleport to="body">
       <div v-if="activeCredentialPanel" class="account-dialog-overlay" @click.self="closeCredentialPanel">
@@ -163,9 +173,9 @@ async function closeCredentialPanel() {
       </div>
     </Teleport>
 
-    <article class="workspace-card account-card">
-      <h2>{{ t('account.privacyTitle') }}</h2>
-      <p>{{ t('account.privacyDescription') }}</p>
+    <article class="account-consent-band">
+      <span><ShieldCheck :size="20" /></span>
+      <div><h2>{{ t('account.privacyTitle') }}</h2><p>{{ t('account.privacyDescription') }}</p></div>
       <RouterLink class="btn-neon btn-ghost" to="/ai-consent"><ShieldCheck :size="16" /> {{ t('account.manageAiConsent') }}</RouterLink>
     </article>
   </section>
