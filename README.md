@@ -92,6 +92,8 @@ npm test
 
 ## 云端部署
 
+普通提交和 Pull Request 由 GitHub Actions 分别验证后端测试、Web 构建与浏览器 E2E、PDF 服务检查；ACR 镜像发布保持手动触发。配置、检查名称和分支保护建议见 [GitHub CI/CD 流水线](docs/CI.md)。
+
 当前可复现发布链路为 GitHub Actions 构建 Linux/amd64 镜像、阿里云 ACR 保存成品镜像、ECS 仅拉取运行。Edge Nginx 是唯一公网入口，Web、API、PDF 和 MySQL 保持在容器私有网络中。
 
 无域名测试环境可以使用公网 IP 与自签名 HTTPS；正式环境仍应配置可信域名证书、备份策略与告警接收渠道。完整操作、回滚、故障排查和注销 ECS 前备份要求见[部署运行手册](docs/DEPLOYMENT.md)。

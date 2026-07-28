@@ -14,7 +14,7 @@ ECS 不构建业务镜像，也不需要直接访问 Docker Hub。发布包含 A
 
 ## 准备条件
 
-- GitHub `master` 包含 `.github/workflows/main.yml`，并已启用 Actions。
+- GitHub `master` 包含 `.github/workflows/ci.yml` 和 `.github/workflows/publish-acr-images.yml`，并已启用 Actions；发布镜像前目标提交的 CI 必须通过。
 - 阿里云 ACR 已创建私有仓库：`intelligent-resume-api`、`intelligent-resume-web`、`intelligent-resume-pdf`、`intelligent-resume-edge`、`intelligent-resume-mysql`。
 - ECS 与 ACR 位于同一区域，安装 Docker Engine、Docker Compose v2，至少保留 4 GiB 内存和 20 GiB 磁盘空间。
 - 若 ECS 上保留仓库副本，可执行 `scripts/Inspect-ServerReadiness.sh` 做部署前检查；该脚本只读，不改变服务器。

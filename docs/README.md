@@ -6,6 +6,7 @@
 - [项目上下文](../PROJECT_CONTEXT.md)：产品目标、真实流程、模块职责、数据边界与协作约束；后续 AI 或新开发者的首读入口。
 
 - [部署运行手册](./DEPLOYMENT.md)：GitHub Actions 构建、阿里云 ACR、ECS 部署、验证、回滚和注销前备份。
+- [GitHub CI/CD 流水线](./CI.md)：PR/主分支持续集成、手动 ACR 镜像发布、Secrets 和分支保护配置。
 - [本地验证指南](./LOCAL_VALIDATION.md)：不依赖 Docker 的本地启动、测试与真实百炼 AI 验收。
 - [部署状态说明](./DEPLOYMENT_READINESS.md)：运行边界、可观测性与安全基线。
 - [根目录 README](../README.md)：项目能力、环境配置和快速开始。
