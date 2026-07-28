@@ -1,10 +1,15 @@
 import { expect, test, type Page } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 
 const now = '2026-07-22T10:00:00Z'
 const response = (data: unknown) => ({ code: 0, message: 'ok', data, traceId: 'e2e' })
 const resume = { id: 1, title: 'Backend resume', currentVersionId: 11, jobDescriptionId: null, createdAt: now, updatedAt: now }
 const version = { id: 11, resumeId: 1, versionNo: 1, sourceType: 'MANUAL', resumeJson: {}, optimizationSummary: null, createdAt: now }
 const job = { id: 20, title: 'Backend Engineer', companyName: 'Example Systems', jdText: 'Java and Spring Boot', parsedKeywordsJson: null, parsedAt: null, parsedVersion: null, createdAt: now, updatedAt: now }
+const allSectionsResume = JSON.parse(readFileSync(
+  new URL('../../test-fixtures/resume-all-sections.json', import.meta.url),
+  'utf8',
+)) as Record<string, unknown>
 
 async function mockAuthenticatedApi(page: Page) {
   await page.route('**/api/auth/refresh', route => route.fulfill({ json: response({ accessToken: 'e2e-token' }) }))
@@ -69,6 +74,44 @@ test('loads complete material details before editing a highlight', async ({ page
     materialType: 'HIGHLIGHT',
     sourceText: 'Updated and still verifiable source text.',
     contentJson: detail.contentJson,
+  })
+})
+
+test('preserves a legacy skill proficiency value when editing', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const summary = {
+    id: 78,
+    materialType: 'SKILL_EVIDENCE',
+    title: 'Spring Boot delivery',
+    usagePreference: 'NORMAL',
+    updatedAt: now,
+  }
+  const detail = {
+    ...summary,
+    contentJson: {
+      skillName: 'Spring Boot', category: '后端框架', proficiency: '熟练', yearsOfExperience: '3 年',
+      lastUsedAt: '2026 年', relatedMaterialIds: [], applicationDescription: '用于交易服务', outcomeEvidence: '稳定支撑高峰流量',
+    },
+    sourceText: '',
+    createdAt: now,
+  }
+  let updatePayload: any
+
+  await page.route('**/api/career-materials', route => route.fulfill({ json: response([summary]) }))
+  await page.route('**/api/career-materials/78', async route => {
+    if (route.request().method() === 'PATCH') updatePayload = route.request().postDataJSON()
+    return route.fulfill({ json: response(detail) })
+  })
+
+  await page.goto('/career-materials')
+  await page.getByRole('article', { name: summary.title }).getByRole('button', { name: '编辑' }).click()
+
+  const form = page.locator('.material-form')
+  await expect(form.getByLabel('熟练度')).toHaveValue('熟练')
+  await form.getByRole('button', { name: '保存修改' }).click()
+  await expect.poll(() => updatePayload).toMatchObject({
+    materialType: 'SKILL_EVIDENCE',
+    contentJson: { proficiency: '熟练' },
   })
 })
 
@@ -218,23 +261,44 @@ test('opens template selection as an independent workspace entry', async ({ page
 
 test('shows extended resume sections and renders their structured content in preview', async ({ page }) => {
   await mockAuthenticatedApi(page)
-  const editorVersion = { ...version, resumeJson: { basics: { name: 'Alice', title: 'Engineer' }, work: [], education: [], skills: [], projects: [], certificates: [], awards: [], languages: [] } }
+  const editorVersion = { ...version, resumeJson: allSectionsResume }
+  let saved: any
   await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+  await page.route('**/api/resumes/1/versions**', async route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: response([version]) })
+    saved = route.request().postDataJSON()
+    return route.fulfill({ json: response({ ...editorVersion, id: 12, versionNo: 2, resumeJson: saved.resumeJson }) })
+  })
   await page.goto('/resumes/1/edit')
   const navigation = page.locator('.resume-editor-navigation')
   for (const name of ['职业目标', '个人链接', '实习 / 志愿经历', '培训课程', '研究成果', '自定义模块']) {
     await expect(navigation.getByRole('button', { name: new RegExp(name) })).toBeVisible()
   }
-  await navigation.getByRole('button', { name: /职业目标/ }).click()
-  await page.locator('#resume-objective textarea').fill('面向可靠分布式系统的后端岗位。')
-  await navigation.getByRole('button', { name: /个人链接/ }).click()
-  await page.getByRole('button', { name: '添加链接' }).click()
-  await page.getByLabel('链接名称').fill('GitHub')
-  await page.getByLabel('链接地址').fill('https://github.com/alice')
   await page.getByRole('button', { name: '预览简历' }).click()
-  await expect(page.locator('.resume-preview-workspace .resume-paper')).toContainText('职业目标')
-  await expect(page.locator('.resume-preview-workspace .resume-paper')).toContainText('GitHub')
-  await expect(page.locator('.resume-preview-workspace .resume-paper')).toContainText('https://github.com/alice')
+  const preview = page.locator('.resume-preview-workspace .resume-paper')
+  for (const marker of ['SUMMARY_MARKER', 'OBJECTIVE_MARKER', 'LINK_MARKER', 'WORK_MARKER', 'VOLUNTEERING_MARKER', 'SKILL_MARKER', 'PROJECT_MARKER', 'EDUCATION_MARKER', 'COURSE_MARKER', 'CERTIFICATE_MARKER', 'PUBLICATION_MARKER', 'AWARD_MARKER', 'LANGUAGE_MARKER', 'CUSTOM_ONE_MARKER', 'CUSTOM_TWO_MARKER']) {
+    await expect(preview).toContainText(marker)
+  }
+  await expect(preview).toContainText('Shanghai')
+  await expect(preview).not.toContainText('[object Object]')
+  await expect(preview).not.toContainText('IGNORED_UNKNOWN_MARKER')
+  const visualOrder = await preview.locator(':scope > section').evaluateAll(sections => sections
+    .map(section => ({ order: Number(getComputedStyle(section).order), text: section.textContent ?? '' }))
+    .sort((left, right) => left.order - right.order)
+    .map(section => section.text))
+  expect(visualOrder.findIndex(text => text.includes('AWARD_MARKER'))).toBeLessThan(visualOrder.findIndex(text => text.includes('OBJECTIVE_MARKER')))
+  expect(visualOrder.findIndex(text => text.includes('OBJECTIVE_MARKER'))).toBeLessThan(visualOrder.findIndex(text => text.includes('WORK_MARKER')))
+  await page.getByRole('button', { name: '返回编辑' }).click()
+  await navigation.getByRole('button', { name: '设计与高级' }).click()
+  await expect(page.locator('.design-live-preview .resume-paper')).toContainText('CUSTOM_TWO_MARKER')
+  await page.getByRole('slider').first().fill('14')
+  await page.getByRole('button', { name: '保存新版本' }).click()
+  await expect.poll(() => saved).toMatchObject({ resumeJson: {
+    basics: allSectionsResume.basics,
+    customSections: allSectionsResume.customSections,
+    layout: { ...allSectionsResume.layout, bodyFontSize: 14 },
+    unknownFutureField: allSectionsResume.unknownFutureField,
+  } })
 })
 
 test('blocks editing after a resume load failure and recovers through retry', async ({ page }) => {
@@ -348,6 +412,160 @@ test('adds a saved award material to the matching resume section', async ({ page
   await expect(page.getByLabel('授予机构')).toHaveValue('ACME')
   await page.locator('.editor-save-dock').getByRole('button', { name: '保存新版本' }).click()
   await expect.poll(() => saved).toMatchObject({ resumeJson: { awards: [{ name: 'Engineering Excellence', issuer: 'ACME', date: '2025-06' }] } })
+})
+
+test('reloads editor state when the route changes to another resume id', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const secondResume = { ...resume, id: 2, title: 'Second resume', currentVersionId: 22 }
+  const firstVersion = { ...version, resumeJson: { basics: { name: 'Alice' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [] } }
+  const secondVersion = { ...version, id: 22, resumeId: 2, resumeJson: { basics: { name: 'Bob' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [] } }
+  await page.route('**/api/resumes/2', route => route.fulfill({ json: response(secondResume) }))
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(firstVersion) }))
+  await page.route('**/api/resume-versions/22', route => route.fulfill({ json: response(secondVersion) }))
+
+  await page.goto('/resumes/1/edit')
+  await expect(page.getByLabel('姓名')).toHaveValue('Alice')
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/resumes/2/edit')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+
+  await expect(page).toHaveURL(/\/resumes\/2\/edit$/)
+  await expect(page.getByLabel('姓名')).toHaveValue('Bob')
+})
+
+test('shows a retryable error when the editor cannot load the material library', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(version) }))
+  await page.route('**/api/career-materials', route => route.fulfill({ status: 503, json: response(null) }))
+
+  await page.goto('/resumes/1/edit')
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: /奖项荣誉/ }).click()
+  await page.getByRole('button', { name: '从资料库添加' }).click()
+
+  await expect(page.locator('.form-error')).toContainText('无法读取资料库，请重试。')
+})
+
+test('does not let a pending save clear or redirect a newly opened resume', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const secondResume = { ...resume, id: 2, title: 'Second resume', currentVersionId: 22 }
+  const firstVersion = { ...version, resumeJson: { basics: { name: 'Alice' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [] } }
+  const secondVersion = { ...version, id: 22, resumeId: 2, resumeJson: { basics: { name: 'Bob' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [] } }
+  let releaseSave!: () => void
+  const saveResponse = new Promise<void>((resolve) => { releaseSave = resolve })
+  let saveStarted = false
+
+  await page.addInitScript(() => {
+    localStorage.setItem('intelligent-resume.editor-draft.99.1', JSON.stringify({ baseVersionId: 11, content: '{}', summary: '', activeSection: 'basics', updatedAt: new Date().toISOString() }))
+    localStorage.setItem('intelligent-resume.editor-draft.99.2', JSON.stringify({ baseVersionId: 22, content: '{}', summary: '', activeSection: 'basics', updatedAt: new Date().toISOString() }))
+  })
+  await page.route('**/api/resumes/2', route => route.fulfill({ json: response(secondResume) }))
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(firstVersion) }))
+  await page.route('**/api/resume-versions/22', route => route.fulfill({ json: response(secondVersion) }))
+  await page.route('**/api/resumes/2/versions**', route => route.fulfill({ json: response([secondVersion]) }))
+  await page.route('**/api/resumes/1/versions**', async route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: response([firstVersion]) })
+    saveStarted = true
+    await saveResponse
+    return route.fulfill({ json: response({ ...firstVersion, id: 12, versionNo: 2 }) })
+  })
+
+  await page.goto('/resumes/1/edit')
+  await page.getByLabel('姓名').fill('Alice saved')
+  await page.locator('.editor-save-dock').getByRole('button', { name: '保存新版本' }).click()
+  await expect.poll(() => saveStarted).toBe(true)
+  page.once('dialog', dialog => dialog.accept())
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/resumes/2/edit')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+  await expect(page).toHaveURL(/\/resumes\/2\/edit$/)
+  releaseSave()
+
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('intelligent-resume.editor-draft.99.1'))).toBeNull()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('intelligent-resume.editor-draft.99.2'))).not.toBeNull()
+  await expect(page.getByLabel('姓名')).toHaveValue('Bob')
+})
+
+test('does not show a rejected save from a previous resume on the current route', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const secondResume = { ...resume, id: 2, title: 'Second resume', currentVersionId: 22 }
+  const firstVersion = { ...version, resumeJson: { basics: { name: 'Alice' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [] } }
+  const secondVersion = { ...version, id: 22, resumeId: 2, resumeJson: { basics: { name: 'Bob' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [] } }
+  let releaseSave!: () => void
+  const saveResponse = new Promise<void>((resolve) => { releaseSave = resolve })
+  let saveStarted = false
+
+  await page.route('**/api/resumes/2', route => route.fulfill({ json: response(secondResume) }))
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(firstVersion) }))
+  await page.route('**/api/resume-versions/22', route => route.fulfill({ json: response(secondVersion) }))
+  await page.route('**/api/resumes/2/versions**', route => route.fulfill({ json: response([secondVersion]) }))
+  await page.route('**/api/resumes/1/versions**', async route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: response([firstVersion]) })
+    saveStarted = true
+    await saveResponse
+    return route.fulfill({ status: 500, json: { code: 50000, message: 'Old resume save failed' } })
+  })
+
+  await page.goto('/resumes/1/edit')
+  await page.getByLabel('姓名').fill('Alice rejected')
+  await page.locator('.editor-save-dock').getByRole('button', { name: '保存新版本' }).click()
+  await expect.poll(() => saveStarted).toBe(true)
+  page.once('dialog', dialog => dialog.accept())
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/resumes/2/edit')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+  await expect(page).toHaveURL(/\/resumes\/2\/edit$/)
+  releaseSave()
+
+  await expect(page.getByLabel('姓名')).toHaveValue('Bob')
+  await expect(page.locator('.form-error')).toHaveCount(0)
+  await expect(page.locator('.editor-save-dock')).toContainText('内容已同步')
+})
+
+test('marks loaded sample content as unsaved and enables saving', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = { ...version, resumeJson: { basics: { name: '' }, work: [], education: [], skills: [], projects: [], certificates: [], languages: [] } }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+
+  await page.goto('/resumes/1/edit')
+  await page.getByRole('button', { name: '加载示例' }).click()
+
+  await expect(page.locator('.editor-save-dock').getByRole('button', { name: '保存新版本' })).toBeEnabled()
+})
+
+test('inserts a material into the section that initiated the request', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = {
+    ...version,
+    resumeJson: { basics: { name: 'Alice' }, work: [], education: [], skills: [], projects: [], certificates: [], awards: [], languages: [], template: { code: 'classic' } },
+  }
+  const award = { id: 88, materialType: 'AWARD', title: 'Engineering Excellence', usagePreference: 'PREFERRED', updatedAt: now }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+  await page.route('**/api/career-materials', route => route.fulfill({ json: response([award]) }))
+  let releaseMaterial!: () => void
+  let markRequestStarted!: () => void
+  const materialGate = new Promise<void>(resolve => { releaseMaterial = resolve })
+  const requestStarted = new Promise<void>(resolve => { markRequestStarted = resolve })
+  await page.route('**/api/career-materials/88', async route => {
+    markRequestStarted()
+    await materialGate
+    await route.fulfill({ json: response({ ...award, contentJson: { issuer: 'ACME' }, sourceText: null, createdAt: now }) })
+  })
+
+  await page.goto('/resumes/1/edit')
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: /奖项荣誉/ }).click()
+  await page.getByRole('button', { name: '从资料库添加' }).click()
+  await page.getByLabel('选择资料').selectOption('88')
+  await page.getByRole('button', { name: '写入当前章节' }).click()
+  await requestStarted
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: /工作经历/ }).click()
+  releaseMaterial()
+
+  await expect(page.locator('#resume-work')).not.toContainText('Engineering Excellence')
+  await page.locator('.resume-editor-navigation').getByRole('button', { name: /奖项荣誉/ }).click()
+  await expect(page.getByLabel('奖项名称')).toHaveValue('Engineering Excellence')
 })
 
 test('replaces the editor with a full-page resume preview and restores the editing context', async ({ page }) => {

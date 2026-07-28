@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc -b && vite build",
+    "check:i18n": "node --test scripts/check-i18n.test.mjs && node scripts/check-i18n.mjs",
+    "build": "npm run check:i18n && vue-tsc -b && vite build",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:local": "cross-env LOCAL_E2E=true playwright test --grep @local-services",
@@ -23,6 +24,8 @@
     "cross-env": "^7.0.3",
     "@types/node": "^22.5.5",
     "@vitejs/plugin-vue": "^5.1.2",
+    "@vue/compiler-dom": "^3.5.4",
+    "@vue/compiler-sfc": "^3.5.4",
     "@vue/tsconfig": "^0.5.1",
     "typescript": "^5.5.4",
     "vite": "^5.4.2",

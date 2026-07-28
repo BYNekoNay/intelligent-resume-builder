@@ -70,8 +70,10 @@ class TaskLeaseServiceTest {
     void releaseFailed_retryable_underMaxRetries_resetsPending() {
         when(properties.getMaxRetries()).thenReturn(3);
         AiTask task = task(1L, AiTaskStatus.RUNNING, 1);
+        task.setLeaseOwner("worker-1");
+        when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.of(task));
 
-        service.releaseFailed(task, "timeout", true);
+        service.releaseFailed(task, "worker-1", "timeout", true);
 
         assertEquals(AiTaskStatus.PENDING, task.getStatus());
         assertEquals("timeout", task.getErrorMessage());
@@ -85,8 +87,10 @@ class TaskLeaseServiceTest {
     void releaseFailed_retryable_overMaxRetries_marksFailed() {
         when(properties.getMaxRetries()).thenReturn(3);
         AiTask task = task(1L, AiTaskStatus.RUNNING, 3);
+        task.setLeaseOwner("worker-1");
+        when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.of(task));
 
-        service.releaseFailed(task, "timeout", true);
+        service.releaseFailed(task, "worker-1", "timeout", true);
 
         assertEquals(AiTaskStatus.FAILED, task.getStatus());
     }
@@ -95,8 +99,10 @@ class TaskLeaseServiceTest {
     @DisplayName("不可重试失败 → 直接 FAILED")
     void releaseFailed_notRetryable_marksFailed() {
         AiTask task = task(1L, AiTaskStatus.RUNNING, 1);
+        task.setLeaseOwner("worker-1");
+        when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.of(task));
 
-        service.releaseFailed(task, "invalid input", false);
+        service.releaseFailed(task, "worker-1", "invalid input", false);
 
         assertEquals(AiTaskStatus.FAILED, task.getStatus());
         assertEquals("invalid input", task.getErrorMessage());
@@ -110,7 +116,8 @@ class TaskLeaseServiceTest {
         task.setLeaseExpiresAt(LocalDateTime.now().plusSeconds(60));
 
         Map<String, Object> result = Map.of("output", "generated content");
-        service.releaseSuccess(task, result);
+        when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.of(task));
+        service.releaseSuccess(task, "worker-1", result);
 
         assertEquals(AiTaskStatus.SUCCESS, task.getStatus());
         assertEquals(result, task.getResultJson());
@@ -118,6 +125,21 @@ class TaskLeaseServiceTest {
         assertNull(task.getLeaseExpiresAt());
         assertNull(task.getErrorMessage());
         verify(taskRepository).save(task);
+    }
+
+    @Test
+    void staleOwnerCannotRenewOrCompleteTask() {
+        AiTask task = task(1L, AiTaskStatus.RUNNING, 2);
+        task.setLeaseOwner("worker-2");
+        when(properties.getLeaseSeconds()).thenReturn(60);
+        when(taskRepository.renewLease(eq(1L), eq("worker-1"), any())).thenReturn(0);
+        when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.empty());
+
+        assertFalse(service.renew(1L, "worker-1"));
+        assertFalse(service.releaseSuccess(task, "worker-1", Map.of("output", "stale")));
+        assertEquals(AiTaskStatus.RUNNING, task.getStatus());
+        assertEquals("worker-2", task.getLeaseOwner());
+        verify(taskRepository, never()).save(any());
     }
 
     private AiTask task(Long id, AiTaskStatus status, int retryCount) {

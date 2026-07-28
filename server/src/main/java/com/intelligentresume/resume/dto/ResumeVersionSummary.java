@@ -8,6 +8,7 @@ public record ResumeVersionSummary(
         Long id,
         Integer versionNo,
         ResumeSourceType sourceType,
+        String templateCode,
         String optimizationSummary,
         LocalDateTime createdAt,
         LocalDateTime archivedAt,

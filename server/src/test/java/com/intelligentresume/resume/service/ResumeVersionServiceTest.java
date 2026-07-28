@@ -128,6 +128,7 @@ class ResumeVersionServiceTest {
         when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
 
         ResumeVersion v2 = version(11L, 1L, 2);
+        v2.setResumeJson(Map.of("basics", Map.of("name", "Test"), "template", Map.of("code", "modern")));
         ResumeVersion v1 = version(10L, 1L, 1);
         when(versionRepository.findByResumeIdAndDeletedAtIsNullOrderByVersionNoDesc(1L))
                 .thenReturn(List.of(v2, v1));
@@ -135,7 +136,9 @@ class ResumeVersionServiceTest {
         List<ResumeVersionSummary> list = versionService.listByResume(1L, false, 100L);
         assertEquals(2, list.size());
         assertEquals(2, list.get(0).versionNo());
+        assertEquals("modern", list.get(0).templateCode());
         assertEquals(1, list.get(1).versionNo());
+        assertEquals("classic", list.get(1).templateCode());
     }
 
     @Test

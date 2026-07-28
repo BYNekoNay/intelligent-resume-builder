@@ -11,10 +11,24 @@ import {
   type MaterialSelectionResult,
 } from '@/api/ai'
 import { useAiTaskStore } from '@/stores/aiTask'
+import { useLocale } from '@/i18n'
 
+const { t } = useLocale()
 const route = useRoute()
 const router = useRouter()
 const taskStore = useAiTaskStore()
+const MATERIAL_TYPE_KEYS: Record<string, string> = {
+  WORK_EXPERIENCE: 'materialSelection.typeWorkExperience',
+  PROJECT_EXPERIENCE: 'materialSelection.typeProjectExperience',
+  EDUCATION: 'materialSelection.typeEducation',
+  SKILL: 'materialSelection.typeSkill',
+  CERTIFICATE: 'materialSelection.typeCertificate',
+  AWARD: 'materialSelection.typeAward',
+  HIGHLIGHT: 'materialSelection.typeHighlight',
+  ACHIEVEMENT: 'materialSelection.typeAchievement',
+  LEADERSHIP_EXPERIENCE: 'materialSelection.typeLeadership',
+  SKILL_EVIDENCE: 'materialSelection.typeSkillEvidence',
+}
 const task = ref<AiTask | null>(null)
 const loading = ref(true)
 const confirming = ref(false)
@@ -48,7 +62,7 @@ const manuallyExcludedItems = computed(() => result.value.excluded
 onMounted(async () => {
   if (!Number.isInteger(taskId.value) || taskId.value <= 0) {
     loading.value = false
-    error.value = '选材任务参数无效，请返回生成工作台重新开始。'
+    error.value = t('materialSelection.errorInvalidTask')
     return
   }
   await loadTask(true)
@@ -62,7 +76,7 @@ async function loadTask(initialize = false) {
   try {
     task.value = (await getTask(taskId.value)).data.data
     if (task.value.taskType !== 'JOB_MATERIAL_SELECTION') {
-      error.value = '该任务不是岗位选材任务。'
+      error.value = t('materialSelection.errorWrongTaskType')
       loading.value = false
       return
     }
@@ -72,20 +86,20 @@ async function loadTask(initialize = false) {
       return
     }
     if (task.value.status === 'FAILED' || task.value.status === 'CANCELLED') {
-      error.value = task.value.errorMessage || 'AI 选材失败，请重试。'
+      error.value = task.value.errorMessage || t('materialSelection.errorAiFailed')
       loading.value = false
       return
     }
     timer = window.setTimeout(() => void loadTask(initialize), 1500)
   } catch (e: any) {
-    error.value = e.response?.data?.message || '暂时无法读取选材结果，请检查网络后重试。'
+    error.value = e.response?.data?.message || t('materialSelection.errorLoadFailed')
     loading.value = false
   }
 }
 
 function add(item: MaterialSelectionItem, force = false) {
   if (selectedIds.value.size >= 30) {
-    error.value = '一次最多确认 30 条资料，请先移除不必要的资料。'
+    error.value = t('materialSelection.errorMaxLimit')
     return
   }
   selectedIds.value = new Set(selectedIds.value).add(item.materialId)
@@ -104,7 +118,7 @@ function remove(item: MaterialSelectionItem) {
 
 async function confirmSelection() {
   if (!task.value || selectedIds.value.size === 0) {
-    error.value = '请至少选择一条真实资料后再生成简历。'
+    error.value = t('materialSelection.errorNoSelection')
     return
   }
   confirming.value = true
@@ -120,7 +134,7 @@ async function confirmSelection() {
     taskStore.remember(generationTask.id)
     await router.push(`/generate/confirm?taskId=${generationTask.id}`)
   } catch (e: any) {
-    error.value = e.response?.data?.message || '无法确认选材，请检查资料后重试。'
+    error.value = e.response?.data?.message || t('materialSelection.errorConfirmFailed')
   } finally {
     confirming.value = false
   }
@@ -135,101 +149,97 @@ async function retry() {
     await loadTask(true)
   } catch (e: any) {
     loading.value = false
-    error.value = e.response?.data?.message || '无法重试选材。'
+    error.value = e.response?.data?.message || t('materialSelection.errorRetryFailed')
   }
 }
 
 function typeLabel(type: string) {
-  return ({
-    WORK_EXPERIENCE: '工作经历', PROJECT_EXPERIENCE: '项目经历', EDUCATION: '教育背景',
-    SKILL: '技能', CERTIFICATE: '证书', AWARD: '荣誉', HIGHLIGHT: '亮点',
-    ACHIEVEMENT: '量化成果', LEADERSHIP_EXPERIENCE: '管理 / 协作', SKILL_EVIDENCE: '技能证据',
-  } as Record<string, string>)[type] ?? '职业资料'
+  return t(MATERIAL_TYPE_KEYS[type] ?? 'materialSelection.typeDefault')
 }
 </script>
 
 <template>
   <main class="selection-page">
     <header class="selection-header">
-      <p class="eyebrow"><Sparkles :size="14" /> AI 选材</p>
-      <h1>确认用于这份简历的资料</h1>
-      <p>AI 已根据岗位要求整理候选，你可以在生成前添加或移除资料。</p>
+      <p class="eyebrow"><Sparkles :size="14" /> {{ t('materialSelection.eyebrow') }}</p>
+      <h1>{{ t('materialSelection.title') }}</h1>
+      <p>{{ t('materialSelection.subtitle') }}</p>
     </header>
 
     <section v-if="loading" class="status-panel" aria-live="polite">
       <span class="spinner"></span>
-      <h2>正在理解岗位并筛选资料</h2>
-      <p>系统只会从你的资料库中选择，不会补造经历。</p>
+      <h2>{{ t('materialSelection.loadingTitle') }}</h2>
+      <p>{{ t('materialSelection.loadingDesc') }}</p>
     </section>
 
     <section v-else-if="error && (!task || task.status !== 'SUCCESS')" class="status-panel error-panel">
       <AlertTriangle :size="24" />
       <p>{{ error }}</p>
-      <button v-if="task?.status === 'FAILED'" class="btn-primary" @click="retry"><RefreshCw :size="15" />重新选材</button>
-      <router-link v-else class="btn-secondary" to="/generate">返回生成工作台</router-link>
+      <button v-if="task?.status === 'FAILED'" class="btn-primary" @click="retry"><RefreshCw :size="15" />{{ t('materialSelection.retrySelection') }}</button>
+      <router-link v-else class="btn-secondary" to="/generate">{{ t('materialSelection.backToWorkspace') }}</router-link>
     </section>
 
     <template v-else-if="task?.status === 'SUCCESS'">
       <section class="selection-section selected-section">
         <div class="section-heading">
-          <div><h2>将用于生成</h2><p>生成模型只会收到这里确认的资料。</p></div>
+          <div><h2>{{ t('materialSelection.selectedTitle') }}</h2><p>{{ t('materialSelection.selectedDesc') }}</p></div>
           <span class="count">{{ selectedItems.length }} / 30</span>
         </div>
-        <p v-if="selectedItems.length === 0" class="empty-hint">尚未选择资料，请从下方候选中添加。</p>
+        <p v-if="selectedItems.length === 0" class="empty-hint">{{ t('materialSelection.emptyHint') }}</p>
         <article v-for="item in selectedItems" :key="item.materialId" class="material-row selected">
           <div class="material-copy">
-            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || '未命名资料' }}</strong></div>
+            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || t('materialSelection.unnamedMaterial') }}</strong></div>
             <p v-if="item.reason">{{ item.reason }}</p>
             <ul v-if="item.matchedRequirements?.length" class="requirement-list">
               <li v-for="requirement in item.matchedRequirements" :key="requirement">{{ requirement }}</li>
             </ul>
           </div>
-          <button class="icon-action remove" title="从本次生成中移除" @click="remove(item)"><Trash2 :size="17" /><span>移除</span></button>
+          <button class="icon-action remove" :title="t('materialSelection.removeTitle')" @click="remove(item)"><Trash2 :size="17" /><span>{{ t('materialSelection.remove') }}</span></button>
         </article>
       </section>
 
       <section v-if="unselectedItems.length" class="selection-section">
-        <div class="section-heading"><div><h2>其他候选</h2><p>相关度较低或岗位篇幅有限，默认不使用。</p></div></div>
+        <div class="section-heading"><div><h2>{{ t('materialSelection.otherCandidates') }}</h2><p>{{ t('materialSelection.otherCandidatesDesc') }}</p></div></div>
         <article v-for="item in unselectedItems" :key="item.materialId" class="material-row">
           <div class="material-copy">
-            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || '未命名资料' }}</strong></div>
-            <p>{{ item.reason || '与当前岗位的直接关联较弱。' }}</p>
+            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || t('materialSelection.unnamedMaterial') }}</strong></div>
+            <p>{{ item.reason || t('materialSelection.weakRelevance') }}</p>
           </div>
-          <button class="icon-action add" @click="add(item)"><Plus :size="17" /><span>加入</span></button>
+          <button class="icon-action add" @click="add(item)"><Plus :size="17" /><span>{{ t('materialSelection.add') }}</span></button>
         </article>
       </section>
 
       <section v-if="excludedItems.length" class="selection-section excluded-section">
-        <div class="section-heading"><div><h2>默认排除的资料</h2><p>这些资料按你的全局偏好不参与生成，只有明确加入才会使用。</p></div></div>
+        <div class="section-heading"><div><h2>{{ t('materialSelection.defaultExcluded') }}</h2><p>{{ t('materialSelection.defaultExcludedDesc') }}</p></div></div>
         <article v-for="item in excludedItems" :key="item.materialId" class="material-row">
           <div class="material-copy">
-            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || '未命名资料' }}</strong></div>
-            <p>{{ item.reason || '你已在资料库中设置为默认不使用。' }}</p>
+            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || t('materialSelection.unnamedMaterial') }}</strong></div>
+            <p>{{ item.reason || t('materialSelection.globallyExcluded') }}</p>
           </div>
-          <button class="icon-action force" @click="add(item, true)"><Plus :size="17" /><span>本次强制加入</span></button>
+          <button class="icon-action force" @click="add(item, true)"><Plus :size="17" /><span>{{ t('materialSelection.forceAddThisTime') }}</span></button>
         </article>
       </section>
 
       <section v-if="manuallyExcludedItems.length" class="selection-section excluded-section">
-        <div class="section-heading"><div><h2>本次已排除的资料</h2><p>这些资料已明确排除，不能在本次生成中重新加入。</p></div></div>
+        <div class="section-heading"><div><h2>{{ t('materialSelection.excludedThisTime') }}</h2><p>{{ t('materialSelection.excludedThisTimeDesc') }}</p></div></div>
         <article v-for="item in manuallyExcludedItems" :key="item.materialId" class="material-row">
           <div class="material-copy">
-            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || '未命名资料' }}</strong></div>
-            <p>{{ item.reason || '已在生成工作台中排除。' }}</p>
+            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || t('materialSelection.unnamedMaterial') }}</strong></div>
+            <p>{{ item.reason || t('materialSelection.excludedInWorkbench') }}</p>
           </div>
         </article>
       </section>
 
       <section v-if="result.missingRequirements.length" class="gap-band">
-        <div><AlertTriangle :size="18" /><h2>尚未覆盖的岗位要求</h2></div>
+        <div><AlertTriangle :size="18" /><h2>{{ t('materialSelection.uncoveredTitle') }}</h2></div>
         <ul><li v-for="gap in result.missingRequirements" :key="gap">{{ gap }}</li></ul>
       </section>
 
       <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
       <footer class="page-actions">
-        <router-link class="btn-secondary" to="/generate">重新配置</router-link>
+        <router-link class="btn-secondary" to="/generate">{{ t('materialSelection.reconfigure') }}</router-link>
         <button class="btn-primary" :disabled="confirming || selectedItems.length === 0" @click="confirmSelection">
-          <Check :size="16" />{{ confirming ? '正在创建草稿...' : '确认选材并生成简历' }}
+          <Check :size="16" />{{ confirming ? t('materialSelection.creatingDraft') : t('materialSelection.confirmAndGenerate') }}
         </button>
       </footer>
     </template>

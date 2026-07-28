@@ -120,12 +120,6 @@ public class AuthService {
         session.setRevokeReason("rotated");
         authSessionRepository.save(session);
 
-        AuthSession next = new AuthSession();
-        next.setUserId(user.getId());
-        next.setTokenFamilyId(session.getTokenFamilyId());
-        next.setRefreshTokenHash(tokenService.hashToken(presentedRefreshToken));
-        // 注意:issued/expires 由调用方刷新原文 token 后再赋,见 issueNewFamily
-
         // 直接发新一对(保持原 family)
         String newRefresh = tokenService.issueRefreshToken();
         AuthSession fresh = new AuthSession();

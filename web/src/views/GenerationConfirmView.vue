@@ -6,6 +6,12 @@ import { getTask, confirmTask, rejectTask, retryTask } from '@/api/ai'
 import { listResumesByJd, type ResumeSummary } from '@/api/resume'
 import DraftContentFields from '@/components/DraftContentFields.vue'
 import { Check, Pencil, Trash2 } from 'lucide-vue-next'
+import { useLocale } from '@/i18n'
+
+const { t } = useLocale()
+
+// data identifier for material-library source
+const MATERIAL_SOURCE = '\u8D44\u6599\u5E93'
 
 const route = useRoute()
 const router = useRouter()
@@ -67,7 +73,7 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null
 onMounted(async () => {
   const tid = route.query.taskId
   if (!tid) {
-    error.value = '缺少任务 ID'
+    error.value = t('generationConfirm.missingTaskId')
     loading.value = false
     return
   }
@@ -90,10 +96,10 @@ async function loadTask(id: number) {
     } else if (task.value.status === 'PENDING' || task.value.status === 'RUNNING') {
       startPolling(id)
     } else if (task.value.status === 'FAILED') {
-      error.value = task.value.errorMessage || 'AI 生成失败'
+      error.value = task.value.errorMessage || t('generationConfirm.aiGenerationFailed')
     }
   } catch (e: any) {
-    error.value = e.response?.data?.message || '加载任务失败'
+    error.value = e.response?.data?.message || t('generationConfirm.loadTaskFailed')
   } finally {
     loading.value = false
   }
@@ -111,7 +117,7 @@ function startPolling(id: number) {
         return
       }
       if (task.value.status === 'FAILED') {
-        error.value = task.value.errorMessage || 'AI 生成失败'
+        error.value = task.value.errorMessage || t('generationConfirm.aiGenerationFailed')
         loading.value = false
         return
       }
@@ -146,7 +152,7 @@ function parseDraft() {
           section,
           content: stripMeta(entry),
           provenance: sourceMeta(entry),
-          source: entry._source ?? (entry._sources ? '资料库' : null),
+          source: entry._source ?? (entry._sources ? MATERIAL_SOURCE : null),
           pending: entry._pending?.reason ?? (typeof entry._pending === 'string' ? entry._pending : null),
           decision: entry._pending ? null : 'ACCEPT',
           editedValue: null,
@@ -159,7 +165,7 @@ function parseDraft() {
         section,
         content: stripMeta(data),
         provenance: sourceMeta(data),
-        source: data._source ?? (data._sources ? '资料库' : null),
+        source: data._source ?? (data._sources ? MATERIAL_SOURCE : null),
         pending: data._pending?.reason ?? (typeof data._pending === 'string' ? data._pending : null),
         decision: data._pending ? null : 'ACCEPT',
         editedValue: null,
@@ -181,11 +187,11 @@ function normalizeQualitySummary(value: unknown): QualitySummary | null {
   return summary as QualitySummary
 }
 
-const QUALITY_READINESS: Record<QualitySummary['readiness'], { label: string; hint: string }> = {
-  READY: { label: '资料依据完整', hint: '草稿内容均有已确认资料依据，可继续逐项审核。' },
-  REVIEW_RECOMMENDED: { label: '建议补充后审核', hint: '草稿可继续审核，但仍有 JD 要求或简历栏目尚未覆盖。' },
-  REQUIRES_ACTION: { label: '需要处理', hint: '存在待补充或没有资料依据的内容，请逐项编辑、接受或删除。' },
-}
+const QUALITY_READINESS = computed<Record<QualitySummary['readiness'], { label: string; hint: string }>>(() => ({
+  READY: { label: t('generationConfirm.qualityReadyLabel'), hint: t('generationConfirm.qualityReadyHint') },
+  REVIEW_RECOMMENDED: { label: t('generationConfirm.qualityReviewLabel'), hint: t('generationConfirm.qualityReviewHint') },
+  REQUIRES_ACTION: { label: t('generationConfirm.qualityActionLabel'), hint: t('generationConfirm.qualityActionHint') },
+}))
 
 function stripMeta(value: any): any {
   if (Array.isArray(value)) return value.map(stripMeta)
@@ -204,14 +210,14 @@ function sourceMeta(value: any): Record<string, unknown> {
   return {}
 }
 
-const SECTION_LABELS: Record<string, string> = {
-  basics: '个人概要',
-  work: '工作经历',
-  education: '教育背景',
-  skills: '技能',
-  projects: '项目经历',
-  certificates: '证书',
-}
+const SECTION_LABELS = computed<Record<string, string>>(() => ({
+  basics: t('generationConfirm.sectionBasics'),
+  work: t('generationConfirm.sectionWork'),
+  education: t('generationConfirm.sectionEducation'),
+  skills: t('generationConfirm.sectionSkills'),
+  projects: t('generationConfirm.sectionProjects'),
+  certificates: t('generationConfirm.sectionCertificates'),
+}))
 
 const SECTION_EDIT_TEMPLATES: Record<string, Record<string, unknown>> = {
   basics: { name: '', title: '', email: '', phone: '', location: '', summary: '' },
@@ -281,7 +287,7 @@ function setDecision(item: DraftItem, decision: 'ACCEPT' | 'REJECT') {
 
 async function handleConfirm() {
   if (pendingCount.value > 0) {
-    error.value = `还有 ${pendingCount.value} 项待处理（待补充信息需接受或拒绝）`
+    error.value = t('generationConfirm.pendingItemsError').replace('{count}', String(pendingCount.value))
     return
   }
 
@@ -331,21 +337,21 @@ async function doConfirm(targetResumeId: number | null) {
     // Navigate to resume detail
     router.push(`/resumes/${data.resumeId}`)
   } catch (e: any) {
-    error.value = e.response?.data?.message || '确认失败'
+    error.value = e.response?.data?.message || t('generationConfirm.confirmFailed')
   } finally {
     confirming.value = false
   }
 }
 
 async function handleReject() {
-  if (!window.confirm('确定拒绝此草稿？拒绝后不会创建简历。')) return
+  if (!window.confirm(t('generationConfirm.rejectConfirm'))) return
   rejecting.value = true
   try {
     await rejectTask(task.value.id, task.value.updatedAt)
     taskStore.clear()
     router.push('/generate')
   } catch (e: any) {
-    error.value = e.response?.data?.message || '操作失败'
+    error.value = e.response?.data?.message || t('generationConfirm.operationFailed')
   } finally {
     rejecting.value = false
   }
@@ -359,7 +365,7 @@ async function handleRetry() {
     loading.value = true
     startPolling(task.value.id)
   } catch (e: any) {
-    error.value = e.response?.data?.message || '重试失败'
+    error.value = e.response?.data?.message || t('generationConfirm.retryFailed')
   }
 }
 </script>
@@ -367,21 +373,21 @@ async function handleRetry() {
 <template>
   <div class="confirm-page">
     <header>
-      <h1>确认 AI 草稿</h1>
-      <p class="subtitle">逐项审核生成内容，确认后将创建岗位简历</p>
+      <h1>{{ t('generationConfirm.pageTitle') }}</h1>
+      <p class="subtitle">{{ t('generationConfirm.pageSubtitle') }}</p>
     </header>
 
     <!-- Loading / Polling -->
     <div v-if="loading" class="status-card">
       <div class="spinner-lg"></div>
-      <p>AI 正在生成你的岗位简历...</p>
-      <p class="hint">通常需要 10-30 秒</p>
+      <p>{{ t('generationConfirm.generating') }}</p>
+      <p class="hint">{{ t('generationConfirm.generatingHint') }}</p>
     </div>
 
     <!-- Error / Failed -->
     <div v-else-if="error && (!task || task.status === 'FAILED')" class="status-card error">
       <p class="error-text">{{ error }}</p>
-      <button class="btn-primary" @click="handleRetry">重试生成</button>
+      <button class="btn-primary" @click="handleRetry">{{ t('generationConfirm.retryGenerate') }}</button>
     </div>
 
     <!-- Draft confirmation -->
@@ -394,26 +400,26 @@ async function handleRetry() {
       <section
         v-if="qualitySummary"
         :class="['quality-summary', `quality-summary--${qualitySummary.readiness.toLowerCase()}`]"
-        aria-label="草稿质量摘要"
+        :aria-label="t('generationConfirm.qualitySummaryAriaLabel')"
       >
         <div class="quality-summary__heading">
           <div>
-            <h3>草稿质量摘要</h3>
+            <h3>{{ t('generationConfirm.qualitySummaryTitle') }}</h3>
             <p>{{ QUALITY_READINESS[qualitySummary.readiness].hint }}</p>
           </div>
           <span class="quality-summary__status">{{ QUALITY_READINESS[qualitySummary.readiness].label }}</span>
         </div>
         <div class="quality-summary__metrics">
-          <div><strong>{{ qualitySummary.sourcedItems }}</strong><span>有资料依据</span></div>
-          <div><strong>{{ qualitySummary.draftGapCount }}</strong><span>草稿待补充</span></div>
-          <div><strong>{{ qualitySummary.unsupportedItems }}</strong><span>待核实内容</span></div>
-          <div><strong>{{ qualitySummary.missingRequirementCount }}</strong><span>未覆盖项</span></div>
+          <div><strong>{{ qualitySummary.sourcedItems }}</strong><span>{{ t('generationConfirm.hasSource') }}</span></div>
+          <div><strong>{{ qualitySummary.draftGapCount }}</strong><span>{{ t('generationConfirm.draftPending') }}</span></div>
+          <div><strong>{{ qualitySummary.unsupportedItems }}</strong><span>{{ t('generationConfirm.pendingReview') }}</span></div>
+          <div><strong>{{ qualitySummary.missingRequirementCount }}</strong><span>{{ t('generationConfirm.uncovered') }}</span></div>
         </div>
       </section>
 
       <!-- Missing info -->
       <div v-if="missingInfo.length" class="missing-section">
-        <h3>缺失信息（JD 要求但资料库未覆盖）</h3>
+        <h3>{{ t('generationConfirm.missingInfoTitle') }}</h3>
         <ul>
           <li v-for="(m, i) in missingInfo" :key="i">
             <strong>{{ m.section }}</strong>：{{ m.reason }}
@@ -426,9 +432,9 @@ async function handleRetry() {
         <h3>{{ SECTION_LABELS[section as string] ?? section }}</h3>
         <div v-for="(item, itemIndex) in items" :key="item.path" :class="['draft-item', item.decision?.toLowerCase()]">
           <div v-if="items.length > 1 || item.source || item.pending" class="item-header">
-            <span v-if="items.length > 1" class="item-number">第 {{ itemIndex + 1 }} 条</span>
-            <span v-if="item.source" class="source-badge">来源：资料库</span>
-            <span v-if="item.pending" class="pending-badge">待补充：{{ item.pending }}</span>
+            <span v-if="items.length > 1" class="item-number">{{ t('generationConfirm.itemNumber').replace('{index}', String(itemIndex + 1)) }}</span>
+            <span v-if="item.source" class="source-badge">{{ t('generationConfirm.sourceBadge') }}</span>
+            <span v-if="item.pending" class="pending-badge">{{ t('generationConfirm.pendingBadge').replace('{pending}', item.pending) }}</span>
           </div>
           <DraftContentFields :model-value="item.content" />
           <div class="item-actions">
@@ -436,31 +442,31 @@ async function handleRetry() {
               :class="['action-btn accept', { active: item.decision === 'ACCEPT' }]"
               :aria-pressed="item.decision === 'ACCEPT'"
               @click="setDecision(item, 'ACCEPT')"
-            ><Check :size="15" /><span>接受</span></button>
-            <button class="action-btn edit" @click="openEdit(item)"><Pencil :size="15" /><span>编辑</span></button>
+            ><Check :size="15" /><span>{{ t('generationConfirm.accept') }}</span></button>
+            <button class="action-btn edit" @click="openEdit(item)"><Pencil :size="15" /><span>{{ t('generationConfirm.editAction') }}</span></button>
             <button
               :class="['action-btn reject', { active: item.decision === 'REJECT' }]"
               :aria-pressed="item.decision === 'REJECT'"
               @click="setDecision(item, 'REJECT')"
-            ><Trash2 :size="15" /><span>删除</span></button>
+            ><Trash2 :size="15" /><span>{{ t('generationConfirm.deleteAction') }}</span></button>
           </div>
         </div>
       </div>
 
       <!-- Unselected materials -->
       <details v-if="unselectedInfo.length" class="unselected-details">
-        <summary>未使用的资料（{{ unselectedInfo.length }} 条）</summary>
+        <summary>{{ t('generationConfirm.unusedMaterials').replace('{count}', String(unselectedInfo.length)) }}</summary>
         <ul>
           <li v-for="(u, i) in unselectedInfo" :key="i">
-            {{ u.title || '未命名资料' }}：{{ u.unselectedReason }}
+            {{ u.title || t('generationConfirm.unnamedMaterial') }}：{{ u.unselectedReason }}
           </li>
         </ul>
       </details>
 
       <!-- Resume title -->
       <div class="title-input">
-        <label>简历名称（可选，默认使用"公司 - 岗位"）</label>
-        <input v-model="customTitle" placeholder="例如：字节跳动 - Java 后端工程师" class="input" />
+        <label>{{ t('generationConfirm.resumeNameLabel') }}</label>
+        <input v-model="customTitle" :placeholder="t('generationConfirm.resumeNamePlaceholder')" class="input" />
       </div>
 
       <!-- Error -->
@@ -469,11 +475,11 @@ async function handleRetry() {
       <!-- Actions -->
       <div class="confirm-actions">
         <button class="btn-secondary" @click="handleReject" :disabled="rejecting">
-          拒绝草稿
+          {{ t('generationConfirm.rejectDraft') }}
         </button>
         <button class="btn-primary" @click="handleConfirm" :disabled="confirming || pendingCount > 0">
           <span v-if="confirming" class="spinner"></span>
-          {{ confirming ? '创建中...' : `确认并创建简历${pendingCount > 0 ? `（${pendingCount} 项待处理）` : ''}` }}
+          {{ confirming ? t('generationConfirm.creating') : `${t('generationConfirm.confirmAndCreate')}${pendingCount > 0 ? `（${pendingCount} ${t('generationConfirm.itemsPending')}）` : ''}` }}
         </button>
       </div>
     </div>
@@ -482,17 +488,17 @@ async function handleRetry() {
     <Teleport to="body">
       <div v-if="showJdDialog" class="dialog-overlay" @click.self="showJdDialog = false">
         <div class="dialog">
-          <h3>该岗位已有简历</h3>
-          <p>检测到相同岗位已存在以下简历，请选择操作：</p>
+          <h3>{{ t('generationConfirm.existingResumeTitle') }}</h3>
+          <p>{{ t('generationConfirm.existingResumeDesc') }}</p>
           <div class="existing-list">
             <div v-for="r in existingResumes" :key="r.id" class="existing-item">
               <span>{{ r.title }}</span>
-              <button class="btn-small" @click="doConfirm(r.id)">更新此简历</button>
+              <button class="btn-small" @click="doConfirm(r.id)">{{ t('generationConfirm.updateResume') }}</button>
             </div>
           </div>
           <div class="dialog-actions">
-            <button class="btn-primary" @click="doConfirm(null)">新建一份简历</button>
-            <button class="btn-secondary" @click="showJdDialog = false">取消</button>
+            <button class="btn-primary" @click="doConfirm(null)">{{ t('generationConfirm.createNewResume') }}</button>
+            <button class="btn-secondary" @click="showJdDialog = false">{{ t('generationConfirm.cancel') }}</button>
           </div>
         </div>
       </div>
@@ -502,11 +508,11 @@ async function handleRetry() {
     <Teleport to="body">
       <div v-if="showEditDialog" class="dialog-overlay" @click.self="showEditDialog = false">
         <div class="dialog edit-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-edit-title">
-          <h3 id="draft-edit-title">编辑内容</h3>
+          <h3 id="draft-edit-title">{{ t('generationConfirm.editContentTitle') }}</h3>
           <DraftContentFields v-model="editValue" editable />
           <div class="dialog-actions">
-            <button class="btn-primary" @click="saveEdit">保存</button>
-            <button class="btn-secondary" @click="showEditDialog = false">取消</button>
+            <button class="btn-primary" @click="saveEdit">{{ t('generationConfirm.save') }}</button>
+            <button class="btn-secondary" @click="showEditDialog = false">{{ t('generationConfirm.cancel') }}</button>
           </div>
         </div>
       </div>

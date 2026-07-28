@@ -25,8 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * DatabaseTaskWorker 集成测试（H2 + 百炼提供者）。
  * 覆盖:领取并执行、过期租约恢复，以及未配置密钥时的失败状态。
  *
- * <p>测试环境 worker poll-interval=60s,不会自动轮询干扰;
- * 通过直接调用 {@code worker.poll()} 手动触发。
+ * <p>测试环境关闭自动调度,通过直接调用 {@code worker.poll()} 手动触发。
  */
 @SpringBootTest
 @AutoConfigureMockMvc

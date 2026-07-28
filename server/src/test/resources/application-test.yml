@@ -16,6 +16,8 @@ spring:
     baseline-on-migrate: true
 
 app:
+  worker-scheduling:
+    enabled: false
   cors:
     allowed-origins: http://localhost:5173,http://127.0.0.1:5176
   resume:

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useLocale } from '@/i18n'
 
 defineOptions({ name: 'DraftContentFields' })
+
+const { t } = useLocale()
 
 const props = withDefaults(defineProps<{
   modelValue: unknown
@@ -14,31 +17,16 @@ const emit = defineEmits<{
   'update:modelValue': [value: unknown]
 }>()
 
-const FIELD_LABELS: Record<string, string> = {
-  name: '姓名',
-  title: '职位名称',
-  position: '职位',
-  role: '角色',
-  email: '邮箱',
-  phone: '电话',
-  location: '所在地',
-  website: '个人网站',
-  summary: '个人简介',
-  company: '公司',
-  school: '学校',
-  degree: '学历',
-  major: '专业',
-  issuer: '颁发机构',
-  date: '日期',
-  startDate: '开始时间',
-  endDate: '结束时间',
-  period: '时间',
-  description: '经历描述',
-  highlights: '关键成果',
-  keywords: '相关技能',
-  level: '熟练程度',
-  credentialId: '证书编号',
-  url: '链接',
+const FIELD_LABEL_KEYS: Record<string, string> = {
+  name: 'draftFields.name', title: 'draftFields.title', position: 'draftFields.position',
+  role: 'draftFields.role', email: 'draftFields.email', phone: 'draftFields.phone',
+  location: 'draftFields.location', website: 'draftFields.website', summary: 'draftFields.summary',
+  company: 'draftFields.company', school: 'draftFields.school', degree: 'draftFields.degree',
+  major: 'draftFields.major', issuer: 'draftFields.issuer', date: 'draftFields.date',
+  startDate: 'draftFields.startDate', endDate: 'draftFields.endDate', period: 'draftFields.period',
+  description: 'draftFields.description', highlights: 'draftFields.highlights',
+  keywords: 'draftFields.keywords', level: 'draftFields.level',
+  credentialId: 'draftFields.credentialId', url: 'draftFields.url',
 }
 
 const TEXTAREA_FIELDS = new Set(['summary', 'description'])
@@ -61,13 +49,14 @@ function isNested(value: unknown) {
 }
 
 function fieldLabel(key: string) {
-  if (FIELD_LABELS[key]) return FIELD_LABELS[key]
+  const i18nKey = FIELD_LABEL_KEYS[key]
+  if (i18nKey) return t(i18nKey)
   return key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ')
 }
 
 function displayValue(value: unknown) {
-  if (typeof value === 'boolean') return value ? '是' : '否'
-  return value === null || value === undefined || value === '' ? '未填写' : String(value)
+  if (typeof value === 'boolean') return value ? t('draftFields.yes') : t('draftFields.no')
+  return value === null || value === undefined || value === '' ? t('draftFields.notFilled') : String(value)
 }
 
 function shouldUseTextarea(key: string, value: unknown) {
@@ -94,7 +83,7 @@ function updateArrayItem(index: number, value: unknown) {
 </script>
 
 <template>
-  <p v-if="isEmpty" class="empty-value">暂无可展示内容</p>
+  <p v-if="isEmpty" class="empty-value">{{ t('draftFields.emptyContent') }}</p>
 
   <div v-else-if="isObject" class="field-list">
     <div v-for="([key, value]) in objectEntries" :key="key" class="field-row">
@@ -109,7 +98,7 @@ function updateArrayItem(index: number, value: unknown) {
         <textarea
           v-else-if="editable && shouldUseTextarea(key, value)"
           :aria-label="fieldLabel(key)"
-          :value="displayValue(value) === '未填写' ? '' : displayValue(value)"
+          :value="displayValue(value) === t('draftFields.notFilled') ? '' : displayValue(value)"
           rows="3"
           @input="updateObjectField(key, coerceValue(value, ($event.target as HTMLTextAreaElement).value))"
         />
@@ -119,13 +108,13 @@ function updateArrayItem(index: number, value: unknown) {
           :value="String(value)"
           @change="updateObjectField(key, ($event.target as HTMLSelectElement).value === 'true')"
         >
-          <option value="true">是</option>
-          <option value="false">否</option>
+          <option value="true">{{ t('draftFields.yes') }}</option>
+          <option value="false">{{ t('draftFields.no') }}</option>
         </select>
         <input
           v-else-if="editable"
           :aria-label="fieldLabel(key)"
-          :value="displayValue(value) === '未填写' ? '' : displayValue(value)"
+          :value="displayValue(value) === t('draftFields.notFilled') ? '' : displayValue(value)"
           @input="updateObjectField(key, coerceValue(value, ($event.target as HTMLInputElement).value))"
         />
         <span v-else>{{ displayValue(value) }}</span>
@@ -143,8 +132,8 @@ function updateArrayItem(index: number, value: unknown) {
       />
       <textarea
         v-else-if="editable"
-        :aria-label="`第 ${index + 1} 项`"
-        :value="displayValue(value) === '未填写' ? '' : displayValue(value)"
+        :aria-label="t('draftFields.itemIndex').replace('{index}', String(index + 1))"
+        :value="displayValue(value) === t('draftFields.notFilled') ? '' : displayValue(value)"
         rows="2"
         @input="updateArrayItem(index, coerceValue(value, ($event.target as HTMLTextAreaElement).value))"
       />

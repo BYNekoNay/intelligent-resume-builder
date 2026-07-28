@@ -1,4 +1,6 @@
 package com.intelligentresume.system.dto;
 
-public record SystemHealthResponse(String service, String status, String stage) {
+import java.util.List;
+
+public record SystemHealthResponse(String service, String status, String version, List<String> capabilities) {
 }

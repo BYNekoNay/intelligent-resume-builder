@@ -33,7 +33,7 @@ app:
   ai:
     worker:
       poll-interval-ms: 200
-      lease-seconds: 60
+      lease-seconds: 180
       max-retries: 1
       batch-size: 1
   pdf:

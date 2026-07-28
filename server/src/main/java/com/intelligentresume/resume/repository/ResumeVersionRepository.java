@@ -12,6 +12,8 @@ public interface ResumeVersionRepository extends JpaRepository<ResumeVersion, Lo
 
     Optional<ResumeVersion> findByIdAndResumeId(Long id, Long resumeId);
 
+    Optional<ResumeVersion> findByIdAndCreatedByAndDeletedAtIsNull(Long id, Long createdBy);
+
     List<ResumeVersion> findByResumeIdAndDeletedAtIsNullOrderByVersionNoDesc(Long resumeId);
 
     List<ResumeVersion> findByResumeIdAndDeletedAtIsNotNullOrderByVersionNoDesc(Long resumeId);

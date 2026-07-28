@@ -10,6 +10,7 @@ import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.ai.worker.AiTaskWorkerProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,11 +39,14 @@ class AiTaskServiceTest {
 
     private IdempotencyService idempotencyService;
     private AiTaskService service;
+    private AiTaskWorkerProperties workerProperties;
 
     @BeforeEach
     void setUp() {
         idempotencyService = new IdempotencyService();
-        service = new AiTaskService(taskRepository, consentService, quotaService, idempotencyService);
+        workerProperties = new AiTaskWorkerProperties();
+        workerProperties.setMaxRetries(3);
+        service = new AiTaskService(taskRepository, consentService, quotaService, idempotencyService, workerProperties);
         lenient().when(consentService.hasValidConsent(anyLong(), anyString(), anyCollection()))
                 .thenReturn(true);
     }
@@ -186,6 +190,39 @@ class AiTaskServiceTest {
 
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
         verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("手动重试重新校验授权与配额，且不提前增加执行次数")
+    void retry_authorized_requeuesWithoutIncrementingAttempt() {
+        AiTask failed = task(7L, 100L, AiTaskType.INLINE_OPTIMIZE, "fingerprint");
+        failed.setStatus(AiTaskStatus.FAILED);
+        failed.setRetryCount(2);
+        failed.setErrorMessage("provider error");
+        when(taskRepository.findByIdAndUserId(7L, 100L)).thenReturn(Optional.of(failed));
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+
+        AiTaskStatusResponse response = service.retry(7L, 100L);
+
+        assertEquals(AiTaskStatus.PENDING, response.status());
+        assertEquals(2, response.retryCount());
+        assertNull(response.errorMessage());
+        verify(consentService).hasValidConsent(100L, AiTaskType.INLINE_OPTIMIZE.name(), java.util.List.of());
+        verify(quotaService).check(100L, AiTaskType.INLINE_OPTIMIZE);
+    }
+
+    @Test
+    @DisplayName("超过最大执行次数后拒绝再次手动重试")
+    void retry_attemptLimitExceeded_returnsConflict() {
+        AiTask failed = task(8L, 100L, AiTaskType.INLINE_OPTIMIZE, "fingerprint");
+        failed.setStatus(AiTaskStatus.FAILED);
+        failed.setRetryCount(3);
+        when(taskRepository.findByIdAndUserId(8L, 100L)).thenReturn(Optional.of(failed));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.retry(8L, 100L));
+
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        verifyNoInteractions(quotaService);
     }
 
     private AiTask task(Long id, Long userId, AiTaskType type, String fingerprint) {

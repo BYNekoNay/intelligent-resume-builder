@@ -205,7 +205,13 @@ public class ResumeVersionService {
 
     private ResumeVersionSummary toSummary(ResumeVersion v) {
         return new ResumeVersionSummary(v.getId(), v.getVersionNo(), v.getSourceType(),
-                v.getOptimizationSummary(), v.getCreatedAt(), v.getDeletedAt(), v.getRestoredFromVersionId());
+                templateCode(v.getResumeJson()), v.getOptimizationSummary(), v.getCreatedAt(), v.getDeletedAt(), v.getRestoredFromVersionId());
+    }
+
+    private String templateCode(Map<String, Object> resumeJson) {
+        Object template = resumeJson == null ? null : resumeJson.get("template");
+        Object code = template instanceof Map<?, ?> values ? values.get("code") : null;
+        return ResumeTemplateCodes.normalize(code);
     }
 
     private ResumeVersionDetail toDetail(ResumeVersion v) {

@@ -102,16 +102,16 @@ const steps = [
       <span>© {{ new Date().getFullYear() }} {{ t('home.copyRight') }}</span>
     </div>
     <div class="home-footer-status">
-      <span v-if="healthLoading" style="color: var(--text-tertiary);">检查服务...</span>
+      <span v-if="healthLoading" style="color: var(--text-tertiary);">{{ t('home.serviceChecking') }}</span>
       <span v-else-if="health" class="home-status-ok">
         <CheckCircle2 :size="14" /> {{ t('home.serviceStatus') }}
       </span>
-      <span v-else class="home-status-err">服务离线</span>
+      <span v-else class="home-status-err">{{ t('home.serviceOffline') }}</span>
     </div>
     <div class="home-footer-links">
-      <a href="https://github.com/" target="_blank" rel="noreferrer">源码</a>
+      <a href="https://github.com/" target="_blank" rel="noreferrer">{{ t('home.sourceCode') }}</a>
       <a href="#">API</a>
-      <a href="#">隐私</a>
+      <a href="#">{{ t('home.privacy') }}</a>
     </div>
   </footer>
 </template>

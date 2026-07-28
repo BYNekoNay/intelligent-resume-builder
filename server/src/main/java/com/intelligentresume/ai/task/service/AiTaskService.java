@@ -7,6 +7,7 @@ import com.intelligentresume.ai.task.domain.AiTaskStatus;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
+import com.intelligentresume.ai.worker.AiTaskWorkerProperties;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import org.springframework.stereotype.Service;
@@ -27,15 +28,18 @@ public class AiTaskService {
     private final AiConsentService consentService;
     private final AiQuotaService quotaService;
     private final IdempotencyService idempotencyService;
+    private final AiTaskWorkerProperties workerProperties;
 
     public AiTaskService(AiTaskRepository taskRepository,
                          AiConsentService consentService,
                          AiQuotaService quotaService,
-                         IdempotencyService idempotencyService) {
+                         IdempotencyService idempotencyService,
+                         AiTaskWorkerProperties workerProperties) {
         this.taskRepository = taskRepository;
         this.consentService = consentService;
         this.quotaService = quotaService;
         this.idempotencyService = idempotencyService;
+        this.workerProperties = workerProperties;
     }
 
     /**
@@ -55,11 +59,7 @@ public class AiTaskService {
         if (!consentService.hasValidConsent(userId)) {
             throw new BusinessException(ErrorCode.CONSENT_REQUIRED);
         }
-        List<String> requiredCategories = switch (req.taskType()) {
-            case JOB_MATERIAL_SELECTION, JOB_GENERATION ->
-                    List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE");
-            default -> List.of();
-        };
+        List<String> requiredCategories = requiredCategories(req.taskType());
         if (!consentService.hasValidConsent(userId, req.taskType().name(), requiredCategories)) {
             throw new BusinessException(ErrorCode.CONSENT_REQUIRED,
                     "AI authorization does not cover this task or its data categories");
@@ -173,10 +173,25 @@ public class AiTaskService {
         if (!com.intelligentresume.ai.task.domain.AiTaskStatus.FAILED.equals(task.getStatus())) {
             throw new BusinessException(ErrorCode.VALIDATION, "只有失败的任务可以重试");
         }
+        if (task.getRetryCount() >= workerProperties.getMaxRetries()) {
+            throw new BusinessException(ErrorCode.CONFLICT, "AI 任务已达到最大重试次数");
+        }
+        if (!consentService.hasValidConsent(userId)
+                || !consentService.hasValidConsent(userId, task.getTaskType().name(), requiredCategories(task.getTaskType()))) {
+            throw new BusinessException(ErrorCode.CONSENT_REQUIRED);
+        }
+        quotaService.check(userId, task.getTaskType());
         task.setStatus(com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING);
         task.setErrorMessage(null);
-        task.setRetryCount(task.getRetryCount() + 1);
         taskRepository.save(task);
         return toResponse(task);
+    }
+
+    private List<String> requiredCategories(com.intelligentresume.ai.task.domain.AiTaskType type) {
+        return switch (type) {
+            case JOB_MATERIAL_SELECTION, JOB_GENERATION ->
+                    List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE");
+            default -> List.of();
+        };
     }
 }

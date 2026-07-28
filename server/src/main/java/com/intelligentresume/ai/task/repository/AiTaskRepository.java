@@ -32,6 +32,12 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
 
     long countByUserIdAndTaskTypeAndCreatedAtAfter(Long userId, AiTaskType taskType, LocalDateTime after);
 
+    @Query("SELECT COALESCE(SUM(CASE WHEN t.retryCount < 1 THEN 1 ELSE t.retryCount END), 0) FROM AiTask t " +
+            "WHERE t.userId = :userId AND t.taskType = :taskType AND t.createdAt > :after")
+    long countAttemptsByUserIdAndTaskTypeAndCreatedAtAfter(@Param("userId") Long userId,
+                                                           @Param("taskType") AiTaskType taskType,
+                                                           @Param("after") LocalDateTime after);
+
     long countByTaskTypeAndCreatedAtAfter(AiTaskType taskType, LocalDateTime after);
 
     long countByStatus(AiTaskStatus status);
@@ -53,4 +59,15 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
     @Modifying
     @Query(value = "UPDATE ai_task SET status = 'RUNNING', lease_owner = :owner, lease_expires_at = :leaseUntil, retry_count = retry_count + 1, updated_at = NOW() WHERE id = :id AND (status = 'PENDING' OR (status = 'RUNNING' AND lease_expires_at < NOW()))", nativeQuery = true)
     int acquireLease(@Param("id") Long id, @Param("owner") String owner, @Param("leaseUntil") LocalDateTime leaseUntil);
+
+    @Modifying
+    @Query("UPDATE AiTask t SET t.leaseExpiresAt = :leaseUntil WHERE t.id = :id " +
+            "AND t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.RUNNING AND t.leaseOwner = :owner")
+    int renewLease(@Param("id") Long id, @Param("owner") String owner,
+                   @Param("leaseUntil") LocalDateTime leaseUntil);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT t FROM AiTask t WHERE t.id = :id " +
+            "AND t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.RUNNING AND t.leaseOwner = :owner")
+    Optional<AiTask> findRunningByIdAndOwnerForUpdate(@Param("id") Long id, @Param("owner") String owner);
 }

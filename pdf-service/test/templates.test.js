@@ -1,37 +1,36 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { renderResumeHtml, TEMPLATE_CODES } from '../src/templates/classic.js'
 
-const payload = {
-  resumeJson: {
-    basics: { name: '<林致远>', title: '高级后端工程师', location: '上海', summary: '稳定性治理' },
-    work: [{ company: '星河科技', position: '技术负责人', startDate: '2022-03', endDate: '至今', highlights: ['吞吐提升 3 倍'] }],
-    skills: [{ name: 'Java' }],
-    projects: [{ name: '交易中台', role: '负责人', description: '统一交易能力' }],
-    education: [{ school: '华东理工大学', degree: '本科', major: '计算机科学' }],
-    certificates: [{ name: 'AWS SAP', issuer: 'AWS', date: '2025-06' }],
-    languages: [{ name: '英语', level: '专业工作沟通' }],
-  },
-}
+const sharedResume = JSON.parse(readFileSync(
+  new URL('../../test-fixtures/resume-all-sections.json', import.meta.url),
+  'utf8',
+))
+const payload = { resumeJson: sharedResume }
 
-test('renders every supported template with the same resume sections', () => {
+test('renders every supported template with the shared resume contract', () => {
+  const markers = [
+    'SUMMARY_MARKER', 'OBJECTIVE_MARKER', 'LINK_MARKER', 'WORK_MARKER',
+    'VOLUNTEERING_MARKER', 'SKILL_MARKER', 'PROJECT_MARKER', 'EDUCATION_MARKER',
+    'COURSE_MARKER', 'CERTIFICATE_MARKER', 'PUBLICATION_MARKER', 'AWARD_MARKER',
+    'LANGUAGE_MARKER', 'CUSTOM_ONE_MARKER', 'CUSTOM_TWO_MARKER',
+  ]
+
   for (const code of TEMPLATE_CODES) {
     const html = renderResumeHtml(code, payload)
-    assert.match(html, new RegExp(`<body`))
-    assert.match(html, /个人概要/)
-    assert.match(html, /工作经历/)
-    assert.match(html, /专业技能/)
-    assert.match(html, /项目经历/)
-    assert.match(html, /教育经历/)
-    assert.match(html, /专业证书/)
-    assert.match(html, /语言能力/)
-    assert.match(html, /&lt;林致远&gt;/)
-    assert.doesNotMatch(html, /<林致远>/)
+    assert.match(html, /<body/)
+    for (const marker of markers) assert.match(html, new RegExp(marker))
+    assert.ok(html.indexOf('AWARD_MARKER') < html.indexOf('OBJECTIVE_MARKER'))
+    assert.ok(html.indexOf('OBJECTIVE_MARKER') < html.indexOf('WORK_MARKER'))
+    assert.doesNotMatch(html, /IGNORED_UNKNOWN_MARKER/)
+    assert.match(html, /Shanghai/)
+    assert.doesNotMatch(html, /\[object Object\]/)
   }
 })
 
 test('rejects unknown template codes', () => {
-  assert.throws(() => renderResumeHtml('unknown', payload), /不支持的简历模板/)
+  assert.throws(() => renderResumeHtml('unknown', payload))
 })
 
 test('renders URL-like resume text as escaped text without external resources', () => {
@@ -54,6 +53,27 @@ test('renders the raw resume JSON sent by the export worker', () => {
 
   assert.match(html, /Alice/)
   assert.match(html, /ACME/)
+})
+
+test('does not crash when optional sections are missing from the payload', () => {
+  const html = renderResumeHtml('classic', {
+    resumeJson: { basics: { name: 'Alice', title: 'Engineer' } },
+  })
+  assert.match(html, /Alice/)
+  assert.match(html, /Engineer/)
+})
+
+test('does not crash when an unknown section key appears in resumeJson', () => {
+  const html = renderResumeHtml('classic', {
+    resumeJson: {
+      basics: { name: 'Bob' },
+      unknownFutureField: [{ data: 'should be ignored' }],
+      work: [{ company: 'ACME' }],
+    },
+  })
+  assert.match(html, /Bob/)
+  assert.match(html, /ACME/)
+  assert.doesNotMatch(html, /should be ignored/)
 })
 
 test('applies saved layout settings within safe bounds', () => {

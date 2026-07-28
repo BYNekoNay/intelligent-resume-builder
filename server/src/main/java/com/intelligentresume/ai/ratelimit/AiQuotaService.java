@@ -53,7 +53,7 @@ public class AiQuotaService {
     public void check(Long userId, AiTaskType type) {
         int limit = quotas.getOrDefault(type, 30);
         LocalDateTime startOfToday = LocalDate.now().atStartOfDay();
-        long count = taskRepository.countByUserIdAndTaskTypeAndCreatedAtAfter(userId, type, startOfToday);
+        long count = taskRepository.countAttemptsByUserIdAndTaskTypeAndCreatedAtAfter(userId, type, startOfToday);
         if (count >= limit) {
             observability.recordQuotaRejected(type);
             throw new BusinessException(ErrorCode.RATE_LIMITED, "AI 任务配额已用完");

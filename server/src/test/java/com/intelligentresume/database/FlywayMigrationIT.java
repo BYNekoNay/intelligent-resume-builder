@@ -17,8 +17,10 @@ import java.sql.Statement;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -223,6 +225,63 @@ class FlywayMigrationIT {
                 .load();
         assertThrows(Exception.class, badFlyway::migrate,
                 "包含引用不存在表的迁移文件应导致 Flyway 迁移失败");
+    }
+
+    @Test
+    @DisplayName("V18 should backfill historical interview rounds and enforce uniqueness")
+    void v18_backfills_historical_interview_rounds() throws Exception {
+        String databaseName = "interview_round_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        String url = "jdbc:h2:mem:" + databaseName
+                + ";MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=USER,KEY,VALUE,ORDER,DATABASE";
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .target("17").load().migrate();
+
+        try (Connection connection = java.sql.DriverManager.getConnection(url, "sa", "");
+             Statement statement = connection.createStatement()) {
+            statement.execute("INSERT INTO user (username, email, password_hash, status, created_at, updated_at) "
+                    + "VALUES ('round_upgrade', 'round-upgrade@example.test', 'hash', 'ACTIVE', NOW(), NOW())");
+            long userId = getGeneratedId(statement, "SELECT id FROM user WHERE username = 'round_upgrade'");
+            statement.execute("INSERT INTO job_description (user_id, title, jd_text, created_at, updated_at) "
+                    + "VALUES (" + userId + ", 'Engineer', 'Java', NOW(), NOW())");
+            long jobId = getGeneratedId(statement, "SELECT id FROM job_description WHERE user_id = " + userId);
+            statement.execute("INSERT INTO interview_session (user_id, source_type, external_resume_text, "
+                    + "job_description_id, interview_mode, status, current_question, created_at, updated_at) "
+                    + "VALUES (" + userId + ", 'EXTERNAL_RESUME', 'Resume', " + jobId
+                    + ", 'TECHNICAL', 'IN_PROGRESS', 'Question', NOW(), NOW())");
+            long sessionId = getGeneratedId(statement, "SELECT id FROM interview_session WHERE user_id = " + userId);
+            statement.execute("INSERT INTO interview_record (session_id, question_text, answer_text, round_score, "
+                    + "feedback_json, created_at, updated_at) VALUES (" + sessionId
+                    + ", 'Q1', 'A1', 60, '{}', TIMESTAMP '2026-01-01 00:00:00', NOW())");
+            statement.execute("INSERT INTO interview_record (session_id, question_text, answer_text, round_score, "
+                    + "feedback_json, created_at, updated_at) VALUES (" + sessionId
+                    + ", 'Q2', 'A2', 70, '{}', TIMESTAMP '2026-01-01 00:00:00', NOW())");
+        }
+
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration").load().migrate();
+
+        try (Connection connection = java.sql.DriverManager.getConnection(url, "sa", "");
+             Statement statement = connection.createStatement()) {
+            assertRound(statement, "Q1", 1);
+            assertRound(statement, "Q2", 2);
+            try (ResultSet column = statement.executeQuery(
+                    "SELECT is_nullable FROM information_schema.columns "
+                            + "WHERE table_name = 'INTERVIEW_RECORD' AND column_name = 'ROUND_NO'")) {
+                assertTrue(column.next());
+                assertEquals("NO", column.getString(1));
+            }
+            assertThrows(SQLException.class, () -> statement.execute(
+                    "UPDATE interview_record SET round_no = 1 WHERE id = "
+                            + "(SELECT MAX(id) FROM interview_record)"));
+        }
+    }
+
+    private void assertRound(Statement statement, String question, int expectedRound) throws SQLException {
+        try (ResultSet result = statement.executeQuery(
+                "SELECT round_no FROM interview_record WHERE question_text = '" + question + "'")) {
+            assertTrue(result.next());
+            assertEquals(expectedRound, result.getInt(1));
+            assertFalse(result.next());
+        }
     }
 
     // ---- 辅助方法 ----

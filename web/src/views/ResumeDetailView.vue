@@ -24,10 +24,14 @@ const templateNames: Record<ResumeTemplateCode, string> = {
   classic: 'resumeDetail.templateClassic',
   modern: 'resumeDetail.templateModern',
   minimal: 'resumeDetail.templateMinimal',
+  ats: 'resumeEditor.templateAts',
+  executive: 'resumeEditor.templateExecutive',
+  compact: 'resumeEditor.templateCompact',
+  academic: 'resumeEditor.templateAcademic',
 }
 
-function versionTemplate(_version: ResumeVersionSummary): ResumeTemplateCode {
-  return 'classic'
+function versionTemplate(version: ResumeVersionSummary): ResumeTemplateCode {
+  return version.templateCode ?? 'classic'
 }
 
 async function load() {
@@ -55,7 +59,7 @@ async function switchHistoryView(view: 'active' | 'archived') {
   historyView.value = view
   error.value = ''
   try { await loadVersions() }
-  catch { error.value = '版本历史加载失败，请重试。' }
+  catch { error.value = t('resumeDetail.historyLoadError') }
 }
 
 onMounted(async () => {
@@ -95,29 +99,29 @@ async function makeCurrent(version: ResumeVersionSummary) {
 }
 
 async function restore(version: ResumeVersionSummary) {
-  if (!window.confirm(`将 v${version.versionNo} 恢复为新的当前版本？这会创建一个新版本，不会覆盖现有历史。`)) return
+  if (!window.confirm(t('resumeDetail.restoreConfirm').replace('{no}', String(version.versionNo)))) return
   runningAction.value = version.id; error.value = ''
   try {
     await restoreResumeVersion(Number(props.id), version.id)
     historyView.value = 'active'
     await load()
-  } catch { error.value = '恢复版本失败，请重试。' }
+  } catch { error.value = t('resumeDetail.restoreError') }
   finally { runningAction.value = null }
 }
 
 async function archive(version: ResumeVersionSummary) {
-  if (!window.confirm(`归档 v${version.versionNo}？归档后不会出现在默认历史中，仍可随时恢复。`)) return
+  if (!window.confirm(t('resumeDetail.archiveConfirm').replace('{no}', String(version.versionNo)))) return
   runningAction.value = version.id; error.value = ''
   try { await archiveResumeVersion(Number(props.id), version.id); await loadVersions() }
-  catch { error.value = '归档版本失败，请重试。' }
+  catch { error.value = t('resumeDetail.archiveError') }
   finally { runningAction.value = null }
 }
 
 async function unarchive(version: ResumeVersionSummary) {
-  if (!window.confirm(`将 v${version.versionNo} 恢复到版本历史列表？`)) return
+  if (!window.confirm(t('resumeDetail.unarchiveConfirm').replace('{no}', String(version.versionNo)))) return
   runningAction.value = version.id; error.value = ''
   try { await unarchiveResumeVersion(Number(props.id), version.id); await loadVersions() }
-  catch { error.value = '恢复归档版本失败，请重试。' }
+  catch { error.value = t('resumeDetail.unarchiveError') }
   finally { runningAction.value = null }
 }
 
@@ -146,7 +150,7 @@ async function exportPdf(version: ResumeVersionSummary) {
   <section class="workspace-page">
     <div class="page-heading">
       <div class="resume-title-block">
-        <h1>{{ resume?.title ?? `Resume #${props.id}` }} {{ t('resumeDetail.title') }}</h1>
+        <h1>{{ resume?.title ?? t('resumeDetail.fallbackTitle').replace('{id}', props.id) }} {{ t('resumeDetail.title') }}</h1>
         <button v-if="!editingTitle" class="text-link" type="button" @click="startTitleEdit">{{ t('resumeDetail.rename') }}</button>
       </div>
       <RouterLink class="btn-neon btn-primary" :to="{ name: 'resume-editor', params: { id: props.id } }">{{ t('resumeDetail.editNewVersion') }}</RouterLink>
@@ -160,9 +164,9 @@ async function exportPdf(version: ResumeVersionSummary) {
     </form>
     <div v-if="associatedJob" class="workspace-card"><strong>{{ t('resumeDetail.linkedJob') }}</strong>{{ associatedJob.title }}{{ associatedJob.companyName ? ` · ${associatedJob.companyName}` : '' }}</div>
     <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-    <div class="version-history-tabs" role="tablist" aria-label="版本历史筛选">
-      <button type="button" :class="{ active: historyView === 'active' }" :aria-selected="historyView === 'active'" @click="switchHistoryView('active')">版本历史</button>
-      <button type="button" :class="{ active: historyView === 'archived' }" :aria-selected="historyView === 'archived'" @click="switchHistoryView('archived')">已归档</button>
+    <div class="version-history-tabs" role="tablist" :aria-label="t('resumeDetail.historyFilter')">
+      <button type="button" :class="{ active: historyView === 'active' }" :aria-selected="historyView === 'active'" @click="switchHistoryView('active')">{{ t('resumeDetail.activeHistory') }}</button>
+      <button type="button" :class="{ active: historyView === 'archived' }" :aria-selected="historyView === 'archived'" @click="switchHistoryView('archived')">{{ t('resumeDetail.archivedHistory') }}</button>
     </div>
     <p v-if="!versions.length" class="empty-state">{{ t('resumeDetail.noVersions') }}</p>
     <div v-else class="job-list">
@@ -177,14 +181,14 @@ async function exportPdf(version: ResumeVersionSummary) {
         <div class="job-actions">
           <template v-if="historyView === 'active'">
             <button v-if="resume?.currentVersionId !== v.id" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="makeCurrent(v)">{{ t('resumeDetail.setCurrent') }}</button>
-            <button class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="restore(v)">恢复为新版本</button>
-            <button v-if="resume?.currentVersionId !== v.id" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="archive(v)">归档</button>
+            <button class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="restore(v)">{{ t('resumeDetail.restoreAction') }}</button>
+            <button v-if="resume?.currentVersionId !== v.id" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="archive(v)">{{ t('resumeDetail.archiveAction') }}</button>
             <button v-if="resume?.jobDescriptionId" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="score(v)">{{ t('resumeDetail.viewScore') }}</button>
             <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="exportPdf(v)">{{ runningAction === v.id ? t('resumeDetail.creatingTask') : t('resumeDetail.exportPdf') }}</button>
           </template>
           <template v-else>
-            <button class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="unarchive(v)">恢复到历史列表</button>
-            <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="restore(v)">恢复为新版本</button>
+            <button class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="unarchive(v)">{{ t('resumeDetail.unarchiveAction') }}</button>
+            <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="restore(v)">{{ t('resumeDetail.restoreAction') }}</button>
           </template>
         </div>
       </article>

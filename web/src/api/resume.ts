@@ -1,4 +1,5 @@
 import { apiClient, type ApiResponse } from './client'
+import type { ResumeTemplateCode } from './export'
 
 export interface ResumeSummary {
   id: number
@@ -25,6 +26,7 @@ export interface ResumeVersionSummary {
   id: number
   versionNo: number
   sourceType: ResumeVersion['sourceType']
+  templateCode: ResumeTemplateCode
   optimizationSummary: string | null
   createdAt: string
   archivedAt: string | null

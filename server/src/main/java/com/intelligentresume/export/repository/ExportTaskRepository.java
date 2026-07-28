@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 /**
  * 导出任务仓库。DDL 含 user_id,跨用户校验直接 findByIdAndUserId。
@@ -19,6 +20,15 @@ import java.util.Optional;
 public interface ExportTaskRepository extends JpaRepository<ExportTask, Long> {
 
     Optional<ExportTask> findByIdAndUserId(Long id, Long userId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT e FROM ExportTask e WHERE e.id = :id")
+    Optional<ExportTask> findByIdForUpdate(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT e FROM ExportTask e WHERE e.status = com.intelligentresume.export.domain.ExportStatus.SUCCESS " +
+            "AND e.expiresAt < :now ORDER BY e.id ASC")
+    List<ExportTask> findExpiredSuccessfulForUpdate(@Param("now") LocalDateTime now, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT e FROM ExportTask e WHERE e.status = :status ORDER BY e.createdAt ASC")

@@ -182,6 +182,7 @@ class ExportControllerIT {
     void download_expired_40401() throws Exception {
         // 将任务设为过期
         ExportTask task = exportTaskRepository.findById(exportTaskId).orElseThrow();
+        String storageKey = task.getStorageKey();
         task.setExpiresAt(LocalDateTime.now().minusHours(1));
         exportTaskRepository.save(task);
 
@@ -189,6 +190,13 @@ class ExportControllerIT {
                         .header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(40401));
+
+        ExportTask expired = exportTaskRepository.findById(exportTaskId).orElseThrow();
+        Assertions.assertEquals(ExportStatus.EXPIRED, expired.getStatus());
+        Assertions.assertNull(expired.getStorageKey());
+        Assertions.assertNull(expired.getFileSizeBytes());
+        Assertions.assertNull(expired.getSha256());
+        Assertions.assertNull(storageService.read(storageKey));
     }
 
     @Test
@@ -199,7 +207,7 @@ class ExportControllerIT {
                         .header("Authorization", "Bearer " + tokenA)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"resumeVersionId": %d, "templateCode": "modern"}
+                                {"resumeVersionId": %d, "templateCode": "unknown"}
                                 """.formatted(versionId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(40001));

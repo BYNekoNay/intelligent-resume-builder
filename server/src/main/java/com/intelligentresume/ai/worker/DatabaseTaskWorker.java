@@ -6,14 +6,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
  * 数据库轮询工作器。定期领取并执行 PENDING 状态的 AI 任务。
  *
  * <p>轮询间隔由 {@code app.ai.worker.poll-interval-ms} 控制。
- * 测试环境设为 60000ms 以避免干扰集成测试。
+ * 测试环境通过 {@code app.worker-scheduling.enabled=false} 关闭自动调度。
  */
 @Component
 public class DatabaseTaskWorker {
@@ -37,8 +36,10 @@ public class DatabaseTaskWorker {
     public void poll() {
         String owner = instanceId + ":" + UUID.randomUUID();
         try {
-            List<AiTask> tasks = leaseService.claimBatch(owner, properties.getBatchSize());
-            for (AiTask task : tasks) {
+            for (int index = 0; index < properties.getBatchSize(); index++) {
+                var tasks = leaseService.claimBatch(owner, 1);
+                if (tasks.isEmpty()) break;
+                AiTask task = tasks.get(0);
                 try {
                     executionService.execute(task, owner);
                 } catch (Exception e) {

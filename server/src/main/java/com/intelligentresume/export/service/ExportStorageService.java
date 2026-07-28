@@ -74,14 +74,16 @@ public class ExportStorageService {
     /**
      * 删除存储文件。
      */
-    public void delete(String storageKey) {
-        if (storageKey == null) return;
+    public boolean delete(String storageKey) {
+        if (storageKey == null) return true;
         Path filePath = resolvePath(storageKey);
         try {
             Files.deleteIfExists(filePath);
             log.debug("Deleted export file: {}", storageKey);
+            return true;
         } catch (IOException e) {
             log.warn("Failed to delete export file: {}", storageKey, e);
+            return false;
         }
     }
 

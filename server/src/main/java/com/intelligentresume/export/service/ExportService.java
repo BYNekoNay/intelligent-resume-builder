@@ -9,6 +9,7 @@ import com.intelligentresume.export.dto.ExportTaskStatusResponse;
 import com.intelligentresume.export.repository.ExportTaskRepository;
 import com.intelligentresume.resume.domain.ResumeVersion;
 import com.intelligentresume.resume.repository.ResumeVersionRepository;
+import com.intelligentresume.resume.service.ResumeTemplateCodes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,7 +25,7 @@ import java.time.LocalDateTime;
  *
  * <p>关键不变量:
  * <ul>
- *   <li>templateCode 只允许 classic</li>
+ *   <li>templateCode 必须属于统一支持列表</li>
  *   <li>跨用户 → NOT_FOUND(不泄露存在性)</li>
  *   <li>下载必须 status=SUCCESS 且未过期</li>
  *   <li>不暴露 storageKey</li>
@@ -38,15 +39,18 @@ public class ExportService {
     private final ExportTaskRepository exportTaskRepository;
     private final ResumeVersionRepository resumeVersionRepository;
     private final ExportStorageService storageService;
+    private final ExportExpiryService expiryService;
     private final long fileTtlHours;
 
     public ExportService(ExportTaskRepository exportTaskRepository,
                          ResumeVersionRepository resumeVersionRepository,
                          ExportStorageService storageService,
+                         ExportExpiryService expiryService,
                          @Value("${app.pdf.file-ttl-hours:24}") long fileTtlHours) {
         this.exportTaskRepository = exportTaskRepository;
         this.resumeVersionRepository = resumeVersionRepository;
         this.storageService = storageService;
+        this.expiryService = expiryService;
         this.fileTtlHours = fileTtlHours;
     }
 
@@ -56,8 +60,8 @@ public class ExportService {
     @Transactional
     public ExportTaskStatusResponse create(CreateExportRequest req, Long userId) {
         // 1. 校验 templateCode
-        if (!"classic".equals(req.templateCode())) {
-            throw new BusinessException(ErrorCode.VALIDATION, "模板代码必须为 classic");
+        if (!ResumeTemplateCodes.SUPPORTED.contains(req.templateCode())) {
+            throw new BusinessException(ErrorCode.VALIDATION, "模板代码不受支持");
         }
 
         // 2. 校验简历版本归属(跨用户 → NOT_FOUND)
@@ -75,7 +79,7 @@ public class ExportService {
         ExportTask task = new ExportTask();
         task.setUserId(userId);
         task.setResumeVersionId(req.resumeVersionId());
-        task.setTemplateCode("classic");
+        task.setTemplateCode(req.templateCode());
         task.setStatus(ExportStatus.PENDING);
         task.setExpiresAt(LocalDateTime.now().plusHours(fileTtlHours));
         exportTaskRepository.save(task);
@@ -94,8 +98,11 @@ public class ExportService {
         if (task.getStatus() == ExportStatus.SUCCESS
                 && task.getExpiresAt() != null
                 && task.getExpiresAt().isBefore(LocalDateTime.now())) {
+            expiryService.expireIfDue(task.getId(), LocalDateTime.now());
             task.setStatus(ExportStatus.EXPIRED);
-            exportTaskRepository.save(task);
+            task.setStorageKey(null);
+            task.setFileSizeBytes(null);
+            task.setSha256(null);
         }
 
         return toResponse(task);
@@ -114,8 +121,7 @@ public class ExportService {
 
         // 过期检测
         if (task.getExpiresAt() != null && task.getExpiresAt().isBefore(LocalDateTime.now())) {
-            task.setStatus(ExportStatus.EXPIRED);
-            exportTaskRepository.save(task);
+            expiryService.expireIfDue(task.getId(), LocalDateTime.now());
             throw new BusinessException(ErrorCode.NOT_FOUND, "导出文件已过期");
         }
 

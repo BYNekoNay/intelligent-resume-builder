@@ -2,24 +2,30 @@ package com.intelligentresume.ats.controller;
 
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
+import com.intelligentresume.ats.dto.AtsCheckRequest;
+import com.intelligentresume.ats.dto.AtsCheckResponse;
+import com.intelligentresume.ats.service.AtsService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/ats")
 public class AtsController {
+    private final AtsService service;
+
+    public AtsController(AtsService service) {
+        this.service = service;
+    }
 
     @PostMapping("/check")
-    public ApiResponse<Map<String, Object>> check(@RequestBody Map<String, Object> body, HttpServletRequest httpRequest) {
-        return ApiResponse.success(Map.of(
-            "checkId", 1, "score", 85,
-            "structure", List.of(),
-            "keywords", Map.of(),
-            "suggestions", List.of()
-        ), traceId(httpRequest));
+    public ApiResponse<AtsCheckResponse> check(@Valid @RequestBody AtsCheckRequest request, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.check(request, currentUserId(httpRequest)), traceId(httpRequest));
+    }
+
+    private Long currentUserId(HttpServletRequest request) {
+        Object value = request.getAttribute("currentUserId");
+        return value instanceof Long id ? id : null;
     }
 
     private String traceId(HttpServletRequest request) {

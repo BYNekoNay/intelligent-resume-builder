@@ -18,10 +18,15 @@ import com.intelligentresume.common.observability.WorkerTraceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import jakarta.annotation.PreDestroy;
 
 import java.util.Map;
 import java.util.List;
 import java.time.Duration;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 任务执行服务。按 taskType 分发:JOB_GENERATION(含 jobDescriptionId)
@@ -41,6 +46,12 @@ public class TaskExecutionService {
     private final AppObservability observability;
     private final FailureCategoryClassifier failureCategoryClassifier;
     private final InlineOptimizeResultFormatter inlineOptimizeResultFormatter;
+    private final AiTaskWorkerProperties workerProperties;
+    private final ScheduledExecutorService heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "ai-task-lease-heartbeat");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public TaskExecutionService(AiProviderRegistry providerRegistry,
                                 TaskLeaseService leaseService,
@@ -49,7 +60,8 @@ public class TaskExecutionService {
                                 AiConsentService consentService,
                                 AppObservability observability,
                                 FailureCategoryClassifier failureCategoryClassifier,
-                                InlineOptimizeResultFormatter inlineOptimizeResultFormatter) {
+                                InlineOptimizeResultFormatter inlineOptimizeResultFormatter,
+                                AiTaskWorkerProperties workerProperties) {
         this.providerRegistry = providerRegistry;
         this.leaseService = leaseService;
         this.jobGenerationService = jobGenerationService;
@@ -58,6 +70,7 @@ public class TaskExecutionService {
         this.observability = observability;
         this.failureCategoryClassifier = failureCategoryClassifier;
         this.inlineOptimizeResultFormatter = inlineOptimizeResultFormatter;
+        this.workerProperties = workerProperties;
     }
 
     /**
@@ -65,21 +78,23 @@ public class TaskExecutionService {
      */
     public void execute(AiTask task, String owner) {
         long startedAt = System.nanoTime();
+        ScheduledFuture<?> heartbeat = startHeartbeat(task.getId(), owner);
         try (WorkerTraceContext ignored = WorkerTraceContext.open(task.getId())) {
             try {
                 log.debug("Executing AI task: type={}, owner={}", task.getTaskType(), owner);
                 if (!hasExecutionConsent(task)) {
-                    leaseService.releaseFailed(task, "AI authorization was withdrawn or no longer covers this task", false);
+                    leaseService.releaseFailed(task, owner, "AI authorization was withdrawn or no longer covers this task", false);
                     return;
                 }
                 if (task.getTaskType() == AiTaskType.JOB_MATERIAL_SELECTION) {
-                    executeMaterialSelection(task);
+                    executeMaterialSelection(task, owner);
                 } else if (task.getTaskType() == AiTaskType.JOB_GENERATION && hasJobDescriptionId(task)) {
-                    executeJobGeneration(task);
+                    executeJobGeneration(task, owner);
                 } else {
-                    executeDefault(task);
+                    executeDefault(task, owner);
                 }
             } finally {
+                heartbeat.cancel(false);
                 String outcome = outcome(task.getStatus());
                 AiFailureCategory category = "success".equals(outcome)
                         ? AiFailureCategory.NONE : failureCategoryClassifier.aiMessage(task.getErrorMessage());
@@ -106,14 +121,14 @@ public class TaskExecutionService {
         return consentService.hasValidConsent(task.getUserId(), task.getTaskType().name(), categories);
     }
 
-    private void executeMaterialSelection(AiTask task) {
+    private void executeMaterialSelection(AiTask task, String owner) {
         try {
             Map<String, Object> result = materialSelectionService.executeTask(task);
             task.setConfirmationStatus(ConfirmationStatus.PENDING);
-            leaseService.releaseSuccess(task, result);
+            leaseService.releaseSuccess(task, owner, result);
         } catch (Exception e) {
             log.warn("Material selection execution failed: exception={}", e.getClass().getSimpleName());
-            leaseService.releaseFailed(task, "Material selection failed: " + e.getMessage(), false);
+            leaseService.releaseFailed(task, owner, "Material selection failed: " + e.getMessage(), false);
         }
     }
 
@@ -126,18 +141,18 @@ public class TaskExecutionService {
      * 岗位定制生成:校验 → 选资料 → 构建 Prompt → 调 Provider → Schema 校验 → 写结果。
      * 成功后 confirmation_status=PENDING(留给 T08 确认)。
      */
-    private void executeJobGeneration(AiTask task) {
+    private void executeJobGeneration(AiTask task, String owner) {
         try {
             Map<String, Object> result = jobGenerationService.executeTask(task);
             task.setConfirmationStatus(ConfirmationStatus.PENDING);
-            leaseService.releaseSuccess(task, result);
+            leaseService.releaseSuccess(task, owner, result);
         } catch (Exception e) {
             log.warn("Job generation execution failed: exception={}", e.getClass().getSimpleName());
-            leaseService.releaseFailed(task, "Generation failed: " + e.getMessage(), false);
+            leaseService.releaseFailed(task, owner, "Generation failed: " + e.getMessage(), false);
         }
     }
 
-    private void executeDefault(AiTask task) {
+    private void executeDefault(AiTask task, String owner) {
         try {
             AiCallContext ctx = new AiCallContext(
                     task.getTaskType(),
@@ -151,14 +166,32 @@ public class TaskExecutionService {
                 Map<String, Object> taskResult = task.getTaskType() == AiTaskType.INLINE_OPTIMIZE
                         ? inlineOptimizeResultFormatter.format(providerInput(task), result.data())
                         : result.data();
-                leaseService.releaseSuccess(task, taskResult);
+                leaseService.releaseSuccess(task, owner, taskResult);
             } else {
-                leaseService.releaseFailed(task, result.errorMessage(), result.retryable());
+                leaseService.releaseFailed(task, owner, result.errorMessage(), result.retryable());
             }
         } catch (Exception e) {
             log.warn("Unexpected AI task execution error: exception={}", e.getClass().getSimpleName());
-            leaseService.releaseFailed(task, "Internal AI task error", true);
+            leaseService.releaseFailed(task, owner, "Internal AI task error", true);
         }
+    }
+
+    private ScheduledFuture<?> startHeartbeat(Long taskId, String owner) {
+        long intervalSeconds = Math.max(1, workerProperties.getLeaseSeconds() / 3L);
+        return heartbeatExecutor.scheduleAtFixedRate(() -> {
+            try {
+                if (!leaseService.renew(taskId, owner)) {
+                    log.warn("AI task {} lease is no longer owned by {}; stale completion will be discarded", taskId, owner);
+                }
+            } catch (RuntimeException e) {
+                log.warn("Could not renew AI task {} lease for owner {}", taskId, owner, e);
+            }
+        }, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
+    }
+
+    @PreDestroy
+    void shutdownHeartbeatExecutor() {
+        heartbeatExecutor.shutdownNow();
     }
 
     @SuppressWarnings("unchecked")

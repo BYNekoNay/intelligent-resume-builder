@@ -22,7 +22,7 @@ const { resumes, jobs, versions, selectedResumeId, loading: optionsLoading, erro
 async function load() {
   loading.value = true
   try { records.value = (await listApplications()).data.data }
-  catch { error.value = 'Unable to load application records.' }
+  catch { error.value = t('applications.loadError') }
   finally { loading.value = false }
 }
 
@@ -35,6 +35,21 @@ function resetForm() {
   openingMessageText.value = ''
 }
 
+async function selectResumeVersion(versionId: number) {
+  const currentResume = resumes.value.find((resume) => resume.currentVersionId === versionId)
+  if (currentResume) {
+    selectedResumeId.value = currentResume.id
+    await loadVersions()
+  } else {
+    for (const resume of resumes.value) {
+      selectedResumeId.value = resume.id
+      await loadVersions()
+      if (versions.value.some((version) => version.id === versionId)) break
+    }
+  }
+  resumeVersionId.value = String(versionId)
+}
+
 async function edit(record: ApplicationRecord) {
   if (loadingEdit.value) return
   loadingEdit.value = true
@@ -44,18 +59,7 @@ async function edit(record: ApplicationRecord) {
   emailBodyText.value = record.emailBodyText ?? ''
   openingMessageText.value = record.openingMessageText ?? ''
   try {
-    const resumeId = resumes.value.find((resume) => resume.currentVersionId === record.resumeVersionId)?.id
-    if (resumeId !== undefined) {
-      selectedResumeId.value = resumeId
-      await loadVersions()
-    } else {
-      for (const resume of resumes.value) {
-        selectedResumeId.value = resume.id
-        await loadVersions()
-        if (versions.value.some((version) => version.id === record.resumeVersionId)) break
-      }
-    }
-    resumeVersionId.value = String(record.resumeVersionId)
+    await selectResumeVersion(record.resumeVersionId)
     error.value = ''
   } finally {
     loadingEdit.value = false
@@ -76,7 +80,7 @@ async function save() {
       records.value = records.value.map((record) => record.id === updated.id ? updated : record)
     }
     resetForm()
-  } catch { error.value = 'Unable to save this application record. Review the selected job and resume version.' }
+  } catch { error.value = t('applications.saveError') }
   finally { saving.value = false }
 }
 
@@ -86,12 +90,12 @@ function allowedStatuses(status: ApplicationStatus): ApplicationStatus[] {
 }
 async function changeStatus(record: ApplicationRecord, status: ApplicationStatus) {
   try { const updated = (await updateApplicationStatus(record.id, status, record.version, feedbackDraft.value[record.id] ?? record.feedbackText ?? undefined)).data.data; Object.assign(record, updated); feedbackDraft.value[record.id] = record.feedbackText ?? '' }
-  catch { error.value = 'Unable to update application status.' }
+  catch { error.value = t('applications.statusError') }
 }
 async function remove(record: ApplicationRecord) {
-  if (!window.confirm('Delete this application record?')) return
+  if (!window.confirm(t('applications.confirmDelete'))) return
   try { await deleteApplication(record.id); records.value = records.value.filter((item) => item.id !== record.id); if (editingId.value === record.id) resetForm() }
-  catch { error.value = 'Unable to delete this application record.' }
+  catch { error.value = t('applications.deleteError') }
 }
 
 onMounted(async () => {
@@ -103,22 +107,11 @@ onMounted(async () => {
   try {
     const draft = JSON.parse(storedDraft) as { resumeVersionId: number; jobDescriptionId: number; type: string; text: string }
     jobDescriptionId.value = String(draft.jobDescriptionId)
-    const currentResume = resumes.value.find((item) => item.currentVersionId === draft.resumeVersionId)
-    if (currentResume) {
-      selectedResumeId.value = currentResume.id
-      await loadVersions()
-    } else {
-      for (const resume of resumes.value) {
-        selectedResumeId.value = resume.id
-        await loadVersions()
-        if (versions.value.some((version) => version.id === draft.resumeVersionId)) break
-      }
-    }
-    resumeVersionId.value = String(draft.resumeVersionId)
+    await selectResumeVersion(draft.resumeVersionId)
     if (draft.type === 'COVER_LETTER') coverLetterText.value = draft.text
     if (draft.type === 'EMAIL') emailBodyText.value = draft.text
     if (draft.type === 'OPENING_MESSAGE') openingMessageText.value = draft.text
-  } catch { error.value = 'Unable to import the communication draft.' }
+  } catch { error.value = t('applications.importDraftError') }
 })
 </script>
 

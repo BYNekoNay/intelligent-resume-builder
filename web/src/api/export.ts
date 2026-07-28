@@ -11,7 +11,7 @@ export interface ExportTask {
   downloadUrl: string | null
 }
 
-export type ResumeTemplateCode = 'classic' | 'modern' | 'minimal'
+export type ResumeTemplateCode = 'classic' | 'modern' | 'minimal' | 'ats' | 'executive' | 'compact' | 'academic'
 
 export function createExport(resumeVersionId: number, templateCode: ResumeTemplateCode = 'classic') {
   return apiClient.post<ApiResponse<ExportTask>>('/api/exports/pdf', { resumeVersionId, templateCode })

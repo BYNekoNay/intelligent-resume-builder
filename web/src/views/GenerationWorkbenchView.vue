@@ -6,6 +6,9 @@ import { useJobDescriptionStore } from '@/stores/jobDescription'
 import { useAiTaskStore } from '@/stores/aiTask'
 import { getConsent, hasJobGenerationConsent, selectMaterialsForJob, type MaterialSelectionRequest } from '@/api/ai'
 import type { CareerMaterialSummary, MaterialType } from '@/api/careerMaterial'
+import { useLocale } from '@/i18n'
+
+const { t } = useLocale()
 
 const PENDING_GENERATION_KEY = 'pending-job-generation'
 
@@ -43,7 +46,7 @@ const resolvedResumeTitle = computed(() => {
   const company = jdMode.value === 'select' ? (selectedJd.value?.companyName ?? '') : companyName.value
   const position = jdMode.value === 'select' ? (selectedJd.value?.title ?? '') : positionTitle.value
   if (company && position) return `${company} - ${position}`
-  return position || company || '岗位定制简历'
+  return position || company || t('generationWorkbench.fallbackResumeTitle')
 })
 
 const canProceedStep1 = computed(() => {
@@ -180,12 +183,12 @@ async function resumePendingGeneration() {
   try {
     const consent = (await getConsent()).data.data
     if (!hasJobGenerationConsent(consent)) {
-      error.value = 'AI 授权尚未生效，请重新授权后再试。'
+      error.value = t('generationWorkbench.consentNotActive')
       return
     }
     await submitGeneration(pending.payload, pending.idempotencyKey)
   } catch (e: any) {
-    error.value = e.response?.data?.message || e.message || '生成请求失败'
+    error.value = e.response?.data?.message || e.message || t('generationWorkbench.generationFailed')
   } finally {
     generating.value = false
   }
@@ -210,64 +213,64 @@ async function startGeneration() {
 
     await submitGeneration(payload, idempotencyKey)
   } catch (e: any) {
-    error.value = e.response?.data?.message || e.message || '生成请求失败'
+    error.value = e.response?.data?.message || e.message || t('generationWorkbench.generationFailed')
   } finally {
     generating.value = false
   }
 }
 
-const TYPE_LABELS: Record<MaterialType, string> = {
-  WORK_EXPERIENCE: '工作经历',
-  PROJECT_EXPERIENCE: '项目经历',
-  EDUCATION: '教育背景',
-  SKILL: '技能',
-  CERTIFICATE: '证书',
-  AWARD: '荣誉',
-  HIGHLIGHT: '亮点',
-  ACHIEVEMENT: '量化成果',
-  LEADERSHIP_EXPERIENCE: '管理 / 协作经历',
-  SKILL_EVIDENCE: '技能证据',
-  VOLUNTEER_EXPERIENCE: '志愿 / 实习经历',
-  COURSE: '培训课程',
-  PUBLICATION: '研究成果',
-}
+const TYPE_LABELS = computed<Record<MaterialType, string>>(() => ({
+  WORK_EXPERIENCE: t('generationWorkbench.typeWorkExperience'),
+  PROJECT_EXPERIENCE: t('generationWorkbench.typeProjectExperience'),
+  EDUCATION: t('generationWorkbench.typeEducation'),
+  SKILL: t('generationWorkbench.typeSkill'),
+  CERTIFICATE: t('generationWorkbench.typeCertificate'),
+  AWARD: t('generationWorkbench.typeAward'),
+  HIGHLIGHT: t('generationWorkbench.typeHighlight'),
+  ACHIEVEMENT: t('generationWorkbench.typeAchievement'),
+  LEADERSHIP_EXPERIENCE: t('generationWorkbench.typeLeadershipExperience'),
+  SKILL_EVIDENCE: t('generationWorkbench.typeSkillEvidence'),
+  VOLUNTEER_EXPERIENCE: t('generationWorkbench.typeVolunteerExperience'),
+  COURSE: t('generationWorkbench.typeCourse'),
+  PUBLICATION: t('generationWorkbench.typePublication'),
+}))
 </script>
 
 <template>
   <div class="workbench">
     <header class="workbench-header">
-      <h1>根据目标岗位生成简历</h1>
-      <p class="subtitle">从你的资料库出发，AI 为你定制一份岗位简历</p>
+      <h1>{{ t('generationWorkbench.title') }}</h1>
+      <p class="subtitle">{{ t('generationWorkbench.subtitle') }}</p>
     </header>
 
     <!-- Step indicators -->
     <div class="steps-indicator">
       <div :class="['step-dot', { active: step === 1, done: step > 1 }]">
         <span class="dot">1</span>
-        <span class="label">确定目标岗位</span>
+        <span class="label">{{ t('generationWorkbench.stepTargetJob') }}</span>
       </div>
       <div class="step-line" :class="{ active: step > 1 }"></div>
       <div :class="['step-dot', { active: step === 2, done: step > 2 }]">
         <span class="dot">2</span>
-        <span class="label">选择资料范围</span>
+        <span class="label">{{ t('generationWorkbench.stepMaterialScope') }}</span>
       </div>
       <div class="step-line" :class="{ active: step > 2 }"></div>
       <div :class="['step-dot', { active: step === 3 }]">
         <span class="dot">3</span>
-        <span class="label">AI 选材</span>
+        <span class="label">{{ t('generationWorkbench.stepAiSelection') }}</span>
       </div>
     </div>
 
     <!-- Step 1: JD Selection -->
     <section v-if="step === 1" class="step-content">
       <div class="mode-toggle">
-        <button :class="{ active: jdMode === 'select' }" @click="jdMode = 'select'">选择已有岗位</button>
-        <button :class="{ active: jdMode === 'paste' }" @click="jdMode = 'paste'">粘贴 JD</button>
+        <button :class="{ active: jdMode === 'select' }" @click="jdMode = 'select'">{{ t('generationWorkbench.modeSelectExisting') }}</button>
+        <button :class="{ active: jdMode === 'paste' }" @click="jdMode = 'paste'">{{ t('generationWorkbench.modePasteJd') }}</button>
       </div>
 
       <div v-if="jdMode === 'select'" class="jd-select">
         <p v-if="jdStore.items.length === 0" class="empty-hint">
-          暂无已保存的岗位描述，请切换到"粘贴 JD"模式。
+          {{ t('generationWorkbench.noSavedJd') }}
         </p>
         <div v-else class="jd-list">
           <label
@@ -285,21 +288,21 @@ const TYPE_LABELS: Record<MaterialType, string> = {
 
       <div v-else class="jd-paste">
         <div class="form-row">
-          <input v-model="companyName" placeholder="公司名称（可选）" class="input" />
-          <input v-model="positionTitle" placeholder="岗位名称（推荐）" class="input" />
+          <input v-model="companyName" :placeholder="t('generationWorkbench.companyNamePlaceholder')" class="input" />
+          <input v-model="positionTitle" :placeholder="t('generationWorkbench.positionTitlePlaceholder')" class="input" />
         </div>
         <textarea
           v-model="pastedJdText"
-          placeholder="粘贴职位描述原文（至少 20 字）..."
+          :placeholder="t('generationWorkbench.jdTextPlaceholder')"
           class="textarea"
           rows="10"
         ></textarea>
-        <p class="char-count">{{ pastedJdText.length }} 字</p>
+        <p class="char-count">{{ pastedJdText.length }} {{ t('generationWorkbench.charUnit') }}</p>
       </div>
 
       <div class="step-actions">
         <button class="btn-primary" :disabled="!canProceedStep1" @click="step = 2">
-          下一步：选择资料
+          {{ t('generationWorkbench.nextSelectMaterials') }}
         </button>
       </div>
     </section>
@@ -307,13 +310,13 @@ const TYPE_LABELS: Record<MaterialType, string> = {
     <!-- Step 2: Material Selection -->
     <section v-if="step === 2" class="step-content">
       <p class="step-desc">
-        标记必须使用或不使用的资料，其余交给 AI 根据岗位相关性自动判断。
+        {{ t('generationWorkbench.step2Desc') }}
       </p>
 
       <div v-if="materialStore.items.length === 0" class="empty-hint">
-        资料库为空。建议先
-        <router-link to="/career-materials">完善资料库</router-link>
-        再生成简历。
+        {{ t('generationWorkbench.emptyMaterialsPrefix') }}
+        <router-link to="/career-materials">{{ t('generationWorkbench.emptyMaterialsLink') }}</router-link>
+        {{ t('generationWorkbench.emptyMaterialsSuffix') }}
       </div>
 
       <div v-else class="material-list">
@@ -325,32 +328,32 @@ const TYPE_LABELS: Record<MaterialType, string> = {
           <div class="material-info">
             <span class="material-type">{{ TYPE_LABELS[m.materialType] ?? m.materialType }}</span>
             <span class="material-title">{{ m.title }}</span>
-            <span v-if="m.usagePreference === 'PREFERRED'" class="preference-badge preferred">优先资料</span>
-            <span v-else-if="m.usagePreference === 'EXCLUDED'" class="preference-badge excluded">默认排除</span>
+            <span v-if="m.usagePreference === 'PREFERRED'" class="preference-badge preferred">{{ t('generationWorkbench.badgePreferred') }}</span>
+            <span v-else-if="m.usagePreference === 'EXCLUDED'" class="preference-badge excluded">{{ t('generationWorkbench.badgeExcluded') }}</span>
           </div>
           <div class="material-actions">
             <button
               :class="['tag-btn', { active: (materialDecisions[m.id] ?? 'default') === 'must' }]"
               @click="setDecision(m.id, (materialDecisions[m.id] ?? 'default') === 'must' ? 'default' : 'must')"
-            >必须使用</button>
+            >{{ t('generationWorkbench.btnMustUse') }}</button>
             <button
               :class="['tag-btn exclude', { active: (materialDecisions[m.id] ?? 'default') === 'exclude' }]"
               @click="setDecision(m.id, (materialDecisions[m.id] ?? 'default') === 'exclude' ? 'default' : 'exclude')"
-            >不使用</button>
+            >{{ t('generationWorkbench.btnExclude') }}</button>
           </div>
         </div>
       </div>
 
       <div class="selection-summary" v-if="materialStore.items.length > 0">
-        <span>必须使用 {{ materialsByDecision.must.length }} 条</span>
-        <span>不使用 {{ materialsByDecision.exclude.length }} 条</span>
-        <span>AI 自动判断 {{ materialsByDecision.auto.length }} 条</span>
+        <span>{{ t('generationWorkbench.summaryMustPrefix') }} {{ materialsByDecision.must.length }} {{ t('generationWorkbench.summaryUnit') }}</span>
+        <span>{{ t('generationWorkbench.summaryExcludePrefix') }} {{ materialsByDecision.exclude.length }} {{ t('generationWorkbench.summaryUnit') }}</span>
+        <span>{{ t('generationWorkbench.summaryAutoPrefix') }} {{ materialsByDecision.auto.length }} {{ t('generationWorkbench.summaryUnit') }}</span>
       </div>
 
       <div class="step-actions">
-        <button class="btn-secondary" @click="step = 1">上一步</button>
+        <button class="btn-secondary" @click="step = 1">{{ t('generationWorkbench.prevStep') }}</button>
         <button class="btn-primary" @click="step = 3" :disabled="materialStore.items.length === 0">
-          下一步：开始生成
+          {{ t('generationWorkbench.nextStartGeneration') }}
         </button>
       </div>
     </section>
@@ -358,18 +361,18 @@ const TYPE_LABELS: Record<MaterialType, string> = {
     <!-- Step 3: Generate -->
     <section v-if="step === 3" class="step-content">
       <div class="generate-summary">
-        <h3>选材配置确认</h3>
+        <h3>{{ t('generationWorkbench.confirmTitle') }}</h3>
         <div class="summary-item">
-          <span class="label">目标岗位：</span>
+          <span class="label">{{ t('generationWorkbench.labelTargetJob') }}</span>
           <span v-if="jdMode === 'select'">{{ selectedJd?.title }} {{ selectedJd?.companyName ? `@ ${selectedJd.companyName}` : '' }}</span>
-          <span v-else>{{ positionTitle || '自定义岗位' }} {{ companyName ? `@ ${companyName}` : '' }}</span>
+          <span v-else>{{ positionTitle || t('generationWorkbench.customPosition') }} {{ companyName ? `@ ${companyName}` : '' }}</span>
         </div>
         <div class="summary-item">
-          <span class="label">资料范围：</span>
-          <span>必须 {{ materialsByDecision.must.length }} / 排除 {{ materialsByDecision.exclude.length }} / 自动 {{ materialsByDecision.auto.length }}</span>
+          <span class="label">{{ t('generationWorkbench.labelMaterialScope') }}</span>
+          <span>{{ t('generationWorkbench.scopeMust') }} {{ materialsByDecision.must.length }} / {{ t('generationWorkbench.scopeExclude') }} {{ materialsByDecision.exclude.length }} / {{ t('generationWorkbench.scopeAuto') }} {{ materialsByDecision.auto.length }}</span>
         </div>
         <div class="summary-item">
-          <span class="label">简历命名：</span>
+          <span class="label">{{ t('generationWorkbench.labelResumeName') }}</span>
           <span>{{ resolvedResumeTitle }}</span>
         </div>
       </div>
@@ -377,10 +380,10 @@ const TYPE_LABELS: Record<MaterialType, string> = {
       <p v-if="error" class="error-msg">{{ error }}</p>
 
       <div class="step-actions">
-        <button class="btn-secondary" @click="step = 2">上一步</button>
+        <button class="btn-secondary" @click="step = 2">{{ t('generationWorkbench.prevStep') }}</button>
         <button class="btn-primary btn-generate" @click="startGeneration" :disabled="generating">
           <span v-if="generating" class="spinner"></span>
-          {{ generating ? '正在分析资料...' : '开始 AI 选材' }}
+          {{ generating ? t('generationWorkbench.generating') : t('generationWorkbench.startGeneration') }}
         </button>
       </div>
     </section>

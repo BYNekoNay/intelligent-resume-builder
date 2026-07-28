@@ -35,11 +35,19 @@ export function useResumeEditorDraft(
     }
   }
 
-  function clear() {
+  function clearFor(targetResumeId: string) {
     if (timer) window.clearTimeout(timer)
     timer = undefined
-    const key = keyFor(userId.value, resumeId.value)
+    const key = keyFor(userId.value, targetResumeId)
     try { if (key) localStorage.removeItem(key) } catch { /* storage is optional */ }
+    if (targetResumeId === resumeId.value) restoreCandidate.value = null
+  }
+
+  function clear() { clearFor(resumeId.value) }
+
+  function reset() {
+    if (timer) window.clearTimeout(timer)
+    timer = undefined
     restoreCandidate.value = null
   }
 
@@ -73,5 +81,5 @@ export function useResumeEditorDraft(
   })
   onBeforeUnmount(() => { if (timer) window.clearTimeout(timer) })
 
-  return { restoreCandidate, read, restore, clear }
+  return { restoreCandidate, read, restore, clear, clearFor, reset }
 }

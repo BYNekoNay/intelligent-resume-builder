@@ -2,35 +2,50 @@ package com.intelligentresume.interview.asset.controller;
 
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
+import com.intelligentresume.interview.asset.dto.InterviewAssetRequest;
+import com.intelligentresume.interview.asset.dto.InterviewAssetResponse;
+import com.intelligentresume.interview.asset.service.InterviewAssetService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/interview-answer-assets")
 public class InterviewAssetController {
+    private final InterviewAssetService service;
+
+    public InterviewAssetController(InterviewAssetService service) { this.service = service; }
 
     @GetMapping
-    public ApiResponse<List<Map<String, Object>>> list(HttpServletRequest httpRequest) {
-        return ApiResponse.success(new ArrayList<>(), traceId(httpRequest));
+    public ApiResponse<List<InterviewAssetResponse>> list(@RequestParam(required = false) Long jobDescriptionId,
+                                                          @RequestParam(required = false) String keyword,
+                                                          HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.list(currentUserId(httpRequest), jobDescriptionId, keyword), traceId(httpRequest));
     }
 
     @PostMapping
-    public ApiResponse<Map<String, Object>> create(@RequestBody Map<String, Object> body, HttpServletRequest httpRequest) {
-        return ApiResponse.success(Map.of("id", 1), traceId(httpRequest));
+    public ResponseEntity<ApiResponse<InterviewAssetResponse>> create(@Valid @RequestBody InterviewAssetRequest request, HttpServletRequest httpRequest) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(service.create(request, currentUserId(httpRequest)), traceId(httpRequest)));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<Map<String, Object>> update(@PathVariable Long id, @RequestBody Map<String, Object> body, HttpServletRequest httpRequest) {
-        return ApiResponse.success(Map.of("id", id), traceId(httpRequest));
+    public ApiResponse<InterviewAssetResponse> update(@PathVariable Long id, @Valid @RequestBody InterviewAssetRequest request, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.update(id, request, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id, HttpServletRequest httpRequest) {
+        service.delete(id, currentUserId(httpRequest));
         return ApiResponse.success(null, traceId(httpRequest));
+    }
+
+    private Long currentUserId(HttpServletRequest request) {
+        Object value = request.getAttribute("currentUserId");
+        return value instanceof Long id ? id : null;
     }
 
     private String traceId(HttpServletRequest request) {
