@@ -173,7 +173,8 @@ public class AiTaskService {
         if (!com.intelligentresume.ai.task.domain.AiTaskStatus.FAILED.equals(task.getStatus())) {
             throw new BusinessException(ErrorCode.VALIDATION, "只有失败的任务可以重试");
         }
-        if (task.getRetryCount() >= workerProperties.getMaxRetries()) {
+        if (task.getRetryCount() >= workerProperties.getMaxRetries()
+                && task.getTaskType() != com.intelligentresume.ai.task.domain.AiTaskType.ATS_ANALYSIS) {
             throw new BusinessException(ErrorCode.CONFLICT, "AI 任务已达到最大重试次数");
         }
         if (!consentService.hasValidConsent(userId)
@@ -191,6 +192,8 @@ public class AiTaskService {
         return switch (type) {
             case JOB_MATERIAL_SELECTION, JOB_GENERATION ->
                     List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE");
+            case ATS_ANALYSIS -> List.of("RESUME", "JOB_DESCRIPTION");
+            case COMMUNICATION_GENERATE -> List.of("RESUME", "JOB_DESCRIPTION");
             default -> List.of();
         };
     }

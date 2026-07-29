@@ -78,7 +78,7 @@ class DatabaseTaskWorkerIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "policyVersion": "v1.1.0",
+                                  "policyVersion": "v1.2.0",
                                   "providerCode": "bailian",
                                   "taskScopes": ["MATERIAL_IMPORT", "RESUME_OPTIMIZE"],
                                   "dataCategories": ["resume"],

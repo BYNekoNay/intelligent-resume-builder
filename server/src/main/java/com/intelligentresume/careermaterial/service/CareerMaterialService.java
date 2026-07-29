@@ -10,11 +10,15 @@ import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +35,13 @@ import java.util.Set;
  */
 @Service
 public class CareerMaterialService {
+
+    private static final int MAX_SEARCH_PAGE_SIZE = 100;
+    private static final int EXCERPT_MAX_LENGTH = 180;
+    private static final Map<String, Sort> SEARCH_SORTS = Map.of(
+            "updatedAt,desc", Sort.by(Sort.Direction.DESC, "updatedAt"),
+            "updatedAt,asc", Sort.by(Sort.Direction.ASC, "updatedAt"),
+            "title,asc", Sort.by(Sort.Direction.ASC, "title"));
 
     private final CareerMaterialRepository repository;
     private final ObjectMapper objectMapper;
@@ -62,10 +73,27 @@ public class CareerMaterialService {
 
     @Transactional(readOnly = true)
     public List<CareerMaterialSummary> list(Long userId, MaterialType filter) {
-        List<CareerMaterial> materials = (filter != null)
-                ? repository.findByUserIdAndMaterialTypeOrderByUpdatedAtDesc(userId, filter)
-                : repository.findByUserIdOrderByUpdatedAtDesc(userId);
-        return materials.stream().map(this::toSummary).toList();
+        return repository.findSummaries(userId, filter);
+    }
+
+    @Transactional(readOnly = true)
+    public CareerMaterialSearchPage search(Long userId, String query, MaterialType type,
+                                           UsagePreference usagePreference, int page, int size,
+                                           String sortValue) {
+        validateSearchParameters(page, size, sortValue);
+        String normalizedQuery = normalizeQuery(query);
+        Page<CareerMaterial> result = repository.search(
+                userId, type, usagePreference, normalizedQuery,
+                PageRequest.of(page, size, searchSort(sortValue)));
+
+        Map<MaterialType, Long> typeCounts = new EnumMap<>(MaterialType.class);
+        repository.countByType(userId)
+                .forEach(count -> typeCounts.put(count.materialType(), count.count()));
+
+        return new CareerMaterialSearchPage(
+                result.getContent().stream().map(this::toSearchItem).toList(),
+                result.getNumber(), result.getSize(), result.getTotalElements(),
+                result.getTotalPages(), typeCounts);
     }
 
     @Transactional(readOnly = true)
@@ -234,9 +262,80 @@ public class CareerMaterialService {
         return new BusinessException(ErrorCode.VALIDATION, message);
     }
 
-    private CareerMaterialSummary toSummary(CareerMaterial m) {
-        return new CareerMaterialSummary(m.getId(), m.getMaterialType(), m.getTitle(),
-                m.getUsagePreference(), m.getUpdatedAt());
+    private CareerMaterialSearchItem toSearchItem(CareerMaterial material) {
+        return new CareerMaterialSearchItem(
+                material.getId(), material.getMaterialType(), material.getTitle(),
+                material.getUsagePreference(), material.getUpdatedAt(), excerpt(material));
+    }
+
+    private void validateSearchParameters(int page, int size, String sortValue) {
+        if (page < 0) {
+            throw validation("page must be greater than or equal to 0");
+        }
+        if (size < 1 || size > MAX_SEARCH_PAGE_SIZE) {
+            throw validation("size must be between 1 and " + MAX_SEARCH_PAGE_SIZE);
+        }
+        if (!SEARCH_SORTS.containsKey(sortValue)) {
+            throw validation("unsupported sort: " + sortValue);
+        }
+    }
+
+    private String normalizeQuery(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        return query.trim()
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+    }
+
+    private Sort searchSort(String sortValue) {
+        return SEARCH_SORTS.get(sortValue).and(Sort.by(Sort.Direction.ASC, "id"));
+    }
+
+    private String excerpt(CareerMaterial material) {
+        String sourceText = normalizeExcerptPart(material.getSourceText());
+        if (!sourceText.isEmpty()) {
+            return truncate(sourceText);
+        }
+
+        Map<String, Object> content = material.getContentJson();
+        if (content == null) {
+            return "";
+        }
+        List<String> parts = switch (material.getMaterialType()) {
+            case ACHIEVEMENT -> List.of(
+                    contentText(content, "outcome"),
+                    firstNonBlank(contentText(content, "metricDisplayValue"),
+                            contentText(content, "metricExactValue")));
+            case LEADERSHIP_EXPERIENCE -> List.of(
+                    contentText(content, "responsibilityScope"), contentText(content, "result"));
+            case SKILL_EVIDENCE -> List.of(
+                    contentText(content, "skillName"), contentText(content, "outcomeEvidence"));
+            default -> List.of();
+        };
+        return truncate(parts.stream().filter(part -> !part.isEmpty()).collect(java.util.stream.Collectors.joining(" · ")));
+    }
+
+    private String contentText(Map<String, Object> content, String key) {
+        Object value = content.get(key);
+        return value instanceof String text ? normalizeExcerptPart(text) : "";
+    }
+
+    private String normalizeExcerptPart(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", " ").trim();
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return first.isEmpty() ? second : first;
+    }
+
+    private String truncate(String value) {
+        if (value.length() <= EXCERPT_MAX_LENGTH) {
+            return value;
+        }
+        return value.substring(0, EXCERPT_MAX_LENGTH - 3).stripTrailing() + "...";
     }
 
     private CareerMaterialDetail toDetail(CareerMaterial m) {

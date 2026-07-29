@@ -24,6 +24,7 @@ class CommunicationControllerIT {
     private static String tokenB;
     private static long versionId;
     private static long jobId;
+    private static long aiTaskId;
 
     @Test @Order(1)
     void prepare() throws Exception {
@@ -34,6 +35,18 @@ class CommunicationControllerIT {
                 {"resumeJson":{"basics":{"name":"Alice Chen"},"skills":[{"name":"Java"}]},"sourceType":"MANUAL"}
                 """));
         jobId = id(postJson("/api/jobs", tokenA, "{\"title\":\"Platform Engineer\",\"companyName\":\"Example Systems\",\"jdText\":\"Java reliability\"}"));
+        mockMvc.perform(post("/api/ai/consent").header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "policyVersion":"v1.2.0",
+                                  "providerCode":"bailian",
+                                  "taskScopes":["COMMUNICATION_GENERATE"],
+                                  "dataCategories":["RESUME","JOB_DESCRIPTION"],
+                                  "noticeHash":"communication-ai-test"
+                                }
+                                """))
+                .andExpect(status().isCreated());
     }
 
     @Test @Order(2)
@@ -47,7 +60,8 @@ class CommunicationControllerIT {
                         org.hamcrest.Matchers.containsString("Alice Chen"),
                         org.hamcrest.Matchers.containsString("Platform Engineer"))))
                 .andExpect(jsonPath("$.data.sentAutomatically").value(false))
-                .andExpect(jsonPath("$.data.requiresManualConfirmation").value(true));
+                .andExpect(jsonPath("$.data.requiresManualConfirmation").value(true))
+                .andExpect(jsonPath("$.data.generationSource").value("TEMPLATE"));
     }
 
     @Test @Order(3)
@@ -55,6 +69,50 @@ class CommunicationControllerIT {
         mockMvc.perform(post("/api/communications/generate").header("Authorization", "Bearer " + tokenB)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"type\":\"EMAIL\"}".formatted(versionId, jobId)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test @Order(4)
+    void generatesEnglishTemplateWhenRequested() throws Exception {
+        mockMvc.perform(post("/api/communications/generate").header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"type\":\"EMAIL\",\"outputLanguage\":\"EN\"}"
+                                .formatted(versionId, jobId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.draft").value(org.hamcrest.Matchers.startsWith("Subject:")))
+                .andExpect(jsonPath("$.data.generationSource").value("TEMPLATE"));
+    }
+
+    @Test @Order(5)
+    void createsIdempotentCommunicationAiTask() throws Exception {
+        String body = "{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"type\":\"COVER_LETTER\",\"outputLanguage\":\"EN\"}"
+                .formatted(versionId, jobId);
+        MvcResult first = mockMvc.perform(post("/api/communications/ai-generate")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "communication-ai-key")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.taskType").value("COMMUNICATION_GENERATE"))
+                .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andReturn();
+        aiTaskId = objectMapper.readTree(first.getResponse().getContentAsString()).path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/communications/ai-generate")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "communication-ai-key")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.id").value(aiTaskId));
+    }
+
+    @Test @Order(6)
+    void validatesOwnershipBeforeAiAuthorization() throws Exception {
+        mockMvc.perform(post("/api/communications/ai-generate")
+                        .header("Authorization", "Bearer " + tokenB)
+                        .header("Idempotency-Key", "cross-user-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"type\":\"EMAIL\"}"
+                                .formatted(versionId, jobId)))
                 .andExpect(status().isNotFound());
     }
 

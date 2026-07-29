@@ -11,10 +11,16 @@ import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.domain.ConfirmationStatus;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
+import com.intelligentresume.ats.service.AtsAiAnalysisException;
+import com.intelligentresume.ats.service.AtsAiAnalysisService;
+import com.intelligentresume.ats.service.AtsResultStateService;
+import com.intelligentresume.ats.dto.AtsFallbackCode;
 import com.intelligentresume.common.observability.AiFailureCategory;
 import com.intelligentresume.common.observability.AppObservability;
 import com.intelligentresume.common.observability.FailureCategoryClassifier;
 import com.intelligentresume.common.observability.WorkerTraceContext;
+import com.intelligentresume.communication.service.CommunicationAiException;
+import com.intelligentresume.communication.service.CommunicationAiService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -46,6 +52,9 @@ public class TaskExecutionService {
     private final AppObservability observability;
     private final FailureCategoryClassifier failureCategoryClassifier;
     private final InlineOptimizeResultFormatter inlineOptimizeResultFormatter;
+    private final AtsAiAnalysisService atsAiAnalysisService;
+    private final AtsResultStateService atsResultStateService;
+    private final CommunicationAiService communicationAiService;
     private final AiTaskWorkerProperties workerProperties;
     private final ScheduledExecutorService heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "ai-task-lease-heartbeat");
@@ -61,6 +70,9 @@ public class TaskExecutionService {
                                 AppObservability observability,
                                 FailureCategoryClassifier failureCategoryClassifier,
                                 InlineOptimizeResultFormatter inlineOptimizeResultFormatter,
+                                AtsAiAnalysisService atsAiAnalysisService,
+                                AtsResultStateService atsResultStateService,
+                                CommunicationAiService communicationAiService,
                                 AiTaskWorkerProperties workerProperties) {
         this.providerRegistry = providerRegistry;
         this.leaseService = leaseService;
@@ -70,6 +82,9 @@ public class TaskExecutionService {
         this.observability = observability;
         this.failureCategoryClassifier = failureCategoryClassifier;
         this.inlineOptimizeResultFormatter = inlineOptimizeResultFormatter;
+        this.atsAiAnalysisService = atsAiAnalysisService;
+        this.atsResultStateService = atsResultStateService;
+        this.communicationAiService = communicationAiService;
         this.workerProperties = workerProperties;
     }
 
@@ -84,12 +99,19 @@ public class TaskExecutionService {
                 log.debug("Executing AI task: type={}, owner={}", task.getTaskType(), owner);
                 if (!hasExecutionConsent(task)) {
                     leaseService.releaseFailed(task, owner, "AI authorization was withdrawn or no longer covers this task", false);
+                    if (task.getTaskType() == AiTaskType.ATS_ANALYSIS && task.getStatus() == AiTaskStatus.FAILED) {
+                        markAtsFallback(task, AtsFallbackCode.CONSENT_REQUIRED, "AI 授权已撤回，已使用本地规则结果。", false, true);
+                    }
                     return;
                 }
                 if (task.getTaskType() == AiTaskType.JOB_MATERIAL_SELECTION) {
                     executeMaterialSelection(task, owner);
                 } else if (task.getTaskType() == AiTaskType.JOB_GENERATION && hasJobDescriptionId(task)) {
                     executeJobGeneration(task, owner);
+                } else if (task.getTaskType() == AiTaskType.ATS_ANALYSIS) {
+                    executeAtsAnalysis(task, owner);
+                } else if (task.getTaskType() == AiTaskType.COMMUNICATION_GENERATE) {
+                    executeCommunicationGeneration(task, owner);
                 } else {
                     executeDefault(task, owner);
                 }
@@ -116,6 +138,8 @@ public class TaskExecutionService {
         List<String> categories = switch (task.getTaskType()) {
             case JOB_MATERIAL_SELECTION, JOB_GENERATION ->
                     List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE");
+            case ATS_ANALYSIS -> List.of("RESUME", "JOB_DESCRIPTION");
+            case COMMUNICATION_GENERATE -> List.of("RESUME", "JOB_DESCRIPTION");
             default -> List.of();
         };
         return consentService.hasValidConsent(task.getUserId(), task.getTaskType().name(), categories);
@@ -174,6 +198,60 @@ public class TaskExecutionService {
             log.warn("Unexpected AI task execution error: exception={}", e.getClass().getSimpleName());
             leaseService.releaseFailed(task, owner, "Internal AI task error", true);
         }
+    }
+
+    private void executeAtsAnalysis(AiTask task, String owner) {
+        try {
+            AtsAiAnalysisService.AnalysisResult result = atsAiAnalysisService.analyze(task);
+            if (leaseService.releaseSuccess(task, owner, result.taskResult())) {
+                Long resultId = atsResultId(task);
+                if (resultId != null) {
+                    atsResultStateService.markCompleted(resultId, task.getUserId(), task.getId(), result.insights());
+                }
+            }
+        } catch (AtsAiAnalysisException e) {
+            boolean released = leaseService.releaseFailed(task, owner, e.getMessage(), e.retryable());
+            if (released && task.getStatus() == AiTaskStatus.FAILED) {
+                String message = e.fallbackCode() == AtsFallbackCode.INVALID_RESPONSE
+                        ? "AI 返回格式不符合要求，已使用本地规则结果。"
+                        : "AI 服务暂时不可用，已使用本地规则结果。";
+                markAtsFallback(task, e.fallbackCode(), message, e.retryable(), false);
+            }
+        } catch (RuntimeException e) {
+            log.warn("Unexpected ATS AI analysis error: exception={}", e.getClass().getSimpleName());
+            boolean released = leaseService.releaseFailed(task, owner, "ATS AI analysis failed", true);
+            if (released && task.getStatus() == AiTaskStatus.FAILED) {
+                markAtsFallback(task, AtsFallbackCode.UNKNOWN, "AI 分析未完成，已使用本地规则结果。", true, false);
+            }
+        }
+    }
+
+    private void executeCommunicationGeneration(AiTask task, String owner) {
+        try {
+            CommunicationAiService.ExecutionResult result = communicationAiService.executeTask(task);
+            leaseService.releaseSuccess(task, owner, result.taskResult());
+        } catch (CommunicationAiException e) {
+            log.warn("Communication AI generation failed: retryable={}, exception={}",
+                    e.retryable(), e.getClass().getSimpleName());
+            leaseService.releaseFailed(task, owner, e.getMessage(), e.retryable());
+        } catch (RuntimeException e) {
+            log.warn("Unexpected communication AI generation error: exception={}", e.getClass().getSimpleName());
+            leaseService.releaseFailed(task, owner, "Communication AI generation failed", true);
+        }
+    }
+
+    private void markAtsFallback(AiTask task, AtsFallbackCode code, String message,
+                                 boolean retryable, boolean consentRequired) {
+        Long resultId = atsResultId(task);
+        if (resultId != null) {
+            atsResultStateService.markFallback(resultId, task.getUserId(), task.getId(),
+                    code, message, retryable, consentRequired);
+        }
+    }
+
+    private Long atsResultId(AiTask task) {
+        Object value = providerInput(task).get("atsCheckResultId");
+        return value instanceof Number number ? number.longValue() : null;
     }
 
     private ScheduledFuture<?> startHeartbeat(Long taskId, String owner) {

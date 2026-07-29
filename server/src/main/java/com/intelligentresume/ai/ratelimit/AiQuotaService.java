@@ -31,6 +31,8 @@ public class AiQuotaService {
             @Value("${app.ai.quota.MATERIAL_IMPORT:5}") int materialImport,
             @Value("${app.ai.quota.ACHIEVEMENT_GUIDANCE:10}") int achievementGuidance,
             @Value("${app.ai.quota.COMMUNICATION_GENERATE:10}") int communicationGenerate,
+            @Value("${app.ai.quota.INTERVIEW_COACH:60}") int interviewCoach,
+            @Value("${app.ai.quota.ATS_ANALYSIS:20}") int atsAnalysis,
             AppObservability observability) {
         this.taskRepository = taskRepository;
         this.observability = observability;
@@ -41,7 +43,9 @@ public class AiQuotaService {
                 AiTaskType.INLINE_OPTIMIZE, inlineOptimize,
                 AiTaskType.MATERIAL_IMPORT, materialImport,
                 AiTaskType.ACHIEVEMENT_GUIDANCE, achievementGuidance,
-                AiTaskType.COMMUNICATION_GENERATE, communicationGenerate
+                AiTaskType.COMMUNICATION_GENERATE, communicationGenerate,
+                AiTaskType.INTERVIEW_COACH, interviewCoach,
+                AiTaskType.ATS_ANALYSIS, atsAnalysis
         );
         quotas.forEach(this.observability::registerQuotaLimit);
     }

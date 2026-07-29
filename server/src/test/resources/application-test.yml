@@ -82,7 +82,7 @@ app:
       max-retries: 1
       batch-size: 1
     consent:
-      policy-version: "v1.1.0"
+      policy-version: "v1.2.0"
     quota:
       JOB_GENERATION: 30
       RESUME_OPTIMIZE: 30
@@ -90,6 +90,8 @@ app:
       MATERIAL_IMPORT: 5
       ACHIEVEMENT_GUIDANCE: 10
       COMMUNICATION_GENERATE: 10
+      INTERVIEW_COACH: 60
+      ATS_ANALYSIS: 20
     generation:
       prompt-version: "v1.0.0"
       schema-version: "v1.0.0"

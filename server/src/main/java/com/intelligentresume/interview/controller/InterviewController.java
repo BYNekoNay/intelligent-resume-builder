@@ -6,23 +6,55 @@ import com.intelligentresume.interview.dto.*;
 import com.intelligentresume.interview.service.InterviewService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/interviews")
+@Validated
 public class InterviewController {
     private final InterviewService service;
 
     public InterviewController(InterviewService service) { this.service = service; }
 
     @PostMapping("/start")
-    public ApiResponse<StartInterviewResponse> start(@Valid @RequestBody StartInterviewRequest request, HttpServletRequest httpRequest) {
-        return ApiResponse.success(service.start(request, currentUserId(httpRequest)), traceId(httpRequest));
+    public ApiResponse<InterviewStateResponse> start(@Valid @RequestBody StartInterviewRequest request,
+                                                      @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 64) String idempotencyKey,
+                                                      HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.start(request, currentUserId(httpRequest), idempotencyKey), traceId(httpRequest));
+    }
+
+    @GetMapping("/{id}")
+    public ApiResponse<InterviewStateResponse> getState(@PathVariable Long id, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.getState(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
     @PostMapping("/{id}/answer")
-    public ApiResponse<AnswerInterviewResponse> answer(@PathVariable Long id, @Valid @RequestBody AnswerInterviewRequest request, HttpServletRequest httpRequest) {
-        return ApiResponse.success(service.answer(id, request, currentUserId(httpRequest)), traceId(httpRequest));
+    public ApiResponse<InterviewStateResponse> answer(@PathVariable Long id,
+                                                       @Valid @RequestBody AnswerInterviewRequest request,
+                                                       @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 64) String idempotencyKey,
+                                                       HttpServletRequest httpRequest) {
+        if (service.getState(id, currentUserId(httpRequest)).getExecutionMode() == com.intelligentresume.interview.domain.ExecutionMode.RULE) {
+            return ApiResponse.success(service.ruleAnswer(id, request.getAnswer().trim(), currentUserId(httpRequest), idempotencyKey), traceId(httpRequest));
+        }
+        return ApiResponse.success(service.answer(id, request.getAnswer().trim(), currentUserId(httpRequest), idempotencyKey), traceId(httpRequest));
+    }
+
+    @PostMapping("/{id}/ai/retry")
+    public ApiResponse<InterviewStateResponse> retry(@PathVariable Long id, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.retryAi(id, currentUserId(httpRequest)), traceId(httpRequest));
+    }
+
+    @PostMapping("/{id}/continue-with-rules")
+    public ApiResponse<InterviewStateResponse> continueWithRules(@PathVariable Long id, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.continueWithRules(id, currentUserId(httpRequest)), traceId(httpRequest));
+    }
+
+    @PostMapping("/{id}/finish")
+    public ApiResponse<InterviewStateResponse> finish(@PathVariable Long id, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.finish(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
     @GetMapping("/{id}/report")

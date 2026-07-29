@@ -10,6 +10,14 @@ public interface AiProvider {
     /** 提供者编码,如 "mock"、"bailian"。 */
     String code();
 
+    /** 当前提供者使用的模型编码,用于审计记录。 */
+    String modelCode();
+
+    /** Whether this provider is configured for live calls. */
+    default boolean isAvailable() {
+        return true;
+    }
+
     /** 是否支持指定任务类型。 */
     boolean supports(AiTaskType type);
 

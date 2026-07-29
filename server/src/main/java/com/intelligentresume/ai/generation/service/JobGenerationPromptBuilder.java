@@ -83,7 +83,8 @@ public class JobGenerationPromptBuilder {
                 - SKILL_EVIDENCE materials: produce standard skills entries and use their evidence only where it agrees with linked experience.
                 - Career profile is long-term positioning. Use it only to shape basics.summary and positioning; the job description determines the target role title.
                 - Do not create links. Generate objective, volunteering, courses, publications, or customSections only when supported by the provided materials.
-                - customSections require a stable text title and entries with explicit sources. Never infer a new achievement, organization, date, or credential from the job description.
+                - customSections are two levels: every outer section object AND every object inside its entries array must independently include _sources or _pending.
+                - The outer customSections _sources must be the union of the material sources used by its entries. Never infer a new achievement, organization, date, or credential from the job description.
 
                 Example output structure:
                 {
@@ -98,7 +99,7 @@ public class JobGenerationPromptBuilder {
                     "volunteering": [],
                     "courses": [],
                     "publications": [],
-                    "customSections": []
+                    "customSections": [{"title": "Leadership", "entries": [{"name": "Platform migration", "description": "...", "_sources": [{"materialId": 3, "materialType": "LEADERSHIP_EXPERIENCE"}]}], "_sources": [{"materialId": 3, "materialType": "LEADERSHIP_EXPERIENCE"}]}]
                   }
                 }
 

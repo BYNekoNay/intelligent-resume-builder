@@ -5,13 +5,33 @@ import { useAiTaskStore } from '@/stores/aiTask'
 import { getTask, confirmTask, rejectTask, retryTask } from '@/api/ai'
 import { listResumesByJd, type ResumeSummary } from '@/api/resume'
 import DraftContentFields from '@/components/DraftContentFields.vue'
-import { Check, ClipboardCheck, Pencil, Sparkles, Trash2 } from 'lucide-vue-next'
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Circle,
+  ClipboardCheck,
+  ListFilter,
+  Menu,
+  Pencil,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-vue-next'
 import { useLocale } from '@/i18n'
 
 const { t } = useLocale()
 
 // data identifier for material-library source
 const MATERIAL_SOURCE = '\u8D44\u6599\u5E93'
+const REVIEWABLE_SECTIONS = [
+  'basics', 'work', 'education', 'skills', 'projects', 'certificates',
+  'objective', 'volunteering', 'courses', 'publications', 'customSections',
+] as const
+type ReviewableSection = (typeof REVIEWABLE_SECTIONS)[number]
 
 const route = useRoute()
 const router = useRouter()
@@ -29,7 +49,7 @@ const resultJson = ref<any>(null)
 // Draft sections for display
 interface DraftItem {
   path: string
-  section: string
+  section: ReviewableSection
   content: any
   provenance: Record<string, unknown>
   source: string | null
@@ -48,10 +68,15 @@ interface QualitySummary {
   readiness: 'READY' | 'REVIEW_RECOMMENDED' | 'REQUIRES_ACTION'
 }
 
+interface MissingInfo {
+  section: string
+  reason: string
+}
+
 const draftItems = ref<DraftItem[]>([])
 const selectedInfo = ref<any[]>([])
 const unselectedInfo = ref<any[]>([])
-const missingInfo = ref<any[]>([])
+const missingInfo = ref<MissingInfo[]>([])
 const warnings = ref<string[]>([])
 const qualitySummary = ref<QualitySummary | null>(null)
 
@@ -64,6 +89,10 @@ const resumeTitle = ref('')
 const showEditDialog = ref(false)
 const editingItem = ref<DraftItem | null>(null)
 const editValue = ref<unknown>(null)
+const activeSection = ref<ReviewableSection | null>(null)
+const attentionOnly = ref(false)
+const qualityExpanded = ref(false)
+const mobileNavigationOpen = ref(false)
 
 // Resume title input
 const customTitle = ref('')
@@ -140,8 +169,7 @@ function parseDraft() {
 
   // Flatten draft into items by section
   const items: DraftItem[] = []
-  const sections = ['basics', 'work', 'education', 'skills', 'projects', 'certificates']
-  for (const section of sections) {
+  for (const section of REVIEWABLE_SECTIONS) {
     const data = draft[section]
     if (!data) continue
     if (Array.isArray(data)) {
@@ -173,6 +201,7 @@ function parseDraft() {
     }
   }
   draftItems.value = items
+  activeSection.value = items.find(item => item.decision === null)?.section ?? items[0]?.section ?? null
 }
 
 function normalizeQualitySummary(value: unknown): QualitySummary | null {
@@ -210,29 +239,38 @@ function sourceMeta(value: any): Record<string, unknown> {
   return {}
 }
 
-const SECTION_LABELS = computed<Record<string, string>>(() => ({
+const SECTION_LABELS = computed<Record<ReviewableSection, string>>(() => ({
   basics: t('generationConfirm.sectionBasics'),
   work: t('generationConfirm.sectionWork'),
   education: t('generationConfirm.sectionEducation'),
   skills: t('generationConfirm.sectionSkills'),
   projects: t('generationConfirm.sectionProjects'),
   certificates: t('generationConfirm.sectionCertificates'),
+  objective: t('generationConfirm.sectionObjective'),
+  volunteering: t('generationConfirm.sectionVolunteering'),
+  courses: t('generationConfirm.sectionCourses'),
+  publications: t('generationConfirm.sectionPublications'),
+  customSections: t('generationConfirm.sectionCustomSections'),
 }))
 
-const SECTION_EDIT_TEMPLATES: Record<string, Record<string, unknown>> = {
+const SECTION_EDIT_TEMPLATES: Record<ReviewableSection, Record<string, unknown>> = {
   basics: { name: '', title: '', email: '', phone: '', location: '', summary: '' },
   work: { company: '', position: '', period: '', description: '', highlights: [] },
   education: { school: '', degree: '', major: '', period: '' },
   skills: { name: '', level: '' },
   projects: { name: '', role: '', period: '', description: '', highlights: [] },
   certificates: { name: '', issuer: '', date: '', credentialId: '' },
+  objective: { targetRole: '', targetIndustry: '', location: '', summary: '' },
+  volunteering: { organization: '', position: '', startDate: '', endDate: '', summary: '', highlights: [] },
+  courses: { name: '', provider: '', date: '', description: '' },
+  publications: { title: '', publisher: '', date: '', url: '', description: '' },
+  customSections: { title: '', entries: [] },
 }
 
 const groupedItems = computed(() => {
-  const groups: Record<string, DraftItem[]> = {}
+  const groups: Partial<Record<ReviewableSection, DraftItem[]>> = {}
   for (const item of draftItems.value) {
-    if (!groups[item.section]) groups[item.section] = []
-    groups[item.section].push(item)
+    (groups[item.section] ??= []).push(item)
   }
   return groups
 })
@@ -240,6 +278,62 @@ const groupedItems = computed(() => {
 const pendingCount = computed(() =>
   draftItems.value.filter(i => i.decision === null).length
 )
+
+const processedCount = computed(() => draftItems.value.length - pendingCount.value)
+
+function matchesMissingSection(section: ReviewableSection, missing: MissingInfo) {
+  const missingSection = String(missing?.section ?? '').trim().toLocaleLowerCase()
+  return missingSection === section.toLocaleLowerCase()
+    || missingSection === (SECTION_LABELS.value[section] ?? '').toLocaleLowerCase()
+}
+
+const sectionEntries = computed(() => REVIEWABLE_SECTIONS
+  .filter(section => (groupedItems.value[section]?.length ?? 0) > 0
+    || missingInfo.value.some(missing => matchesMissingSection(section, missing)))
+  .map(section => {
+    const items = groupedItems.value[section] ?? []
+    const unresolved = items.filter(item => item.decision === null).length
+    const missing = missingInfo.value.filter(entry => matchesMissingSection(section, entry)).length
+    return {
+      key: section,
+      label: SECTION_LABELS.value[section] ?? section,
+      count: items.length,
+      rejected: items.length > 0 && items.every(item => item.decision === 'REJECT'),
+      needsAttention: unresolved > 0 || missing > 0,
+    }
+  }))
+
+const visibleSectionEntries = computed(() => attentionOnly.value
+  ? sectionEntries.value.filter(section => section.needsAttention)
+  : sectionEntries.value)
+const attentionSectionCount = computed(() => sectionEntries.value.filter(section => section.needsAttention).length)
+
+const activeEntry = computed(() => sectionEntries.value.find(section => section.key === activeSection.value)
+  ?? sectionEntries.value[0])
+const activeItems = computed(() => activeEntry.value ? (groupedItems.value[activeEntry.value.key] ?? []) : [])
+const activeMissingInfo = computed(() => missingInfo.value.filter(entry => activeEntry.value
+  && matchesMissingSection(activeEntry.value.key, entry)))
+const activeSectionIndex = computed(() => sectionEntries.value.findIndex(section => section.key === activeEntry.value?.key))
+const activeNavigationIndex = computed(() => visibleSectionEntries.value
+  .findIndex(section => section.key === activeEntry.value?.key))
+
+function selectSection(section: ReviewableSection) {
+  activeSection.value = section
+  mobileNavigationOpen.value = false
+}
+
+function moveSection(offset: number) {
+  const next = visibleSectionEntries.value[activeNavigationIndex.value + offset]
+  if (next) selectSection(next.key)
+}
+
+function toggleAttentionOnly() {
+  attentionOnly.value = !attentionOnly.value
+  if (attentionOnly.value && !activeEntry.value?.needsAttention) {
+    const nextAttention = sectionEntries.value.find(section => section.needsAttention)
+    if (nextAttention) selectSection(nextAttention.key)
+  }
+}
 
 function openEdit(item: DraftItem) {
   editingItem.value = item
@@ -256,6 +350,11 @@ function saveEdit() {
   editingItem.value.editedValue = Object.assign({}, cleanedValue as Record<string, unknown>, editingItem.value.provenance)
   editingItem.value.content = cleanedValue
   editingItem.value.decision = 'EDIT'
+  showEditDialog.value = false
+  editingItem.value = null
+}
+
+function closeEdit() {
   showEditDialog.value = false
   editingItem.value = null
 }
@@ -283,6 +382,13 @@ function isEmptyValue(value: unknown) {
 function setDecision(item: DraftItem, decision: 'ACCEPT' | 'REJECT') {
   item.decision = decision
   if (decision === 'ACCEPT') item.editedValue = null
+  if (attentionOnly.value) {
+    const current = sectionEntries.value.find(section => section.key === activeSection.value)
+    if (!current?.needsAttention) {
+      const nextAttention = sectionEntries.value.find(section => section.needsAttention)
+      if (nextAttention) selectSection(nextAttention.key)
+    }
+  }
 }
 
 async function handleConfirm() {
@@ -394,12 +500,7 @@ async function handleRetry() {
     </div>
 
     <!-- Draft confirmation -->
-    <div v-else-if="task && task.status === 'SUCCESS'" class="draft-container">
-      <!-- Warnings -->
-      <div v-if="warnings.length" class="warnings">
-        <p v-for="w in warnings" :key="w" class="warning-item">{{ w }}</p>
-      </div>
-
+    <div v-else-if="task && task.status === 'SUCCESS'" class="draft-container" @keydown.esc="mobileNavigationOpen = false">
       <section
         v-if="qualitySummary"
         :class="['quality-summary', `quality-summary--${qualitySummary.readiness.toLowerCase()}`]"
@@ -408,9 +509,19 @@ async function handleRetry() {
         <div class="quality-summary__heading">
           <div>
             <h3>{{ t('generationConfirm.qualitySummaryTitle') }}</h3>
-            <p>{{ QUALITY_READINESS[qualitySummary.readiness].hint }}</p>
+            <p>{{ processedCount }}/{{ draftItems.length }} {{ t('generationConfirm.reviewedCount') }}</p>
           </div>
-          <span class="quality-summary__status">{{ QUALITY_READINESS[qualitySummary.readiness].label }}</span>
+          <div class="quality-summary__controls">
+            <span class="quality-summary__status">{{ QUALITY_READINESS[qualitySummary.readiness].label }}</span>
+            <button
+              class="icon-button"
+              :class="{ active: qualityExpanded }"
+              :aria-expanded="qualityExpanded"
+              :aria-label="t('generationConfirm.toggleQualityDetails')"
+              :title="t('generationConfirm.toggleQualityDetails')"
+              @click="qualityExpanded = !qualityExpanded"
+            ><ChevronDown :size="16" /></button>
+          </div>
         </div>
         <div class="quality-summary__metrics">
           <div><strong>{{ qualitySummary.sourcedItems }}</strong><span>{{ t('generationConfirm.hasSource') }}</span></div>
@@ -418,73 +529,172 @@ async function handleRetry() {
           <div><strong>{{ qualitySummary.unsupportedItems }}</strong><span>{{ t('generationConfirm.pendingReview') }}</span></div>
           <div><strong>{{ qualitySummary.missingRequirementCount }}</strong><span>{{ t('generationConfirm.uncovered') }}</span></div>
         </div>
+        <div v-if="qualityExpanded" class="quality-summary__details">
+          <p>{{ QUALITY_READINESS[qualitySummary.readiness].hint }}</p>
+          <p v-for="warning in warnings" :key="warning" class="warning-item">{{ warning }}</p>
+          <div v-if="missingInfo.length" class="missing-summary">
+            <strong>{{ t('generationConfirm.missingInfoTitle') }}</strong>
+            <ul>
+              <li v-for="(missing, index) in missingInfo" :key="index">
+                {{ missing.section }}：{{ missing.reason }}
+              </li>
+            </ul>
+          </div>
+        </div>
       </section>
 
-      <!-- Missing info -->
-      <div v-if="missingInfo.length" class="missing-section">
-        <h3>{{ t('generationConfirm.missingInfoTitle') }}</h3>
-        <ul>
-          <li v-for="(m, i) in missingInfo" :key="i">
-            <strong>{{ m.section }}</strong>：{{ m.reason }}
-          </li>
-        </ul>
-      </div>
-
-      <!-- Draft items by section -->
-      <div v-for="(items, section) in groupedItems" :key="section" class="draft-section">
-        <h3>{{ SECTION_LABELS[section as string] ?? section }}</h3>
-        <div v-for="(item, itemIndex) in items" :key="item.path" :class="['draft-item', item.decision?.toLowerCase()]">
-          <div v-if="items.length > 1 || item.source || item.pending" class="item-header">
-            <span v-if="items.length > 1" class="item-number">{{ t('generationConfirm.itemNumber').replace('{index}', String(itemIndex + 1)) }}</span>
-            <span v-if="item.source" class="source-badge">{{ t('generationConfirm.sourceBadge') }}</span>
-            <span v-if="item.pending" class="pending-badge">{{ t('generationConfirm.pendingBadge').replace('{pending}', item.pending) }}</span>
-          </div>
-          <DraftContentFields :model-value="item.content" />
-          <div class="item-actions">
-            <button
-              :class="['action-btn accept', { active: item.decision === 'ACCEPT' }]"
-              :aria-pressed="item.decision === 'ACCEPT'"
-              @click="setDecision(item, 'ACCEPT')"
-            ><Check :size="15" /><span>{{ t('generationConfirm.accept') }}</span></button>
-            <button class="action-btn edit" @click="openEdit(item)"><Pencil :size="15" /><span>{{ t('generationConfirm.editAction') }}</span></button>
-            <button
-              :class="['action-btn reject', { active: item.decision === 'REJECT' }]"
-              :aria-pressed="item.decision === 'REJECT'"
-              @click="setDecision(item, 'REJECT')"
-            ><Trash2 :size="15" /><span>{{ t('generationConfirm.deleteAction') }}</span></button>
-          </div>
+      <div v-if="!qualitySummary && (warnings.length || missingInfo.length)" class="review-notices">
+        <p v-for="warning in warnings" :key="warning" class="warning-item">{{ warning }}</p>
+        <div v-if="missingInfo.length" class="missing-summary">
+          <strong>{{ t('generationConfirm.missingInfoTitle') }}</strong>
+          <ul>
+            <li v-for="(missing, index) in missingInfo" :key="index">{{ missing.section }}：{{ missing.reason }}</li>
+          </ul>
         </div>
       </div>
 
-      <!-- Unselected materials -->
-      <details v-if="unselectedInfo.length" class="unselected-details">
-        <summary>{{ t('generationConfirm.unusedMaterials').replace('{count}', String(unselectedInfo.length)) }}</summary>
-        <ul>
-          <li v-for="(u, i) in unselectedInfo" :key="i">
-            {{ u.title || t('generationConfirm.unnamedMaterial') }}：{{ u.unselectedReason }}
-          </li>
-        </ul>
-      </details>
+      <button
+        class="mobile-outline-trigger"
+        :aria-expanded="mobileNavigationOpen"
+        @click="mobileNavigationOpen = true"
+      >
+        <Menu :size="17" />
+        <span>{{ activeEntry?.label }}</span>
+        <b>{{ activeSectionIndex + 1 }}/{{ sectionEntries.length }}</b>
+      </button>
 
-      <!-- Resume title -->
-      <div class="title-input">
-        <label>{{ t('generationConfirm.resumeNameLabel') }}</label>
-        <input v-model="customTitle" :placeholder="t('generationConfirm.resumeNamePlaceholder')" class="input" />
+      <div class="review-workspace">
+        <aside :class="['review-rail', { open: mobileNavigationOpen }]">
+          <div class="review-rail__heading">
+            <div>
+              <span>{{ t('generationConfirm.sectionNavigator') }}</span>
+              <strong>{{ processedCount }}/{{ draftItems.length }}</strong>
+            </div>
+            <button
+              class="icon-button mobile-only"
+              :aria-label="t('common.close')"
+              :title="t('common.close')"
+              @click="mobileNavigationOpen = false"
+            ><X :size="17" /></button>
+          </div>
+          <button
+            class="attention-filter"
+            :class="{ active: attentionOnly }"
+            :aria-pressed="attentionOnly"
+            @click="toggleAttentionOnly"
+          >
+            <ListFilter :size="15" />
+            <span>{{ t('generationConfirm.attentionOnly') }}</span>
+            <b>{{ attentionSectionCount }}</b>
+          </button>
+          <nav class="section-navigation" :aria-label="t('generationConfirm.sectionNavigationAria')">
+            <button
+              v-for="section in visibleSectionEntries"
+              :key="section.key"
+              :class="['section-navigation__item', { active: activeEntry?.key === section.key }]"
+              :aria-current="activeEntry?.key === section.key ? 'step' : undefined"
+              @click="selectSection(section.key)"
+            >
+              <AlertCircle v-if="section.needsAttention" :size="15" class="attention" />
+              <Circle v-else-if="section.rejected" :size="15" class="rejected" />
+              <CheckCircle2 v-else :size="15" />
+              <span>{{ section.label }}</span>
+              <b>{{ section.count }}</b>
+            </button>
+          </nav>
+          <p v-if="attentionOnly && !visibleSectionEntries.length" class="rail-empty">
+            {{ t('generationConfirm.noAttentionItems') }}
+          </p>
+          <details v-if="unselectedInfo.length" class="unselected-details">
+            <summary>{{ t('generationConfirm.unusedMaterials').replace('{count}', String(unselectedInfo.length)) }}</summary>
+            <ul>
+              <li v-for="(unused, index) in unselectedInfo" :key="index">
+                {{ unused.title || t('generationConfirm.unnamedMaterial') }}：{{ unused.unselectedReason }}
+              </li>
+            </ul>
+          </details>
+        </aside>
+
+        <section class="review-stage">
+          <header class="review-stage__heading">
+            <div>
+              <p>{{ t('generationConfirm.currentSection') }}</p>
+              <h2>{{ activeEntry?.label }}</h2>
+            </div>
+            <span>{{ activeItems.length }} {{ t('generationConfirm.itemUnit') }}</span>
+          </header>
+
+          <div class="review-stage__scroll">
+            <div v-if="activeMissingInfo.length" class="missing-section">
+              <h3><AlertCircle :size="16" />{{ t('generationConfirm.missingInfoTitle') }}</h3>
+              <ul>
+                <li v-for="(missing, index) in activeMissingInfo" :key="index">{{ missing.reason }}</li>
+              </ul>
+            </div>
+
+            <div v-if="activeEntry" class="draft-section">
+              <h3 class="sr-only" aria-hidden="true">{{ activeEntry.label }}</h3>
+              <div v-for="(item, itemIndex) in activeItems" :key="item.path" :class="['draft-item', item.decision?.toLowerCase()]">
+                <div class="item-header">
+                  <span class="item-number">{{ t('generationConfirm.itemNumber').replace('{index}', String(itemIndex + 1)) }}</span>
+                  <span v-if="item.source" class="source-badge">{{ t('generationConfirm.sourceBadge') }}</span>
+                  <span v-if="item.pending" class="pending-badge">{{ t('generationConfirm.pendingBadge').replace('{pending}', item.pending) }}</span>
+                </div>
+                <DraftContentFields :model-value="item.content" />
+                <div class="item-actions">
+                  <button
+                    :class="['action-btn accept', { active: item.decision === 'ACCEPT' }]"
+                    :aria-pressed="item.decision === 'ACCEPT'"
+                    @click="setDecision(item, 'ACCEPT')"
+                  ><Check :size="15" /><span>{{ t('generationConfirm.accept') }}</span></button>
+                  <button class="action-btn edit" @click="openEdit(item)"><Pencil :size="15" /><span>{{ t('generationConfirm.editAction') }}</span></button>
+                  <button
+                    :class="['action-btn reject', { active: item.decision === 'REJECT' }]"
+                    :aria-pressed="item.decision === 'REJECT'"
+                    @click="setDecision(item, 'REJECT')"
+                  ><Trash2 :size="15" /><span>{{ t('generationConfirm.deleteAction') }}</span></button>
+                </div>
+              </div>
+              <div v-if="!activeItems.length" class="section-empty">
+                <AlertCircle :size="24" />
+                <p>{{ t('generationConfirm.noDraftForSection') }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-pagination">
+            <button
+              class="btn-secondary"
+              :disabled="activeNavigationIndex <= 0"
+              @click="moveSection(-1)"
+            ><ChevronLeft :size="15" />{{ t('generationConfirm.previousSection') }}</button>
+            <span>{{ Math.max(0, activeNavigationIndex + 1) }} / {{ visibleSectionEntries.length }}</span>
+            <button
+              class="btn-secondary"
+              :disabled="activeNavigationIndex < 0 || activeNavigationIndex >= visibleSectionEntries.length - 1"
+              @click="moveSection(1)"
+            >{{ t('generationConfirm.nextSection') }}<ChevronRight :size="15" /></button>
+          </div>
+
+          <footer class="confirm-actions">
+            <div class="title-input">
+              <label for="generated-resume-title">{{ t('generationConfirm.resumeNameShortLabel') }}</label>
+              <input id="generated-resume-title" v-model="customTitle" :placeholder="t('generationConfirm.resumeNamePlaceholder')" class="input" />
+            </div>
+            <p v-if="error" class="error-msg">{{ error }}</p>
+            <div class="confirm-actions__buttons">
+              <button class="btn-secondary" @click="handleReject" :disabled="rejecting">
+                {{ t('generationConfirm.rejectDraft') }}
+              </button>
+              <button class="btn-primary" @click="handleConfirm" :disabled="confirming || pendingCount > 0">
+                <span v-if="confirming" class="spinner"></span>
+                {{ confirming ? t('generationConfirm.creating') : `${t('generationConfirm.confirmAndCreate')}${pendingCount > 0 ? `（${pendingCount}）` : ''}` }}
+              </button>
+            </div>
+          </footer>
+        </section>
       </div>
-
-      <!-- Error -->
-      <p v-if="error" class="error-msg">{{ error }}</p>
-
-      <!-- Actions -->
-      <div class="confirm-actions">
-        <button class="btn-secondary" @click="handleReject" :disabled="rejecting">
-          {{ t('generationConfirm.rejectDraft') }}
-        </button>
-        <button class="btn-primary" @click="handleConfirm" :disabled="confirming || pendingCount > 0">
-          <span v-if="confirming" class="spinner"></span>
-          {{ confirming ? t('generationConfirm.creating') : `${t('generationConfirm.confirmAndCreate')}${pendingCount > 0 ? `（${pendingCount} ${t('generationConfirm.itemsPending')}）` : ''}` }}
-        </button>
-      </div>
+      <button v-if="mobileNavigationOpen" class="mobile-nav-scrim" :aria-label="t('common.close')" @click="mobileNavigationOpen = false"></button>
     </div>
 
     <!-- Same-JD Dialog -->
@@ -509,13 +719,13 @@ async function handleRetry() {
 
     <!-- Edit Dialog -->
     <Teleport to="body">
-      <div v-if="showEditDialog" class="dialog-overlay" @click.self="showEditDialog = false">
+      <div v-if="showEditDialog" class="dialog-overlay edit-overlay" @click.self="closeEdit" @keydown.esc="closeEdit">
         <div class="dialog edit-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-edit-title">
-          <h3 id="draft-edit-title">{{ t('generationConfirm.editContentTitle') }}</h3>
-          <DraftContentFields v-model="editValue" editable />
+          <header><h3 id="draft-edit-title">{{ t('generationConfirm.editContentTitle') }}</h3><button class="icon-button" :aria-label="t('common.close')" :title="t('common.close')" @click="closeEdit"><X :size="18" /></button></header>
+          <div class="edit-dialog__body"><DraftContentFields v-model="editValue" editable /></div>
           <div class="dialog-actions">
             <button class="btn-primary" @click="saveEdit">{{ t('generationConfirm.save') }}</button>
-            <button class="btn-secondary" @click="showEditDialog = false">{{ t('generationConfirm.cancel') }}</button>
+            <button class="btn-secondary" @click="closeEdit">{{ t('generationConfirm.cancel') }}</button>
           </div>
         </div>
       </div>
@@ -562,13 +772,6 @@ header h1 {
 .hint {
   color: #9ca3af;
   font-size: 0.85rem;
-}
-.warnings {
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
 }
 .warning-item {
   font-size: 0.85rem;
@@ -945,7 +1148,6 @@ header h1 {
 .status-card .hint { color: var(--text-tertiary); font-size: 10px; font-weight: 500; }
 .status-card.error { border-color: color-mix(in srgb, var(--danger) 28%, var(--border)); color: var(--danger); background: var(--danger-light); }
 .spinner-lg { width: 30px; height: 30px; margin: 0 0 5px; border-color: var(--border); border-top-color: var(--accent); }
-.warnings { display: grid; gap: 4px; margin: 0; padding: 13px 16px; border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--border)); border-radius: 6px; background: var(--warning-light); }
 .warning-item { margin: 0; color: var(--warning); font-size: 10px; }
 .quality-summary { margin: 0; padding: 20px; border: 1px solid color-mix(in srgb, var(--info) 25%, var(--border)); border-radius: 7px; background: var(--info-light); }
 .quality-summary--review_recommended { border-color: color-mix(in srgb, var(--warning) 28%, var(--border)); background: var(--warning-light); }
@@ -1003,4 +1205,132 @@ header h1 {
 .existing-item { border-bottom-color: var(--border-soft); color: var(--text-primary); font-size: 12px; }
 .dialog-actions { justify-content: flex-end; gap: 8px; }
 @media (max-width: 560px) { .confirm-page { padding-top: 0; } .confirm-header h1 { font-size: 29px; } .confirm-route { grid-template-columns: auto 15px auto 15px auto; justify-content: stretch; font-size: 8px; } .quality-summary { padding: 16px; } .draft-section { padding: 17px 14px; } .item-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); } .confirm-actions { display: grid; grid-template-columns: 1fr; } .confirm-actions button { width: 100%; } .dialog-overlay { align-items: end; padding: 0; } .dialog { width: 100%; max-width: none; border-bottom: 0; border-radius: 8px 8px 0 0; } }
+
+.confirm-page { gap: 14px; width: min(100%, 1180px); max-width: 1180px; padding-bottom: 28px; }
+.confirm-header { grid-template-columns: minmax(0, 1fr) auto; padding-bottom: 13px; }
+.confirm-header .eyebrow,
+.confirm-header h1,
+.confirm-header .subtitle { grid-column: 1; }
+.confirm-header h1 { margin: 3px 0 4px; font-size: 28px; }
+.confirm-header .subtitle { font-size: 11px; }
+.confirm-route { grid-column: 2; grid-row: 1 / 4; align-self: center; margin: 0 0 0 28px; }
+.draft-container { gap: 10px; min-width: 0; }
+.quality-summary { display: grid; grid-template-columns: minmax(210px, .7fr) minmax(420px, 1.3fr); gap: 10px 18px; padding: 11px 14px; border-color: var(--border); border-left: 3px solid var(--info); background: var(--bg-surface); }
+.quality-summary--review_recommended { border-color: var(--border); border-left-color: var(--warning); background: var(--bg-surface); }
+.quality-summary--requires_action { border-color: var(--border); border-left-color: var(--danger); background: var(--bg-surface); }
+.quality-summary__heading { align-items: center; margin: 0; }
+.quality-summary__heading h3 { margin: 0 0 2px; font-size: 12px; }
+.quality-summary__heading p { margin: 0; }
+.quality-summary__controls { display: flex; align-items: center; gap: 6px; }
+.quality-summary__metrics { gap: 0; border-left: 1px solid var(--border-soft); }
+.quality-summary__metrics > div { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 5px; padding: 4px 10px; border: 0; border-right: 1px solid var(--border-soft); border-radius: 0; background: transparent; }
+.quality-summary__metrics strong { font-size: 14px; }
+.quality-summary__metrics span { margin: 0; white-space: nowrap; }
+.quality-summary__details { grid-column: 1 / -1; padding: 10px 0 2px; border-top: 1px solid var(--border-soft); }
+.quality-summary__details > p { margin: 0 0 5px; color: var(--text-secondary); font-size: 10px; }
+.missing-summary { margin-top: 8px; color: var(--text-secondary); font-size: 10px; }
+.missing-summary ul { margin: 5px 0 0; padding-left: 18px; }
+.review-notices { padding: 11px 14px; border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border)); border-left: 3px solid var(--warning); border-radius: 6px; background: var(--bg-surface); }
+.review-notices .missing-summary:first-child { margin-top: 0; }
+.icon-button { display: inline-grid; width: 30px; height: 30px; flex: 0 0 30px; padding: 0; place-items: center; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); background: var(--bg-surface); cursor: pointer; }
+.icon-button:hover,
+.icon-button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.icon-button.active svg { transform: rotate(180deg); }
+.review-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: clamp(540px, calc(100dvh - 248px), 740px); min-height: 540px; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); box-shadow: var(--shadow-sm); }
+.review-rail { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 10px; min-width: 0; padding: 16px 12px; overflow: hidden; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--bg-page) 70%, var(--bg-surface)); }
+.review-rail__heading { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 8px; }
+.review-rail__heading > div { display: flex; align-items: baseline; justify-content: space-between; width: 100%; gap: 10px; }
+.review-rail__heading span { color: var(--text-secondary); font-size: 10px; font-weight: 700; }
+.review-rail__heading strong { color: var(--accent); font-family: var(--font-utility); font-size: 11px; }
+.attention-filter { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); background: var(--bg-surface); font-size: 10px; font-weight: 650; text-align: left; cursor: pointer; }
+.attention-filter b { display: grid; min-width: 19px; height: 19px; place-items: center; border-radius: 10px; color: var(--text-tertiary); background: var(--bg-page); font-size: 9px; }
+.attention-filter.active { border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); color: var(--warning); background: var(--warning-light); }
+.section-navigation { display: grid; align-content: start; gap: 2px; min-height: 0; overflow-y: auto; padding-right: 3px; scrollbar-width: thin; }
+.section-navigation__item { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; width: 100%; min-height: 36px; padding: 0 9px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; font-size: 10px; font-weight: 650; text-align: left; cursor: pointer; }
+.section-navigation__item svg { color: var(--success); }
+.section-navigation__item svg.attention { color: var(--warning); }
+.section-navigation__item svg.rejected { color: var(--text-tertiary); }
+.section-navigation__item b { color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; }
+.section-navigation__item:hover { color: var(--text-primary); background: var(--bg-surface); }
+.section-navigation__item.active { color: var(--accent); background: var(--accent-light); box-shadow: inset 3px 0 0 var(--accent); }
+.section-navigation__item.active svg,
+.section-navigation__item.active b { color: var(--accent); }
+.rail-empty { margin: 8px; color: var(--text-tertiary); font-size: 10px; line-height: 1.5; }
+.review-rail .unselected-details { padding: 9px; background: transparent; }
+.review-rail .unselected-details ul { max-height: 120px; overflow-y: auto; padding-left: 16px; }
+.review-stage { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; min-width: 0; min-height: 0; }
+.review-stage__heading { display: flex; align-items: center; justify-content: space-between; min-height: 62px; padding: 11px 20px; border-bottom: 1px solid var(--border); }
+.review-stage__heading p { margin: 0 0 2px; color: var(--text-tertiary); font-size: 9px; font-weight: 700; }
+.review-stage__heading h2 { margin: 0; color: var(--text-primary); font-size: 17px; }
+.review-stage__heading > span { color: var(--text-tertiary); font-size: 10px; }
+.review-stage__scroll { min-height: 0; overflow-y: auto; padding: 12px 20px 24px; scrollbar-width: thin; }
+.review-stage__scroll .missing-section { margin-bottom: 12px; padding: 11px 13px; border-left-width: 3px; }
+.review-stage__scroll .missing-section h3 { display: flex; align-items: center; gap: 6px; }
+.review-stage__scroll .draft-section { padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+.review-stage__scroll .draft-item { padding: 15px 12px; }
+.review-stage__scroll .draft-item:first-of-type { padding-top: 8px; }
+.section-empty { display: grid; justify-items: center; gap: 7px; padding: 48px 20px; color: var(--warning); text-align: center; }
+.section-empty p { max-width: 360px; margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
+.section-pagination { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 8px 20px; border-top: 1px solid var(--border-soft); }
+.section-pagination > span { color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; text-align: center; }
+.section-pagination .btn-secondary { min-height: 32px; gap: 4px; padding: 0 10px; }
+.section-pagination button:disabled { opacity: .45; cursor: not-allowed; }
+.confirm-actions { display: grid; grid-template-columns: minmax(210px, 1fr) auto; align-items: end; gap: 10px 16px; padding: 10px 14px; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: 0 -5px 14px rgba(28, 48, 37, .04); }
+.confirm-actions .title-input { grid-template-columns: auto minmax(160px, 1fr); align-items: center; gap: 9px; padding: 0; border: 0; background: transparent; }
+.confirm-actions .title-input label { white-space: nowrap; font-size: 10px; }
+.confirm-actions .title-input .input { min-width: 0; height: 36px; padding: 0 10px; }
+.confirm-actions__buttons { display: flex; gap: 8px; }
+.confirm-actions .error-msg { grid-column: 1 / -1; grid-row: 1; }
+.mobile-outline-trigger,
+.mobile-only,
+.mobile-nav-scrim { display: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.edit-overlay { align-items: stretch; justify-content: flex-end; padding: 0; }
+.edit-overlay .edit-dialog { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(440px, 100%); max-width: 440px; max-height: none; height: 100%; padding: 20px; overflow: hidden; border-block: 0; border-right: 0; border-radius: 8px 0 0 8px; }
+.edit-dialog > header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.edit-dialog > header h3 { margin: 0; font-size: 20px; }
+.edit-dialog__body { min-height: 0; overflow-y: auto; padding: 16px 4px; }
+.edit-dialog .dialog-actions { margin: 0; padding-top: 12px; border-top: 1px solid var(--border); }
+
+@media (max-width: 900px) {
+  .confirm-route { display: none; }
+  .quality-summary { grid-template-columns: 1fr; }
+  .quality-summary__metrics { border-left: 0; }
+  .quality-summary__details { grid-column: auto; }
+  .review-workspace { grid-template-columns: 190px minmax(0, 1fr); }
+  .confirm-actions { grid-template-columns: 1fr; }
+  .confirm-actions__buttons { justify-content: flex-end; }
+}
+
+@media (max-width: 767px) {
+  .confirm-page { gap: 10px; padding-top: 0; }
+  .confirm-header { display: block; padding-bottom: 10px; }
+  .confirm-header h1 { font-size: 25px; }
+  .confirm-header .subtitle { display: none; }
+  .quality-summary { padding: 10px 12px; }
+  .quality-summary__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .quality-summary__metrics > div { border-bottom: 1px solid var(--border-soft); }
+  .mobile-outline-trigger { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; min-height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); background: var(--bg-surface); font-size: 11px; font-weight: 700; text-align: left; }
+  .mobile-outline-trigger b { color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; }
+  .review-workspace { display: block; height: auto; min-height: 0; overflow: visible; }
+  .review-rail { position: fixed; inset: 0 auto 0 0; z-index: 1002; width: min(310px, calc(100vw - 48px)); padding-top: 18px; transform: translateX(-105%); transition: transform .18s ease; box-shadow: var(--shadow-lg); }
+  .review-rail.open { transform: translateX(0); }
+  .review-rail__heading > div { width: auto; flex: 1; }
+  .mobile-only { display: inline-grid; }
+  .mobile-nav-scrim { position: fixed; inset: 0; z-index: 1001; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: rgba(18, 36, 27, .42); }
+  .review-stage { min-height: calc(100dvh - 220px); }
+  .review-stage__heading { min-height: 56px; padding: 10px 14px; }
+  .review-stage__scroll { overflow: visible; padding: 12px 14px 22px; }
+  .review-stage__scroll .draft-item { padding-inline: 6px; }
+  .section-pagination { padding: 8px 12px; }
+  .section-pagination .btn-secondary { width: auto; }
+  .confirm-actions { position: sticky; z-index: 8; bottom: 0; grid-template-columns: 1fr; padding: 10px 12px; background: var(--bg-surface); }
+  .confirm-actions__buttons { display: grid; grid-template-columns: minmax(0, .75fr) minmax(0, 1.25fr); }
+  .confirm-actions button { width: 100%; }
+  .edit-overlay .edit-dialog { width: 100%; max-width: none; border-left: 0; border-radius: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-rail { transition: none; }
+}
 </style>

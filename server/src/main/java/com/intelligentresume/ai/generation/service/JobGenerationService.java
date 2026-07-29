@@ -29,7 +29,6 @@ public class JobGenerationService {
     private static final Logger log = LoggerFactory.getLogger(JobGenerationService.class);
     private static final long DEFAULT_TIMEOUT_MS = 60_000;
     private static final Pattern LEGACY_SOURCE_ID = Pattern.compile("materialId\\s*=\\s*(\\d+)");
-
     private final CareerMaterialRepository materialRepository;
     private final JobDescriptionRepository jobRepository;
     private final ResumeRepository resumeRepository;
@@ -240,6 +239,42 @@ public class JobGenerationService {
         renameEach(draft.get("education"), Map.of("institution", "school", "field", "major", "studyType", "degree"));
         renameEach(draft.get("certificates"), Map.of("title", "name", "organization", "issuer"));
         renameEach(draft.get("skills"), Map.of("keywords", "items"));
+        promoteCustomSectionSources(draft.get("customSections"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void promoteCustomSectionSources(Object value) {
+        if (!(value instanceof List<?> sections)) return;
+        for (Object item : sections) {
+            if (!(item instanceof Map<?, ?> rawSection)) continue;
+            Map<String, Object> section = (Map<String, Object>) rawSection;
+            if (section.containsKey("_source") || section.containsKey("_sources")
+                    || section.containsKey("_pending")) continue;
+            if (!(section.get("entries") instanceof List<?> entries)) continue;
+
+            Map<String, Map<String, Object>> uniqueSources = new LinkedHashMap<>();
+            for (Object entry : entries) {
+                if (!(entry instanceof Map<?, ?> rawEntry)) continue;
+                Object sources = rawEntry.get("_sources");
+                if (sources instanceof List<?> list) {
+                    for (Object source : list) addPromotedSource(source, uniqueSources);
+                }
+                addPromotedSource(rawEntry.get("_source"), uniqueSources);
+            }
+            if (!uniqueSources.isEmpty()) {
+                section.put("_sources", new ArrayList<>(uniqueSources.values()));
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void addPromotedSource(Object value, Map<String, Map<String, Object>> sources) {
+        if (!(value instanceof Map<?, ?> rawSource)) return;
+        Map<String, Object> source = (Map<String, Object>) rawSource;
+        Object materialId = source.get("materialId");
+        if (materialId == null) return;
+        String key = materialId + "\u0000" + Objects.toString(source.get("materialType"), "");
+        sources.putIfAbsent(key, new LinkedHashMap<>(source));
     }
 
     @SuppressWarnings("unchecked")
@@ -307,7 +342,7 @@ public class JobGenerationService {
         int sourced = 0;
         int pending = 0;
         int unsupported = 0;
-        for (String section : List.of("basics", "work", "education", "skills", "projects", "certificates")) {
+        for (String section : JobGenerationSchemaValidator.SUPPORTED_SECTIONS) {
             Object value = draft.get(section);
             List<Map<String, Object>> entries = new ArrayList<>();
             if (value instanceof Map<?, ?> raw) {

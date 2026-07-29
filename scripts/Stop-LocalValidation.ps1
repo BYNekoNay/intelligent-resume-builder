@@ -8,5 +8,8 @@ foreach ($process in $manifest.processes) {
     Stop-LocalProcessTree -Id $process.id
     if ($process.port) { Stop-LocalPortListener -Port $process.port }
 }
+if ($manifest.PSObject.Properties.Name -contains 'databaseCleanup') {
+    Remove-DisposableMySqlDatabase -Schema $manifest.databaseCleanup.schema -User $manifest.databaseCleanup.user
+}
 Remove-Item -Force -ErrorAction SilentlyContinue $path
 Write-Output 'Local validation processes stopped.'

@@ -29,6 +29,7 @@ import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -263,6 +264,51 @@ class JobGenerationServiceTest {
         assertTrue(ex.getMessage().contains("Draft schema validation failed"));
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void customSectionChildSourcesArePromotedBeforeSchemaValidation() {
+        AiTask task = buildTask(100L, 1L, 1L, List.of(1L));
+
+        Resume resume = new Resume();
+        resume.setId(1L);
+        resume.setUserId(100L);
+        when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
+        when(jdRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(jd(1L, 100L)));
+        when(injectionDetector.detect(anyString(), anyList()))
+                .thenReturn(new PromptInjectionDetector.DetectionResult(false, List.of()));
+
+        CareerMaterial material = material(1L, MaterialType.LEADERSHIP_EXPERIENCE);
+        when(materialRepository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of(material));
+        when(materialSelector.select(eq(100L), anyList(), any()))
+                .thenReturn(new MaterialSelector.SelectionResult(
+                        List.of(material), List.of(), List.of(), List.of(), Map.of()));
+        when(promptBuilder.build(any(), anyList(), anyList(), anyList(), anyString()))
+                .thenReturn(new JobGenerationPromptBuilder.Prompt("sys", "task", "data"));
+
+        Map<String, Object> childSource = Map.of(
+                "materialId", 1L, "materialType", "LEADERSHIP_EXPERIENCE");
+        Map<String, Object> customEntry = new LinkedHashMap<>();
+        customEntry.put("name", "Platform migration leadership");
+        customEntry.put("_sources", List.of(childSource));
+        Map<String, Object> customSection = new LinkedHashMap<>();
+        customSection.put("title", "Leadership");
+        customSection.put("entries", List.of(customEntry));
+        Map<String, Object> draft = new LinkedHashMap<>();
+        draft.put("customSections", List.of(customSection));
+
+        when(providerRegistry.route(AiTaskType.JOB_GENERATION)).thenReturn(aiProvider);
+        when(aiProvider.call(any())).thenReturn(
+                AiCallResult.ok(Map.of("draftResumeJson", draft), "req-custom-section"));
+
+        service.executeTask(task);
+
+        ArgumentCaptor<Map<String, Object>> validatedDraft = ArgumentCaptor.forClass(Map.class);
+        verify(schemaValidator).validate(validatedDraft.capture(), eq("v1.0.0"), eq(Set.of(1L)));
+        List<Map<String, Object>> sections =
+                (List<Map<String, Object>>) validatedDraft.getValue().get("customSections");
+        assertEquals(List.of(childSource), sections.get(0).get("_sources"));
+    }
+
     // ---- 辅助方法 ----
 
     @Test
@@ -297,6 +343,26 @@ class JobGenerationServiceTest {
         assertEquals(0, summary.get("unsupportedItems"));
         assertEquals(1, summary.get("missingRequirementCount"));
         assertEquals("REVIEW_RECOMMENDED", summary.get("readiness"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void qualitySummaryIncludesExtendedResumeSections() {
+        Map<String, Object> source = Map.of("materialId", 1L);
+        Map<String, Object> draft = Map.of(
+                "objective", Map.of("summary", "Lead reliable platforms"),
+                "volunteering", List.of(Map.of("organization", "Community", "_sources", List.of(source))),
+                "courses", List.of(Map.of("name", "Distributed systems", "_sources", List.of(source))),
+                "publications", List.of(Map.of("title", "Reliability guide", "_sources", List.of(source))),
+                "customSections", List.of(Map.of("title", "Leadership", "entries", List.of(),
+                        "_sources", List.of(source))));
+
+        Map<String, Object> summary = ReflectionTestUtils.invokeMethod(
+                service, "buildQualitySummary", draft, List.of(), List.of(), false);
+
+        assertEquals(5, summary.get("totalDraftItems"));
+        assertEquals(4, summary.get("sourcedItems"));
+        assertEquals(1, summary.get("unsupportedItems"));
     }
 
     @Test

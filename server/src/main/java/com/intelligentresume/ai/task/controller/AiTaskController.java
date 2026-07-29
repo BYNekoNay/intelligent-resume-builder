@@ -38,9 +38,10 @@ public class AiTaskController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             HttpServletRequest servletRequest) {
         if (request.taskType() == AiTaskType.JOB_GENERATION
-                || request.taskType() == AiTaskType.JOB_MATERIAL_SELECTION) {
+                || request.taskType() == AiTaskType.JOB_MATERIAL_SELECTION
+                || request.taskType() == AiTaskType.COMMUNICATION_GENERATE) {
             throw new BusinessException(ErrorCode.VALIDATION,
-                    "Job resume generation must start with material selection");
+                    "This AI task must start from its domain endpoint");
         }
         String key = idempotencyKey == null || idempotencyKey.isBlank()
                 ? UUID.randomUUID().toString() : idempotencyKey;

@@ -93,3 +93,97 @@ function Import-LiveAiEnvironment {
     $env:AI_PROVIDER = 'bailian'
     foreach ($pair in $values.GetEnumerator()) { Set-Item -Path "Env:$($pair.Key)" -Value $pair.Value }
 }
+
+function New-DisposableMySqlDatabase {
+    param([string]$SourceSchema)
+    Assert-LocalCommand mysql
+    $requiresBaseline = $false
+    if (-not [string]::IsNullOrWhiteSpace($SourceSchema)) {
+        if ($SourceSchema -notmatch '^[A-Za-z0-9_]+$') { throw 'Unsafe source schema name.' }
+        Assert-LocalCommand mysqldump
+        $sourceVersion = (& mysql --batch --skip-column-names $SourceSchema -e "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1;").Trim()
+        if ($LASTEXITCODE -ne 0 -or $sourceVersion -ne '19') {
+            throw 'Database cloning currently supports only a source schema at Flyway V19.'
+        }
+    }
+    $suffix = [guid]::NewGuid().ToString('N').Substring(0, 16)
+    $schema = "intelligent_resume_gate_$suffix"
+    $databaseUser = "ir_gate_$($suffix.Substring(0, 12))"
+    $databasePassword = [guid]::NewGuid().ToString('N')
+    if ($schema -notmatch '^intelligent_resume_gate_[a-f0-9]{16}$') { throw 'Unsafe temporary schema name.' }
+    if ($databaseUser -notmatch '^ir_gate_[a-f0-9]{12}$') { throw 'Unsafe temporary database user name.' }
+
+    $setupSql = @"
+CREATE DATABASE ``$schema`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER '$databaseUser'@'%' IDENTIFIED BY '$databasePassword';
+GRANT ALL PRIVILEGES ON ``$schema``.* TO '$databaseUser'@'%';
+FLUSH PRIVILEGES;
+"@
+    $dumpPath = $null
+    try {
+        $setupSql | & mysql --batch --skip-column-names
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to create the disposable MySQL validation database.' }
+        if (-not [string]::IsNullOrWhiteSpace($SourceSchema)) {
+            $dumpPath = [System.IO.Path]::GetTempFileName()
+            & mysqldump --no-data --triggers --column-statistics=0 "--result-file=$dumpPath" $SourceSchema
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to export the source schema.' }
+            $importCommand = "mysql --binary-mode=1 --database=$schema < `"$dumpPath`""
+            & cmd.exe /d /s /c $importCommand
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to import the source schema into the disposable database.' }
+            $sourceTables = @(& mysql --batch --skip-column-names -e "SELECT table_name FROM information_schema.tables WHERE table_schema='$SourceSchema' AND table_type='BASE TABLE' ORDER BY table_name;")
+            if ($LASTEXITCODE -ne 0 -or $sourceTables.Count -eq 0) { throw 'Unable to enumerate source tables.' }
+            $copyStatements = @('SET FOREIGN_KEY_CHECKS=0;')
+            foreach ($table in $sourceTables) {
+                if ($table -notmatch '^[A-Za-z0-9_]+$') { throw 'Unsafe source table name.' }
+                $copyStatements += "INSERT INTO ``$schema``.``$table`` SELECT * FROM ``$SourceSchema``.``$table``;"
+            }
+            $copyStatements += 'SET FOREIGN_KEY_CHECKS=1;'
+            ($copyStatements -join [Environment]::NewLine) | & mysql --batch --skip-column-names
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to copy source data into the disposable database.' }
+            foreach ($table in $sourceTables) {
+                $counts = @(& mysql --batch --skip-column-names -e "SELECT (SELECT COUNT(*) FROM ``$SourceSchema``.``$table``), (SELECT COUNT(*) FROM ``$schema``.``$table``);")
+                if ($LASTEXITCODE -ne 0 -or $counts.Count -ne 1 -or $counts[0] -notmatch '^(\d+)\s+(\d+)$' -or $Matches[1] -ne $Matches[2]) {
+                    throw "Row-count verification failed for cloned table '$table'."
+                }
+            }
+            $cloneInvariantSql = @"
+SELECT IF(
+    (SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1) = 19
+    AND (SELECT IS_NULLABLE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'interview_record' AND column_name = 'round_no') = 'NO'
+    AND (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'interview_record' AND index_name = 'uq_interview_record_session_round' AND non_unique = 0) = 2
+    AND (SELECT IS_NULLABLE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'interview_session' AND column_name = 'job_description_id') = 'YES',
+    'READY', 'INVALID');
+"@
+            $cloneInvariant = (& mysql --batch --skip-column-names $schema -e $cloneInvariantSql).Trim()
+            if ($LASTEXITCODE -ne 0 -or $cloneInvariant -ne 'READY') {
+                throw 'The cloned database does not match the required V19 schema invariants.'
+            }
+            & mysql --batch --skip-column-names $schema -e 'DROP TABLE flyway_schema_history;'
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to prepare the isolated clone for a V19 Flyway baseline.' }
+            $requiresBaseline = $true
+        }
+    } catch {
+        $cloneError = $_
+        Remove-DisposableMySqlDatabase -Schema $schema -User $databaseUser
+        throw $cloneError
+    } finally {
+        if ($dumpPath) { Remove-Item -LiteralPath $dumpPath -Force -ErrorAction SilentlyContinue }
+    }
+    return [pscustomobject]@{ Schema = $schema; User = $databaseUser; Password = $databasePassword; SourceSchema = $SourceSchema; RequiresBaseline = $requiresBaseline }
+}
+
+function Remove-DisposableMySqlDatabase {
+    param(
+        [Parameter(Mandatory = $true)][string]$Schema,
+        [Parameter(Mandatory = $true)][string]$User
+    )
+    if ($Schema -notmatch '^intelligent_resume_gate_[a-f0-9]{16}$') { throw 'Refusing to remove an unsafe schema name.' }
+    if ($User -notmatch '^ir_gate_[a-f0-9]{12}$') { throw 'Refusing to remove an unsafe database user name.' }
+    $cleanupSql = @"
+DROP DATABASE IF EXISTS ``$Schema``;
+DROP USER IF EXISTS '$User'@'%';
+FLUSH PRIVILEGES;
+"@
+    $cleanupSql | & mysql --batch --skip-column-names
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to remove the disposable MySQL validation database.' }
+}

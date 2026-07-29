@@ -198,7 +198,7 @@ class InlineOptimizeControllerIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "policyVersion": "v1.1.0",
+                                  "policyVersion": "v1.2.0",
                                   "providerCode": "bailian",
                                   "taskScopes": ["INLINE_OPTIMIZE", "ACHIEVEMENT_GUIDANCE"],
                                   "dataCategories": ["resume"],

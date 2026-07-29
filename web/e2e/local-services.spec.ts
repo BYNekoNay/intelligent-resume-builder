@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 
-const apiBaseUrl = process.env.LOCAL_E2E_API_URL ?? 'http://localhost:8080'
+const apiBaseUrl = process.env.LOCAL_E2E_API_URL ?? 'http://127.0.0.1:8080'
 if (!new Set([
   'http://localhost:8080',
   'http://127.0.0.1:8080',
@@ -46,7 +46,7 @@ test.describe('@local-services local application smoke', () => {
   test('loads the local login route without recording browser diagnostics', async ({ page }) => {
     await page.goto('/login')
     await expect(page).toHaveURL(/\/login$/)
-    await expect(page.getByRole('heading')).toBeVisible()
+    await expect(page.getByRole('heading', { name: '登录', exact: true })).toBeVisible()
   })
 
   test('creates a synthetic account through the visible registration flow and cleans it up', async ({ page }) => {
@@ -71,7 +71,7 @@ test.describe('@local-services local application smoke', () => {
 
       await page.goto('/ai-consent')
       await page.locator('.consent-card button').click()
-      await expect(page.locator('.consent-card')).toContainText('GRANTED')
+      await expect(page.locator('.consent-card')).toContainText('Authorized')
 
       await page.goto('/resume-import')
       await page.locator('input[type="file"]').setInputFiles({
@@ -81,21 +81,21 @@ test.describe('@local-services local application smoke', () => {
       })
       const [importResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith('/api/resume-imports/parse')),
-        page.locator('form button').click(),
+        page.getByRole('button', { name: 'Parse file content' }).click(),
       ])
       expect(importResponse.status(), `Resume import failed: ${await importResponse.text()}`).toBe(200)
-      const extracted = page.getByLabel('Extracted text')
+      const extracted = page.getByLabel('Editable text')
       await expect(extracted).toBeVisible()
       await extracted.fill('Java engineer. Built a Spring Boot service and verified local MySQL workflows.')
-      await page.getByRole('button', { name: 'Use corrected text' }).click()
+      await page.getByRole('button', { name: 'Confirm text and continue' }).click()
       await expect(page).toHaveURL(/\/material-generation$/)
       const materialText = page.locator('textarea').first()
       await expect(materialText).toHaveValue(/verified local MySQL workflows/)
       await page.getByRole('button', { name: 'Generate structured draft' }).click()
-      const titleInput = page.locator('article.workspace-card input')
-      await expect(titleInput).toBeVisible()
+      const titleInput = page.getByLabel('Resume title')
+      await expect(titleInput).toBeVisible({ timeout: 75_000 })
       await titleInput.fill(title)
-      await page.locator('article.workspace-card button.btn-secondary').click()
+      await page.getByRole('button', { name: 'Confirm & create editable resume' }).click()
       await expect(page).toHaveURL(/\/resumes\/\d+$/)
       await expect(page.locator('.workspace-page')).toContainText(title)
     } finally {
@@ -125,20 +125,20 @@ test.describe('@local-services local application smoke', () => {
       const resumeForm = page.locator('form').first()
       await resumeForm.locator('input').nth(0).fill(resumeTitle)
       await resumeForm.locator('input').nth(1).fill('PDF Recovery Candidate')
-      await resumeForm.locator('button').click()
-      await page.locator('.job-card a').filter({ hasText: resumeTitle }).click()
+      await resumeForm.getByRole('button', { name: 'New resume' }).click()
+      await page.locator('.resume-row-main').filter({ hasText: resumeTitle }).click()
 
       invokePdfFault('StopPdf')
       rendererStopped = true
-      await page.locator('.version-card').first().locator('button').nth(1).click()
+      await page.locator('.version-card').first().getByRole('button', { name: 'Export PDF' }).click()
       await expect(page).toHaveURL(/\/exports\/\d+$/)
-      await expect.poll(async () => page.locator('.workspace-card').textContent()).toContain('FAILED')
-      await expect(page.locator('.workspace-card .form-error')).toBeVisible()
+      await expect(page.getByText('PDF generation failed', { exact: true })).toBeVisible({ timeout: 30_000 })
+      await expect(page.getByRole('button', { name: 'Retry export' })).toBeVisible()
 
       invokePdfFault('StartPdf')
       rendererStopped = false
-      await page.locator('.workspace-card button.btn-secondary').click()
-      await expect.poll(async () => page.locator('.workspace-card').textContent(), { timeout: 30_000 }).toContain('SUCCESS')
+      await page.getByRole('button', { name: 'Retry export' }).click()
+      await expect(page.getByText('PDF is ready', { exact: true })).toBeVisible({ timeout: 30_000 })
     } finally {
       if (rendererStopped) invokePdfFault('StartPdf')
       if (accessToken) {
@@ -151,8 +151,65 @@ test.describe('@local-services local application smoke', () => {
     }
   })
 
+  test('runs a real multi-round AI interview and saves the final answer asset', async ({ page }) => {
+    test.setTimeout(600_000)
+    const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`
+    let accessToken: string | undefined
+
+    try {
+      accessToken = await registerSyntheticAccount(page, 'interview', suffix)
+      await switchToEnglish(page)
+
+      await page.goto('/ai-consent')
+      await page.locator('.consent-card button').click()
+      await expect(page.locator('.consent-card')).toContainText('Authorized')
+
+      await page.goto('/interviews')
+      await page.locator('textarea').first().fill('Java backend engineer who built Spring Boot and MySQL services and improved P99 latency by 30 percent.')
+      await page.locator('input[type="number"]').fill('4')
+      page.once('dialog', dialog => dialog.accept())
+      await page.getByRole('button', { name: 'Start interview' }).click()
+
+      const answerInput = page.getByLabel('Your answer')
+      await expect(answerInput).toBeVisible({ timeout: 75_000 })
+      let finalAnswer = ''
+      let completed = false
+      for (let round = 1; round <= 6; round += 1) {
+        finalAnswer = `Round ${round} ${suffix}: I diagnosed the bottleneck from metrics, changed the Java and MySQL implementation, validated it under production-like load, and measured a ${30 + round} percent P99 improvement.`
+        await answerInput.fill(finalAnswer)
+        const [answerResponse] = await Promise.all([
+          page.waitForResponse(response => response.url().includes('/api/interviews/') && response.url().endsWith('/answer') && response.status() === 200, { timeout: 75_000 }),
+          page.getByRole('button', { name: 'Submit answer' }).click(),
+        ])
+        const answerPayload = await answerResponse.json() as { data: { status: string } }
+        await expect(page.getByRole('heading', { name: 'Answer review' })).toBeVisible()
+        completed = answerPayload.data.status === 'COMPLETED'
+        if (completed) break
+        await expect(answerInput).toBeVisible()
+      }
+
+      expect(completed, 'Interview did not complete within the configured maximum range').toBe(true)
+      await expect(page.getByRole('heading', { name: /Interview complete/ })).toBeVisible()
+      await page.getByRole('button', { name: 'Interview report' }).click()
+      await expect(page.getByText('Total score', { exact: true })).toBeVisible()
+      await page.getByRole('button', { name: 'Save as answer asset' }).click()
+      await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+
+      await page.goto('/interview-assets')
+      await expect(page.getByText(finalAnswer, { exact: true })).toBeVisible()
+    } finally {
+      if (accessToken) {
+        const cleanup = await page.request.delete(`${apiBaseUrl}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 5_000,
+        })
+        expect(cleanup.status()).toBe(200)
+      }
+    }
+  })
+
   test('runs the core resume journey through the visible local UI', async ({ page }) => {
-    test.setTimeout(150_000)
+    test.setTimeout(900_000)
     const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`
     const resumeTitle = `Local UI resume ${suffix}`
     const materialTitle = `Local UI project ${suffix}`
@@ -166,15 +223,15 @@ test.describe('@local-services local application smoke', () => {
       const materialForm = page.locator('form').first()
       await materialForm.locator('input').fill(materialTitle)
       await materialForm.locator('textarea').first().fill('Built a local validation project with Java and Spring Boot.')
-      await materialForm.locator('button').click()
+      await materialForm.getByRole('button', { name: 'Save material' }).click()
       await expect(page.getByText(materialTitle)).toBeVisible()
 
       await page.goto('/resumes')
       const resumeForm = page.locator('form').first()
       await resumeForm.locator('input').nth(0).fill(resumeTitle)
       await resumeForm.locator('input').nth(1).fill('Local Journey Candidate')
-      await resumeForm.locator('button').click()
-      const resumeLink = page.locator('.job-card a').filter({ hasText: resumeTitle })
+      await resumeForm.getByRole('button', { name: 'New resume' }).click()
+      const resumeLink = page.locator('.resume-row-main').filter({ hasText: resumeTitle })
       await expect(resumeLink).toBeVisible()
 
       await page.goto('/jobs')
@@ -182,13 +239,13 @@ test.describe('@local-services local application smoke', () => {
       await jobForm.locator('input').nth(0).fill(jobTitle)
       await jobForm.locator('input').nth(1).fill('Local Validation Co')
       await jobForm.locator('textarea').fill('Java, Spring Boot, and MySQL experience required.')
-      await jobForm.locator('button').click()
+      await jobForm.getByRole('button', { name: 'Save job' }).click()
       const jobCard = page.locator('.job-card').filter({ hasText: jobTitle })
       await expect(jobCard).toBeVisible()
 
       await page.goto('/ai-consent')
       await page.locator('.consent-card button').click()
-      await expect(page.locator('.consent-card')).toContainText('GRANTED')
+      await expect(page.locator('.consent-card')).toContainText('Authorized')
 
       await page.goto('/jobs')
       const generatedJob = page.locator('.job-card').filter({ hasText: jobTitle })
@@ -199,29 +256,39 @@ test.describe('@local-services local application smoke', () => {
       await page.getByRole('button', { name: 'Next: start generation' }).click()
       await page.getByRole('button', { name: 'Start AI selection' }).click()
       await expect(page).toHaveURL(/\/generate\/materials\?taskId=\d+$/)
-      await expect.poll(async () => page.locator('.task-status').textContent()).toContain('SUCCESS')
+      await expect(page.getByRole('heading', { name: 'Confirm materials for this resume' })).toBeVisible({ timeout: 180_000 })
+      await page.getByRole('button', { name: 'Confirm selection & generate resume' }).click()
+      await expect(page).toHaveURL(/\/generate\/confirm\?taskId=\d+$/)
 
-      const confirmationItems = page.locator('.confirmation-item')
-      for (let index = 0; index < await confirmationItems.count(); index += 1) {
-        await confirmationItems.nth(index).locator('button').first().click()
+      const acceptButtons = page.getByRole('button', { name: 'Accept', exact: true })
+      await expect(acceptButtons.first()).toBeVisible({ timeout: 180_000 })
+      for (let index = 0; index < await acceptButtons.count(); index += 1) {
+        await acceptButtons.nth(index).click()
       }
-      const confirmationSubmit = page.locator('.dialog-actions button.btn-primary').first()
+      const confirmationSubmit = page.getByRole('button', { name: 'Confirm & create resume' })
       await expect(confirmationSubmit).toBeEnabled()
       await confirmationSubmit.click()
-      await expect(page).toHaveURL(/\/resumes$/)
+      const existingResumeDialog = page.getByRole('heading', { name: 'Resume already exists' })
+      await Promise.race([
+        page.waitForURL(/\/resumes\/\d+$/),
+        existingResumeDialog.waitFor({ state: 'visible' }),
+      ])
+      if (await existingResumeDialog.isVisible()) {
+        await page.getByRole('button', { name: 'Update this resume' }).click()
+      }
+      await expect(page).toHaveURL(/\/resumes\/\d+$/)
 
-      await page.locator('.job-card a').filter({ hasText: resumeTitle }).click()
       const versionCard = page.locator('.version-card').first()
       await expect(versionCard).toBeVisible()
-      await versionCard.locator('button').nth(0).click()
+      await versionCard.getByRole('button', { name: 'View JD coverage' }).click()
       await expect(page).toHaveURL(/\/match\/\d+$/)
       await expect(page.locator('.workspace-page')).not.toContainText('无法加载')
 
       await page.goBack()
       await expect(page).toHaveURL(/\/resumes\/\d+$/)
-      await page.locator('.version-card').first().locator('button').nth(1).click()
+      await page.locator('.version-card').first().getByRole('button', { name: 'Export PDF' }).click()
       await expect(page).toHaveURL(/\/exports\/\d+$/)
-      await expect.poll(async () => page.locator('.workspace-card').textContent(), { timeout: 30_000 }).toContain('SUCCESS')
+      await expect(page.getByText('PDF is ready', { exact: true })).toBeVisible({ timeout: 30_000 })
 
       await page.goto('/communications')
       const communicationSelects = page.locator('select')
@@ -229,20 +296,20 @@ test.describe('@local-services local application smoke', () => {
       await communicationSelects.nth(1).selectOption({ index: 1 })
       await communicationSelects.nth(2).selectOption({ index: 1 })
       await communicationSelects.nth(3).selectOption('EMAIL')
-      await page.locator('form button').click()
+      await page.getByRole('button', { name: 'Use template' }).click()
       const draftEditor = page.getByLabel('Editable draft')
-      await expect(draftEditor).toBeVisible()
+      await expect(draftEditor).toBeVisible({ timeout: 75_000 })
       await draftEditor.fill('Edited local UI application email.')
       await page.getByRole('button', { name: 'Use in application' }).click()
       await expect(page).toHaveURL(/\/applications$/)
       await expect(page.locator('textarea').nth(1)).toHaveValue('Edited local UI application email.')
       await page.getByRole('button', { name: 'Create draft' }).click()
-      await expect(page.locator('.application-card')).toHaveCount(1)
+      const applicationTicket = page.locator('.application-ticket').filter({ hasText: jobTitle })
+      await expect(applicationTicket).toHaveCount(1)
 
       await page.reload()
-      const applicationCard = page.locator('.application-card').first()
-      await expect(applicationCard).toBeVisible()
-      const applicationStatus = applicationCard.locator('select')
+      await expect(applicationTicket).toBeVisible()
+      const applicationStatus = applicationTicket.getByRole('combobox', { name: 'Application stage' })
       await expect(applicationStatus).toHaveValue('DRAFT')
       await Promise.all([
         page.waitForResponse(response => response.url().includes('/api/applications/') && response.url().endsWith('/status') && response.status() === 200),
@@ -250,48 +317,54 @@ test.describe('@local-services local application smoke', () => {
       ])
       await expect(applicationStatus).toHaveValue('APPLIED')
       await page.reload()
-      await expect(page.locator('.application-card').first().locator('select')).toHaveValue('APPLIED')
+      await expect(applicationTicket.getByRole('combobox', { name: 'Application stage' })).toHaveValue('APPLIED')
 
       await page.goto('/ats')
       const atsSelects = page.locator('form select')
       await atsSelects.nth(0).selectOption({ label: resumeTitle })
       await atsSelects.nth(1).selectOption({ index: 1 })
       await atsSelects.nth(2).selectOption({ index: 1 })
-      await page.locator('form button').click()
-      const atsResult = page.locator('article.workspace-card').last()
-      await expect(atsResult.locator('.score-grid p')).toHaveCount(3)
-      await expect(atsResult.getByRole('heading', { name: 'Priority changes' })).toBeVisible()
+      await page.getByRole('button', { name: 'Run AI check' }).click()
+      const atsResult = page.locator('article').filter({ has: page.getByRole('heading', { name: 'ATS Check Report' }) })
+      await expect(atsResult.getByText('Rule score', { exact: true })).toBeVisible({ timeout: 90_000 })
+      await expect(atsResult.getByText('Structure', { exact: true })).toBeVisible()
+      await expect(atsResult.getByText('Keyword coverage', { exact: true })).toBeVisible()
+      await expect(atsResult.getByRole('heading', { name: 'Rule priorities' })).toBeVisible()
       await expect(atsResult.getByRole('heading', { name: 'Passed checks' })).toBeVisible()
-      await expect(atsResult.getByRole('heading', { name: 'Risks and evidence' })).toBeVisible()
+      await expect(atsResult.getByRole('heading', { name: 'Rule risks and evidence' })).toBeVisible()
 
       await page.goto('/interviews')
       const interviewSelects = page.locator('select')
       await interviewSelects.nth(0).selectOption('EXTERNAL_RESUME')
       await page.locator('textarea').first().fill('Java engineer with local validation project experience.')
+      await page.locator('input[type="number"]').fill('4')
       await interviewSelects.nth(2).selectOption({ index: 1 })
-      await page.locator('form button').click()
-      await expect(page.locator('textarea').first()).toBeVisible()
+      await page.getByRole('button', { name: 'Start interview' }).click()
+      await expect(page.getByLabel('Your answer')).toBeVisible({ timeout: 75_000 })
       const answerInput = page.getByLabel('Your answer')
-      const finalAnswer = `Final local interview answer ${suffix} with a measured 30 percent result.`
-      const answers = [
-        'I designed the local project, verified its Java and Spring flows, and documented the outcome.',
-        'I handled a MySQL reliability issue, took action with validation, and reduced failures by 20 percent.',
-        finalAnswer,
-      ]
-      for (const interviewAnswer of answers) {
+      let finalAnswer = ''
+      let completed = false
+      for (let round = 1; round <= 6; round += 1) {
+        const interviewAnswer = `Round ${round} ${suffix}: I inspected the evidence, implemented the Java and MySQL change, verified it under production-like load, and measured a ${20 + round} percent improvement.`
+        finalAnswer = interviewAnswer
         await answerInput.fill(interviewAnswer)
-        await Promise.all([
-          page.waitForResponse(response => response.url().includes('/api/interviews/') && response.url().endsWith('/answer') && response.status() === 200),
-          page.locator('form button').click(),
+        const [answerResponse] = await Promise.all([
+          page.waitForResponse(response => response.url().includes('/api/interviews/') && response.url().endsWith('/answer') && response.status() === 200, { timeout: 75_000 }),
+          page.getByRole('button', { name: 'Submit answer' }).click(),
         ])
-        await expect(page.getByText(/Round score:/)).toBeVisible()
+        const answerPayload = await answerResponse.json() as { data: { status: string } }
+        await expect(page.getByRole('heading', { name: 'Answer review' })).toBeVisible()
+        completed = answerPayload.data.status === 'COMPLETED'
+        if (completed) break
+        await expect(answerInput).toBeVisible()
       }
-      await expect(page.getByRole('heading', { name: 'Interview complete' })).toBeVisible()
+      expect(completed, 'Interview did not reach COMPLETED within its configured maximum range').toBe(true)
+      await expect(page.getByRole('heading', { name: /Interview complete/ })).toBeVisible()
       await page.getByRole('button', { name: 'Interview report' }).click()
-      await expect(page.getByText(/Total score:/)).toBeVisible()
+      await expect(page.getByText('Total score', { exact: true })).toBeVisible()
       await expect(page.locator('article').filter({ hasText: 'Resume suggestions' })).toBeVisible()
-      await page.getByRole('button', { name: 'Save to answer assets' }).click()
-      await expect(page.getByText('Saved to answer assets.')).toBeVisible()
+      await page.getByRole('button', { name: 'Save as answer asset' }).click()
+      await expect(page.getByText('Saved', { exact: true })).toBeVisible()
 
       await page.goto('/interview-assets')
       const assetFilter = page.locator('form.compact-form')
@@ -308,13 +381,13 @@ test.describe('@local-services local application smoke', () => {
 
       await page.goto('/ai-consent')
       await page.locator('.consent-card button').click()
-      await expect(page.locator('.consent-card')).toContainText('WITHDRAWN')
+      await expect(page.locator('.consent-card')).toContainText('Withdrawn')
       await page.goto('/communications')
       const withdrawnSelects = page.locator('select')
       await withdrawnSelects.nth(0).selectOption({ label: resumeTitle })
       await withdrawnSelects.nth(1).selectOption({ index: 1 })
       await withdrawnSelects.nth(2).selectOption({ index: 1 })
-      await page.locator('form button').click()
+      await page.getByRole('button', { name: 'Generate with AI' }).click()
       await expect(page.getByRole('alert')).toBeVisible()
       await page.goto('/resumes')
       await expect(page.getByText(resumeTitle)).toBeVisible()

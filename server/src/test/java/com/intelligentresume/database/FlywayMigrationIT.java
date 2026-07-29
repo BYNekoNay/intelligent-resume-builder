@@ -50,6 +50,18 @@ class FlywayMigrationIT {
     private DataSource dataSource;
 
     @Test
+    @DisplayName("V21 adds a required Chinese-default interview output language")
+    void v21_interview_output_language_exists() throws Exception {
+        try (Connection connection = dataSource.getConnection();
+             ResultSet columns = connection.getMetaData()
+                     .getColumns(null, "PUBLIC", "INTERVIEW_SESSION", "OUTPUT_LANGUAGE")) {
+            assertTrue(columns.next(), "V21 should add interview_session.output_language");
+            assertEquals(DatabaseMetaData.columnNoNulls, columns.getInt("NULLABLE"));
+            assertTrue(columns.getString("COLUMN_DEF").contains("ZH_CN"));
+        }
+    }
+
+    @Test
     @DisplayName("V1__m1_m2_init 应用成功")
     void v1_applied() {
         MigrationInfo v1 = Arrays.stream(flyway.info().applied())
@@ -91,6 +103,25 @@ class FlywayMigrationIT {
                 .filter(m -> "1".equals(m.getVersion().getVersion()))
                 .count();
         assertEquals(1, v1Count, "V1 迁移记录应只有一条");
+    }
+
+    @Test
+    @DisplayName("V20 AI attempt 幂等与轮次唯一约束存在")
+    void v20_interview_attempt_unique_constraints_exist() throws Exception {
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            Set<String> uniqueConstraints = new HashSet<>();
+            try (ResultSet constraints = statement.executeQuery(
+                    "SELECT constraint_name FROM information_schema.table_constraints "
+                            + "WHERE table_schema='PUBLIC' AND table_name='INTERVIEW_AI_ATTEMPT' "
+                            + "AND constraint_type='UNIQUE'")) {
+                while (constraints.next()) {
+                    uniqueConstraints.add(constraints.getString(1).toUpperCase());
+                }
+            }
+            assertTrue(uniqueConstraints.contains("UQ_IAI_USER_IDEMPOTENCY"));
+            assertTrue(uniqueConstraints.contains("UQ_IAI_SESSION_OPERATION_ROUND"));
+        }
     }
 
     @Test
@@ -236,6 +267,7 @@ class FlywayMigrationIT {
         Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
                 .target("17").load().migrate();
 
+        long sessionId;
         try (Connection connection = java.sql.DriverManager.getConnection(url, "sa", "");
              Statement statement = connection.createStatement()) {
             statement.execute("INSERT INTO user (username, email, password_hash, status, created_at, updated_at) "
@@ -248,13 +280,16 @@ class FlywayMigrationIT {
                     + "job_description_id, interview_mode, status, current_question, created_at, updated_at) "
                     + "VALUES (" + userId + ", 'EXTERNAL_RESUME', 'Resume', " + jobId
                     + ", 'TECHNICAL', 'IN_PROGRESS', 'Question', NOW(), NOW())");
-            long sessionId = getGeneratedId(statement, "SELECT id FROM interview_session WHERE user_id = " + userId);
+            sessionId = getGeneratedId(statement, "SELECT id FROM interview_session WHERE user_id = " + userId);
             statement.execute("INSERT INTO interview_record (session_id, question_text, answer_text, round_score, "
                     + "feedback_json, created_at, updated_at) VALUES (" + sessionId
                     + ", 'Q1', 'A1', 60, '{}', TIMESTAMP '2026-01-01 00:00:00', NOW())");
             statement.execute("INSERT INTO interview_record (session_id, question_text, answer_text, round_score, "
                     + "feedback_json, created_at, updated_at) VALUES (" + sessionId
                     + ", 'Q2', 'A2', 70, '{}', TIMESTAMP '2026-01-01 00:00:00', NOW())");
+            statement.execute("INSERT INTO interview_record (session_id, question_text, answer_text, round_score, "
+                    + "feedback_json, created_at, updated_at) VALUES (" + sessionId
+                    + ", 'Q3', 'A3', 80, '{}', TIMESTAMP '2026-01-02 00:00:00', NOW())");
         }
 
         Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration").load().migrate();
@@ -263,6 +298,12 @@ class FlywayMigrationIT {
              Statement statement = connection.createStatement()) {
             assertRound(statement, "Q1", 1);
             assertRound(statement, "Q2", 2);
+            assertRound(statement, "Q3", 3);
+            try (ResultSet status = statement.executeQuery(
+                    "SELECT status FROM interview_session WHERE id = " + sessionId)) {
+                assertTrue(status.next());
+                assertEquals("AWAITING_ANSWER", status.getString(1));
+            }
             try (ResultSet column = statement.executeQuery(
                     "SELECT is_nullable FROM information_schema.columns "
                             + "WHERE table_name = 'INTERVIEW_RECORD' AND column_name = 'ROUND_NO'")) {
@@ -272,6 +313,69 @@ class FlywayMigrationIT {
             assertThrows(SQLException.class, () -> statement.execute(
                     "UPDATE interview_record SET round_no = 1 WHERE id = "
                             + "(SELECT MAX(id) FROM interview_record)"));
+        }
+    }
+
+    @Test
+    @DisplayName("V19 should allow general interviews without dropping the job foreign key")
+    void v19_makes_interview_job_optional() throws Exception {
+        String databaseName = "optional_interview_job_" + UUID.randomUUID().toString().replace("-", "");
+        String url = "jdbc:h2:mem:" + databaseName
+                + ";MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=USER,KEY,VALUE,ORDER,DATABASE";
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .target("18").load().migrate();
+
+        long userId;
+        long jobId;
+        long sessionId;
+        try (Connection connection = java.sql.DriverManager.getConnection(url, "sa", "");
+             Statement statement = connection.createStatement()) {
+            statement.execute("INSERT INTO user (username, email, password_hash, status, created_at, updated_at) "
+                    + "VALUES ('optional_job', 'optional-job@example.test', 'hash', 'ACTIVE', NOW(), NOW())");
+            userId = getGeneratedId(statement, "SELECT id FROM user WHERE username = 'optional_job'");
+            statement.execute("INSERT INTO job_description (user_id, title, jd_text, created_at, updated_at) "
+                    + "VALUES (" + userId + ", 'Engineer', 'Java', NOW(), NOW())");
+            jobId = getGeneratedId(statement, "SELECT id FROM job_description WHERE user_id = " + userId);
+            statement.execute("INSERT INTO interview_session (user_id, source_type, external_resume_text, "
+                    + "job_description_id, interview_mode, status, current_question, created_at, updated_at) "
+                    + "VALUES (" + userId + ", 'EXTERNAL_RESUME', 'Resume', " + jobId
+                    + ", 'TECHNICAL', 'IN_PROGRESS', 'Targeted question', NOW(), NOW())");
+            sessionId = getGeneratedId(statement, "SELECT id FROM interview_session WHERE user_id = " + userId);
+        }
+
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration").load().migrate();
+
+        try (Connection connection = java.sql.DriverManager.getConnection(url, "sa", "");
+             Statement statement = connection.createStatement()) {
+            try (ResultSet column = statement.executeQuery(
+                    "SELECT is_nullable FROM information_schema.columns "
+                            + "WHERE table_name = 'INTERVIEW_SESSION' AND column_name = 'JOB_DESCRIPTION_ID'")) {
+                assertTrue(column.next());
+                assertEquals("YES", column.getString(1));
+            }
+            boolean foreignKeyFound = false;
+            try (ResultSet keys = connection.getMetaData().getImportedKeys(null, "PUBLIC", "INTERVIEW_SESSION")) {
+                while (keys.next()) {
+                    if ("JOB_DESCRIPTION_ID".equalsIgnoreCase(keys.getString("FKCOLUMN_NAME"))
+                            && "JOB_DESCRIPTION".equalsIgnoreCase(keys.getString("PKTABLE_NAME"))) {
+                        foreignKeyFound = true;
+                    }
+                }
+            }
+            assertTrue(foreignKeyFound, "V19 must retain the job description foreign key");
+            assertEquals(jobId, getGeneratedId(statement,
+                    "SELECT job_description_id FROM interview_session WHERE id = " + sessionId));
+            assertThrows(SQLException.class, () -> statement.execute(
+                    "INSERT INTO interview_session (user_id, source_type, external_resume_text, "
+                            + "job_description_id, interview_mode, status, current_question, created_at, updated_at) "
+                            + "VALUES (" + userId + ", 'EXTERNAL_RESUME', 'Resume', 999999, "
+                            + "'TECHNICAL', 'IN_PROGRESS', 'Invalid job', NOW(), NOW())"));
+            statement.execute("INSERT INTO interview_session (user_id, source_type, external_resume_text, "
+                    + "job_description_id, interview_mode, status, current_question, created_at, updated_at) "
+                    + "VALUES (" + userId + ", 'EXTERNAL_RESUME', 'Resume', NULL, "
+                    + "'TECHNICAL', 'IN_PROGRESS', 'General question', NOW(), NOW())");
+            assertEquals(1, getGeneratedId(statement,
+                    "SELECT COUNT(*) FROM interview_session WHERE job_description_id IS NULL"));
         }
     }
 

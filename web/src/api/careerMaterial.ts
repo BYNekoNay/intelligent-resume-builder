@@ -25,6 +25,30 @@ export interface CareerMaterialSummary {
   updatedAt: string
 }
 
+export interface CareerMaterialSearchItem extends CareerMaterialSummary {
+  excerpt: string
+}
+
+export type CareerMaterialSort = 'updatedAt,desc' | 'updatedAt,asc' | 'title,asc'
+
+export interface CareerMaterialSearchPage {
+  items: CareerMaterialSearchItem[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
+  typeCounts: Partial<Record<MaterialType, number>>
+}
+
+export interface CareerMaterialSearchParams {
+  q?: string
+  type?: MaterialType
+  usagePreference?: UsagePreference
+  page?: number
+  size?: number
+  sort?: CareerMaterialSort
+}
+
 export interface CareerMaterial extends CareerMaterialSummary {
   contentJson: Record<string, unknown>
   sourceText: string | null
@@ -41,6 +65,10 @@ export interface CareerMaterialPayload {
 
 export function listMaterials(type?: MaterialType) {
   return apiClient.get<ApiResponse<CareerMaterialSummary[]>>('/api/career-materials', { params: { type } })
+}
+
+export function searchMaterials(params: CareerMaterialSearchParams = {}) {
+  return apiClient.get<ApiResponse<CareerMaterialSearchPage>>('/api/career-materials/search', { params })
 }
 
 export function getMaterial(id: number) {

@@ -52,7 +52,7 @@ class AiTaskControllerIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "policyVersion": "v1.1.0",
+                                  "policyVersion": "v1.2.0",
                                   "providerCode": "bailian",
                                   "taskScopes": ["JOB_GENERATION", "RESUME_OPTIMIZE"],
                                   "dataCategories": ["resume", "career_material"],
@@ -174,7 +174,7 @@ class AiTaskControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.status").value("GRANTED"))
-                .andExpect(jsonPath("$.data.policyVersion").value("v1.1.0"));
+                .andExpect(jsonPath("$.data.policyVersion").value("v1.2.0"));
     }
 
     // ---- 6. 未登录 → 403 ----

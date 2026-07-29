@@ -1,6 +1,8 @@
 package com.intelligentresume.interview.asset.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.interview.domain.InterviewRecord;
+import com.intelligentresume.interview.repository.InterviewRecordRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -9,6 +11,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import java.util.List;
+import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -20,6 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class InterviewAssetControllerIT {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private InterviewRecordRepository recordRepository;
     private static String tokenA;
     private static String tokenB;
     private static long jobId;
@@ -30,17 +36,42 @@ class InterviewAssetControllerIT {
     void prepareInterviewRecord() throws Exception {
         tokenA = register("asset_a", "asset_a@example.com");
         tokenB = register("asset_b", "asset_b@example.com");
+
+        // 授权 AI 面试
+        mockMvc.perform(post("/api/ai/consent")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"policyVersion\":\"v1.2.0\",\"providerCode\":\"bailian\",\"taskScopes\":[\"INTERVIEW_COACH\"],\"dataCategories\":[\"INTERVIEW_ANSWER\"],\"noticeHash\":\"test-hash\"}"))
+                .andExpect(status().isCreated());
+
         jobId = id(postJson("/api/jobs", tokenA, "{\"title\":\"Platform Engineer\",\"jdText\":\"Java Docker Kubernetes platform engineering\"}"));
-        MvcResult started = mockMvc.perform(post("/api/interviews/start").header("Authorization", "Bearer " + tokenA)
+
+        // 启动面试（AI 不可用 -> AI_ACTION_REQUIRED）
+        MvcResult started = mockMvc.perform(post("/api/interviews/start")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sourceType\":\"EXTERNAL_RESUME\",\"externalResumeText\":\"Java platform engineer\",\"jobDescriptionId\":%d,\"interviewMode\":\"TECHNICAL\"}".formatted(jobId)))
                 .andExpect(status().isOk()).andReturn();
         long interviewId = objectMapper.readTree(started.getResponse().getContentAsString()).path("data").path("interviewId").asLong();
-        MvcResult answered = mockMvc.perform(post("/api/interviews/" + interviewId + "/answer")
-                        .header("Authorization", "Bearer " + tokenA).contentType(MediaType.APPLICATION_JSON)
+
+        // 切换到规则模式
+        mockMvc.perform(post("/api/interviews/" + interviewId + "/continue-with-rules")
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk());
+
+        // 规则模式作答
+        mockMvc.perform(post("/api/interviews/" + interviewId + "/answer")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"answer\":\"I designed a Kubernetes platform and reduced deployment time by 40 percent.\"}"))
                 .andExpect(status().isOk()).andReturn();
-        recordId = objectMapper.readTree(answered.getResponse().getContentAsString()).path("data").path("recordId").asLong();
+
+        // 从数据库查询最新记录
+        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(interviewId);
+        Assertions.assertFalse(records.isEmpty(), "应至少有一条回答记录");
+        recordId = records.get(0).getId();
     }
 
     @Test @Order(2)

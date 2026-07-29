@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
@@ -24,6 +25,7 @@ class AtsControllerIT {
     private static String tokenB;
     private static long versionId;
     private static long jobId;
+    private static long atsResultId;
 
     @Test
     @Order(1)
@@ -42,8 +44,9 @@ class AtsControllerIT {
     @Test
     @Order(2)
     void returnsExplainablePersistedContract() throws Exception {
-        mockMvc.perform(post("/api/ats/check")
+        MvcResult result = mockMvc.perform(post("/api/ats/check")
                         .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "ats-contract")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d}".formatted(versionId, jobId)))
                 .andExpect(status().isOk())
@@ -54,16 +57,60 @@ class AtsControllerIT {
                 .andExpect(jsonPath("$.data.passedChecks").isArray())
                 .andExpect(jsonPath("$.data.risks").isArray())
                 .andExpect(jsonPath("$.data.priorities").isArray())
-                .andExpect(jsonPath("$.data.disclaimer").isNotEmpty());
+                .andExpect(jsonPath("$.data.disclaimer").isNotEmpty())
+                .andExpect(jsonPath("$.data.analysisStatus").value("RULES_FALLBACK"))
+                .andExpect(jsonPath("$.data.analysisSource").value("RULES"))
+                .andExpect(jsonPath("$.data.fallback.code").value("AI_DISABLED"))
+                .andReturn();
+
+        atsResultId = objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+        mockMvc.perform(get("/api/ats/checks/" + atsResultId)
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(atsResultId))
+                .andExpect(jsonPath("$.data.analysisStatus").value("RULES_FALLBACK"));
     }
 
     @Test
     @Order(3)
+    void reusesMatchingIdempotentRequestAndRejectsChangedPayload() throws Exception {
+        String body = "{\"resumeVersionId\":%d,\"jobDescriptionId\":%d}".formatted(versionId, jobId);
+        MvcResult repeated = mockMvc.perform(post("/api/ats/check")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "ats-contract")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andReturn();
+        long repeatedId = objectMapper.readTree(repeated.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+        Assertions.assertEquals(atsResultId, repeatedId);
+
+        mockMvc.perform(post("/api/ats/check")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "ats-contract")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"useAi\":false}".formatted(versionId, jobId)))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    @Order(4)
     void rejectsCrossUserResources() throws Exception {
         mockMvc.perform(post("/api/ats/check")
                         .header("Authorization", "Bearer " + tokenB)
+                        .header("Idempotency-Key", "ats-cross-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d}".formatted(versionId, jobId)))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get("/api/ats/checks/" + atsResultId)
+                        .header("Authorization", "Bearer " + tokenB))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post("/api/ats/checks/" + atsResultId + "/ai-retry")
+                        .header("Authorization", "Bearer " + tokenB))
                 .andExpect(status().isNotFound());
     }
 

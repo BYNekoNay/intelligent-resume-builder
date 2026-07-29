@@ -23,7 +23,7 @@ public class AiConsentService {
 
     private final AiConsentRepository repository;
 
-    @Value("${app.ai.consent.policy-version:v1.0.0}")
+    @Value("${app.ai.consent.policy-version:v1.2.0}")
     private String policyVersion;
 
     public AiConsentService(AiConsentRepository repository) {

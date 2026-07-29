@@ -3,9 +3,62 @@ import { readFileSync } from 'node:fs'
 
 const now = '2026-07-22T10:00:00Z'
 const response = (data: unknown) => ({ code: 0, message: 'ok', data, traceId: 'e2e' })
+const materialSearch = (items: Array<Record<string, unknown>>, overrides: Record<string, unknown> = {}) => ({
+  items: items.map(item => ({ excerpt: '', ...item })),
+  page: 0,
+  size: 25,
+  totalElements: items.length,
+  totalPages: items.length ? 1 : 0,
+  typeCounts: items.reduce<Record<string, number>>((counts, item) => {
+    const type = String(item.materialType)
+    counts[type] = (counts[type] ?? 0) + 1
+    return counts
+  }, {}),
+  ...overrides,
+})
 const resume = { id: 1, title: 'Backend resume', currentVersionId: 11, jobDescriptionId: null, createdAt: now, updatedAt: now }
 const version = { id: 11, resumeId: 1, versionNo: 1, sourceType: 'MANUAL', resumeJson: {}, optimizationSummary: null, createdAt: now }
 const job = { id: 20, title: 'Backend Engineer', companyName: 'Example Systems', jdText: 'Java and Spring Boot', parsedKeywordsJson: null, parsedAt: null, parsedVersion: null, createdAt: now, updatedAt: now }
+const dimensionScores = {
+  relevance: 20,
+  evidenceSpecificity: 18,
+  structureClarity: 16,
+  roleCompetency: 15,
+  authenticityReflection: 8,
+}
+
+function interviewState(interviewId: number, overrides: Record<string, unknown> = {}) {
+  return {
+    interviewId,
+    status: 'AWAITING_ANSWER',
+    executionMode: 'AI',
+    currentQuestion: 'Question one',
+    currentQuestionNo: 1,
+    completedQuestionCount: 0,
+    targetQuestionCount: 6,
+    minQuestionCount: 3,
+    maxQuestionCount: 9,
+    lastEvaluation: null,
+    aiFailure: null,
+    completionReason: null,
+    ...overrides,
+  }
+}
+
+function lastEvaluation(roundNo: number, questionText: string, answerText: string) {
+  return {
+    recordId: 100 + roundNo,
+    roundNo,
+    questionText,
+    answerText,
+    roundScore: 77,
+    dimensionScores,
+    evaluationSource: 'AI',
+    strengths: ['Clear evidence'],
+    improvements: ['Add context'],
+    suggestedAnswer: 'A more structured answer.',
+  }
+}
 const allSectionsResume = JSON.parse(readFileSync(
   new URL('../../test-fixtures/resume-all-sections.json', import.meta.url),
   'utf8',
@@ -18,11 +71,359 @@ async function mockAuthenticatedApi(page: Page) {
   await page.route('**/api/resumes/1', route => route.fulfill({ json: response(resume) }))
   await page.route('**/api/resumes/1/versions**', route => route.fulfill({ json: response([version]) }))
   await page.route('**/api/jobs', route => route.fulfill({ json: response([job]) }))
+  await page.route('**/api/career-materials/search*', route => route.fulfill({ json: response(materialSearch([])) }))
   await page.route('**/api/career-materials*', route => route.fulfill({ json: response([]) }))
   await page.route('**/api/personal-profile*', route => route.fulfill({ json: response({ fullName: '', email: '', phone: '', location: '', website: '', profileSummary: '' }) }))
   await page.route('**/api/applications', route => route.fulfill({ json: response([]) }))
   await page.route('**/api/interview-answer-assets**', route => route.fulfill({ json: response([]) }))
 }
+
+test('confirms before starting a general interview without a selected job', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const payloads: unknown[] = []
+  await page.route('**/api/interviews/start', async route => {
+    payloads.push(route.request().postDataJSON())
+    await route.fulfill({ json: response(interviewState(51, { currentQuestion: 'Tell me about a technical project.' })) })
+  })
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+
+  page.once('dialog', dialog => dialog.dismiss())
+  await page.locator('.interview-setup > button').click()
+  await expect(page.locator('.interview-setup')).toBeVisible()
+  expect(payloads).toHaveLength(0)
+
+  page.once('dialog', dialog => dialog.accept())
+  await page.locator('.interview-setup > button').click()
+  await expect(page.getByText('Tell me about a technical project.')).toBeVisible()
+  expect(payloads).toEqual([{
+    sourceType: 'EXTERNAL_RESUME',
+    externalResumeText: 'Java engineer with five years of experience.',
+    interviewMode: 'TECHNICAL',
+    targetQuestionCount: 6,
+    outputLanguage: 'ZH_CN',
+  }])
+})
+
+test('starts a selected-job interview without a confirmation prompt', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let payload: unknown = null
+  let dialogOpened = false
+  page.on('dialog', async dialog => { dialogOpened = true; await dialog.dismiss() })
+  await page.route('**/api/interviews/start', async route => {
+    payload = route.request().postDataJSON()
+    await route.fulfill({ json: response(interviewState(52, { currentQuestion: 'Why this role?' })) })
+  })
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+  await page.locator('.interview-setup select').nth(2).selectOption('20')
+  await page.locator('.interview-setup > button').click()
+
+  await expect(page.getByText('Why this role?')).toBeVisible()
+  expect(dialogOpened).toBe(false)
+  expect(payload).toEqual({
+    sourceType: 'EXTERNAL_RESUME',
+    externalResumeText: 'Java engineer with five years of experience.',
+    jobDescriptionId: 20,
+    interviewMode: 'TECHNICAL',
+    targetQuestionCount: 6,
+    outputLanguage: 'ZH_CN',
+  })
+})
+
+test('keeps the interview open for three rounds and then shows the complete report', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let round = 0
+  await page.route('**/api/interviews/start', route => route.fulfill({
+    json: response(interviewState(53)),
+  }))
+  await page.route('**/api/interviews/53/answer', async route => {
+    round += 1
+    const questions = ['Question two', 'Question three', null]
+    const completed = round === 3
+    await route.fulfill({ json: response(interviewState(53, {
+      status: completed ? 'COMPLETED' : 'AWAITING_ANSWER',
+      currentQuestion: questions[round - 1],
+      currentQuestionNo: completed ? null : round + 1,
+      completedQuestionCount: round,
+      lastEvaluation: lastEvaluation(round, `Question ${round}`, 'A detailed answer with measurable results.'),
+      completionReason: completed ? 'AI_INFORMATION_COMPLETE' : null,
+    })) })
+  })
+  await page.route('**/api/interviews/53/report', route => route.fulfill({ json: response({
+    totalScore: 80, summary: 'Completed 3 rounds.', strengths: ['Clear evidence'],
+    weaknesses: ['Add context'], resumeSuggestions: ['Add the result to the resume.'],
+    expressionSuggestions: ['Lead with the conclusion.'],
+    dimensionScores, targetQuestionCount: 6, actualQuestionCount: 3,
+    completionReason: 'AI_INFORMATION_COMPLETE', evaluationSource: 'AI',
+    aiEvaluatedRounds: 3, ruleEvaluatedRounds: 0,
+  }) }))
+
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+  page.once('dialog', dialog => dialog.accept())
+  await page.locator('.interview-setup > button').click()
+
+  for (const expectedQuestion of ['Question two', 'Question three']) {
+    await page.getByRole('textbox', { name: '你的回答' }).fill('A detailed answer with measurable results.')
+    await page.getByRole('button', { name: '提交回答' }).click()
+    await expect(page.getByRole('heading', { name: expectedQuestion })).toBeVisible()
+    await expect(page.getByRole('button', { name: '提交回答' })).toBeVisible()
+  }
+
+  await page.getByRole('textbox', { name: '你的回答' }).fill('A final detailed answer with measurable results.')
+  await page.getByRole('button', { name: '提交回答' }).click()
+  await expect(page.getByRole('heading', { name: '面试完成。请查看报告或保存答案资产。' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '你的回答' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '提交回答' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '面试报告' }).click()
+  const report = page.locator('.interview-report')
+  await expect(report.getByText('Completed 3 rounds.')).toBeVisible()
+  await expect(report.getByText('Clear evidence')).toBeVisible()
+  await expect(report.getByText('Lead with the conclusion.')).toBeVisible()
+  expect(round).toBe(3)
+})
+
+test('retries a failed AI operation and can continue in rule mode', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const failure = {
+    operationId: 301,
+    stage: 'GENERATE_QUESTION',
+    retryable: true,
+    reauthorizationRequired: false,
+    messageCode: 'AI_PROVIDER_UNAVAILABLE',
+  }
+  await page.route('**/api/interviews/start', route => route.fulfill({
+    json: response(interviewState(54, {
+      status: 'AI_ACTION_REQUIRED', currentQuestion: null, currentQuestionNo: null, aiFailure: failure,
+    })),
+  }))
+  await page.route('**/api/interviews/54/ai/retry', route => route.fulfill({
+    json: response(interviewState(54, {
+      status: 'AI_ACTION_REQUIRED', currentQuestion: null, currentQuestionNo: null,
+      aiFailure: { ...failure, retryable: false },
+    })),
+  }))
+  await page.route('**/api/interviews/54/continue-with-rules', route => route.fulfill({
+    json: response(interviewState(54, { executionMode: 'RULE', currentQuestion: 'Rule fallback question' })),
+  }))
+
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '开始面试' }).click()
+  await expect(page.getByText('AI 服务暂时不可用')).toBeVisible()
+
+  await page.getByRole('button', { name: '重试 AI' }).click()
+  await expect(page.getByRole('button', { name: '重试 AI' })).toHaveCount(0)
+  await page.getByRole('button', { name: '切换到规则模式' }).click()
+  await expect(page.getByRole('heading', { name: 'Rule fallback question' })).toBeVisible()
+  await expect(page.getByText('规则模式', { exact: true })).toBeVisible()
+})
+
+test('restores an unfinished interview after a page refresh', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let stateRequests = 0
+  await page.addInitScript(() => sessionStorage.setItem('interview-session-id', '55'))
+  await page.route('**/api/interviews/55', route => {
+    stateRequests += 1
+    return route.fulfill({ json: response(interviewState(55, { currentQuestion: 'Recovered question' })) })
+  })
+
+  await page.goto('/interviews')
+  await expect(page.getByRole('heading', { name: 'Recovered question' })).toBeVisible()
+  expect(stateRequests).toBe(1)
+})
+
+test('polls an in-flight interview until the server finishes processing', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let stateRequests = 0
+  await page.addInitScript(() => sessionStorage.setItem('interview-session-id', '57'))
+  await page.route('**/api/interviews/57', route => {
+    stateRequests += 1
+    const state = stateRequests === 1
+      ? interviewState(57, { status: 'EVALUATING_ANSWER', currentQuestion: 'Question one' })
+      : interviewState(57, { currentQuestion: 'Recovered next question', completedQuestionCount: 1 })
+    return route.fulfill({ json: response(state) })
+  })
+
+  await page.goto('/interviews')
+  await expect(page.getByText('AI 正在评估你的回答')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Recovered next question' })).toBeVisible({ timeout: 5000 })
+  expect(stateRequests).toBeGreaterThanOrEqual(2)
+})
+
+test('restores a completed interview and its report after refresh', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.addInitScript(() => sessionStorage.setItem('interview-session-id', '58'))
+  await page.route('**/api/interviews/58', route => route.fulfill({ json: response(interviewState(58, {
+    status: 'COMPLETED', currentQuestion: null, currentQuestionNo: null,
+    completedQuestionCount: 3, completionReason: 'AI_INFORMATION_COMPLETE',
+  })) }))
+  await page.route('**/api/interviews/58/report', route => route.fulfill({ json: response({
+    totalScore: 81, summary: 'Recovered completed report.', strengths: [], weaknesses: [],
+    resumeSuggestions: [], expressionSuggestions: [], dimensionScores,
+    targetQuestionCount: 6, actualQuestionCount: 3, completionReason: 'AI_INFORMATION_COMPLETE',
+    evaluationSource: 'AI', aiEvaluatedRounds: 3, ruleEvaluatedRounds: 0,
+  }) }))
+
+  await page.goto('/interviews')
+  await expect(page.locator('.interview-report').getByText('Recovered completed report.')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('interview-session-id'))).toBe('58')
+})
+
+test('preserves a failed answer when switching to rule fallback', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const answerText = 'I used a staged rollout and reduced incidents by 30 percent.'
+  await page.route('**/api/interviews/start', route => route.fulfill({ json: response(interviewState(59)) }))
+  await page.route('**/api/interviews/59/answer', route => route.fulfill({ json: response(interviewState(59, {
+    status: 'AI_ACTION_REQUIRED', aiFailure: {
+      operationId: 401, stage: 'ANSWER_EVALUATION', retryable: true,
+      reauthorizationRequired: false, messageCode: 'AI_FAILURE',
+    },
+  })) }))
+  await page.route('**/api/interviews/59/continue-with-rules', route => route.fulfill({ json: response(interviewState(59, {
+    executionMode: 'RULE', currentQuestion: 'Question one',
+  })) }))
+
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '开始面试' }).click()
+  await page.getByRole('textbox', { name: '你的回答' }).fill(answerText)
+  await page.getByRole('button', { name: '提交回答' }).click()
+  await page.getByRole('button', { name: '切换到规则模式' }).click()
+
+  await expect(page.getByRole('textbox', { name: '你的回答' })).toHaveValue(answerText)
+})
+
+test('saves the evaluated question and answer snapshot as an asset', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let assetPayload: unknown = null
+  const originalQuestion = 'Describe a production incident you resolved.'
+  const originalAnswer = 'I traced the latency to a saturated connection pool and reduced P99 by 35%.'
+  await page.route('**/api/interviews/start', route => route.fulfill({
+    json: response(interviewState(56, { currentQuestion: originalQuestion })),
+  }))
+  await page.route('**/api/interviews/56/answer', route => route.fulfill({
+    json: response(interviewState(56, {
+      currentQuestion: 'What did you learn from that incident?', currentQuestionNo: 2,
+      completedQuestionCount: 1, lastEvaluation: lastEvaluation(1, originalQuestion, originalAnswer),
+    })),
+  }))
+  await page.route('**/api/interview-answer-assets', async route => {
+    assetPayload = route.request().postDataJSON()
+    await route.fulfill({ json: response({ id: 501 }) })
+  })
+
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '开始面试' }).click()
+  await page.getByRole('textbox', { name: '你的回答' }).fill(originalAnswer)
+  await page.getByRole('button', { name: '提交回答' }).click()
+  await page.getByRole('button', { name: '保存为答案资产' }).click()
+
+  await expect.poll(() => assetPayload).toEqual({
+    interviewRecordId: 101,
+    questionText: originalQuestion,
+    originalAnswerText: originalAnswer,
+    suggestedAnswerText: 'A more structured answer.',
+  })
+  await expect(page.getByText('已保存', { exact: true })).toBeVisible()
+})
+
+test('reuses the start idempotency key when the same request is retried', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const keys: string[] = []
+  let attempt = 0
+  await page.route('**/api/interviews/start', async route => {
+    attempt += 1
+    keys.push(route.request().headers()['idempotency-key'])
+    if (attempt === 1) {
+      await route.fulfill({ status: 500, json: { code: 50000, message: 'temporary failure', data: null, traceId: 'e2e' } })
+      return
+    }
+    await route.fulfill({ json: response(interviewState(57, { currentQuestion: 'Idempotent question' })) })
+  })
+
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '开始面试' }).click()
+  await expect(page.getByRole('alert')).toContainText('无法启动面试')
+
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '开始面试' }).click()
+  await expect(page.getByRole('heading', { name: 'Idempotent question' })).toBeVisible()
+  expect(keys).toHaveLength(2)
+  expect(keys[0]).toBeTruthy()
+  expect(keys[1]).toBe(keys[0])
+})
+
+test('requires confirmation before ending an interview early', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let finishCalls = 0
+  await page.route('**/api/interviews/start', route => route.fulfill({
+    json: response(interviewState(58, { completedQuestionCount: 1, currentQuestionNo: 2 })),
+  }))
+  await page.route('**/api/interviews/58/finish', route => {
+    finishCalls += 1
+    return route.fulfill({ json: response(interviewState(58, {
+      status: 'COMPLETED', currentQuestion: null, currentQuestionNo: null,
+      completedQuestionCount: 1, completionReason: 'USER_FINISHED',
+    })) })
+  })
+
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '开始面试' }).click()
+
+  page.once('dialog', dialog => dialog.dismiss())
+  await page.getByRole('button', { name: '结束面试' }).click()
+  expect(finishCalls).toBe(0)
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '结束面试' }).click()
+  await expect(page.getByRole('heading', { name: '面试完成。请查看报告或保存答案资产。' })).toBeVisible()
+  expect(finishCalls).toBe(1)
+})
+
+test('redirects to AI consent when interview authorization is missing', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.route('**/api/ai/consent', route => route.fulfill({ json: response(null) }))
+  await page.route('**/api/interviews/start', route => route.fulfill({
+    status: 403,
+    json: { code: 40301, message: 'consent required', data: null, traceId: 'e2e' },
+  }))
+
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '开始面试' }).click()
+
+  await expect(page).toHaveURL(/\/ai-consent\?redirect=\/interviews$/)
+  await expect(page.getByRole('heading', { name: '管理 AI 数据授权' })).toBeVisible()
+})
+
+test('keeps the active interview usable on a mobile viewport', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route('**/api/interviews/start', route => route.fulfill({
+    json: response(interviewState(59, { currentQuestion: 'Mobile interview question' })),
+  }))
+
+  await page.goto('/interviews')
+  await page.locator('.interview-setup textarea').fill('Java engineer with five years of experience.')
+  await page.locator('.interview-setup select').nth(2).selectOption('20')
+  await page.getByRole('button', { name: '开始面试' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Mobile interview question' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '你的回答' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '提交回答' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
+})
 
 test('takes an authenticated user from the home primary action to the generation workbench', async ({ page }) => {
   await mockAuthenticatedApi(page)
@@ -166,18 +567,230 @@ test('turns resume import into a file, parse, and review sequence', async ({ pag
   await expect(page.getByRole('button', { name: /确认文本并继续/ })).toBeVisible()
 })
 
-test('keeps the career identity, material composer, and library filter usable on mobile', async ({ page }) => {
+test('renders the material workspace as three independent desktop columns', async ({ page }, testInfo) => {
+  await mockAuthenticatedApi(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  await page.goto('/career-materials')
+  const navigation = page.locator('.material-index')
+  const library = page.locator('.library-pane')
+  const detail = page.locator('.detail-pane')
+  await expect(navigation).toBeVisible()
+  await expect(library).toBeVisible()
+  await expect(detail).toBeVisible()
+  const [navigationBox, libraryBox, detailBox] = await Promise.all([
+    navigation.boundingBox(), library.boundingBox(), detail.boundingBox(),
+  ])
+  expect(navigationBox?.x).toBeLessThan(libraryBox?.x ?? 0)
+  expect(libraryBox?.x).toBeLessThan(detailBox?.x ?? 0)
+  await expect(page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).resolves.toBe(0)
+  await page.screenshot({ path: testInfo.outputPath('career-material-desktop-1440x900.png'), fullPage: true })
+})
+
+test('keeps the desktop material editor wide with a visible action bar', async ({ page }, testInfo) => {
+  await mockAuthenticatedApi(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  await page.goto('/career-materials')
+  await page.locator('.new-icon-action').click()
+
+  const workspace = page.locator('.material-workspace')
+  const editor = page.locator('.material-editor')
+  const formScroll = page.locator('.form-scroll')
+  const actions = page.locator('.editor-actions')
+  await expect(editor).toBeVisible()
+  await expect(page.locator('.form-section')).toHaveCount(2)
+  await expect(actions).toBeVisible()
+  await expect(formScroll).toHaveCSS('overflow-y', 'auto')
+
+  const [workspaceBox, editorBox, formScrollBox, actionsBox] = await Promise.all([
+    workspace.boundingBox(), editor.boundingBox(), formScroll.boundingBox(), actions.boundingBox(),
+  ])
+  expect(editorBox?.width ?? 0).toBeGreaterThanOrEqual(460)
+  expect(formScrollBox?.width ?? 0).toBeGreaterThanOrEqual((editorBox?.width ?? 0) * .9)
+  expect(actionsBox?.width ?? 0).toBeGreaterThanOrEqual((editorBox?.width ?? 0) * .9)
+  expect((actionsBox?.y ?? 0) + (actionsBox?.height ?? 0)).toBeLessThanOrEqual((workspaceBox?.y ?? 0) + (workspaceBox?.height ?? 0) + 1)
+  await expect(page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).resolves.toBe(0)
+  await page.screenshot({ path: testInfo.outputPath('career-material-editor-desktop-1440x900.png'), fullPage: true })
+})
+
+test('opens material details in a tablet drawer', async ({ page }, testInfo) => {
+  await mockAuthenticatedApi(page)
+  await page.setViewportSize({ width: 1024, height: 768 })
+  const summary = { id: 88, materialType: 'PROJECT_EXPERIENCE', title: 'Platform migration', usagePreference: 'PREFERRED', updatedAt: now }
+  await page.route('**/api/career-materials/search*', route => route.fulfill({ json: response(materialSearch([summary])) }))
+  await page.route('**/api/career-materials/88', route => route.fulfill({ json: response({
+    ...summary, contentJson: { outcome: 'Zero-downtime migration.' }, sourceText: 'Moved the platform without downtime.', createdAt: now,
+  }) }))
+
+  await page.goto('/career-materials')
+  await page.getByRole('article', { name: summary.title }).locator('.row-select').click()
+  const drawer = page.locator('.detail-pane')
+  await expect(drawer).toHaveCSS('position', 'fixed')
+  await expect(drawer).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+  await expect(page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).resolves.toBe(0)
+  await page.screenshot({ path: testInfo.outputPath('career-material-tablet-1024x768.png'), fullPage: true })
+})
+
+test('keeps the material-first workspace and full-screen composer usable on mobile', async ({ page }, testInfo) => {
   await mockAuthenticatedApi(page)
   await page.setViewportSize({ width: 390, height: 844 })
 
   await page.goto('/career-materials')
-  await expect(page.getByRole('heading', { name: '把经历整理成可复用证据' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '个人档案' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '记录一段真实经历' })).toBeVisible()
-  await expect(page.locator('.material-form').getByLabel('资料类型')).toBeVisible()
-  await expect(page.getByLabel('筛选资料类型')).toBeVisible()
-  await expect(page.getByRole('heading', { name: '还没有可复用资料' })).toBeVisible()
+  await expect(page.locator('.material-workspace')).toBeVisible()
+  await expect(page.locator('.profile-index-entry')).toBeVisible()
+  await expect(page.locator('.search-control input')).toBeVisible()
+  await expect(page.locator('.error-state')).toHaveCount(0)
+  await expect(page.locator('.material-form')).toHaveCount(0)
+  await page.locator('.new-icon-action').click()
+  await expect(page.locator('.material-form')).toBeVisible()
+  await expect(page.locator('.detail-pane')).toHaveCSS('position', 'fixed')
   await expect(page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).resolves.toBe(0)
+  await page.screenshot({ path: testInfo.outputPath('career-material-mobile-390x844.png'), fullPage: true })
+})
+
+test('keeps workspace filters in the URL and only loads details for the selected material', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const summary = { id: 91, materialType: 'SKILL', title: 'Spring platform delivery', usagePreference: 'PREFERRED', updatedAt: now }
+  const detail = { ...summary, contentJson: { name: 'Spring Boot' }, sourceText: 'Delivered a reliable Spring platform.', createdAt: now }
+  const searchUrls: string[] = []
+  let detailRequests = 0
+  await page.route('**/api/career-materials/search*', route => {
+    searchUrls.push(route.request().url())
+    return route.fulfill({ json: response(materialSearch([summary])) })
+  })
+  await page.route('**/api/career-materials/91', route => {
+    detailRequests += 1
+    return route.fulfill({ json: response(detail) })
+  })
+
+  await page.goto('/career-materials?q=Spring&type=SKILL&usage=PREFERRED&sort=title,asc')
+  await expect(page.locator('.search-control input')).toHaveValue('Spring')
+  await expect(page.getByRole('article', { name: summary.title })).toBeVisible()
+  expect(detailRequests).toBe(0)
+
+  await page.getByRole('article', { name: summary.title }).locator('.row-select').click()
+  await expect(page).toHaveURL(/selected=91/)
+  await expect(page.locator('.material-detail h2')).toHaveText(summary.title)
+  expect(detailRequests).toBe(1)
+
+  await page.locator('.search-control input').fill('platform')
+  await expect(page).toHaveURL(/q=platform/)
+  await expect(page).not.toHaveURL(/selected=/)
+  expect(searchUrls.some(url => new URL(url).searchParams.get('q') === 'platform')).toBe(true)
+})
+
+test('paginates material results and keeps URL and API page indexes aligned', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const requestedPages: string[] = []
+  await page.route('**/api/career-materials/search*', route => {
+    const apiPage = new URL(route.request().url()).searchParams.get('page') ?? '0'
+    requestedPages.push(apiPage)
+    const item = { id: Number(apiPage) + 1, materialType: 'SKILL', title: `Skill page ${Number(apiPage) + 1}`, usagePreference: 'NORMAL', updatedAt: now }
+    return route.fulfill({ json: response(materialSearch([item], { page: Number(apiPage), totalElements: 51, totalPages: 3 })) })
+  })
+  await page.route('**/api/career-materials/1', route => route.fulfill({ json: response({
+    id: 1, materialType: 'SKILL', title: 'Skill page 1', usagePreference: 'NORMAL', updatedAt: now,
+    contentJson: {}, sourceText: '', createdAt: now,
+  }) }))
+
+  await page.goto('/career-materials?selected=1')
+  await expect(page.locator('.pagination')).toBeVisible()
+  await page.locator('.pagination button').last().click()
+  await expect(page).toHaveURL(/page=2/)
+  await expect(page).not.toHaveURL(/selected=/)
+  await expect(page.getByRole('article', { name: 'Skill page 2' })).toBeVisible()
+  expect(requestedPages).toContain('1')
+})
+
+test('retries a failed material workspace search', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let attempts = 0
+  await page.route('**/api/career-materials/search*', route => {
+    attempts += 1
+    if (attempts === 1) return route.fulfill({ status: 503, json: { code: 503, message: 'unavailable' } })
+    const item = { id: 2, materialType: 'PROJECT_EXPERIENCE', title: 'Recovered project', usagePreference: 'NORMAL', updatedAt: now }
+    return route.fulfill({ json: response(materialSearch([item])) })
+  })
+
+  await page.goto('/career-materials')
+  await expect(page.locator('.error-state')).toBeVisible()
+  await page.locator('.error-state button').click()
+  await expect(page.getByRole('article', { name: 'Recovered project' })).toBeVisible()
+  await expect(page.locator('.error-state')).toHaveCount(0)
+})
+
+test('protects an edited mobile material and restores the list position after closing', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  const summaries = Array.from({ length: 12 }, (_, index) => ({
+    id: 120 + index,
+    materialType: 'HIGHLIGHT',
+    title: `Evidence item ${index + 1}`,
+    usagePreference: 'NORMAL',
+    updatedAt: now,
+  }))
+  const selected = summaries[9]
+  await page.route('**/api/career-materials/search*', route => route.fulfill({ json: response(materialSearch(summaries)) }))
+  await page.route(`**/api/career-materials/${selected.id}`, route => route.fulfill({ json: response({
+    ...selected,
+    contentJson: { summary: 'Verifiable evidence.' },
+    sourceText: 'Verifiable evidence.',
+    createdAt: now,
+  }) }))
+
+  await page.goto('/career-materials')
+  const row = page.getByRole('article', { name: selected.title })
+  await row.scrollIntoViewIfNeeded()
+  const listScrollY = await page.evaluate(() => window.scrollY)
+  await row.locator('.row-select').click()
+  await page.locator('.detail-actions .btn-primary').click()
+  await page.locator('.material-form').getByLabel('标题').fill('Edited evidence title')
+
+  page.once('dialog', dialog => dialog.dismiss())
+  await page.locator('.close-action').click()
+  await expect(page.locator('.material-form')).toBeVisible()
+
+  page.once('dialog', dialog => dialog.accept())
+  await page.locator('.close-action').click()
+  await expect(page.locator('.material-form')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(listScrollY)
+})
+
+test('keeps an edited material when the user cancels a delete', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const summaries = [
+    { id: 301, materialType: 'HIGHLIGHT', title: 'Editing target', usagePreference: 'NORMAL', updatedAt: now },
+    { id: 302, materialType: 'HIGHLIGHT', title: 'Delete target', usagePreference: 'NORMAL', updatedAt: now },
+  ]
+  let deleteRequests = 0
+  await page.route('**/api/career-materials/search*', route => route.fulfill({ json: response(materialSearch(summaries)) }))
+  await page.route('**/api/career-materials/301', route => route.fulfill({ json: response({
+    ...summaries[0], contentJson: {}, sourceText: 'Evidence', createdAt: now,
+  }) }))
+  await page.route('**/api/career-materials/302', route => {
+    if (route.request().method() === 'DELETE') deleteRequests += 1
+    return route.fulfill({ json: response(null) })
+  })
+
+  await page.goto('/career-materials')
+  await page.getByRole('article', { name: 'Editing target' }).getByRole('button', { name: '编辑' }).click()
+  const title = page.locator('.material-form input').first()
+  await title.fill('Unsaved title')
+  let dialogCount = 0
+  const dialogMessages: string[] = []
+  page.on('dialog', async dialog => {
+    dialogCount += 1
+    dialogMessages.push(dialog.message())
+    if (dialogCount === 1) await dialog.accept()
+    else await dialog.dismiss()
+  })
+  await page.getByRole('article', { name: 'Delete target' }).locator('.row-actions .danger').click()
+  await expect(title).toHaveValue('Unsaved title')
+  expect(dialogCount).toBe(2)
+  expect(dialogMessages[1]).toBe('删除资料不会改写已创建版本的历史快照，确定继续吗？')
+  expect(dialogMessages[1]).not.toContain('�')
+  expect(deleteRequests).toBe(0)
 })
 
 test('loads complete material details before editing a highlight', async ({ page }) => {
@@ -197,6 +810,7 @@ test('loads complete material details before editing a highlight', async ({ page
   }
   let updatePayload: unknown
 
+  await page.route('**/api/career-materials/search*', route => route.fulfill({ json: response(materialSearch([summary])) }))
   await page.route('**/api/career-materials', route => route.fulfill({ json: response([summary]) }))
   await page.route('**/api/career-materials/77', async route => {
     if (route.request().method() === 'PATCH') {
@@ -215,13 +829,39 @@ test('loads complete material details before editing a highlight', async ({ page
   await expect(form.getByLabel('来源原文')).toHaveValue(detail.sourceText)
   await expect(form.getByLabel('资料 JSON')).toHaveValue(/platform reliability initiative/)
 
-  await form.getByLabel('来源原文').fill('Updated and still verifiable source text.')
+  await form.getByLabel('来源原文').fill('')
   await form.getByRole('button', { name: '保存修改' }).click()
   await expect.poll(() => updatePayload).toMatchObject({
     materialType: 'HIGHLIGHT',
-    sourceText: 'Updated and still verifiable source text.',
+    sourceText: '',
     contentJson: detail.contentJson,
   })
+})
+
+test('ignores a stale detail response after another material is selected', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const summaries = [
+    { id: 201, materialType: 'HIGHLIGHT', title: 'Slow detail', usagePreference: 'NORMAL', updatedAt: now },
+    { id: 202, materialType: 'HIGHLIGHT', title: 'Current detail', usagePreference: 'NORMAL', updatedAt: now },
+  ]
+  let releaseSlowDetail!: () => void
+  const slowDetailGate = new Promise<void>(resolve => { releaseSlowDetail = resolve })
+  await page.route('**/api/career-materials/search*', route => route.fulfill({ json: response(materialSearch(summaries)) }))
+  await page.route('**/api/career-materials/201', async route => {
+    await slowDetailGate
+    return route.fulfill({ json: response({ ...summaries[0], contentJson: {}, sourceText: 'Slow', createdAt: now }) })
+  })
+  await page.route('**/api/career-materials/202', route => route.fulfill({ json: response({
+    ...summaries[1], contentJson: {}, sourceText: 'Current', createdAt: now,
+  }) }))
+
+  await page.goto('/career-materials')
+  await page.getByRole('article', { name: 'Slow detail' }).getByRole('button', { name: '编辑' }).click()
+  await page.getByRole('article', { name: 'Current detail' }).locator('.row-select').click()
+  await expect(page.locator('.material-detail h2')).toHaveText('Current detail')
+  releaseSlowDetail()
+  await expect(page.locator('.material-form')).toHaveCount(0)
+  await expect(page.locator('.material-detail h2')).toHaveText('Current detail')
 })
 
 test('preserves a legacy skill proficiency value when editing', async ({ page }) => {
@@ -244,6 +884,7 @@ test('preserves a legacy skill proficiency value when editing', async ({ page })
   }
   let updatePayload: any
 
+  await page.route('**/api/career-materials/search*', route => route.fulfill({ json: response(materialSearch([summary])) }))
   await page.route('**/api/career-materials', route => route.fulfill({ json: response([summary]) }))
   await page.route('**/api/career-materials/78', async route => {
     if (route.request().method() === 'PATCH') updatePayload = route.request().postDataJSON()
@@ -278,12 +919,31 @@ test('loads a personal profile suggestion without saving it automatically', asyn
   })
 
   await page.goto('/career-materials')
+  await page.locator('.profile-index-entry').click()
   await page.getByLabel('从已有简历提取建议').selectOption('1')
   await page.getByRole('button', { name: '读取建议' }).click()
   await expect(page.getByLabel('姓名')).toHaveValue('BYNeko')
   expect(savedProfile).toBeUndefined()
   await page.getByRole('button', { name: '保存个人档案' }).click()
   await expect.poll(() => savedProfile).toMatchObject({ fullName: 'BYNeko', email: '2149752131@qq.com' })
+})
+
+test('restores the server profile after the user discards edits', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.route('**/api/personal-profile', route => route.fulfill({ json: response({
+    fullName: 'Persisted Name', email: '', phone: '', location: '', website: '', profileSummary: '',
+    targetRoleTitles: [], targetSeniority: '', targetIndustries: [], targetWorkPreferences: [], careerPositioningSummary: '',
+  }) }))
+
+  await page.goto('/career-materials')
+  await page.locator('.profile-index-entry').click()
+  const fullName = page.locator('.profile-fields input').first()
+  await expect(fullName).toHaveValue('Persisted Name')
+  await fullName.fill('Unsaved Draft')
+  page.once('dialog', dialog => dialog.accept())
+  await page.locator('.profile-workspace .back-action').click()
+  await page.locator('.profile-index-entry').click()
+  await expect(page.locator('.profile-fields input').first()).toHaveValue('Persisted Name')
 })
 
 test('creates an achievement material through the structured form without exposing JSON', async ({ page }) => {
@@ -297,10 +957,12 @@ test('creates an achievement material through the structured form without exposi
       return route.fulfill({ json: response({ id: 80, ...createPayload, updatedAt: now, createdAt: now }) })
     }
     if (url.pathname.endsWith('/41')) return route.fulfill({ json: response({ ...workMaterial, contentJson: {}, sourceText: '负责交易服务', createdAt: now }) })
+    if (url.pathname.endsWith('/search')) return route.fulfill({ json: response(materialSearch([workMaterial])) })
     return route.fulfill({ json: response([workMaterial]) })
   })
 
   await page.goto('/career-materials')
+  await page.locator('.new-icon-action').click()
   const form = page.locator('.material-form')
   await form.getByLabel('资料类型').selectOption('ACHIEVEMENT')
   await expect(form.getByLabel('关联工作或项目')).toBeVisible()
@@ -372,6 +1034,39 @@ test('persists resume typography and spacing controls with the edited version', 
   await expect(page.locator('.resume-paper')).toHaveCSS('--resume-font-family', '"Songti SC", SimSun, serif')
   await page.locator('.resume-preview-workspace').getByRole('button', { name: '保存新版本' }).click()
   await expect.poll(() => saved).toMatchObject({ resumeJson: { layout: { bodyFontSize: 16, headingFontSize: 18, fontFamily: 'songti' } } })
+})
+
+test('applies an AI-optimized personal summary from the section assistant', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = {
+    ...version,
+    resumeJson: {
+      basics: { name: 'BYNeko', title: '后端工程师', summary: '负责后端平台开发。' },
+      work: [], education: [], skills: [], projects: [], certificates: [], languages: [],
+    },
+  }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+  await page.route('**/api/ai/inline-optimize', route => route.fulfill({ json: response({ id: 71, status: 'PENDING' }) }))
+  await page.route('**/api/ai/tasks/71', route => route.fulfill({ json: response({
+    id: 71,
+    status: 'SUCCESS',
+    resultJson: {
+      originalContent: '负责后端平台开发。',
+      candidates: [{ content: '主导高并发后端平台的设计与交付。', suggestion: '强化行动表达' }],
+      requiresManualConfirmation: true,
+    },
+  }) }))
+
+  await page.goto('/resumes/1/edit')
+  await page.locator('#resume-basics').getByRole('button', { name: 'AI 优化' }).click()
+  const assistant = page.locator('.ai-assistant-panel')
+  await expect(assistant.getByText('主导高并发后端平台的设计与交付。')).toBeVisible()
+  const applyButton = assistant.getByRole('button', { name: '采纳并写回' })
+  await expect(applyButton).toBeVisible()
+  await applyButton.click()
+
+  await expect(page.locator('#resume-basics textarea')).toHaveValue('主导高并发后端平台的设计与交付。')
+  await expect(assistant).toBeHidden()
 })
 
 test('keeps return and preview actions inside the design workspace', async ({ page }) => {
@@ -857,10 +1552,13 @@ test('resumes the pending job generation after granting AI consent', async ({ pa
     id: 9,
     status: 'GRANTED',
     createdAt: now,
-    policyVersion: 'v1.1.0',
+    policyVersion: 'v1.2.0',
     providerCode: 'bailian',
-    taskScopes: ['JOB_MATERIAL_SELECTION', 'JOB_GENERATION'],
-    dataCategories: ['CAREER_MATERIAL', 'JOB_DESCRIPTION', 'PERSONAL_PROFILE'],
+    taskScopes: [
+      'JOB_MATERIAL_SELECTION', 'JOB_GENERATION', 'RESUME_OPTIMIZE', 'ACHIEVEMENT_GUIDANCE',
+      'COMMUNICATION_GENERATE', 'MATERIAL_IMPORT', 'INLINE_OPTIMIZE', 'INTERVIEW_COACH', 'ATS_ANALYSIS',
+    ],
+    dataCategories: ['RESUME', 'INTERVIEW_ANSWER', 'CAREER_MATERIAL', 'JOB_DESCRIPTION', 'PERSONAL_PROFILE'],
   }
   let consentGranted = false
   let generationPayload: unknown
@@ -971,6 +1669,15 @@ test('renders the generated resume draft as readable fields instead of JSON', as
             highlights: ['将核心接口 P99 降至 160ms', '季度故障数下降 45%'],
             _source: 'materialId=62, type=WORK_EXPERIENCE',
           }],
+          objective: { summary: '负责复杂后端系统的技术负责人角色。' },
+          volunteering: [{ organization: '开源社区', role: '维护者', _sources: [{ materialId: 63 }] }],
+          courses: [{ name: '高并发系统设计', provider: '示例技术学院', _sources: [{ materialId: 64 }] }],
+          publications: [{ title: '可靠分布式系统实践', publisher: '技术社区', _sources: [{ materialId: 65 }] }],
+          customSections: [{
+            title: '领导力经历',
+            entries: [{ name: '平台迁移领导力', description: '协调跨职能团队完成迁移。', _sources: [{ materialId: 66 }] }],
+            _sources: [{ materialId: 66 }],
+          }],
         },
         selected: [],
         unselected: [],
@@ -991,18 +1698,36 @@ test('renders the generated resume draft as readable fields instead of JSON', as
 
   await page.goto('/generate/confirm?taskId=33')
   const draft = page.locator('.draft-container')
-  await expect(draft.getByText('姓名', { exact: true })).toBeVisible()
-  await expect(draft.getByText('BYNeko', { exact: true })).toBeVisible()
+  const workspace = page.locator('.review-workspace')
+  const basicsSection = page.locator('.draft-section').filter({ hasText: '个人概要' })
+  await expect(workspace).toBeVisible()
+  await expect(page.getByRole('navigation', { name: '草稿章节' })).toBeVisible()
+  await expect(page.locator('.draft-section')).toHaveCount(1)
+  await expect(basicsSection.getByText('姓名', { exact: true })).toBeVisible()
+  await expect(basicsSection.getByText('BYNeko', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /工作经历/ }).click()
   await expect(draft.getByText('公司', { exact: true })).toBeVisible()
   await expect(draft).toContainText('将核心接口 P99 降至 160ms')
   await expect(draft).not.toContainText('work[0]')
   await expect(draft).not.toContainText('"company"')
   await expect(draft).not.toContainText('materialId=62')
+  await page.getByRole('button', { name: /求职目标/ }).click()
+  await expect(draft.getByRole('heading', { name: '求职目标' })).toBeVisible()
+  await page.getByRole('button', { name: /志愿经历/ }).click()
+  await expect(draft.getByRole('heading', { name: '志愿经历' })).toBeVisible()
+  await page.getByRole('button', { name: /课程培训/ }).click()
+  await expect(draft.getByRole('heading', { name: '课程培训' })).toBeVisible()
+  await page.getByRole('button', { name: /研究成果/ }).click()
+  await expect(draft.getByRole('heading', { name: '研究成果' })).toBeVisible()
+  await page.getByRole('button', { name: /自定义模块/ }).click()
+  await expect(draft.getByRole('heading', { name: '自定义模块' })).toBeVisible()
+  await expect(draft).toContainText('平台迁移领导力')
   const qualitySummary = draft.locator('.quality-summary')
   await expect(qualitySummary.getByRole('heading', { name: '草稿质量摘要' })).toBeVisible()
   await expect(qualitySummary).toContainText('需要处理')
   await expect(qualitySummary).toContainText('待核实内容')
 
+  await page.getByRole('button', { name: /工作经历/ }).click()
   const workSection = page.locator('.draft-section').filter({ hasText: '工作经历' })
   await expect(workSection.locator('.action-btn')).toHaveCount(3)
   await expect(workSection.getByRole('button', { name: '接受' })).toHaveCSS('white-space', 'nowrap')
@@ -1015,9 +1740,79 @@ test('renders the generated resume draft as readable fields instead of JSON', as
   await dialog.getByRole('button', { name: '保存' }).click()
   await expect(workSection).toContainText('负责核心交易和账户平台。')
 
-  const basicsSection = page.locator('.draft-section').filter({ hasText: '个人概要' })
+  await page.getByRole('button', { name: /个人概要/ }).click()
   await basicsSection.getByRole('button', { name: '编辑' }).click()
-  await expect(page.getByRole('dialog', { name: '编辑内容' }).getByRole('textbox', { name: '邮箱' })).toBeVisible()
+  const basicsDialog = page.getByRole('dialog', { name: '编辑内容' })
+  await expect(basicsDialog.getByRole('textbox', { name: '邮箱' })).toBeVisible()
+  await expect(page.locator('.confirm-actions')).toBeVisible()
+  await basicsDialog.getByRole('button', { name: '关闭' }).click()
+  await expect(basicsDialog).toBeHidden()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mobileOutline = page.locator('.mobile-outline-trigger')
+  await expect(mobileOutline).toBeVisible()
+  await mobileOutline.click()
+  const mobileNavigation = page.getByRole('navigation', { name: '草稿章节' })
+  await expect(mobileNavigation).toBeVisible()
+  await mobileNavigation.getByRole('button', { name: /工作经历/ }).click()
+  await expect(draft.getByRole('heading', { name: '工作经历' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('moves through only the generated draft sections that still need attention', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.route('**/api/ai/tasks/34', route => route.fulfill({
+    json: response({
+      id: 34,
+      taskType: 'JOB_GENERATION',
+      jobDescriptionId: job.id,
+      status: 'SUCCESS',
+      confirmationStatus: 'PENDING',
+      errorMessage: null,
+      updatedAt: now,
+      resultJson: {
+        draftResumeJson: {
+          basics: { name: 'BYNeko', summary: '平台工程师。', _source: 'profile' },
+          work: [{ company: '星河科技', position: '后端工程师', _pending: { reason: '需要确认任职时间' } }],
+        },
+        selected: [],
+        unselected: [],
+        missing: [{ section: 'education', reason: '未提供教育背景资料' }],
+        qualitySummary: {
+          totalDraftItems: 2,
+          sourcedItems: 1,
+          pendingItems: 1,
+          unsupportedItems: 0,
+          draftGapCount: 1,
+          missingRequirementCount: 1,
+          readiness: 'REQUIRES_ACTION',
+        },
+        warnings: [],
+      },
+    }),
+  }))
+
+  await page.goto('/generate/confirm?taskId=34')
+  const draft = page.locator('.draft-container')
+  const confirmButton = draft.getByRole('button', { name: /确认并创建简历/ })
+  await expect(draft.getByRole('heading', { name: '工作经历' })).toBeVisible()
+  await expect(confirmButton).toBeDisabled()
+
+  await draft.getByRole('button', { name: /只看待处理/ }).click()
+  const attentionNavigation = draft.getByRole('navigation', { name: '草稿章节' })
+  await expect(attentionNavigation.locator('.section-navigation__item')).toHaveCount(2)
+  await draft.getByRole('button', { name: '下一章节' }).click()
+  await expect(draft.getByRole('heading', { name: '教育背景' })).toBeVisible()
+  await draft.getByRole('button', { name: '上一章节' }).click()
+  await expect(draft.getByRole('heading', { name: '工作经历' })).toBeVisible()
+  await draft.getByRole('button', { name: '接受' }).click()
+
+  await expect(attentionNavigation.locator('.section-navigation__item')).toHaveCount(1)
+  await expect(attentionNavigation.getByRole('button', { name: /工作经历/ })).toHaveCount(0)
+  await expect(draft.getByRole('heading', { name: '教育背景' })).toBeVisible()
+  await expect(draft.getByText('未提供教育背景资料')).toBeVisible()
+  await expect(draft.getByText('该章节暂无可审核草稿，可根据资料缺口稍后补充。')).toBeVisible()
+  await expect(confirmButton).toBeEnabled()
 })
 
 test('generates an editable communication draft and carries it into an application', async ({ page }) => {
@@ -1025,7 +1820,7 @@ test('generates an editable communication draft and carries it into an applicati
   let generationPayload: unknown
   await page.route('**/api/communications/generate', async route => {
     generationPayload = route.request().postDataJSON()
-    await route.fulfill({ json: response({ type: 'EMAIL', draft: 'Hello Example Systems, I would like to apply.', sentAutomatically: false, requiresManualConfirmation: true }) })
+    await route.fulfill({ json: response({ type: 'EMAIL', draft: 'Hello Example Systems, I would like to apply.', sentAutomatically: false, requiresManualConfirmation: true, generationSource: 'TEMPLATE' }) })
   })
   await page.goto('/communications')
   const versionSelect = page.locator('select').nth(1)
@@ -1035,13 +1830,50 @@ test('generates an editable communication draft and carries it into an applicati
   await page.locator('select').nth(2).selectOption('20')
   await page.locator('select').nth(3).selectOption('EMAIL')
   const communicationForm = page.locator('form.compact-form')
-  await communicationForm.locator('button').click()
-  await expect.poll(() => generationPayload).toEqual({ resumeVersionId: 11, jobDescriptionId: 20, type: 'EMAIL' })
+  await communicationForm.locator('.generation-actions button').nth(1).click()
+  await expect.poll(() => generationPayload).toEqual({ resumeVersionId: 11, jobDescriptionId: 20, type: 'EMAIL', outputLanguage: 'ZH_CN' })
   const editor = page.locator('article.workspace-card textarea')
   await editor.fill('Edited email body')
   await page.locator('article.workspace-card .job-actions button').nth(1).click()
   await expect(page).toHaveURL(/\/applications$/)
   await expect(page.locator('textarea').nth(1)).toHaveValue('Edited email body')
+})
+
+test('generates a communication draft through the AI task lifecycle', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockAuthenticatedApi(page)
+  let aiPayload: unknown
+  await page.route('**/api/communications/ai-generate', async route => {
+    aiPayload = route.request().postDataJSON()
+    expect(route.request().headers()['idempotency-key']).toBe('communication:11:20:EMAIL:ZH_CN:v1')
+    await route.fulfill({ json: response({
+      id: 81, taskType: 'COMMUNICATION_GENERATE', jobDescriptionId: 20, status: 'PENDING',
+      resultJson: null, errorMessage: null, retryCount: 0, createdAt: now, updatedAt: now,
+    }) })
+  })
+  await page.route('**/api/ai/tasks/81', route => route.fulfill({ json: response({
+    id: 81, taskType: 'COMMUNICATION_GENERATE', jobDescriptionId: 20, status: 'SUCCESS',
+    resultJson: {
+      type: 'EMAIL', subject: '申请后端工程师岗位', body: '您好，我具备 Java 服务开发经验。',
+      draft: '主题：申请后端工程师岗位\n\n您好，我具备 Java 服务开发经验。', generationSource: 'AI',
+      communicationDraftId: 91, resumeVersionId: 11, jobDescriptionId: 20, promptVersion: 'communication-v1',
+    },
+    errorMessage: null, retryCount: 0, createdAt: now, updatedAt: now,
+  }) }))
+
+  await page.goto('/communications')
+  await page.locator('select').nth(1).selectOption('11')
+  await page.locator('select').nth(2).selectOption('20')
+  await page.locator('select').nth(3).selectOption('EMAIL')
+  await page.locator('form.compact-form .generation-actions button').first().click()
+
+  await expect.poll(() => aiPayload).toEqual({
+    resumeVersionId: 11, jobDescriptionId: 20, type: 'EMAIL', outputLanguage: 'ZH_CN',
+  })
+  await expect(page).toHaveURL(/taskId=81/)
+  await expect(page.getByText('AI 生成', { exact: true })).toBeVisible({ timeout: 5_000 })
+  await expect(page.locator('article.workspace-card textarea')).toHaveValue(/Java 服务开发经验/)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
 
 test('retries a failed PDF export through polling and downloads the completed document', async ({ page }) => {

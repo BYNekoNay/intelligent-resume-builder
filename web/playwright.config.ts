@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const localServices = process.env.LOCAL_E2E === 'true'
-const localBaseUrl = process.env.LOCAL_E2E_BASE_URL ?? 'http://localhost:5173'
+const localBaseUrl = process.env.LOCAL_E2E_BASE_URL ?? 'http://127.0.0.1:5173'
 const allowedLocalOrigins = new Set([
   'http://127.0.0.1:5173',
   'http://localhost:5173',
@@ -14,7 +14,8 @@ if (localServices && !allowedLocalOrigins.has(localBaseUrl)) {
 
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: true,
+  fullyParallel: !localServices,
+  workers: localServices ? 1 : undefined,
   reporter: 'list',
   use: {
     baseURL: localServices ? localBaseUrl : 'http://127.0.0.1:4173',

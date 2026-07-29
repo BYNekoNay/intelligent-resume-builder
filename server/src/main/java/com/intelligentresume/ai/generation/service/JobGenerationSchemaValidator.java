@@ -29,7 +29,7 @@ import java.util.HashSet;
 public class JobGenerationSchemaValidator {
 
     static final String CURRENT_VERSION = "v1.0.0";
-    private static final Set<String> ALLOWED_TOP_KEYS =
+    static final Set<String> SUPPORTED_SECTIONS =
             Set.of("basics", "work", "education", "skills", "projects", "certificates",
                     "objective", "volunteering", "courses", "publications", "customSections");
 
@@ -59,7 +59,7 @@ public class JobGenerationSchemaValidator {
 
         // 1. 顶层键校验
         for (String key : draft.keySet()) {
-            if (!ALLOWED_TOP_KEYS.contains(key)) {
+            if (!SUPPORTED_SECTIONS.contains(key)) {
                 throw new BusinessException(ErrorCode.VALIDATION, "不允许的顶层字段: " + key);
             }
         }

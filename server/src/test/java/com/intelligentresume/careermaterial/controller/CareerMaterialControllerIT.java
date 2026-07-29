@@ -124,10 +124,121 @@ class CareerMaterialControllerIT {
                 .andExpect(jsonPath("$.data[0].materialType").value("SKILL"));
     }
 
+    @Test
+    @Order(5)
+    @DisplayName("workspace search treats wildcard characters literally and isolates users")
+    void search_treatsWildcardsLiterallyAndIsolatesUsers() throws Exception {
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "materialType": "HIGHLIGHT",
+                                  "title": "Release 100% readiness",
+                                  "contentJson": {"summary": "Release readiness"},
+                                  "sourceText": "Literal percent evidence",
+                                  "usagePreference": "PREFERRED"
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "materialType": "HIGHLIGHT",
+                                  "title": "Plain release readiness",
+                                  "contentJson": {"summary": "No wildcard character"},
+                                  "sourceText": "A separate release note",
+                                  "usagePreference": "PREFERRED"
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        String otherToken = registerAndGetToken("cm_other", "cm_other@example.com", "correcthorse");
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + otherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "materialType": "HIGHLIGHT",
+                                  "title": "Other 100% readiness",
+                                  "contentJson": {"summary": "Other user"},
+                                  "sourceText": "Literal percent evidence",
+                                  "usagePreference": "PREFERRED"
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/career-materials/search")
+                        .param("q", "%")
+                        .param("type", "HIGHLIGHT")
+                        .param("usagePreference", "PREFERRED")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].title").value("Release 100% readiness"))
+                .andExpect(jsonPath("$.data.typeCounts.HIGHLIGHT").value(2));
+
+        mockMvc.perform(get("/api/career-materials/search")
+                        .param("q", "PERCENT EVIDENCE")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].title").value("Release 100% readiness"));
+    }
+
+    @Test
+    @Order(6)
+    @DisplayName("GET /api/career-materials/search returns paged workspace data")
+    void search_returnsPagedWorkspaceData() throws Exception {
+        mockMvc.perform(get("/api/career-materials/search")
+                        .param("q", "Java")
+                        .param("type", "SKILL")
+                        .param("usagePreference", "NORMAL")
+                        .param("page", "0")
+                        .param("size", "25")
+                        .param("sort", "title,asc")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].title", org.hamcrest.Matchers.startsWith("Java")))
+                .andExpect(jsonPath("$.data.items[0].excerpt").isString())
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.size").value(25))
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.typeCounts.SKILL").value(1));
+
+        mockMvc.perform(get("/api/career-materials/search")
+                        .param("q", "Java")
+                        .param("type", "SKILL")
+                        .param("page", "99")
+                        .param("size", "25")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.page").value(99))
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.totalPages").value(1));
+    }
+
+    @Test
+    @Order(7)
+    @DisplayName("GET /api/career-materials/search rejects unsupported sorting")
+    void search_rejectsInvalidSort() throws Exception {
+        mockMvc.perform(get("/api/career-materials/search")
+                        .param("sort", "title,desc")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001));
+    }
+
     // ---- 4. 软删 ----
 
     @Test
-    @Order(5)
+    @Order(8)
     @DisplayName("DELETE 软删,资源不再出现在列表")
     void delete_softDeleted() throws Exception {
         // 创建一条用于删除的资料
@@ -156,7 +267,7 @@ class CareerMaterialControllerIT {
         mockMvc.perform(get("/api/career-materials")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(2)); // 原来 2 条,删除 1 条后仍 2 条(之前创建了 3 条)
+                .andExpect(jsonPath("$.data[?(@.id == " + deleteId + ")]").isEmpty());
 
         // 删除后 get 返回 404
         mockMvc.perform(get("/api/career-materials/" + deleteId)
@@ -168,7 +279,7 @@ class CareerMaterialControllerIT {
     // ---- 5. 未登录 ----
 
     @Test
-    @Order(6)
+    @Order(9)
     @DisplayName("未登录访问 POST 返回 403(Spring Security 拦截)")
     void postWithoutAuth_40101() throws Exception {
         // 偏差说明:同 T03,/api/career-materials 不在 permitAll 白名单,
@@ -182,6 +293,9 @@ class CareerMaterialControllerIT {
                                   "contentJson": {"name": "test"}
                                 }
                                 """))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/career-materials/search"))
                 .andExpect(status().isForbidden());
     }
 }

@@ -92,7 +92,7 @@ npm test
 
 ## 云端部署
 
-普通提交和 Pull Request 由 GitHub Actions 分别验证后端测试、Web 构建与浏览器 E2E、PDF 服务检查；ACR 镜像发布保持手动触发。配置、检查名称和分支保护建议见 [GitHub CI/CD 流水线](docs/CI.md)。
+推送到 `master` 与面向 `master` 的 Pull Request 由 GitHub Actions 验证后端测试、Web 构建与浏览器 E2E、PDF 服务检查；ACR 镜像发布保持手动触发。配置、检查名称和分支保护建议见 [GitHub CI/CD 流水线](docs/CI.md)。
 
 当前可复现发布链路为 GitHub Actions 构建 Linux/amd64 镜像、阿里云 ACR 保存成品镜像、ECS 仅拉取运行。Edge Nginx 是唯一公网入口，Web、API、PDF 和 MySQL 保持在容器私有网络中。
 

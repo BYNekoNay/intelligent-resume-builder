@@ -16,6 +16,9 @@ public class InterviewRecord extends BaseEntity {
     @Column(name = "round_score", nullable = false) private Integer roundScore;
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "feedback_json", nullable = false, columnDefinition = "json") private Map<String, Object> feedbackJson;
 
+    @Enumerated(EnumType.STRING) @Column(name = "evaluation_source", length = 16) private EvaluationSource evaluationSource;
+    @Column(name = "ai_attempt_id") private Long aiAttemptId;
+
     public Long getSessionId() { return sessionId; }
     public void setSessionId(Long sessionId) { this.sessionId = sessionId; }
     public Integer getRoundNo() { return roundNo; }
@@ -28,4 +31,9 @@ public class InterviewRecord extends BaseEntity {
     public void setRoundScore(Integer roundScore) { this.roundScore = roundScore; }
     public Map<String, Object> getFeedbackJson() { return feedbackJson; }
     public void setFeedbackJson(Map<String, Object> feedbackJson) { this.feedbackJson = feedbackJson; }
+
+    public EvaluationSource getEvaluationSource() { return evaluationSource; }
+    public void setEvaluationSource(EvaluationSource evaluationSource) { this.evaluationSource = evaluationSource; }
+    public Long getAiAttemptId() { return aiAttemptId; }
+    public void setAiAttemptId(Long aiAttemptId) { this.aiAttemptId = aiAttemptId; }
 }

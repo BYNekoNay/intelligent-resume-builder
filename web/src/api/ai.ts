@@ -34,8 +34,10 @@ export interface GenerateTaskRequest {
   additionalInput?: Record<string, unknown>
 }
 
-export const JOB_GENERATION_POLICY_VERSION = 'v1.1.0'
+export const JOB_GENERATION_POLICY_VERSION = 'v1.2.0'
 export const JOB_GENERATION_DATA_CATEGORIES = ['CAREER_MATERIAL', 'JOB_DESCRIPTION', 'PERSONAL_PROFILE'] as const
+export const AI_CONSENT_TASK_SCOPES = ['JOB_MATERIAL_SELECTION', 'JOB_GENERATION', 'RESUME_OPTIMIZE', 'ACHIEVEMENT_GUIDANCE', 'COMMUNICATION_GENERATE', 'MATERIAL_IMPORT', 'INLINE_OPTIMIZE', 'INTERVIEW_COACH', 'ATS_ANALYSIS'] as const
+export const AI_CONSENT_DATA_CATEGORIES = ['RESUME', 'INTERVIEW_ANSWER', ...JOB_GENERATION_DATA_CATEGORIES] as const
 
 export function hasJobGenerationConsent(consent: ConsentResponse | null | undefined) {
   return consent?.status === 'GRANTED'
@@ -43,6 +45,13 @@ export function hasJobGenerationConsent(consent: ConsentResponse | null | undefi
     && consent.taskScopes.includes('JOB_MATERIAL_SELECTION')
     && consent.taskScopes.includes('JOB_GENERATION')
     && JOB_GENERATION_DATA_CATEGORIES.every(category => consent.dataCategories.includes(category))
+}
+
+export function hasFullAiConsent(consent: ConsentResponse | null | undefined) {
+  return consent?.status === 'GRANTED'
+    && consent.policyVersion === JOB_GENERATION_POLICY_VERSION
+    && AI_CONSENT_TASK_SCOPES.every(scope => consent.taskScopes.includes(scope))
+    && AI_CONSENT_DATA_CATEGORIES.every(category => consent.dataCategories.includes(category))
 }
 
 export type MaterialSelectionRequest = GenerateTaskRequest
@@ -69,7 +78,7 @@ export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELL
 
 export interface AiTask {
   id: number
-  taskType: 'JOB_MATERIAL_SELECTION' | 'JOB_GENERATION' | 'INLINE_OPTIMIZE' | 'ACHIEVEMENT_GUIDANCE' | 'MATERIAL_IMPORT' | 'EXPORT_PDF'
+  taskType: 'JOB_MATERIAL_SELECTION' | 'JOB_GENERATION' | 'INLINE_OPTIMIZE' | 'ACHIEVEMENT_GUIDANCE' | 'MATERIAL_IMPORT' | 'ATS_ANALYSIS' | 'COMMUNICATION_GENERATE' | 'EXPORT_PDF'
   parentTaskId?: number | null
   jobDescriptionId: number | null
   status: TaskStatus

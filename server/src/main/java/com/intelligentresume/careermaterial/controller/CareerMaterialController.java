@@ -1,6 +1,7 @@
 package com.intelligentresume.careermaterial.controller;
 
 import com.intelligentresume.careermaterial.domain.MaterialType;
+import com.intelligentresume.careermaterial.domain.UsagePreference;
 import com.intelligentresume.careermaterial.dto.*;
 import com.intelligentresume.careermaterial.service.CareerMaterialService;
 import com.intelligentresume.common.api.ApiResponse;
@@ -46,6 +47,19 @@ public class CareerMaterialController {
     public ApiResponse<List<CareerMaterialSummary>> list(
             @RequestParam(required = false) MaterialType type, HttpServletRequest httpRequest) {
         return ApiResponse.success(service.list(currentUserId(httpRequest), type), traceId(httpRequest));
+    }
+
+    @GetMapping("/search")
+    public ApiResponse<CareerMaterialSearchPage> search(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) MaterialType type,
+            @RequestParam(required = false) UsagePreference usagePreference,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(defaultValue = "updatedAt,desc") String sort,
+            HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.search(currentUserId(httpRequest), q, type, usagePreference,
+                page, size, sort), traceId(httpRequest));
     }
 
     @GetMapping("/{id}")

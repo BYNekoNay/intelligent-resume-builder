@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [switch]$SkipWeb
+    [switch]$SkipWeb,
+    [switch]$DisposableDatabase,
+    [string]$CloneDatabase
 )
 
 . (Join-Path $PSScriptRoot 'lib\LocalValidationHelpers.ps1')
@@ -10,6 +12,25 @@ $root = Get-LocalValidationRoot
 if ($LASTEXITCODE -ne 0) { throw 'Prerequisite validation failed.' }
 Import-LiveAiEnvironment -Path (Join-Path $root '.env.live-ai')
 $env:SPRING_PROFILES_ACTIVE = 'local-mysql'
+$disposable = $null
+if ($DisposableDatabase -and -not [string]::IsNullOrWhiteSpace($CloneDatabase)) {
+    throw 'Use either -DisposableDatabase or -CloneDatabase, not both.'
+}
+$isolatedDatabaseRequested = $DisposableDatabase -or -not [string]::IsNullOrWhiteSpace($CloneDatabase)
+if ($isolatedDatabaseRequested -and (Test-LocalHttpEndpoint -Uri 'http://127.0.0.1:8080/actuator/health')) {
+    throw 'Port 8080 already has a healthy server. Stop the local validation environment before requesting an isolated database.'
+}
+if ($isolatedDatabaseRequested) {
+    $disposable = New-DisposableMySqlDatabase -SourceSchema $CloneDatabase
+    $env:SPRING_DATASOURCE_URL = "jdbc:mysql://127.0.0.1:3306/$($disposable.Schema)?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
+    $env:SPRING_DATASOURCE_USERNAME = $disposable.User
+    $env:SPRING_DATASOURCE_PASSWORD = $disposable.Password
+    if ($disposable.RequiresBaseline) {
+        $env:SPRING_FLYWAY_BASELINE_ON_MIGRATE = 'true'
+        $env:SPRING_FLYWAY_BASELINE_VERSION = '19'
+        $env:SPRING_FLYWAY_BASELINE_DESCRIPTION = 'Isolated V19 business-data clone'
+    }
+}
 
 $output = Get-LocalValidationDirectory
 $processes = @()
@@ -28,8 +49,12 @@ try {
     Wait-LocalHttpEndpoint -Uri 'http://127.0.0.1:3001/health'
     Wait-LocalHttpEndpoint -Uri 'http://127.0.0.1:8080/actuator/health'
     if (-not $SkipWeb) { Wait-LocalHttpEndpoint -Uri 'http://127.0.0.1:5173' }
-    Write-LocalValidationSummary -Name 'processes.json' -Summary @{ mode = 'live'; database = 'local-mysql'; startedAt = (Get-Date).ToUniversalTime().ToString('o'); processes = $processes } | Write-Output
+    $databaseMode = if (-not [string]::IsNullOrWhiteSpace($CloneDatabase)) { 'cloned-local-mysql' } elseif ($disposable) { 'disposable-mysql' } else { 'local-mysql' }
+    $summary = @{ mode = 'live'; database = $databaseMode; startedAt = (Get-Date).ToUniversalTime().ToString('o'); processes = $processes }
+    if ($disposable) { $summary.databaseCleanup = @{ schema = $disposable.Schema; user = $disposable.User } }
+    Write-LocalValidationSummary -Name 'processes.json' -Summary $summary | Write-Output
 } catch {
     foreach ($process in $processes) { Stop-LocalProcessTree -Id $process.id }
+    if ($disposable) { Remove-DisposableMySqlDatabase -Schema $disposable.Schema -User $disposable.User }
     throw
 }

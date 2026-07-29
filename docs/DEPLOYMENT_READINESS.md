@@ -49,7 +49,7 @@ docker compose --env-file production.env.example -f docker-compose.prod.yml conf
 .\scripts\Test-ReleaseReadiness.ps1
 ```
 
-GitHub Actions 是发布前的权威 CI 门禁；其 `CI` 工作流在面向 `master` 的 Pull Request、`master` 推送和手动运行时验证后端、Web 与 PDF 服务。`.gitee/workflows/ci.yml` 是同步仓库的补充质量门禁，包含后端测试和 Flyway 迁移验证、前端构建及 Playwright 回归、PDF 服务测试、生产 Compose 静态校验和 Git 空白检查，但不发布镜像或部署 ECS。浏览器仅在 CI 临时环境安装，不要求开发机下载 Chromium。具体触发条件、Secrets 与分支保护见 [GitHub CI/CD 流水线](./CI.md)。
+GitHub Actions 提供发布前的 CI 证据；在仓库配置分支保护或 ruleset 前，它不是强制合并门禁。其 `CI` 工作流在面向 `master` 的 Pull Request、`master` 推送和手动运行时验证后端、Web 与 PDF 服务。`.gitee/workflows/ci.yml` 是同步仓库的补充质量门禁，包含后端测试和 Flyway 迁移验证、前端构建及 Playwright 回归、PDF 服务测试、生产 Compose 静态校验和 Git 空白检查，但不发布镜像或部署 ECS。浏览器仅在 CI 临时环境安装，不要求开发机下载 Chromium。具体触发条件、Secrets 与分支保护见 [GitHub CI/CD 流水线](./CI.md)。
 
 真实百炼全流程仍是凭据环境下的显式验收：
 

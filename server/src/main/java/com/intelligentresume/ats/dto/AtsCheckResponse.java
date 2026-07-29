@@ -11,5 +11,10 @@ public record AtsCheckResponse(
         List<String> passedChecks,
         List<String> risks,
         List<String> priorities,
-        String disclaimer
+        String disclaimer,
+        AtsAnalysisStatus analysisStatus,
+        AtsAnalysisSource analysisSource,
+        Long aiTaskId,
+        AtsAiInsights aiInsights,
+        AtsFallbackInfo fallback
 ) {}

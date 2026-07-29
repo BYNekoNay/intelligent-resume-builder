@@ -19,7 +19,7 @@ class AiQuotaServiceTest {
     void recordsQuotaRejectionBeforeReturningRateLimitedError() {
         AiTaskRepository repository = mock(AiTaskRepository.class);
         AppObservability observability = mock(AppObservability.class);
-        AiQuotaService service = new AiQuotaService(repository, 1, 1, 1, 1, 1, 1, observability);
+        AiQuotaService service = new AiQuotaService(repository, 1, 1, 1, 1, 1, 1, 1, 1, observability);
         when(repository.countAttemptsByUserIdAndTaskTypeAndCreatedAtAfter(eq(7L), eq(AiTaskType.JOB_GENERATION), any()))
                 .thenReturn(1L);
 

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { CheckCircle2, Database, Eye, RotateCcw, ShieldCheck, ShieldOff } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
-import { getConsent, grantConsent, hasJobGenerationConsent, JOB_GENERATION_DATA_CATEGORIES, JOB_GENERATION_POLICY_VERSION, withdrawConsent, type ConsentResponse } from '@/api/ai'
+import { AI_CONSENT_DATA_CATEGORIES, AI_CONSENT_TASK_SCOPES, getConsent, grantConsent, hasFullAiConsent, JOB_GENERATION_POLICY_VERSION, withdrawConsent, type ConsentResponse } from '@/api/ai'
 import { useLocale } from '@/i18n'
 
 const { t } = useLocale()
@@ -11,7 +11,7 @@ const router = useRouter()
 const consent = ref<ConsentResponse | null>(null)
 const loading = ref(true)
 const message = ref('')
-const granted = computed(() => hasJobGenerationConsent(consent.value))
+const granted = computed(() => hasFullAiConsent(consent.value))
 const consentStatus = computed(() => granted.value ? t('aiConsent.statusGranted') : consent.value?.status === 'WITHDRAWN' ? t('aiConsent.statusWithdrawn') : t('aiConsent.statusPending'))
 const scopeCount = computed(() => consent.value?.taskScopes.length ?? 0)
 const redirectAfterConsent = computed(() => {
@@ -34,9 +34,9 @@ async function grant() {
   try {
     await grantConsent({
       policyVersion: JOB_GENERATION_POLICY_VERSION, providerCode: 'bailian',
-      taskScopes: ['JOB_MATERIAL_SELECTION', 'JOB_GENERATION', 'RESUME_OPTIMIZE', 'ACHIEVEMENT_GUIDANCE', 'COMMUNICATION_GENERATE', 'MATERIAL_IMPORT', 'INLINE_OPTIMIZE'],
-      dataCategories: ['RESUME', ...JOB_GENERATION_DATA_CATEGORIES],
-      noticeHash: 'personal-profile-selection-v1.1.0',
+      taskScopes: [...AI_CONSENT_TASK_SCOPES],
+      dataCategories: [...AI_CONSENT_DATA_CATEGORIES],
+      noticeHash: 'ai-data-processing-v1.2.0',
     })
     consent.value = (await getConsent()).data.data
     message.value = t('aiConsent.grantSuccess')
