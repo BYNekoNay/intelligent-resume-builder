@@ -570,8 +570,14 @@ test('turns resume import into a file, parse, and review sequence', async ({ pag
 test('renders the material workspace as three independent desktop columns', async ({ page }, testInfo) => {
   await mockAuthenticatedApi(page)
   await page.setViewportSize({ width: 1440, height: 900 })
+  const summary = { id: 88, materialType: 'PROJECT_EXPERIENCE', title: 'Platform migration', usagePreference: 'PREFERRED', updatedAt: now }
+  await page.route('**/api/career-materials/search*', route => route.fulfill({ json: response(materialSearch([summary])) }))
+  await page.route('**/api/career-materials/88', route => route.fulfill({ json: response({
+    ...summary, contentJson: { outcome: 'Zero-downtime migration.' }, sourceText: 'Moved the platform without downtime.', createdAt: now,
+  }) }))
 
   await page.goto('/career-materials')
+  await page.getByRole('article', { name: summary.title }).locator('.row-select').click()
   const navigation = page.locator('.material-index')
   const library = page.locator('.library-pane')
   const detail = page.locator('.detail-pane')
@@ -1845,7 +1851,7 @@ test('generates a communication draft through the AI task lifecycle', async ({ p
   let aiPayload: unknown
   await page.route('**/api/communications/ai-generate', async route => {
     aiPayload = route.request().postDataJSON()
-    expect(route.request().headers()['idempotency-key']).toBe('communication:11:20:EMAIL:ZH_CN:v1')
+    expect(route.request().headers()['idempotency-key']).toMatch(/^communication:[0-9a-f-]{36}$/)
     await route.fulfill({ json: response({
       id: 81, taskType: 'COMMUNICATION_GENERATE', jobDescriptionId: 20, status: 'PENDING',
       resultJson: null, errorMessage: null, retryCount: 0, createdAt: now, updatedAt: now,

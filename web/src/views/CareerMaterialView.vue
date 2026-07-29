@@ -511,7 +511,7 @@ onBeforeRouteLeave(() => !hasUnsavedChanges.value || window.confirm(t('careerMat
         />
       </main>
 
-      <aside v-if="!activeProfile" class="detail-pane" :class="{ 'has-error': detailError || mutationError }" :aria-label="t('careerMaterial.detailTitle')">
+      <aside v-if="!activeProfile && panelOpen" class="detail-pane" :class="{ 'has-error': detailError || mutationError }" :aria-label="t('careerMaterial.detailTitle')">
         <p v-if="detailError || mutationError" class="pane-error" role="alert">{{ mutationError || detailError }}</p>
         <CareerMaterialForm
           v-if="panelMode === 'create' || panelMode === 'edit'"
