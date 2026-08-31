@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -54,6 +55,12 @@ public class AiTaskController {
     @GetMapping("/tasks/{id}")
     public ApiResponse<AiTaskStatusResponse> getTask(@PathVariable Long id, HttpServletRequest request) {
         return ApiResponse.success(taskService.get(id, currentUserId(request)),
+                (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
+    }
+
+    @GetMapping("/tasks/continuations")
+    public ApiResponse<List<AiTaskStatusResponse>> listContinuations(HttpServletRequest request) {
+        return ApiResponse.success(taskService.listContinuations(currentUserId(request)),
                 (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
     }
 

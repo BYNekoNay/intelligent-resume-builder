@@ -19,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -223,6 +224,22 @@ class AiTaskServiceTest {
 
         assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
         verifyNoInteractions(quotaService);
+    }
+
+    @Test
+    @DisplayName("续办列表仅映射仓储筛选出的当前用户任务")
+    void listContinuations_mapsRepositoryResultsInOrder() {
+        AiTask newer = task(9L, 100L, AiTaskType.JOB_GENERATION, "newer");
+        newer.setStatus(AiTaskStatus.SUCCESS);
+        newer.setConfirmationStatus(com.intelligentresume.ai.task.domain.ConfirmationStatus.PENDING);
+        AiTask older = task(7L, 100L, AiTaskType.JOB_MATERIAL_SELECTION, "older");
+        when(taskRepository.findContinuationsByUserId(100L)).thenReturn(List.of(newer, older));
+
+        List<AiTaskStatusResponse> response = service.listContinuations(100L);
+
+        assertEquals(List.of(9L, 7L), response.stream().map(AiTaskStatusResponse::id).toList());
+        assertEquals(AiTaskType.JOB_GENERATION, response.get(0).taskType());
+        verify(taskRepository).findContinuationsByUserId(100L);
     }
 
     private AiTask task(Long id, Long userId, AiTaskType type, String fingerprint) {

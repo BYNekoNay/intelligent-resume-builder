@@ -30,6 +30,16 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
 
     Optional<AiTask> findByUserIdAndTaskTypeAndIdempotencyKey(Long userId, AiTaskType taskType, String idempotencyKey);
 
+    @Query("SELECT t FROM AiTask t WHERE t.userId = :userId " +
+            "AND t.taskType IN (com.intelligentresume.ai.task.domain.AiTaskType.JOB_MATERIAL_SELECTION, " +
+            "com.intelligentresume.ai.task.domain.AiTaskType.JOB_GENERATION) " +
+            "AND (t.status IN (com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING, " +
+            "com.intelligentresume.ai.task.domain.AiTaskStatus.RUNNING) " +
+            "OR (t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.SUCCESS " +
+            "AND t.confirmationStatus = com.intelligentresume.ai.task.domain.ConfirmationStatus.PENDING)) " +
+            "ORDER BY t.updatedAt DESC, t.id DESC")
+    List<AiTask> findContinuationsByUserId(@Param("userId") Long userId);
+
     long countByUserIdAndTaskTypeAndCreatedAtAfter(Long userId, AiTaskType taskType, LocalDateTime after);
 
     @Query("SELECT COALESCE(SUM(CASE WHEN t.retryCount < 1 THEN 1 ELSE t.retryCount END), 0) FROM AiTask t " +

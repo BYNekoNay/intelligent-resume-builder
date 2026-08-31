@@ -2,6 +2,12 @@ package com.intelligentresume.ai.task.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.ai.task.domain.AiTask;
+import com.intelligentresume.ai.task.domain.AiTaskStatus;
+import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.ai.task.domain.ConfirmationStatus;
+import com.intelligentresume.ai.task.repository.AiTaskRepository;
+import com.intelligentresume.auth.repository.UserRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -15,6 +21,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import java.util.Map;
+
 /**
  * AI 任务控制器集成测试（MockMvc + H2 + Flyway）。
  * 覆盖:同意授权、任务创建 202、未授权 40302、跨用户 40401、幂等性。
@@ -27,6 +35,8 @@ class AiTaskControllerIT {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private AiTaskRepository taskRepository;
+    @Autowired private UserRepository userRepository;
 
     private static String tokenA;
     private static String tokenB;
@@ -189,5 +199,50 @@ class AiTaskControllerIT {
                                 {"taskType": "RESUME_OPTIMIZE"}
                                 """))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @Order(9)
+    @DisplayName("续办列表仅返回当前用户待继续的岗位生成任务")
+    void listContinuations_returnsOnlyOwnedResumableJobTasks() throws Exception {
+        Long userA = userRepository.findByUsername("ai_user_a").orElseThrow().getId();
+        Long userB = userRepository.findByUsername("ai_user_b").orElseThrow().getId();
+        AiTask pendingGeneration = saveTask(userA, "continuation-generation", AiTaskType.JOB_GENERATION,
+                AiTaskStatus.PENDING, null);
+        AiTask pendingSelection = saveTask(userA, "continuation-selection", AiTaskType.JOB_MATERIAL_SELECTION,
+                AiTaskStatus.SUCCESS, ConfirmationStatus.PENDING);
+        saveTask(userA, "continuation-confirmed", AiTaskType.JOB_GENERATION,
+                AiTaskStatus.SUCCESS, ConfirmationStatus.CONFIRMED);
+        saveTask(userA, "continuation-failed", AiTaskType.JOB_GENERATION,
+                AiTaskStatus.FAILED, null);
+        saveTask(userA, "continuation-inline", AiTaskType.INLINE_OPTIMIZE,
+                AiTaskStatus.PENDING, null);
+        saveTask(userB, "continuation-other-user", AiTaskType.JOB_GENERATION,
+                AiTaskStatus.PENDING, null);
+
+        MvcResult result = mockMvc.perform(get("/api/ai/tasks/continuations")
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andReturn();
+
+        JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).get("data");
+        assertTrue(data.toString().contains(String.valueOf(pendingGeneration.getId())));
+        assertTrue(data.toString().contains(String.valueOf(pendingSelection.getId())));
+    }
+
+    private AiTask saveTask(Long userId, String key, AiTaskType type, AiTaskStatus status,
+                            ConfirmationStatus confirmationStatus) {
+        AiTask task = new AiTask();
+        task.setUserId(userId);
+        task.setTaskType(type);
+        task.setIdempotencyKey(key);
+        task.setRequestFingerprint(key);
+        task.setInputSnapshotJson(Map.of("taskType", type.name(), "jobDescriptionId", 20));
+        task.setStatus(status);
+        task.setConfirmationStatus(confirmationStatus);
+        task.setRetryCount(0);
+        return taskRepository.saveAndFlush(task);
     }
 }

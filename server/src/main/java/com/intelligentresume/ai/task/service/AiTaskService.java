@@ -108,6 +108,13 @@ public class AiTaskService {
         return toResponse(task);
     }
 
+    @Transactional(readOnly = true)
+    public List<AiTaskStatusResponse> listContinuations(Long userId) {
+        return taskRepository.findContinuationsByUserId(userId).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     private Map<String, Object> buildInputSnapshot(CreateAiTaskRequest req) {
         Map<String, Object> snapshot = new HashMap<>();
         snapshot.put("taskType", req.taskType().name());
