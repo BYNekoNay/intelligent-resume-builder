@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { AlertTriangle, Check, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -10,6 +10,7 @@ import {
   type MaterialSelectionItem,
   type MaterialSelectionResult,
 } from '@/api/ai'
+import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useAiTaskStore } from '@/stores/aiTask'
 import { useLocale } from '@/i18n'
 
@@ -35,7 +36,8 @@ const confirming = ref(false)
 const error = ref('')
 const selectedIds = ref(new Set<number>())
 const forcedIds = ref(new Set<number>())
-let timer: number | null = null
+const pollingTimedOut = ref(false)
+const polling = useTaskPolling<AiTask>()
 
 const taskId = computed(() => Number(route.query.taskId))
 const result = computed<MaterialSelectionResult>(() => {
@@ -68,11 +70,10 @@ onMounted(async () => {
   await loadTask(true)
 })
 
-onBeforeUnmount(() => {
-  if (timer !== null) window.clearTimeout(timer)
-})
-
 async function loadTask(initialize = false) {
+  loading.value = true
+  error.value = ''
+  pollingTimedOut.value = false
   try {
     task.value = (await getTask(taskId.value)).data.data
     if (task.value.taskType !== 'JOB_MATERIAL_SELECTION') {
@@ -86,15 +87,47 @@ async function loadTask(initialize = false) {
       return
     }
     if (task.value.status === 'FAILED' || task.value.status === 'CANCELLED') {
-      error.value = task.value.errorMessage || t('materialSelection.errorAiFailed')
+      error.value = task.value.errorMessage
+        || (task.value.status === 'CANCELLED' ? t('common.taskCancelled') : t('materialSelection.errorAiFailed'))
       loading.value = false
       return
     }
-    timer = window.setTimeout(() => void loadTask(initialize), 1500)
+    startPolling(initialize)
   } catch (e: any) {
     error.value = e.response?.data?.message || t('materialSelection.errorLoadFailed')
     loading.value = false
   }
+}
+
+function startPolling(initialize: boolean) {
+  pollingTimedOut.value = false
+  polling.start({
+    taskId: taskId.value,
+    fetchTask: async (id) => (await getTask(id)).data.data,
+    onTask: (next) => {
+      task.value = next
+      if (next.status === 'SUCCESS') {
+        if (initialize) selectedIds.value = new Set(result.value.recommended.map(item => item.materialId))
+        loading.value = false
+      } else if (next.status === 'FAILED' || next.status === 'CANCELLED') {
+        error.value = next.errorMessage
+          || (next.status === 'CANCELLED' ? t('common.taskCancelled') : t('materialSelection.errorAiFailed'))
+        loading.value = false
+      }
+    },
+    shouldStop: (next) => next.status === 'SUCCESS' || next.status === 'FAILED' || next.status === 'CANCELLED',
+    onTimeout: () => {
+      pollingTimedOut.value = true
+      error.value = t('common.taskTimeout')
+      loading.value = false
+    },
+    onError: (e: any) => {
+      // 与原实现一致：单次读取失败视为终止并展示错误
+      error.value = e.response?.data?.message || t('materialSelection.errorLoadFailed')
+      loading.value = false
+      polling.stop()
+    },
+  })
 }
 
 function add(item: MaterialSelectionItem, force = false) {
@@ -176,7 +209,7 @@ function typeLabel(type: string) {
     <section v-else-if="error && (!task || task.status !== 'SUCCESS')" class="status-panel error-panel">
       <AlertTriangle :size="24" />
       <p>{{ error }}</p>
-      <button v-if="task?.status === 'FAILED'" class="btn-primary" @click="retry"><RefreshCw :size="15" />{{ t('materialSelection.retrySelection') }}</button>
+      <button v-if="task?.status === 'FAILED' || pollingTimedOut" class="btn-primary" @click="retry"><RefreshCw :size="15" />{{ t('materialSelection.retrySelection') }}</button>
       <router-link v-else class="btn-secondary" to="/generate">{{ t('materialSelection.backToWorkspace') }}</router-link>
     </section>
 

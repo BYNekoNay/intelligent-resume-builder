@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed, toRaw } from 'vue'
+import { onMounted, ref, computed, toRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAiTaskStore } from '@/stores/aiTask'
-import { getTask, confirmTask, rejectTask, retryTask } from '@/api/ai'
+import { getTask, confirmTask, rejectTask, retryTask, type AiTask } from '@/api/ai'
+import { useTaskPolling } from '@/composables/useTaskPolling'
 import { listResumesByJd, type ResumeSummary } from '@/api/resume'
 import DraftContentFields from '@/components/DraftContentFields.vue'
 import {
@@ -97,7 +98,8 @@ const mobileNavigationOpen = ref(false)
 // Resume title input
 const customTitle = ref('')
 
-let pollTimer: ReturnType<typeof setTimeout> | null = null
+const pollingTimedOut = ref(false)
+const polling = useTaskPolling<AiTask>()
 
 onMounted(async () => {
   const tid = route.query.taskId
@@ -107,10 +109,6 @@ onMounted(async () => {
     return
   }
   await loadTask(Number(tid))
-})
-
-onUnmounted(() => {
-  if (pollTimer) clearTimeout(pollTimer)
 })
 
 async function loadTask(id: number) {
@@ -135,27 +133,31 @@ async function loadTask(id: number) {
 }
 
 function startPolling(id: number) {
-  const poll = async () => {
-    try {
-      const res = await getTask(id)
-      task.value = res.data.data
-      if (task.value.status === 'SUCCESS') {
-        resultJson.value = task.value.resultJson
+  pollingTimedOut.value = false
+  polling.start({
+    taskId: id,
+    fetchTask: async (taskId) => (await getTask(taskId)).data.data,
+    onTask: (next) => {
+      task.value = next
+      if (next.status === 'SUCCESS') {
+        resultJson.value = next.resultJson
         parseDraft()
         loading.value = false
-        return
-      }
-      if (task.value.status === 'FAILED') {
-        error.value = task.value.errorMessage || t('generationConfirm.aiGenerationFailed')
+      } else if (next.status === 'FAILED') {
+        error.value = next.errorMessage || t('generationConfirm.aiGenerationFailed')
         loading.value = false
-        return
+      } else if (next.status === 'CANCELLED') {
+        error.value = t('common.taskCancelled')
+        loading.value = false
       }
-      pollTimer = setTimeout(poll, 2000)
-    } catch {
-      pollTimer = setTimeout(poll, 3000)
-    }
-  }
-  pollTimer = setTimeout(poll, 1500)
+    },
+    shouldStop: (next) => next.status === 'SUCCESS' || next.status === 'FAILED' || next.status === 'CANCELLED',
+    onTimeout: () => {
+      pollingTimedOut.value = true
+      error.value = t('common.taskTimeout')
+      loading.value = false
+    },
+  })
 }
 
 function parseDraft() {
@@ -494,7 +496,7 @@ async function handleRetry() {
     </div>
 
     <!-- Error / Failed -->
-    <div v-else-if="error && (!task || task.status === 'FAILED')" class="status-card error">
+    <div v-else-if="error && (pollingTimedOut || !task || task.status === 'FAILED' || task.status === 'CANCELLED')" class="status-card error">
       <p class="error-text">{{ error }}</p>
       <button class="btn-primary" @click="handleRetry">{{ t('generationConfirm.retryGenerate') }}</button>
     </div>

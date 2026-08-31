@@ -18,6 +18,7 @@ const messages: Record<Locale, MessageTree> = {
       loading: '加载中...', saving: '正在保存…', error: '错误', cancel: '取消', confirm: '确认', delete: '删除', edit: '编辑',
       retry: '重试', close: '关闭', back: '返回', refresh: '刷新', noData: '暂无数据', lastUpdate: '最后更新',
       selectResume: '选择简历', selectVersion: '选择版本', selectJob: '选择岗位',
+      taskTimeout: '任务超时，请刷新重试', taskCancelled: '任务已取消',
     },
     navGroups: {
       career: { label: '准备资料', home: '查看下一步', materials: '整理职业资料', imports: '导入已有简历' },
@@ -461,6 +462,7 @@ const messages: Record<Locale, MessageTree> = {
       loading: 'Loading...', saving: 'Saving…', error: 'Error', cancel: 'Cancel', confirm: 'Confirm', delete: 'Delete', edit: 'Edit',
       retry: 'Retry', close: 'Close', back: 'Back', refresh: 'Refresh', noData: 'No data', lastUpdate: 'Last updated',
       selectResume: 'Select a resume', selectVersion: 'Select a version', selectJob: 'Select a job',
+      taskTimeout: 'Task timed out. Please refresh and retry.', taskCancelled: 'Task cancelled',
     },
     navGroups: {
       career: { label: 'Prepare evidence', home: 'See next action', materials: 'Organize career records', imports: 'Import an existing resume' },
