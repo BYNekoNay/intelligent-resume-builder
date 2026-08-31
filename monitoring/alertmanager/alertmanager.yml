@@ -1,0 +1,51 @@
+# Alertmanager 配置模板。
+#
+# 敏感值（Webhook URL、SMTP 凭据）全部以占位符（形如 __NAME__）表示，容器启动时由
+# entrypoint.sh 用环境变量渲染后写入 /etc/alertmanager/alertmanager.yml。
+# 仓库内不保存任何真实凭据；未配置的变量由 entrypoint.sh 提供安全默认值。
+#
+# 告警路由策略：
+#   severity=critical -> 邮件 + Webhook（钉钉/企业微信机器人）
+#   severity=warning  -> Webhook
+#   其他（默认）      -> Webhook
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: '__SMTP_SMARTHOST__'
+  smtp_from: '__SMTP_FROM__'
+  smtp_auth_username: '__SMTP_USER__'
+  smtp_auth_password: '__SMTP_PASS__'
+  smtp_require_tls: true
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'webhook'
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: 'critical'
+      continue: false
+    - matchers:
+        - severity="warning"
+      receiver: 'warning'
+      continue: false
+
+receivers:
+  - name: 'webhook'
+    webhook_configs:
+      - url: '__ALERTMANAGER_WEBHOOK_URL__'
+        send_resolved: true
+  - name: 'critical'
+    email_configs:
+      - to: '__SMTP_TO__'
+        send_resolved: true
+    webhook_configs:
+      - url: '__ALERTMANAGER_WEBHOOK_URL__'
+        send_resolved: true
+  - name: 'warning'
+    webhook_configs:
+      - url: '__ALERTMANAGER_WEBHOOK_URL__'
+        send_resolved: true

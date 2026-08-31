@@ -67,7 +67,7 @@ IMAGE_TAG=release-YYYYMMDD-N
 TEST_TLS_DIR=/opt/intelligent-resume/tls
 ```
 
-还必须设置 `MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`JWT_SECRET`、`PDF_SERVICE_TOKEN`、`BAILIAN_API_KEY` 和 `GRAFANA_ADMIN_PASSWORD`。
+还必须设置 `MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`JWT_SECRET`、`PDF_SERVICE_TOKEN`、`BAILIAN_API_KEY` 和 `GRAFANA_ADMIN_PASSWORD`。告警渠道变量（`ALERTMANAGER_WEBHOOK_URL`、`SMTP_*`）可选，未配置时监控栈仍可启动，仅告警不会真正送达。
 
 关键约束：`SPRING_DATASOURCE_USERNAME` 必须等于 `MYSQL_USER`，`SPRING_DATASOURCE_PASSWORD` 必须等于 `MYSQL_PASSWORD`。MySQL 数据卷首次初始化后会固定应用用户密码；修改环境文件不会重置已有数据库用户密码。
 
@@ -128,6 +128,25 @@ curl -k -I https://<公网 IP>/
 ```
 
 预期结果：MySQL、PDF、API 显示 `healthy`，HTTPS 返回 `200`。基础设施就绪后再进行真实百炼 AI 调用，避免无效消耗额度。
+
+## 监控与告警（可选）
+
+监控栈（Prometheus、Grafana、Alertmanager）默认不随主栈启动，需要时在部署目录显式启用：
+
+```bash
+cd /opt/intelligent-resume/app/deploy
+docker compose --env-file production.ip-test.env \
+  --profile monitoring up -d prometheus grafana alertmanager
+```
+
+健康检查：
+
+```bash
+docker compose exec prometheus wget -qO- http://localhost:9090/-/healthy  # Prometheus（容器内探测，未映射宿主机端口）
+curl -fsS http://127.0.0.1:9093/-/healthy   # Alertmanager（仅本机回环）
+```
+
+告警链路：Prometheus 按 `monitoring/prometheus/rules/*.yml` 评估规则，命中后推送 Alertmanager；Alertmanager 按 `severity` 路由（`critical` → 邮件 + Webhook，`warning` → Webhook）。告警渠道（`ALERTMANAGER_WEBHOOK_URL`、`SMTP_*`）在环境文件中配置，仓库内只保存占位符、不保存任何凭据；未配置时监控栈仍可启动，仅告警不会真正送达（Alertmanager 日志会记录投递失败）。
 
 ## 常见故障
 
