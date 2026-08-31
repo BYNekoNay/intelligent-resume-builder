@@ -136,7 +136,7 @@ app:
       model: ${BAILIAN_MODEL:qwen-plus}
       models: ${BAILIAN_MODELS:qwen-plus,deepseek-v3.2,deepseek-v3.2-exp,deepseek-v3.1,deepseek-r1-0528,deepseek-v3,deepseek-r1,deepseek-r1-distill-qwen-32b,deepseek-r1-distill-qwen-14b}
       connect-timeout-seconds: ${BAILIAN_CONNECT_TIMEOUT_S:10}
-      read-timeout-seconds: ${BAILIAN_READ_TIMEOUT_S:60}
+      read-timeout-seconds: ${BAILIAN_READ_TIMEOUT_S:300}
     worker:
       poll-interval-ms: ${AI_WORKER_POLL_MS:1000}
       lease-seconds: ${AI_WORKER_LEASE_S:180}
