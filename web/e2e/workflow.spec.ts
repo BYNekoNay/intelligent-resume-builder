@@ -425,15 +425,17 @@ test('keeps the active interview usable on a mobile viewport', async ({ page }) 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
 })
 
-test('takes an authenticated user from the home primary action to the generation workbench', async ({ page }) => {
+test('takes an authenticated user from the home primary action to the latest resume editor', async ({ page }) => {
   await mockAuthenticatedApi(page)
 
   await page.goto('/')
   await expect(page.getByRole('heading', { name: /更有把握的下一次投递/ })).toBeVisible()
-  await expect(page.getByLabel('岗位定制简历预览')).toContainText('来源已关联')
-  await page.getByRole('link', { name: '开始岗位定制' }).click()
+  await expect(page.getByRole('region', { name: '你的下一步' }).getByRole('heading', { name: '继续完善最近的简历' })).toBeVisible()
+  await expect(page.getByText('示例预览', { exact: true })).toHaveCount(0)
+  await expect(page.locator('.home-primary-action')).toHaveText(/继续编辑/)
+  await page.locator('.home-primary-action').click()
 
-  await expect(page).toHaveURL(/\/generate$/)
+  await expect(page).toHaveURL(/\/resumes\/1\/edit$/)
 })
 
 test('keeps the complete product navigation usable on mobile', async ({ page }) => {
@@ -444,11 +446,60 @@ test('keeps the complete product navigation usable on mobile', async ({ page }) 
   await page.getByRole('button', { name: '打开导航菜单' }).click()
   const mobileNavigation = page.locator('#mobile-navigation')
   await expect(mobileNavigation).toBeVisible()
-  await expect(mobileNavigation.getByRole('link', { name: '我的简历' })).toBeVisible()
-  await mobileNavigation.getByRole('link', { name: '我的简历' }).click()
+  await expect(mobileNavigation.getByRole('link', { name: '管理简历版本' })).toBeVisible()
+  await mobileNavigation.getByRole('link', { name: '管理简历版本' }).click()
 
   await expect(page).toHaveURL(/\/resumes$/)
   await expect(mobileNavigation).toHaveCount(0)
+})
+
+test('uses task-oriented navigation and keeps deep resume routes in their active group', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+
+  await page.goto('/resumes/1/edit')
+  await page.getByRole('button', { name: 'EN' }).click()
+
+  const resumeGroup = page.getByRole('button', { name: 'Build resumes' })
+  await expect(resumeGroup).toHaveClass(/active/)
+  await resumeGroup.click()
+
+  const menu = page.getByRole('group', { name: 'Build resumes' })
+  await expect(menu.getByRole('link', { name: /Tailor to a job description/ })).toHaveAttribute('href', '/generate')
+  await expect(menu.getByText('Select evidence against a target role, then review every change.')).toBeVisible()
+  await expect(menu.getByRole('link', { name: /Assemble from career materials/ })).toHaveAttribute('href', '/material-generation')
+  await expect(menu.getByText('Build a general resume from your verified career records.')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(resumeGroup).toHaveAttribute('aria-expanded', 'false')
+  await resumeGroup.focus()
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Tab')
+  await expect(page.locator('.nav-group-menu a[href="/resumes"]')).toBeFocused()
+})
+
+test('exposes the same task routes in desktop and mobile navigation', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'EN' }).click()
+
+  const desktopRoutes: string[] = []
+  for (const label of ['Prepare evidence', 'Build resumes', 'Match & interview', 'Apply & follow up']) {
+    const trigger = page.getByRole('button', { name: label })
+    await trigger.click()
+    desktopRoutes.push(...await page.getByRole('group', { name: label }).getByRole('link').evaluateAll(links => links.map(link => link.getAttribute('href') ?? '')))
+    await trigger.click()
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: 'Open navigation menu' }).click()
+  const mobileNavigation = page.locator('#mobile-navigation')
+  const mobileRoutes = await mobileNavigation.getByRole('link').evaluateAll(links => links
+    .map(link => link.getAttribute('href') ?? '')
+    .filter(href => !['/account', '/ai-consent'].includes(href)))
+
+  expect([...desktopRoutes].sort()).toEqual([...mobileRoutes].sort())
+  await expect(mobileNavigation.getByRole('link', { name: /Tailor to a job description/ })).toBeVisible()
+  await expect(mobileNavigation.getByRole('link', { name: /Assemble from career materials/ })).toBeVisible()
 })
 
 test('keeps application evidence visible while tracking a pipeline stage', async ({ page }) => {
@@ -1509,7 +1560,7 @@ test('switches the application chrome and answer library between Chinese and Eng
 
   await page.getByRole('button', { name: 'EN' }).click()
 
-  await expect(page.getByRole('button', { name: 'Career records' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Prepare evidence' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Interview Answer Assets' })).toBeVisible()
   await expect(page.getByRole('button', { name: '中文' })).toHaveAttribute('aria-pressed', 'false')
 
@@ -1985,4 +2036,99 @@ test('opens the resume preview as a standalone mobile workspace', async ({ page 
   await page.getByRole('button', { name: '返回编辑' }).click()
   await expect(page.locator('.resume-preview-workspace')).toHaveCount(0)
   await expect(page.locator('#resume-basics')).toBeVisible()
+})
+
+// ---- 002 fix plan U1/U2/U4: generated time ranges survive confirmation and preview ----
+
+test('keeps legacy period-only time ranges visible in the editor preview', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const editorVersion = {
+    ...version,
+    resumeJson: {
+      basics: { name: 'Alice', title: 'Engineer' },
+      work: [
+        { company: 'Legacy Systems', position: 'Engineer', period: '2021 年至今' },
+        { company: 'Modern Systems', position: 'Engineer', startDate: '2019-01', endDate: '2021-06', period: '2019 - 2021' },
+      ],
+      projects: [{ name: 'Order Platform', role: 'Lead', period: '2023 Q2 - 2023 Q4' }],
+      education: [{ school: 'Legacy University', degree: 'BSc', period: '2018 - 2022' }],
+      skills: [], certificates: [], awards: [], languages: [], template: { code: 'classic' },
+    },
+  }
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(editorVersion) }))
+
+  await page.goto('/resumes/1/edit')
+  await page.getByRole('button', { name: '预览', exact: true }).click()
+  const paper = page.locator('.resume-preview-workspace .resume-paper')
+  await expect(paper).toContainText('2021 年至今')
+  await expect(paper).toContainText('2019-01 — 2021-06')
+  await expect(paper).not.toContainText('2019 - 2021')
+  await expect(paper).toContainText('2023 Q2 - 2023 Q4')
+  await expect(paper).toContainText('2018 - 2022')
+})
+
+test('carries a generated period-only draft through confirmation into the editor preview', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const confirmedWork = { company: '星河科技', position: '高级后端工程师', period: '2021 年至今', description: '负责交易和账户平台。', highlights: ['将核心接口 P99 降至 160ms'] }
+  await page.route('**/api/resumes/by-jd/**', route => route.fulfill({ json: response([]) }))
+  await page.route('**/api/ai/tasks/35', route => route.fulfill({
+    json: response({
+      id: 35,
+      taskType: 'JOB_GENERATION',
+      jobDescriptionId: job.id,
+      status: 'SUCCESS',
+      confirmationStatus: 'PENDING',
+      errorMessage: null,
+      updatedAt: now,
+      resultJson: {
+        draftResumeJson: {
+          basics: { name: 'BYNeko', title: '高级后端工程师' },
+          work: [{ ...confirmedWork, _source: 'materialId=62, type=WORK_EXPERIENCE' }],
+          education: [{ school: '示例大学', degree: '本科', period: '2018 - 2022', _source: 'materialId=63, type=EDUCATION' }],
+          projects: [{ name: '订单平台', role: '负责人', period: '2023 Q2 - 2023 Q4', _source: 'materialId=64, type=PROJECT_EXPERIENCE' }],
+        },
+        selected: [],
+        unselected: [],
+        missing: [],
+        qualitySummary: {
+          totalDraftItems: 3, sourcedItems: 3, pendingItems: 0, unsupportedItems: 0,
+          draftGapCount: 0, missingRequirementCount: 0, readiness: 'READY',
+        },
+        warnings: [],
+      },
+    }),
+  }))
+  await page.route('**/api/resume-versions/11', route => route.fulfill({
+    json: response({
+      ...version,
+      resumeJson: {
+        basics: { name: 'BYNeko', title: '高级后端工程师' },
+        work: [confirmedWork],
+        education: [{ school: '示例大学', degree: '本科', period: '2018 - 2022' }],
+        projects: [{ name: '订单平台', role: '负责人', period: '2023 Q2 - 2023 Q4' }],
+        skills: [], certificates: [], awards: [], languages: [], template: { code: 'classic' },
+      },
+    }),
+  }))
+  let confirmPayload: unknown = null
+  await page.route('**/api/ai/tasks/35/confirm', async route => {
+    confirmPayload = route.request().postDataJSON()
+    await route.fulfill({ json: response({ resumeId: 1, resumeVersionId: 12, versionNo: 2, resultResumeVersionId: 12, rejectedPaths: [], newMaterialIds: [] }) })
+  })
+
+  await page.goto('/generate/confirm?taskId=35')
+  await expect(page.locator('.draft-container')).toBeVisible()
+  await page.getByRole('button', { name: /工作经历/ }).click()
+  await expect(page.locator('.draft-section')).toContainText('2021 年至今')
+  await page.getByRole('button', { name: '确认并创建简历' }).click()
+  await expect(page).toHaveURL(/\/resumes\/1$/)
+  expect(confirmPayload).not.toBeNull()
+
+  await page.goto('/resumes/1/edit')
+  await page.getByRole('button', { name: '预览', exact: true }).click()
+  const paper = page.locator('.resume-preview-workspace .resume-paper')
+  await expect(paper).toContainText('2021 年至今')
+  await expect(paper).toContainText('2018 - 2022')
+  await expect(paper).toContainText('2023 Q2 - 2023 Q4')
+  await expect(paper).not.toContainText('materialId=62')
 })
