@@ -395,13 +395,20 @@ async function removeTemplate(template: CommunicationTemplateSummary) {
   if (!window.confirm(t('communication.confirmDeleteTemplate'))) return
   error.value = ''
   try {
-    void deleteTemplate(template.id)
+    await deleteTemplate(template.id)
     templates.value = templates.value.filter(item => item.id !== template.id)
     toastSuccess(t('toast.templateDeleted'))
   } catch (cause) {
     const code = errorCode(cause)
-    error.value = code === 40301 ? t('communication.templateReadOnly') : t('communication.templateDeleteError')
-    toastError(error.value)
+    const message = code === 40301 ? t('communication.templateReadOnly') : t('communication.templateDeleteError')
+    error.value = message
+    toastError(message)
+    // 删除失败时恢复本地列表，避免 UI 与后端不一致
+    try {
+      await loadTemplates()
+    } catch {
+      // 列表刷新失败时保持本地状态，用户可手动刷新
+    }
   }
 }
 

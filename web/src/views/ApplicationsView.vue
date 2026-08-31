@@ -168,7 +168,7 @@ async function save() {
     coverLetterText: coverLetterText.value || undefined,
     emailBodyText: emailBodyText.value || undefined,
     openingMessageText: openingMessageText.value || undefined,
-    nextFollowUpAt: nextFollowUpAt.value ? new Date(nextFollowUpAt.value).toISOString() : null,
+    nextFollowUpAt: nextFollowUpAt.value ? `${nextFollowUpAt.value}:00` : null,
   }
   try {
     if (editingId.value === null) {
