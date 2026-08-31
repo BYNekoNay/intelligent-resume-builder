@@ -226,6 +226,66 @@ class InterviewContextSanitizerTest {
         assertEquals(exactAnswer, result);
     }
 
+    // ---- sanitizePlatformResume: time-range compatibility (002 plan U2) ----
+
+    @Test
+    @DisplayName("platform resume keeps a legacy work period while excluding identity and contact data")
+    void structuredContexts_keepLegacyPeriodAndExcludeIdentity() {
+        Map<String, Object> resume = Map.of(
+                "basics", Map.of("name", "Alice Example", "email", "alice@example.com", "phone", "13812345678",
+                        "summary", "Platform engineer."),
+                "work", List.of(Map.of(
+                        "company", "ACME",
+                        "position", "Engineer",
+                        "period", "2021 - present",
+                        "description", "Built Java services")));
+
+        String summary = sanitizer.sanitizePlatformResume(resume).get("resumeSummary").toString();
+        assertTrue(summary.contains("2021 - present"), "Legacy period should be visible in the interview context");
+        assertTrue(summary.contains("ACME"));
+        assertFalse(summary.contains("Alice Example"), "Identity name must stay excluded");
+        assertFalse(summary.contains("alice@example.com"), "Contact email must stay excluded");
+        assertFalse(summary.contains("13812345678"), "Contact phone must stay excluded");
+    }
+
+    @Test
+    @DisplayName("platform resume includes structured dates and period for projects and education")
+    void structuredContexts_includeProjectAndEducationDates() {
+        Map<String, Object> resume = Map.of(
+                "basics", Map.of("label", "Backend Engineer"),
+                "projects", List.of(Map.of(
+                        "name", "Order Platform",
+                        "startDate", "2023-01",
+                        "endDate", "2023-12",
+                        "description", "Led migration")),
+                "education", List.of(Map.of(
+                        "institution", "Example University",
+                        "period", "2018 - 2022")));
+
+        String summary = sanitizer.sanitizePlatformResume(resume).get("resumeSummary").toString();
+        assertTrue(summary.contains("startDate: 2023-01"), "Project start date should be present");
+        assertTrue(summary.contains("endDate: 2023-12"), "Project end date should be present");
+        assertTrue(summary.contains("period: 2018 - 2022"), "Education legacy period should be present");
+    }
+
+    @Test
+    @DisplayName("platform resume still masks PII embedded in structured values")
+    void structuredContexts_maskPiiInsideAllowedFields() {
+        Map<String, Object> resume = Map.of(
+                "basics", Map.of("summary", "Reach alice@example.com or call 13812345678."),
+                "work", List.of(Map.of(
+                        "company", "ACME",
+                        "period", "See https://example.com/me for details")));
+
+        String summary = sanitizer.sanitizePlatformResume(resume).get("resumeSummary").toString();
+        assertTrue(summary.contains("[EMAIL]"));
+        assertTrue(summary.contains("[PHONE]"));
+        assertTrue(summary.contains("[URL]"));
+        assertFalse(summary.contains("alice@example.com"));
+        assertFalse(summary.contains("13812345678"));
+        assertFalse(summary.contains("https://example.com/me"));
+    }
+
     // ---- buildHistoryContext ----
 
     @Test

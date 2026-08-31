@@ -92,3 +92,57 @@ test('applies saved layout settings within safe bounds', () => {
   assert.match(html, /--resume-entry-gap:16\.5pt/)
   assert.match(html, /--paper-pad:60pt/)
 })
+
+// ---- 002 fix plan U2/U4: time-range fallback parity with the Web preview ----
+
+const periodOnlyResume = {
+  basics: { name: 'Period Candidate', title: 'Engineer' },
+  work: [{ company: 'Legacy Systems', position: 'Engineer', period: '2021 - present' }],
+  education: [{ school: 'Legacy University', degree: 'BSc', period: '2018 - 2022' }],
+  projects: [{ name: 'Legacy Platform', role: 'Lead', period: '2023 Q2 - 2023 Q4' }],
+}
+
+test('renders period-only time ranges in every supported template', () => {
+  for (const code of TEMPLATE_CODES) {
+    const html = renderResumeHtml(code, { resumeJson: periodOnlyResume })
+    assert.match(html, /2021 - present/, `${code} should show work period`)
+    assert.match(html, /2018 - 2022/, `${code} should show education period`)
+    assert.match(html, /2023 Q2 - 2023 Q4/, `${code} should show project period`)
+  }
+})
+
+test('shows structural dates only when both structural and period are present', () => {
+  const html = renderResumeHtml('classic', {
+    resumeJson: {
+      basics: { name: 'Alice' },
+      work: [{ company: 'ACME', position: 'Engineer', startDate: '2021-03', endDate: '2023-06', period: '2021 - present' }],
+    },
+  })
+  assert.match(html, /2021-03 — 2023-06/)
+  assert.doesNotMatch(html, /2021 - present/, 'period must not render when structural dates exist')
+})
+
+test('shows the single available structural date and keeps the period fallback', () => {
+  const html = renderResumeHtml('classic', {
+    resumeJson: {
+      basics: { name: 'Alice' },
+      work: [{ company: 'ACME', position: 'Engineer', startDate: '2021-03' }],
+      education: [{ school: 'U', degree: 'BSc', endDate: '2022-06', period: '2018 - 2022' }],
+    },
+  })
+  assert.match(html, /2021-03/)
+  assert.doesNotMatch(html, /—/, 'a lone start date should not fabricate a separator')
+  assert.match(html, /2022-06/, 'a lone end date should still render')
+  assert.doesNotMatch(html, /2018 - 2022/, 'period must be hidden when an end date exists')
+})
+
+test('escapes HTML-like text in the period fallback path', () => {
+  const html = renderResumeHtml('classic', {
+    resumeJson: {
+      basics: { name: 'Alice' },
+      work: [{ company: 'ACME', position: 'Engineer', period: '<script>alert("x")</script> & more' }],
+    },
+  })
+  assert.match(html, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; &amp; more/)
+  assert.doesNotMatch(html, /<script>alert/)
+})

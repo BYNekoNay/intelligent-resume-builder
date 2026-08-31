@@ -105,4 +105,98 @@ class ResumeJsonNormalizerTest {
                 () -> normalizer.normalize(draft, List.of()));
         assertTrue(ex.getMessage().contains("_pending"));
     }
+
+    @Test
+    @DisplayName("兼容契约: ACCEPT 的旧版 period 在剥离标记后原样保留")
+    void normalize_keepsLegacyPeriodAfterMarkerRemoval() {
+        Map<String, Object> draft = new LinkedHashMap<>();
+        draft.put("work", List.of(
+                new LinkedHashMap<>(Map.of(
+                        "company", "星河科技",
+                        "position", "高级后端工程师",
+                        "period", "2021 年至今",
+                        "_source", Map.of("materialId", 62)
+                ))
+        ));
+
+        List<ConfirmedDraftItem> items = List.of(
+                new ConfirmedDraftItem("work[0]", Decision.ACCEPT, null)
+        );
+
+        Map<String, Object> result = normalizer.normalize(draft, items);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> work = (List<Map<String, Object>>) result.get("work");
+        Map<String, Object> entry = work.get(0);
+        assertFalse(entry.containsKey("_source"), "_source 标记应被剥离");
+        assertEquals("2021 年至今", entry.get("period"),
+                "历史自由文本 period 是已确认事实,不能被删除或改写");
+        assertEquals("星河科技", entry.get("company"));
+        assertEquals("高级后端工程师", entry.get("position"));
+    }
+
+    @Test
+    @DisplayName("兼容契约: 结构化日期与未来扩展字段在标准化后同样保留")
+    void normalize_keepsStructuredDatesAndUnrelatedFields() {
+        Map<String, Object> draft = new LinkedHashMap<>();
+        draft.put("work", List.of(
+                new LinkedHashMap<>(Map.of(
+                        "company", "星河科技",
+                        "position", "高级后端工程师",
+                        "startDate", "2021-03",
+                        "endDate", "2023-06",
+                        "futureExtensionField", Map.of("note", "保留未知字段"),
+                        "_source", Map.of("materialId", 62)
+                ))
+        ));
+
+        Map<String, Object> result = normalizer.normalize(draft, List.of());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> work = (List<Map<String, Object>>) result.get("work");
+        Map<String, Object> entry = work.get(0);
+        assertEquals("2021-03", entry.get("startDate"));
+        assertEquals("2023-06", entry.get("endDate"));
+        assertFalse(entry.containsKey("_source"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> extension = (Map<String, Object>) entry.get("futureExtensionField");
+        assertNotNull(extension);
+        assertEquals("保留未知字段", extension.get("note"));
+    }
+
+    @Test
+    @DisplayName("兼容契约: 编辑条目时旧版 period 与结构化字段都按用户编辑结果落库")
+    void normalize_editKeepsChosenTimeFields() {
+        Map<String, Object> draft = new LinkedHashMap<>();
+        draft.put("education", List.of(
+                new LinkedHashMap<>(Map.of(
+                        "school", "示例大学",
+                        "period", "2018 - 2022",
+                        "_source", Map.of("materialId", 63)
+                ))
+        ));
+
+        List<ConfirmedDraftItem> items = List.of(
+                new ConfirmedDraftItem("education[0]", Decision.EDIT, editedEducation())
+        );
+
+        Map<String, Object> result = normalizer.normalize(draft, items);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> education = (List<Map<String, Object>>) result.get("education");
+        Map<String, Object> entry = education.get(0);
+        assertEquals("2018-09", entry.get("startDate"));
+        assertEquals("2022-06", entry.get("endDate"));
+        assertEquals("2018 - 2022", entry.get("period"),
+                "用户编辑保存的 period 原文不能被标准化过程丢弃");
+    }
+
+    private Map<String, Object> editedEducation() {
+        Map<String, Object> edited = new LinkedHashMap<>();
+        edited.put("school", "示例大学");
+        edited.put("startDate", "2018-09");
+        edited.put("endDate", "2022-06");
+        edited.put("period", "2018 - 2022");
+        return edited;
+    }
 }

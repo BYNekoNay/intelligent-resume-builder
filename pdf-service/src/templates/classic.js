@@ -119,7 +119,12 @@ export function renderResumeHtml(templateCode, payload) {
   const highlights = (item) => Array.isArray(item.highlights) && item.highlights.length
     ? `<ul>${list(item.highlights, (point) => `<li>${text(point?.text ?? point?.value ?? point)}</li>`)}</ul>`
     : ''
-  const dates = (item) => [item.startDate, item.endDate].filter(Boolean).map(text).join(' — ')
+  // Structural-first, period-fallback precedence. Mirrors ResumePaper.vue formatDateRange.
+  const dates = (item) => {
+    const structured = [item.startDate, item.endDate].filter(Boolean)
+    if (structured.length) return structured.map(text).join(' — ')
+    return item.period ? text(item.period) : ''
+  }
   const description = (item) => item.description ? `<p>${text(item.description)}</p>` : ''
   const entry = (item, title, subtitle = '', date = dates(item)) => `<article class="entry"><strong>${text(title)}</strong><span>${text(subtitle)}</span><small>${date}</small>${description(item)}${highlights(item)}</article>`
 

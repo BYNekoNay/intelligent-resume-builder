@@ -255,10 +255,10 @@ const SECTION_LABELS = computed<Record<ReviewableSection, string>>(() => ({
 
 const SECTION_EDIT_TEMPLATES: Record<ReviewableSection, Record<string, unknown>> = {
   basics: { name: '', title: '', email: '', phone: '', location: '', summary: '' },
-  work: { company: '', position: '', period: '', description: '', highlights: [] },
-  education: { school: '', degree: '', major: '', period: '' },
+  work: { company: '', position: '', startDate: '', endDate: '', period: '', description: '', highlights: [] },
+  education: { school: '', degree: '', major: '', startDate: '', endDate: '', period: '' },
   skills: { name: '', level: '' },
-  projects: { name: '', role: '', period: '', description: '', highlights: [] },
+  projects: { name: '', role: '', startDate: '', endDate: '', period: '', description: '', highlights: [] },
   certificates: { name: '', issuer: '', date: '', credentialId: '' },
   objective: { targetRole: '', targetIndustry: '', location: '', summary: '' },
   volunteering: { organization: '', position: '', startDate: '', endDate: '', summary: '', highlights: [] },

@@ -42,6 +42,12 @@ export interface ResumeWorkItem {
   role?: string
   startDate?: string
   endDate?: string
+  /**
+   * Legacy free-form time range (e.g. "2021 - present").
+   * Treated as a compatibility value: consumers display it only when
+   * neither startDate nor endDate is present. Never parsed or rewritten.
+   */
+  period?: string
   description?: string
   highlights?: (string | ResumeHighlight)[]
 }
@@ -53,6 +59,8 @@ export interface ResumeVolunteeringItem {
   position?: string
   startDate?: string
   endDate?: string
+  /** Legacy free-form time range; see ResumeWorkItem.period. */
+  period?: string
   description?: string
   highlights?: (string | ResumeHighlight)[]
 }
@@ -66,6 +74,10 @@ export interface ResumeProjectItem {
   name?: string
   role?: string
   position?: string
+  startDate?: string
+  endDate?: string
+  /** Legacy free-form time range; see ResumeWorkItem.period. */
+  period?: string
   description?: string
   highlights?: (string | ResumeHighlight)[]
 }
@@ -78,6 +90,8 @@ export interface ResumeEducationItem {
   area?: string
   startDate?: string
   endDate?: string
+  /** Legacy free-form time range; see ResumeWorkItem.period. */
+  period?: string
 }
 
 export interface ResumeCourseItem {
@@ -124,6 +138,8 @@ export interface ResumeCustomEntry {
   role?: string
   startDate?: string
   endDate?: string
+  /** Legacy free-form time range; see ResumeWorkItem.period. */
+  period?: string
   description?: string
   highlights?: (string | ResumeHighlight)[]
 }

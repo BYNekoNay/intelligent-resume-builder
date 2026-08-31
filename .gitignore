@@ -36,6 +36,9 @@ deploy/production.ip-test.env
 .DS_Store
 Thumbs.db
 
+# Personal documents (not for repository)
+docs/实习面试项目应对手册.md
+
 # Package manager diagnostics
 npm-debug.log*
 yarn-debug.log*

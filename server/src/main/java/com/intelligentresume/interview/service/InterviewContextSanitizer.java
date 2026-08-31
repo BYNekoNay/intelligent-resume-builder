@@ -43,9 +43,9 @@ public class InterviewContextSanitizer {
             if (summary != null) sb.append("Summary: ").append(summary).append("\n");
         }
 
-        appendCollection(resumeJson, "work", sb, List.of("company", "position", "description", "startDate", "endDate", "highlights"));
-        appendCollection(resumeJson, "projects", sb, List.of("name", "description", "role", "technologies", "highlights"));
-        appendCollection(resumeJson, "education", sb, List.of("institution", "area", "studyType", "startDate", "endDate"));
+        appendCollection(resumeJson, "work", sb, List.of("company", "position", "description", "startDate", "endDate", "period", "highlights"));
+        appendCollection(resumeJson, "projects", sb, List.of("name", "description", "role", "technologies", "startDate", "endDate", "period", "highlights"));
+        appendCollection(resumeJson, "education", sb, List.of("institution", "area", "studyType", "startDate", "endDate", "period"));
         appendCollection(resumeJson, "skills", sb, List.of("name", "level", "keywords"));
         appendCollection(resumeJson, "certificates", sb, List.of("name", "issuer", "date"));
         appendCollection(resumeJson, "languages", sb, List.of("language", "fluency"));
