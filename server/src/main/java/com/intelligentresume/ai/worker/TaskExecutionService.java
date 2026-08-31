@@ -180,7 +180,8 @@ public class TaskExecutionService {
             leaseService.releaseFailed(task, owner, e.getMessage(),
                     e.getErrorCode() == ErrorCode.AI_FAILURE || e.getErrorCode() == ErrorCode.INTERNAL);
         } catch (RuntimeException e) {
-            log.warn("Unexpected interview follow-up AI execution error: exception={}", e.getClass().getSimpleName());
+            log.warn("Unexpected interview follow-up AI execution error: exception={}, message={}",
+                    e.getClass().getSimpleName(), e.getMessage(), e);
             leaseService.releaseFailed(task, owner, "Interview follow-up AI execution failed", true);
         }
     }

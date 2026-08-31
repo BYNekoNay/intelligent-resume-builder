@@ -11,12 +11,13 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -60,14 +61,18 @@ public class BailianAiProvider implements AiProvider {
         this.observability = observability;
         this.failureCategoryClassifier = failureCategoryClassifier;
 
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofSeconds(connectTimeout));
+        // 使用 JDK HttpClient 请求工厂：HttpURLConnection 默认强制 Accept-Encoding: gzip，
+        // 百炼对 gzip 响应会以 application/octet-stream 返回导致 RestClient 无法反序列化；
+        // JDK HttpClient 默认不发送 gzip 头，配合 Accept-Encoding: identity 双保险避免压缩。
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(connectTimeout)).build());
         factory.setReadTimeout(Duration.ofSeconds(readTimeout));
 
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .requestFactory(factory)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader(HttpHeaders.ACCEPT_ENCODING, "identity")
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .build();
 
@@ -161,13 +166,16 @@ public class BailianAiProvider implements AiProvider {
             return complete(ctx, AiCallResult.fail("百炼 API 网络异常", true, requestId), category, startedAt);
         } catch (RestClientResponseException e) {
             AiFailureCategory category = failureCategoryClassifier.ai(e);
-            log.warn("Bailian API response failure: taskType={}, category={}, status={}",
-                    ctx.type(), category, e.getStatusCode().value());
+            String body = e.getResponseBodyAsString();
+            log.warn("Bailian API response failure: taskType={}, category={}, status={}, body={}",
+                    ctx.type(), category, e.getStatusCode().value(),
+                    body == null ? "" : body.substring(0, Math.min(body.length(), 800)));
             return complete(ctx, AiCallResult.fail("百炼 API 调用失败", isRetryableError(e), requestId), category, startedAt);
         } catch (Exception e) {
             AiFailureCategory category = failureCategoryClassifier.ai(e);
-            log.warn("Bailian API call failure: taskType={}, category={}, exception={}",
-                    ctx.type(), category, e.getClass().getSimpleName());
+            log.warn("Bailian API call failure: taskType={}, category={}, exception={}, message={}",
+                    ctx.type(), category, e.getClass().getSimpleName(),
+                    e.getMessage() == null ? "" : e.getMessage().substring(0, Math.min(e.getMessage().length(), 800)));
             boolean retryable = isRetryableError(e);
             return complete(ctx, AiCallResult.fail("百炼 API 调用失败", retryable, requestId), category, startedAt);
         }
