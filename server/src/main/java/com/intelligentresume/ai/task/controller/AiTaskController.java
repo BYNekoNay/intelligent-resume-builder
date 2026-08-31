@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -38,9 +39,10 @@ public class AiTaskController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             HttpServletRequest servletRequest) {
         if (request.taskType() == AiTaskType.JOB_GENERATION
-                || request.taskType() == AiTaskType.JOB_MATERIAL_SELECTION) {
+                || request.taskType() == AiTaskType.JOB_MATERIAL_SELECTION
+                || request.taskType() == AiTaskType.COMMUNICATION_GENERATE) {
             throw new BusinessException(ErrorCode.VALIDATION,
-                    "Job resume generation must start with material selection");
+                    "This AI task must start from its domain endpoint");
         }
         String key = idempotencyKey == null || idempotencyKey.isBlank()
                 ? UUID.randomUUID().toString() : idempotencyKey;
@@ -53,6 +55,12 @@ public class AiTaskController {
     @GetMapping("/tasks/{id}")
     public ApiResponse<AiTaskStatusResponse> getTask(@PathVariable Long id, HttpServletRequest request) {
         return ApiResponse.success(taskService.get(id, currentUserId(request)),
+                (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
+    }
+
+    @GetMapping("/tasks/continuations")
+    public ApiResponse<List<AiTaskStatusResponse>> listContinuations(HttpServletRequest request) {
+        return ApiResponse.success(taskService.listContinuations(currentUserId(request)),
                 (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
     }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { FilePenLine, LayoutDashboard, Sparkles, FileText, NotebookPen, UserRoundPlus, LogIn, LogOut, Send, Activity, Target } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { Activity, FilePenLine, FileText, LayoutDashboard, LogIn, LogOut, Menu, NotebookPen, Send, Sparkles, Target, UserRound, UserRoundPlus, X } from 'lucide-vue-next'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
@@ -11,44 +11,48 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 const { t } = useLocale()
+const mobileMenuOpen = ref(false)
 
-interface NavItem { to: string; key: string; icon: any }
+interface NavItem { to: string; key: string; icon: any; descriptionKey?: string }
 
-type GroupKey = 'accumulate' | 'refine' | 'match' | 'deliver'
+type GroupKey = 'career' | 'resume' | 'prepare' | 'applications'
 
 const groups: Record<GroupKey, NavItem[]> = {
-  accumulate: [
+  career: [
     { to: '/', key: 'home', icon: LayoutDashboard },
     { to: '/career-materials', key: 'materials', icon: Sparkles },
-    { to: '/resumes', key: 'resumes', icon: NotebookPen },
     { to: '/resume-import', key: 'imports', icon: FileText },
   ],
-  refine: [
-    { to: '/generate', key: 'generate', icon: Sparkles },
-    { to: '/material-generation', key: 'materialGeneration', icon: Sparkles },
+  resume: [
+    { to: '/resumes', key: 'resumes', icon: NotebookPen },
+    { to: '/generate', key: 'generate', icon: Sparkles, descriptionKey: 'generateDesc' },
+    { to: '/material-generation', key: 'materialGeneration', icon: Sparkles, descriptionKey: 'materialGenerationDesc' },
     { to: '/achievement-guidance', key: 'achievements', icon: Target },
-    { to: '/communications', key: 'communications', icon: Send },
   ],
-  match: [
+  prepare: [
     { to: '/jobs', key: 'jobs', icon: FileText },
     { to: '/ats', key: 'ats', icon: Activity },
     { to: '/interviews', key: 'interviews', icon: Sparkles },
     { to: '/interview-assets', key: 'answerAssets', icon: NotebookPen },
   ],
-  deliver: [
+  applications: [
+    { to: '/communications', key: 'communications', icon: Send },
     { to: '/applications', key: 'applications', icon: Send },
   ],
 }
 
-const routeToGroup = computed<Record<string, GroupKey>>(() => {
-  const map: Record<string, GroupKey> = {}
+const activeGroup = computed<GroupKey | null>(() => {
   for (const [group, items] of Object.entries(groups)) {
-    for (const item of items) map[item.to] = group as GroupKey
+    const matches = items.some(item => item.to === '/'
+      ? route.path === '/'
+      : route.path === item.to || route.path.startsWith(`${item.to}/`))
+    if (matches) return group as GroupKey
   }
-  return map
+  if (route.path.startsWith('/match/') || route.path.startsWith('/exports/')) return 'resume'
+  return null
 })
 
-const activeGroup = computed<GroupKey | null>(() => routeToGroup.value[route.path] ?? null)
+watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
 
 async function signOut() {
   await auth.signOut()
@@ -75,15 +79,21 @@ async function signOut() {
             v-for="item in groups[groupKey]"
             :key="item.key"
             :to="item.to"
-            @click.stop
           >
             <component :is="item.icon" :size="15" />
-            {{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}
+            <span class="nav-item-copy">
+              <span>{{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}</span>
+              <small v-if="item.descriptionKey">{{ t(`navGroups.${groupKey}.${item.descriptionKey}`) }}</small>
+            </span>
           </RouterLink>
         </NavDropdown>
       </nav>
 
       <div v-if="auth.accessToken" class="header-actions">
+        <RouterLink class="header-user" to="/account" :aria-label="t('account.title')" :title="t('account.title')">
+          <UserRound :size="18" />
+          <span>{{ auth.currentUser?.displayName || auth.currentUser?.username || t('account.eyebrow') }}</span>
+        </RouterLink>
         <RouterLink class="icon-action" to="/ai-consent" :aria-label="t('actions.aiConsent')" :title="t('actions.aiConsent')">
           <Sparkles :size="18" />
         </RouterLink>
@@ -100,7 +110,45 @@ async function signOut() {
         </RouterLink>
       </div>
       <LanguageSwitcher />
+      <button
+        class="mobile-menu-toggle"
+        type="button"
+        :aria-expanded="mobileMenuOpen"
+        :aria-label="mobileMenuOpen ? t('navigation.closeMenu') : t('navigation.openMenu')"
+        aria-controls="mobile-navigation"
+        @click="mobileMenuOpen = !mobileMenuOpen"
+      >
+        <X v-if="mobileMenuOpen" :size="20" />
+        <Menu v-else :size="20" />
+      </button>
     </header>
+
+    <div v-if="mobileMenuOpen" id="mobile-navigation" class="mobile-navigation-panel">
+      <nav :aria-label="t('navigation.label')">
+        <section v-for="groupKey in (Object.keys(groups) as GroupKey[])" :key="groupKey">
+          <p>{{ t(`navGroups.${groupKey}.label`) }}</p>
+          <RouterLink v-for="item in groups[groupKey]" :key="item.key" :to="item.to">
+            <component :is="item.icon" :size="16" />
+            <span class="nav-item-copy">
+              <span>{{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}</span>
+              <small v-if="item.descriptionKey">{{ t(`navGroups.${groupKey}.${item.descriptionKey}`) }}</small>
+            </span>
+          </RouterLink>
+        </section>
+      </nav>
+
+      <div class="mobile-account-actions">
+        <template v-if="auth.accessToken">
+          <RouterLink to="/account"><UserRound :size="17" /> {{ t('account.title') }}</RouterLink>
+          <RouterLink to="/ai-consent"><Sparkles :size="17" /> {{ t('actions.aiConsent') }}</RouterLink>
+          <button type="button" @click="signOut"><LogOut :size="17" /> {{ t('actions.signOut') }}</button>
+        </template>
+        <template v-else>
+          <RouterLink to="/login"><LogIn :size="17" /> {{ t('actions.signIn') }}</RouterLink>
+          <RouterLink to="/register"><UserRoundPlus :size="17" /> {{ t('actions.signUp') }}</RouterLink>
+        </template>
+      </div>
+    </div>
     <main class="app-main">
       <RouterView />
     </main>

@@ -67,33 +67,44 @@ public class JobGenerationPromptBuilder {
                 4. If materials are insufficient for a section, use "_pending" with a clear reason.
                 5. IMPORTANT: Write all descriptions in the SAME LANGUAGE as the source materials. If materials are in English, write in English. If in Chinese, write in Chinese.
                 6. Output valid JSON only. No markdown, no explanations outside the JSON.
+                7. Time ranges: for work, education, and project entries, set "startDate" and "endDate" (formats "YYYY-MM" or "YYYY") ONLY when the cited source material contains explicit start and end bounds. Otherwise keep the source-backed free-form "period" text exactly as written in the material. NEVER split, guess, translate, or invent a structured date range from a free-form period.
                 """;
 
         String task = """
                 Generate a customized resume draft for the given job description using the provided career materials.
                 Output format: a JSON object with a top-level key "draftResumeJson".
-                The value of "draftResumeJson" is a resume object with keys: basics, work, education, skills, projects, certificates.
+                The value of "draftResumeJson" is a resume object with keys: basics, work, education, skills, projects, certificates, objective, volunteering, courses, publications, customSections.
 
                 Requirements for each entry:
                 - Include "_sources": [{"materialId": <ID>, "materialType": "<TYPE>"}] to cite every source material actually used.
                 - OR include "_pending": {"reason": "<explanation>"} if data is missing.
                 - Prioritize fixed materials, then preferred materials, then candidate materials.
+                - Time ranges: for work, education, and project entries, use "startDate" and "endDate" (formats "YYYY-MM" or "YYYY") only when the source material provides exact bounds. When the material only carries a free-form "period" (for example "2021 - present" or a quarter), copy that period value into the output entry and Do NOT invent a structured date range from it.
                 - ACHIEVEMENT materials: write their supported result into the linked work/project description or highlights.
                 - LEADERSHIP_EXPERIENCE materials: write supported responsibility, collaboration, decision, and result into the linked work/project description or highlights.
                 - SKILL_EVIDENCE materials: produce standard skills entries and use their evidence only where it agrees with linked experience.
                 - Career profile is long-term positioning. Use it only to shape basics.summary and positioning; the job description determines the target role title.
+                - Do not create links. Generate objective, volunteering, courses, publications, or customSections only when supported by the provided materials.
+                - customSections are two levels: every outer section object AND every object inside its entries array must independently include _sources or _pending.
+                - The outer customSections _sources must be the union of the material sources used by its entries. Never infer a new achievement, organization, date, or credential from the job description.
 
                 Example output structure:
                 {
                   "draftResumeJson": {
                     "basics": {"name": "...", "label": "...", "_pending": {"reason": "No name provided"}},
-                    "work": [{"position": "...", "company": "...", "period": "...", "description": "...", "highlights": [], "_sources": [{"materialId": 1, "materialType": "WORK_EXPERIENCE"}]}],
+                    "work": [{"position": "...", "company": "...", "startDate": "2021-03", "endDate": "2023-06", "description": "...", "highlights": [], "_sources": [{"materialId": 1, "materialType": "WORK_EXPERIENCE"}]}],
                     "education": [...],
                     "skills": [{"name": "...", "category": "...", "items": [...], "level": "...", "_sources": [{"materialId": 2, "materialType": "SKILL"}]}],
                     "projects": [...],
-                    "certificates": {"_pending": {"reason": "No certificate materials"}}
+                    "certificates": {"_pending": {"reason": "No certificate materials"}},
+                    "objective": {"summary": "...", "_pending": {"reason": "No confirmed profile"}},
+                    "volunteering": [],
+                    "courses": [],
+                    "publications": [],
+                    "customSections": [{"title": "Leadership", "entries": [{"name": "Platform migration", "description": "...", "_sources": [{"materialId": 3, "materialType": "LEADERSHIP_EXPERIENCE"}]}], "_sources": [{"materialId": 3, "materialType": "LEADERSHIP_EXPERIENCE"}]}]
                   }
                 }
+                Note: when a source material cannot provide exact start/end bounds, the work/education/project entry may carry "period" (the source's own free-form text) instead of startDate/endDate.
 
                 Prompt version: %s
                 """.formatted(promptVersion);

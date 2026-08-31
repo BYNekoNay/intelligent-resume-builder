@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed, toRaw } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAiTaskStore } from '@/stores/aiTask'
-import { getTask, confirmTask, rejectTask, retryTask } from '@/api/ai'
-import { listResumesByJd, type ResumeSummary } from '@/api/resume'
-import DraftContentFields from '@/components/DraftContentFields.vue'
-import { Check, Pencil, Trash2 } from 'lucide-vue-next'
+import { getTask, confirmTask, rejectTask, retryTask, type AiTask } from '@/api/ai'
+import { useTaskPolling } from '@/composables/useTaskPolling'
+import { listResumesByJd } from '@/api/resume'
+import { useDraftReview } from '@/composables/useDraftReview'
+import { Check, ClipboardCheck, Sparkles } from 'lucide-vue-next'
+import { useLocale } from '@/i18n'
+import QualitySummaryCard from '@/components/generation/QualitySummaryCard.vue'
+import DraftSectionReview from '@/components/generation/DraftSectionReview.vue'
+import DraftEditDialog from '@/components/generation/DraftEditDialog.vue'
+import ExistingJdDialog from '@/components/generation/ExistingJdDialog.vue'
+
+const { t } = useLocale()
 
 const route = useRoute()
 const router = useRouter()
@@ -20,62 +28,20 @@ const rejecting = ref(false)
 const task = ref<any>(null)
 const resultJson = ref<any>(null)
 
-// Draft sections for display
-interface DraftItem {
-  path: string
-  section: string
-  content: any
-  provenance: Record<string, unknown>
-  source: string | null
-  pending: string | null
-  decision: 'ACCEPT' | 'EDIT' | 'REJECT' | null
-  editedValue: any
-}
+const pollingTimedOut = ref(false)
+const polling = useTaskPolling<AiTask>()
 
-interface QualitySummary {
-  totalDraftItems: number
-  sourcedItems: number
-  pendingItems: number
-  unsupportedItems: number
-  draftGapCount: number
-  missingRequirementCount: number
-  readiness: 'READY' | 'REVIEW_RECOMMENDED' | 'REQUIRES_ACTION'
-}
-
-const draftItems = ref<DraftItem[]>([])
-const selectedInfo = ref<any[]>([])
-const unselectedInfo = ref<any[]>([])
-const missingInfo = ref<any[]>([])
-const warnings = ref<string[]>([])
-const qualitySummary = ref<QualitySummary | null>(null)
-
-// Same-JD dialog
-const showJdDialog = ref(false)
-const existingResumes = ref<ResumeSummary[]>([])
-const resumeTitle = ref('')
-
-// Edit dialog
-const showEditDialog = ref(false)
-const editingItem = ref<DraftItem | null>(null)
-const editValue = ref<unknown>(null)
-
-// Resume title input
-const customTitle = ref('')
-
-let pollTimer: ReturnType<typeof setTimeout> | null = null
+const { draftItems, pendingCount, customTitle, mobileNavigationOpen, parseDraft, openJdDialog, closeJdDialog, resetDraftReview } = useDraftReview()
 
 onMounted(async () => {
+  resetDraftReview()
   const tid = route.query.taskId
   if (!tid) {
-    error.value = '缺少任务 ID'
+    error.value = t('generationConfirm.missingTaskId')
     loading.value = false
     return
   }
   await loadTask(Number(tid))
-})
-
-onUnmounted(() => {
-  if (pollTimer) clearTimeout(pollTimer)
 })
 
 async function loadTask(id: number) {
@@ -86,202 +52,50 @@ async function loadTask(id: number) {
     task.value = res.data.data
     if (task.value.status === 'SUCCESS' && task.value.confirmationStatus === 'PENDING') {
       resultJson.value = task.value.resultJson
-      parseDraft()
+      parseDraft(resultJson.value)
     } else if (task.value.status === 'PENDING' || task.value.status === 'RUNNING') {
       startPolling(id)
     } else if (task.value.status === 'FAILED') {
-      error.value = task.value.errorMessage || 'AI 生成失败'
+      error.value = task.value.errorMessage || t('generationConfirm.aiGenerationFailed')
     }
   } catch (e: any) {
-    error.value = e.response?.data?.message || '加载任务失败'
+    error.value = e.response?.data?.message || t('generationConfirm.loadTaskFailed')
   } finally {
     loading.value = false
   }
 }
 
 function startPolling(id: number) {
-  const poll = async () => {
-    try {
-      const res = await getTask(id)
-      task.value = res.data.data
-      if (task.value.status === 'SUCCESS') {
-        resultJson.value = task.value.resultJson
-        parseDraft()
+  pollingTimedOut.value = false
+  polling.start({
+    taskId: id,
+    fetchTask: async (taskId) => (await getTask(taskId)).data.data,
+    onTask: (next) => {
+      task.value = next
+      if (next.status === 'SUCCESS') {
+        resultJson.value = next.resultJson
+        parseDraft(resultJson.value)
         loading.value = false
-        return
-      }
-      if (task.value.status === 'FAILED') {
-        error.value = task.value.errorMessage || 'AI 生成失败'
+      } else if (next.status === 'FAILED') {
+        error.value = next.errorMessage || t('generationConfirm.aiGenerationFailed')
         loading.value = false
-        return
+      } else if (next.status === 'CANCELLED') {
+        error.value = t('common.taskCancelled')
+        loading.value = false
       }
-      pollTimer = setTimeout(poll, 2000)
-    } catch {
-      pollTimer = setTimeout(poll, 3000)
-    }
-  }
-  pollTimer = setTimeout(poll, 1500)
-}
-
-function parseDraft() {
-  if (!resultJson.value) return
-  const draft = resultJson.value.draftResumeJson
-  selectedInfo.value = resultJson.value.selected ?? []
-  unselectedInfo.value = resultJson.value.unselected ?? []
-  missingInfo.value = resultJson.value.missing ?? []
-  warnings.value = resultJson.value.warnings ?? []
-  qualitySummary.value = normalizeQualitySummary(resultJson.value.qualitySummary)
-
-  // Flatten draft into items by section
-  const items: DraftItem[] = []
-  const sections = ['basics', 'work', 'education', 'skills', 'projects', 'certificates']
-  for (const section of sections) {
-    const data = draft[section]
-    if (!data) continue
-    if (Array.isArray(data)) {
-      data.forEach((entry: any, idx: number) => {
-        const path = `${section}[${idx}]`
-        items.push({
-          path,
-          section,
-          content: stripMeta(entry),
-          provenance: sourceMeta(entry),
-          source: entry._source ?? (entry._sources ? '资料库' : null),
-          pending: entry._pending?.reason ?? (typeof entry._pending === 'string' ? entry._pending : null),
-          decision: entry._pending ? null : 'ACCEPT',
-          editedValue: null,
-        })
-      })
-    } else if (typeof data === 'object') {
-      const path = section
-      items.push({
-        path,
-        section,
-        content: stripMeta(data),
-        provenance: sourceMeta(data),
-        source: data._source ?? (data._sources ? '资料库' : null),
-        pending: data._pending?.reason ?? (typeof data._pending === 'string' ? data._pending : null),
-        decision: data._pending ? null : 'ACCEPT',
-        editedValue: null,
-      })
-    }
-  }
-  draftItems.value = items
-}
-
-function normalizeQualitySummary(value: unknown): QualitySummary | null {
-  if (!value || typeof value !== 'object') return null
-  const summary = value as Partial<QualitySummary>
-  const numericKeys: Array<keyof Pick<QualitySummary,
-    'totalDraftItems' | 'sourcedItems' | 'pendingItems' | 'unsupportedItems' | 'draftGapCount' | 'missingRequirementCount'>> = [
-    'totalDraftItems', 'sourcedItems', 'pendingItems', 'unsupportedItems', 'draftGapCount', 'missingRequirementCount',
-  ]
-  if (!numericKeys.every(key => typeof summary[key] === 'number') || typeof summary.readiness !== 'string') return null
-  if (!['READY', 'REVIEW_RECOMMENDED', 'REQUIRES_ACTION'].includes(summary.readiness)) return null
-  return summary as QualitySummary
-}
-
-const QUALITY_READINESS: Record<QualitySummary['readiness'], { label: string; hint: string }> = {
-  READY: { label: '资料依据完整', hint: '草稿内容均有已确认资料依据，可继续逐项审核。' },
-  REVIEW_RECOMMENDED: { label: '建议补充后审核', hint: '草稿可继续审核，但仍有 JD 要求或简历栏目尚未覆盖。' },
-  REQUIRES_ACTION: { label: '需要处理', hint: '存在待补充或没有资料依据的内容，请逐项编辑、接受或删除。' },
-}
-
-function stripMeta(value: any): any {
-  if (Array.isArray(value)) return value.map(stripMeta)
-  if (value === null || typeof value !== 'object') return value
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => key !== '_source' && key !== '_sources' && key !== '_pending')
-      .map(([key, nestedValue]) => [key, stripMeta(nestedValue)]),
-  )
-}
-
-function sourceMeta(value: any): Record<string, unknown> {
-  if (value?._source) return { _source: value._source }
-  if (value?._sources) return { _sources: value._sources }
-  if (value?._pending) return { _pending: value._pending }
-  return {}
-}
-
-const SECTION_LABELS: Record<string, string> = {
-  basics: '个人概要',
-  work: '工作经历',
-  education: '教育背景',
-  skills: '技能',
-  projects: '项目经历',
-  certificates: '证书',
-}
-
-const SECTION_EDIT_TEMPLATES: Record<string, Record<string, unknown>> = {
-  basics: { name: '', title: '', email: '', phone: '', location: '', summary: '' },
-  work: { company: '', position: '', period: '', description: '', highlights: [] },
-  education: { school: '', degree: '', major: '', period: '' },
-  skills: { name: '', level: '' },
-  projects: { name: '', role: '', period: '', description: '', highlights: [] },
-  certificates: { name: '', issuer: '', date: '', credentialId: '' },
-}
-
-const groupedItems = computed(() => {
-  const groups: Record<string, DraftItem[]> = {}
-  for (const item of draftItems.value) {
-    if (!groups[item.section]) groups[item.section] = []
-    groups[item.section].push(item)
-  }
-  return groups
-})
-
-const pendingCount = computed(() =>
-  draftItems.value.filter(i => i.decision === null).length
-)
-
-function openEdit(item: DraftItem) {
-  editingItem.value = item
-  const content = structuredClone(toRaw(item.content))
-  editValue.value = content !== null && typeof content === 'object' && !Array.isArray(content)
-    ? { ...(SECTION_EDIT_TEMPLATES[item.section] ?? {}), ...content }
-    : content
-  showEditDialog.value = true
-}
-
-function saveEdit() {
-  if (!editingItem.value) return
-  const cleanedValue = removeEmptyFields(editValue.value)
-  editingItem.value.editedValue = Object.assign({}, cleanedValue as Record<string, unknown>, editingItem.value.provenance)
-  editingItem.value.content = cleanedValue
-  editingItem.value.decision = 'EDIT'
-  showEditDialog.value = false
-  editingItem.value = null
-}
-
-function removeEmptyFields(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(removeEmptyFields).filter(item => !isEmptyValue(item))
-  }
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .map(([key, nestedValue]) => [key, removeEmptyFields(nestedValue)])
-        .filter(([, nestedValue]) => !isEmptyValue(nestedValue)),
-    )
-  }
-  return value
-}
-
-function isEmptyValue(value: unknown) {
-  if (value === null || value === undefined || value === '') return true
-  if (Array.isArray(value)) return value.length === 0
-  return typeof value === 'object' && Object.keys(value).length === 0
-}
-
-function setDecision(item: DraftItem, decision: 'ACCEPT' | 'REJECT') {
-  item.decision = decision
-  if (decision === 'ACCEPT') item.editedValue = null
+    },
+    shouldStop: (next) => next.status === 'SUCCESS' || next.status === 'FAILED' || next.status === 'CANCELLED',
+    onTimeout: () => {
+      pollingTimedOut.value = true
+      error.value = t('common.taskTimeout')
+      loading.value = false
+    },
+  })
 }
 
 async function handleConfirm() {
   if (pendingCount.value > 0) {
-    error.value = `还有 ${pendingCount.value} 项待处理（待补充信息需接受或拒绝）`
+    error.value = t('generationConfirm.pendingItemsError').replace('{count}', String(pendingCount.value))
     return
   }
 
@@ -291,8 +105,7 @@ async function handleConfirm() {
     try {
       const res = await listResumesByJd(jdId)
       if (res.data.data && res.data.data.length > 0) {
-        existingResumes.value = res.data.data
-        showJdDialog.value = true
+        openJdDialog(res.data.data)
         return
       }
     } catch { /* ignore, proceed with new */ }
@@ -307,7 +120,7 @@ function extractJdId(): number | null {
 }
 
 async function doConfirm(targetResumeId: number | null) {
-  showJdDialog.value = false
+  closeJdDialog()
   confirming.value = true
   error.value = ''
 
@@ -331,21 +144,21 @@ async function doConfirm(targetResumeId: number | null) {
     // Navigate to resume detail
     router.push(`/resumes/${data.resumeId}`)
   } catch (e: any) {
-    error.value = e.response?.data?.message || '确认失败'
+    error.value = e.response?.data?.message || t('generationConfirm.confirmFailed')
   } finally {
     confirming.value = false
   }
 }
 
 async function handleReject() {
-  if (!window.confirm('确定拒绝此草稿？拒绝后不会创建简历。')) return
+  if (!window.confirm(t('generationConfirm.rejectConfirm'))) return
   rejecting.value = true
   try {
     await rejectTask(task.value.id, task.value.updatedAt)
     taskStore.clear()
     router.push('/generate')
   } catch (e: any) {
-    error.value = e.response?.data?.message || '操作失败'
+    error.value = e.response?.data?.message || t('generationConfirm.operationFailed')
   } finally {
     rejecting.value = false
   }
@@ -359,158 +172,51 @@ async function handleRetry() {
     loading.value = true
     startPolling(task.value.id)
   } catch (e: any) {
-    error.value = e.response?.data?.message || '重试失败'
+    error.value = e.response?.data?.message || t('generationConfirm.retryFailed')
   }
 }
 </script>
 
 <template>
   <div class="confirm-page">
-    <header>
-      <h1>确认 AI 草稿</h1>
-      <p class="subtitle">逐项审核生成内容，确认后将创建岗位简历</p>
+    <header class="confirm-header">
+      <p class="eyebrow"><ClipboardCheck :size="14" /> {{ t('generationConfirm.eyebrow') }}</p>
+      <h1>{{ t('generationConfirm.pageTitle') }}</h1>
+      <p class="subtitle">{{ t('generationConfirm.pageSubtitle') }}</p>
+      <div class="confirm-route" aria-hidden="true"><span class="done"><Check :size="12" />{{ t('generationWorkbench.stepTargetJob') }}</span><i></i><span class="done"><Check :size="12" />{{ t('generationWorkbench.stepMaterialScope') }}</span><i></i><span class="active">{{ t('generationConfirm.reviewStep') }}</span></div>
     </header>
 
     <!-- Loading / Polling -->
     <div v-if="loading" class="status-card">
       <div class="spinner-lg"></div>
-      <p>AI 正在生成你的岗位简历...</p>
-      <p class="hint">通常需要 10-30 秒</p>
+      <Sparkles :size="20" />
+      <p>{{ t('generationConfirm.generating') }}</p>
+      <p class="hint">{{ t('generationConfirm.generatingHint') }}</p>
     </div>
 
     <!-- Error / Failed -->
-    <div v-else-if="error && (!task || task.status === 'FAILED')" class="status-card error">
+    <div v-else-if="error && (pollingTimedOut || !task || task.status === 'FAILED' || task.status === 'CANCELLED')" class="status-card error">
       <p class="error-text">{{ error }}</p>
-      <button class="btn-primary" @click="handleRetry">重试生成</button>
+      <button class="btn-primary" @click="handleRetry">{{ t('generationConfirm.retryGenerate') }}</button>
     </div>
 
     <!-- Draft confirmation -->
-    <div v-else-if="task && task.status === 'SUCCESS'" class="draft-container">
-      <!-- Warnings -->
-      <div v-if="warnings.length" class="warnings">
-        <p v-for="w in warnings" :key="w" class="warning-item">{{ w }}</p>
-      </div>
-
-      <section
-        v-if="qualitySummary"
-        :class="['quality-summary', `quality-summary--${qualitySummary.readiness.toLowerCase()}`]"
-        aria-label="草稿质量摘要"
-      >
-        <div class="quality-summary__heading">
-          <div>
-            <h3>草稿质量摘要</h3>
-            <p>{{ QUALITY_READINESS[qualitySummary.readiness].hint }}</p>
-          </div>
-          <span class="quality-summary__status">{{ QUALITY_READINESS[qualitySummary.readiness].label }}</span>
-        </div>
-        <div class="quality-summary__metrics">
-          <div><strong>{{ qualitySummary.sourcedItems }}</strong><span>有资料依据</span></div>
-          <div><strong>{{ qualitySummary.draftGapCount }}</strong><span>草稿待补充</span></div>
-          <div><strong>{{ qualitySummary.unsupportedItems }}</strong><span>待核实内容</span></div>
-          <div><strong>{{ qualitySummary.missingRequirementCount }}</strong><span>未覆盖项</span></div>
-        </div>
-      </section>
-
-      <!-- Missing info -->
-      <div v-if="missingInfo.length" class="missing-section">
-        <h3>缺失信息（JD 要求但资料库未覆盖）</h3>
-        <ul>
-          <li v-for="(m, i) in missingInfo" :key="i">
-            <strong>{{ m.section }}</strong>：{{ m.reason }}
-          </li>
-        </ul>
-      </div>
-
-      <!-- Draft items by section -->
-      <div v-for="(items, section) in groupedItems" :key="section" class="draft-section">
-        <h3>{{ SECTION_LABELS[section as string] ?? section }}</h3>
-        <div v-for="(item, itemIndex) in items" :key="item.path" :class="['draft-item', item.decision?.toLowerCase()]">
-          <div v-if="items.length > 1 || item.source || item.pending" class="item-header">
-            <span v-if="items.length > 1" class="item-number">第 {{ itemIndex + 1 }} 条</span>
-            <span v-if="item.source" class="source-badge">来源：资料库</span>
-            <span v-if="item.pending" class="pending-badge">待补充：{{ item.pending }}</span>
-          </div>
-          <DraftContentFields :model-value="item.content" />
-          <div class="item-actions">
-            <button
-              :class="['action-btn accept', { active: item.decision === 'ACCEPT' }]"
-              :aria-pressed="item.decision === 'ACCEPT'"
-              @click="setDecision(item, 'ACCEPT')"
-            ><Check :size="15" /><span>接受</span></button>
-            <button class="action-btn edit" @click="openEdit(item)"><Pencil :size="15" /><span>编辑</span></button>
-            <button
-              :class="['action-btn reject', { active: item.decision === 'REJECT' }]"
-              :aria-pressed="item.decision === 'REJECT'"
-              @click="setDecision(item, 'REJECT')"
-            ><Trash2 :size="15" /><span>删除</span></button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Unselected materials -->
-      <details v-if="unselectedInfo.length" class="unselected-details">
-        <summary>未使用的资料（{{ unselectedInfo.length }} 条）</summary>
-        <ul>
-          <li v-for="(u, i) in unselectedInfo" :key="i">
-            {{ u.title || '未命名资料' }}：{{ u.unselectedReason }}
-          </li>
-        </ul>
-      </details>
-
-      <!-- Resume title -->
-      <div class="title-input">
-        <label>简历名称（可选，默认使用"公司 - 岗位"）</label>
-        <input v-model="customTitle" placeholder="例如：字节跳动 - Java 后端工程师" class="input" />
-      </div>
-
-      <!-- Error -->
-      <p v-if="error" class="error-msg">{{ error }}</p>
-
-      <!-- Actions -->
-      <div class="confirm-actions">
-        <button class="btn-secondary" @click="handleReject" :disabled="rejecting">
-          拒绝草稿
-        </button>
-        <button class="btn-primary" @click="handleConfirm" :disabled="confirming || pendingCount > 0">
-          <span v-if="confirming" class="spinner"></span>
-          {{ confirming ? '创建中...' : `确认并创建简历${pendingCount > 0 ? `（${pendingCount} 项待处理）` : ''}` }}
-        </button>
-      </div>
+    <div v-else-if="task && task.status === 'SUCCESS'" class="draft-container" @keydown.esc="mobileNavigationOpen = false">
+      <QualitySummaryCard />
+      <DraftSectionReview
+        :error="error"
+        :confirming="confirming"
+        :rejecting="rejecting"
+        @confirm="handleConfirm"
+        @reject="handleReject"
+      />
     </div>
 
     <!-- Same-JD Dialog -->
-    <Teleport to="body">
-      <div v-if="showJdDialog" class="dialog-overlay" @click.self="showJdDialog = false">
-        <div class="dialog">
-          <h3>该岗位已有简历</h3>
-          <p>检测到相同岗位已存在以下简历，请选择操作：</p>
-          <div class="existing-list">
-            <div v-for="r in existingResumes" :key="r.id" class="existing-item">
-              <span>{{ r.title }}</span>
-              <button class="btn-small" @click="doConfirm(r.id)">更新此简历</button>
-            </div>
-          </div>
-          <div class="dialog-actions">
-            <button class="btn-primary" @click="doConfirm(null)">新建一份简历</button>
-            <button class="btn-secondary" @click="showJdDialog = false">取消</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <ExistingJdDialog @confirm="doConfirm" />
 
     <!-- Edit Dialog -->
-    <Teleport to="body">
-      <div v-if="showEditDialog" class="dialog-overlay" @click.self="showEditDialog = false">
-        <div class="dialog edit-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-edit-title">
-          <h3 id="draft-edit-title">编辑内容</h3>
-          <DraftContentFields v-model="editValue" editable />
-          <div class="dialog-actions">
-            <button class="btn-primary" @click="saveEdit">保存</button>
-            <button class="btn-secondary" @click="showEditDialog = false">取消</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <DraftEditDialog />
   </div>
 </template>
 
@@ -554,266 +260,6 @@ header h1 {
   color: #9ca3af;
   font-size: 0.85rem;
 }
-.warnings {
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-}
-.warning-item {
-  font-size: 0.85rem;
-  color: #92400e;
-}
-.quality-summary {
-  border: 1px solid #bfdbfe;
-  border-radius: 8px;
-  background: #eff6ff;
-  padding: 1rem;
-  margin-bottom: 1rem;
-}
-.quality-summary--review_recommended {
-  border-color: #fde68a;
-  background: #fffbeb;
-}
-.quality-summary--requires_action {
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-.quality-summary__heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.85rem;
-}
-.quality-summary__heading h3 {
-  margin: 0 0 0.25rem;
-  color: #0f3d75;
-  font-size: 0.95rem;
-}
-.quality-summary--review_recommended .quality-summary__heading h3 { color: #92400e; }
-.quality-summary--requires_action .quality-summary__heading h3 { color: #991b1b; }
-.quality-summary__heading p {
-  margin: 0;
-  color: #475569;
-  font-size: 0.82rem;
-  line-height: 1.45;
-}
-.quality-summary__status {
-  flex: 0 0 auto;
-  padding: 0.2rem 0.45rem;
-  border-radius: 4px;
-  color: #1d4ed8;
-  background: #dbeafe;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-.quality-summary--review_recommended .quality-summary__status {
-  color: #92400e;
-  background: #fef3c7;
-}
-.quality-summary--requires_action .quality-summary__status {
-  color: #b91c1c;
-  background: #fee2e2;
-}
-.quality-summary__metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.5rem;
-}
-.quality-summary__metrics > div {
-  min-width: 0;
-  padding: 0.55rem;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.65);
-}
-.quality-summary__metrics strong,
-.quality-summary__metrics span {
-  display: block;
-}
-.quality-summary__metrics strong {
-  color: #1e293b;
-  font-size: 1.05rem;
-}
-.quality-summary__metrics span {
-  margin-top: 0.15rem;
-  color: #64748b;
-  font-size: 0.72rem;
-  line-height: 1.3;
-}
-@media (max-width: 560px) {
-  .quality-summary__heading { flex-direction: column; gap: 0.5rem; }
-  .quality-summary__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-.missing-section {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1.5rem;
-}
-.missing-section h3 {
-  font-size: 0.9rem;
-  color: #991b1b;
-  margin-bottom: 0.5rem;
-}
-.missing-section li {
-  font-size: 0.85rem;
-  color: #7f1d1d;
-}
-.draft-section {
-  margin-bottom: 1.5rem;
-}
-.draft-section h3 {
-  font-size: 1rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-  padding-bottom: 0.25rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-.draft-item {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 0.75rem;
-  margin-bottom: 0.5rem;
-  transition: border-color 0.15s;
-}
-.draft-item.accept {
-  border-color: #a7f3d0;
-}
-.draft-item.reject {
-  border-color: #fca5a5;
-  opacity: 0.6;
-}
-.draft-item.edit {
-  border-color: #93c5fd;
-}
-.item-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
-  flex-wrap: wrap;
-}
-.item-number {
-  font-size: 0.75rem;
-  color: #64748b;
-  font-weight: 600;
-}
-.source-badge {
-  font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
-  background: #dbeafe;
-  color: #1e40af;
-  border-radius: 3px;
-}
-.pending-badge {
-  font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
-  background: #fef3c7;
-  color: #92400e;
-  border-radius: 3px;
-}
-.item-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid #edf1f5;
-}
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 76px;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid #d9e0e8;
-  border-radius: 6px;
-  background: #fff;
-  color: #475569;
-  font: 600 13px/1 inherit;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
-}
-.action-btn svg {
-  flex: 0 0 auto;
-}
-.action-btn:hover {
-  border-color: #94a3b8;
-  background: #f8fafc;
-  transform: translateY(-1px);
-}
-.action-btn:focus-visible {
-  outline: 2px solid rgba(14, 116, 144, 0.28);
-  outline-offset: 2px;
-}
-.action-btn.accept {
-  color: #047857;
-}
-.action-btn.accept:hover {
-  border-color: #6ee7b7;
-  background: #ecfdf5;
-}
-.action-btn.accept.active {
-  background: #059669;
-  border-color: #059669;
-  color: #fff;
-}
-.action-btn.edit {
-  color: #1d4ed8;
-}
-.action-btn.reject.active {
-  background: #dc2626;
-  border-color: #dc2626;
-  color: #fff;
-}
-.action-btn.reject {
-  color: #b91c1c;
-}
-.action-btn.reject:hover {
-  border-color: #fca5a5;
-  background: #fef2f2;
-}
-.unselected-details {
-  margin-bottom: 1.5rem;
-  font-size: 0.85rem;
-  color: #6b7280;
-}
-.unselected-details summary {
-  cursor: pointer;
-  font-weight: 500;
-}
-.title-input {
-  margin-bottom: 1.5rem;
-}
-.title-input label {
-  display: block;
-  font-size: 0.85rem;
-  color: #6b7280;
-  margin-bottom: 0.4rem;
-}
-.input {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-.error-msg {
-  color: #dc2626;
-  font-size: 0.85rem;
-  margin-bottom: 1rem;
-}
-.confirm-actions {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: flex-end;
-}
 .btn-primary {
   padding: 0.6rem 1.5rem;
   background: #0e7490;
@@ -831,91 +277,55 @@ header h1 {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.btn-secondary {
-  padding: 0.6rem 1.5rem;
-  background: #fff;
-  color: #374151;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-.btn-small {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.5rem;
-  background: #0e7490;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255,255,255,0.3);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
+
+/* Human review surface for generated content. */
+.confirm-page { display: grid; gap: 24px; width: min(100%, 920px); max-width: 920px; margin: 0 auto; padding: 8px 0 52px; }
+.confirm-header { display: grid; gap: 0; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
+.confirm-header .eyebrow { justify-self: start; }
+.confirm-header h1 { margin: 5px 0 7px; color: var(--text-primary); font-family: var(--font-display); font-size: 34px; font-weight: 700; letter-spacing: 0; }
+.confirm-header .subtitle { max-width: 690px; margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
+.confirm-route { display: grid; grid-template-columns: auto 34px auto 34px auto; align-items: center; justify-content: end; gap: 7px; margin-top: 20px; color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; font-weight: 700; }
+.confirm-route span { display: inline-flex; align-items: center; gap: 4px; }
+.confirm-route i { height: 1px; background: var(--border); }
+.confirm-route .done { color: var(--text-primary); }
+.confirm-route .active { color: var(--accent); }
+.draft-container { display: grid; gap: 18px; }
+.status-card { display: grid; justify-items: center; gap: 9px; padding: 48px 20px; border: 1px solid var(--border); border-radius: 7px; color: var(--accent); background: var(--bg-surface); text-align: center; }
+.status-card p { margin: 0; color: var(--text-primary); font-size: 13px; font-weight: 650; }
+.status-card .hint { color: var(--text-tertiary); font-size: 10px; font-weight: 500; }
+.status-card.error { border-color: color-mix(in srgb, var(--danger) 28%, var(--border)); color: var(--danger); background: var(--danger-light); }
+.spinner-lg { width: 30px; height: 30px; margin: 0 0 5px; border-color: var(--border); border-top-color: var(--accent); }
+.btn-primary, .btn-secondary, .btn-small { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 13px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; font-weight: 650; cursor: pointer; }
+.btn-primary, .btn-small { border-color: var(--accent); color: #fff; background: var(--accent); }
+
+.confirm-page { gap: 14px; width: min(100%, 1180px); max-width: 1180px; padding-bottom: 28px; }
+.confirm-header { grid-template-columns: minmax(0, 1fr) auto; padding-bottom: 13px; }
+.confirm-header .eyebrow,
+.confirm-header h1,
+.confirm-header .subtitle { grid-column: 1; }
+.confirm-header h1 { margin: 3px 0 4px; font-size: 28px; }
+.confirm-header .subtitle { font-size: 11px; }
+.confirm-route { grid-column: 2; grid-row: 1 / 4; align-self: center; margin: 0 0 0 28px; }
+.draft-container { gap: 10px; min-width: 0; }
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+
+@media (max-width: 900px) {
+  .confirm-route { display: none; }
 }
-.dialog {
-  background: #fff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  max-width: 480px;
-  width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
+
+@media (max-width: 767px) {
+  .confirm-page { gap: 10px; padding-top: 0; }
+  .confirm-header { display: block; padding-bottom: 10px; }
+  .confirm-header h1 { font-size: 25px; }
+  .confirm-header .subtitle { display: none; }
 }
-.dialog h3 {
-  margin-bottom: 0.75rem;
-}
-.edit-dialog {
-  max-width: 640px;
-}
-.existing-list {
-  margin: 1rem 0;
-}
-.existing-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid #f3f4f6;
-}
-.dialog-actions {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 1rem;
-}
+
 @media (max-width: 560px) {
-  .item-actions {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .action-btn {
-    width: 100%;
-    min-width: 0;
-    padding: 0 8px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .action-btn {
-    transition: none;
-  }
-  .action-btn:hover {
-    transform: none;
-  }
+  .confirm-page { padding-top: 0; }
+  .confirm-header h1 { font-size: 29px; }
+  .confirm-route { grid-template-columns: auto 15px auto 15px auto; justify-content: stretch; font-size: 8px; }
 }
 </style>

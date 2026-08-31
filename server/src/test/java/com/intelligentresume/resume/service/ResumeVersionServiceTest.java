@@ -1,5 +1,7 @@
 package com.intelligentresume.resume.service;
 
+import com.intelligentresume.ats.domain.AtsCheckResult;
+import com.intelligentresume.ats.repository.AtsCheckResultRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.resume.domain.Resume;
@@ -7,6 +9,7 @@ import com.intelligentresume.resume.domain.ResumeSourceType;
 import com.intelligentresume.resume.domain.ResumeVersion;
 import com.intelligentresume.resume.dto.ResumeVersionDetail;
 import com.intelligentresume.resume.dto.ResumeVersionSummary;
+import com.intelligentresume.resume.dto.RestoreResumeVersionRequest;
 import com.intelligentresume.resume.dto.SaveVersionRequest;
 import com.intelligentresume.resume.repository.ResumeRepository;
 import com.intelligentresume.resume.repository.ResumeVersionRepository;
@@ -36,12 +39,14 @@ class ResumeVersionServiceTest {
     @Mock private ResumeVersionRepository versionRepository;
     @Mock private ResumeRepository resumeRepository;
     @Mock private JsonResumeValidator jsonResumeValidator;
+    @Mock private AtsCheckResultRepository atsCheckResultRepository;
 
     private ResumeVersionService versionService;
 
     @BeforeEach
     void setUp() {
-        versionService = new ResumeVersionService(versionRepository, resumeRepository, jsonResumeValidator);
+        versionService = new ResumeVersionService(versionRepository, resumeRepository, jsonResumeValidator,
+                atsCheckResultRepository);
     }
 
     @Test
@@ -128,6 +133,7 @@ class ResumeVersionServiceTest {
         when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
 
         ResumeVersion v2 = version(11L, 1L, 2);
+        v2.setResumeJson(Map.of("basics", Map.of("name", "Test"), "template", Map.of("code", "modern")));
         ResumeVersion v1 = version(10L, 1L, 1);
         when(versionRepository.findByResumeIdAndDeletedAtIsNullOrderByVersionNoDesc(1L))
                 .thenReturn(List.of(v2, v1));
@@ -135,7 +141,9 @@ class ResumeVersionServiceTest {
         List<ResumeVersionSummary> list = versionService.listByResume(1L, false, 100L);
         assertEquals(2, list.size());
         assertEquals(2, list.get(0).versionNo());
+        assertEquals("modern", list.get(0).templateCode());
         assertEquals(1, list.get(1).versionNo());
+        assertEquals("classic", list.get(1).templateCode());
     }
 
     @Test
@@ -164,11 +172,134 @@ class ResumeVersionServiceTest {
     }
 
     @Test
+    @DisplayName("ATS 分析创建继任版本时仅持久化服务端校验的溯源")
+    void restore_withAtsProvenance_persistsValidatedContext() {
+        Resume resume = resume(1L, 100L);
+        resume.setCurrentVersionId(12L);
+        ResumeVersion source = version(10L, 1L, 3);
+        AtsCheckResult atsResult = atsResult(31L, 100L, 10L, "COMPLETED", Map.of(
+                "evidenceFindings", List.of(Map.of(
+                        "section", "work",
+                        "suggestion", "Add measurable impact")),
+                "prioritizedActions", List.of()));
+        when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
+        when(versionRepository.findByIdAndResumeId(10L, 1L)).thenReturn(Optional.of(source));
+        when(atsCheckResultRepository.findByIdAndUserId(31L, 100L)).thenReturn(Optional.of(atsResult));
+        when(versionRepository.findMaxVersionNoByResumeId(1L)).thenReturn(3);
+        when(versionRepository.save(any(ResumeVersion.class))).thenAnswer(invocation -> {
+            ResumeVersion saved = invocation.getArgument(0);
+            if (saved.getId() == null) saved.setId(20L);
+            return saved;
+        });
+
+        ResumeVersionDetail restored = versionService.restore(1L, 10L,
+                new RestoreResumeVersionRequest(31L, "evidence:0"), 100L);
+
+        Map<String, Object> provenance = castMap(restored.generationContext().get("atsProvenance"));
+        assertEquals(31L, provenance.get("resultId"));
+        assertEquals(10L, provenance.get("sourceVersionId"));
+        assertEquals(44L, provenance.get("jobDescriptionId"));
+        assertEquals("work", provenance.get("mappedSection"));
+        assertEquals("evidence", provenance.get("itemKind"));
+        assertEquals(0, provenance.get("itemIndex"));
+        assertEquals("Add measurable impact", provenance.get("optimizationObjective"));
+        assertEquals(20L, resume.getCurrentVersionId());
+    }
+
+    @Test
+    @DisplayName("无效、待分析或非本人 ATS 溯源不得切换当前版本")
+    void restore_withInvalidAtsProvenance_doesNotChangeCurrentVersion() {
+        Resume resume = resume(1L, 100L);
+        resume.setCurrentVersionId(12L);
+        ResumeVersion source = version(10L, 1L, 3);
+        when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
+        when(versionRepository.findByIdAndResumeId(10L, 1L)).thenReturn(Optional.of(source));
+
+        AtsCheckResult pending = atsResult(31L, 100L, 10L, "ANALYZING", Map.of());
+        when(atsCheckResultRepository.findByIdAndUserId(31L, 100L)).thenReturn(Optional.of(pending));
+        assertThrows(BusinessException.class, () -> versionService.restore(1L, 10L,
+                new RestoreResumeVersionRequest(31L, "evidence:0"), 100L));
+
+        when(atsCheckResultRepository.findByIdAndUserId(32L, 100L)).thenReturn(Optional.empty());
+        assertThrows(BusinessException.class, () -> versionService.restore(1L, 10L,
+                new RestoreResumeVersionRequest(32L, "evidence:0"), 100L));
+
+        AtsCheckResult completed = atsResult(33L, 100L, 10L, "COMPLETED", Map.of(
+                "evidenceFindings", List.of(Map.of("section", "unknown", "suggestion", "ignored")),
+                "prioritizedActions", List.of()));
+        when(atsCheckResultRepository.findByIdAndUserId(33L, 100L)).thenReturn(Optional.of(completed));
+        assertThrows(BusinessException.class, () -> versionService.restore(1L, 10L,
+                new RestoreResumeVersionRequest(33L, "evidence:0"), 100L));
+
+        assertEquals(12L, resume.getCurrentVersionId());
+        verify(versionRepository, never()).save(any(ResumeVersion.class));
+        verify(resumeRepository, never()).save(resume);
+    }
+
+    @Test
+    @DisplayName("ATS 溯源拒绝源版本错配、越界和伪造条目")
+    void restore_withMismatchedOrMalformedAtsItem_doesNotCreateVersion() {
+        Resume resume = resume(1L, 100L);
+        resume.setCurrentVersionId(12L);
+        ResumeVersion source = version(10L, 1L, 3);
+        when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
+        when(versionRepository.findByIdAndResumeId(10L, 1L)).thenReturn(Optional.of(source));
+
+        AtsCheckResult mismatched = atsResult(31L, 100L, 99L, "COMPLETED", Map.of());
+        when(atsCheckResultRepository.findByIdAndUserId(31L, 100L)).thenReturn(Optional.of(mismatched));
+        assertThrows(BusinessException.class, () -> versionService.restore(1L, 10L,
+                new RestoreResumeVersionRequest(31L, "evidence:0"), 100L));
+
+        AtsCheckResult completed = atsResult(32L, 100L, 10L, "COMPLETED", Map.of(
+                "evidenceFindings", List.of(Map.of("section", "work", "suggestion", "Add impact")),
+                "prioritizedActions", List.of()));
+        when(atsCheckResultRepository.findByIdAndUserId(32L, 100L)).thenReturn(Optional.of(completed));
+        assertThrows(BusinessException.class, () -> versionService.restore(1L, 10L,
+                new RestoreResumeVersionRequest(32L, "evidence:1"), 100L));
+        assertThrows(BusinessException.class, () -> versionService.restore(1L, 10L,
+                new RestoreResumeVersionRequest(32L, "free-text:0"), 100L));
+
+        assertEquals(12L, resume.getCurrentVersionId());
+        verify(versionRepository, never()).save(any(ResumeVersion.class));
+        verify(resumeRepository, never()).save(resume);
+    }
+
+    @Test
+    @DisplayName("ATS prioritized action 的优化目标也由服务端结果派生")
+    void restore_withAtsAction_persistsActionObjective() {
+        Resume resume = resume(1L, 100L);
+        ResumeVersion source = version(10L, 1L, 3);
+        AtsCheckResult atsResult = atsResult(31L, 100L, 10L, "COMPLETED", Map.of(
+                "evidenceFindings", List.of(),
+                "prioritizedActions", List.of(Map.of(
+                        "section", "skills",
+                        "action", "Name the required tooling"))));
+        when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
+        when(versionRepository.findByIdAndResumeId(10L, 1L)).thenReturn(Optional.of(source));
+        when(atsCheckResultRepository.findByIdAndUserId(31L, 100L)).thenReturn(Optional.of(atsResult));
+        when(versionRepository.findMaxVersionNoByResumeId(1L)).thenReturn(3);
+        when(versionRepository.save(any(ResumeVersion.class))).thenAnswer(invocation -> {
+            ResumeVersion saved = invocation.getArgument(0);
+            if (saved.getId() == null) saved.setId(20L);
+            return saved;
+        });
+
+        ResumeVersionDetail restored = versionService.restore(1L, 10L,
+                new RestoreResumeVersionRequest(31L, "action:0"), 100L);
+
+        Map<String, Object> provenance = castMap(restored.generationContext().get("atsProvenance"));
+        assertEquals("action", provenance.get("itemKind"));
+        assertEquals("skills", provenance.get("mappedSection"));
+        assertEquals("Name the required tooling", provenance.get("optimizationObjective"));
+    }
+
+    @Test
     @DisplayName("归档版本列表只返回已归档记录")
     void listByResume_archived_returnsOnlyArchivedVersions() {
         Resume resume = resume(1L, 100L);
         ResumeVersion archived = version(10L, 1L, 2);
         archived.setDeletedAt(LocalDateTime.now());
+        archived.setGenerationContext(Map.of("atsProvenance", Map.of("resultId", 31L)));
         when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
         when(versionRepository.findByResumeIdAndDeletedAtIsNotNullOrderByVersionNoDesc(1L))
                 .thenReturn(List.of(archived));
@@ -177,6 +308,7 @@ class ResumeVersionServiceTest {
 
         assertEquals(1, list.size());
         assertNotNull(list.get(0).archivedAt());
+        assertEquals(31L, castMap(list.get(0).generationContext().get("atsProvenance")).get("resultId"));
     }
 
     @Test
@@ -221,5 +353,21 @@ class ResumeVersionServiceTest {
         v.setResumeJson(Map.of("basics", Map.of("name", "Test")));
         v.setCreatedBy(100L);
         return v;
+    }
+
+    private AtsCheckResult atsResult(Long id, Long userId, Long sourceVersionId, String status,
+                                     Map<String, Object> aiInsights) {
+        AtsCheckResult result = new AtsCheckResult();
+        result.setId(id);
+        result.setUserId(userId);
+        result.setResumeVersionId(sourceVersionId);
+        result.setJobDescriptionId(44L);
+        result.setResultJson(Map.of("analysisStatus", status, "aiInsights", aiInsights));
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> castMap(Object value) {
+        return (Map<String, Object>) value;
     }
 }

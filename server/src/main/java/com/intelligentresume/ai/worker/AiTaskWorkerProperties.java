@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 public class AiTaskWorkerProperties {
 
     private long pollIntervalMs = 1000;
-    private int leaseSeconds = 60;
+    private int leaseSeconds = 180;
     private int maxRetries = 3;
     private int batchSize = 5;
 

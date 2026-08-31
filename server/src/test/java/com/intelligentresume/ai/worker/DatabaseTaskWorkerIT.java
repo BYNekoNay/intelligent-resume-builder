@@ -13,7 +13,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
@@ -25,8 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * DatabaseTaskWorker 集成测试（H2 + 百炼提供者）。
  * 覆盖:领取并执行、过期租约恢复，以及未配置密钥时的失败状态。
  *
- * <p>测试环境 worker poll-interval=60s,不会自动轮询干扰;
- * 通过直接调用 {@code worker.poll()} 手动触发。
+ * <p>测试环境关闭自动调度,通过直接调用 {@code worker.poll()} 手动触发。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -80,7 +78,7 @@ class DatabaseTaskWorkerIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "policyVersion": "v1.1.0",
+                                  "policyVersion": "v1.2.0",
                                   "providerCode": "bailian",
                                   "taskScopes": ["MATERIAL_IMPORT", "RESUME_OPTIMIZE"],
                                   "dataCategories": ["resume"],
@@ -109,7 +107,6 @@ class DatabaseTaskWorkerIT {
     @Test
     @Order(3)
     @DisplayName("过期租约的 RUNNING 任务被重新领取，未配置密钥时标记为 FAILED")
-    @Transactional
     void workerPoll_recoversExpiredLease() throws Exception {
         Long taskId = createTask("RESUME_OPTIMIZE");
 
@@ -117,7 +114,9 @@ class DatabaseTaskWorkerIT {
         AiTask task = taskRepository.findById(taskId).orElseThrow();
         task.setStatus(AiTaskStatus.RUNNING);
         task.setLeaseOwner("dead-worker");
-        task.setLeaseExpiresAt(LocalDateTime.now().minusMinutes(5));
+        // Use an unambiguously expired timestamp so H2's NOW() implementation and
+        // the JVM/database clock cannot make this recovery-path test flaky.
+        task.setLeaseExpiresAt(LocalDateTime.of(2000, 1, 1, 0, 0));
         task.setRetryCount(1);
         taskRepository.saveAndFlush(task);
 

@@ -1,9 +1,12 @@
 package com.intelligentresume.auth.controller;
 
 import com.intelligentresume.auth.dto.CurrentUserResponse;
+import com.intelligentresume.auth.dto.ChangeEmailRequest;
+import com.intelligentresume.auth.dto.ChangePasswordRequest;
 import com.intelligentresume.auth.dto.LoginRequest;
 import com.intelligentresume.auth.dto.RegisterRequest;
 import com.intelligentresume.auth.dto.TokenResponse;
+import com.intelligentresume.auth.dto.UpdateProfileRequest;
 import com.intelligentresume.auth.service.AuthService;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
@@ -19,6 +22,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -83,6 +87,25 @@ public class AuthController {
     @GetMapping("/me")
     public ApiResponse<CurrentUserResponse> me(HttpServletRequest httpRequest) {
         return ApiResponse.success(authService.currentUser(currentUserId(httpRequest)), traceId(httpRequest));
+    }
+
+    @PatchMapping("/me")
+    public ApiResponse<CurrentUserResponse> updateProfile(@Valid @RequestBody UpdateProfileRequest request, HttpServletRequest httpRequest) {
+        return ApiResponse.success(authService.updateProfile(currentUserId(httpRequest), request), traceId(httpRequest));
+    }
+
+    @PostMapping("/me/email")
+    public ResponseEntity<ApiResponse<Void>> changeEmail(@Valid @RequestBody ChangeEmailRequest request, HttpServletRequest httpRequest) {
+        authService.changeEmail(currentUserId(httpRequest), request);
+        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, expiredRefreshCookie().toString())
+                .body(ApiResponse.success(null, traceId(httpRequest)));
+    }
+
+    @PostMapping("/me/password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(@Valid @RequestBody ChangePasswordRequest request, HttpServletRequest httpRequest) {
+        authService.changePassword(currentUserId(httpRequest), request);
+        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, expiredRefreshCookie().toString())
+                .body(ApiResponse.success(null, traceId(httpRequest)));
     }
 
     @DeleteMapping("/me")

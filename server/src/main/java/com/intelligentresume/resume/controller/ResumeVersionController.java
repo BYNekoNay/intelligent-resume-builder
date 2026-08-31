@@ -6,6 +6,7 @@ import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.resume.dto.ResumeVersionDetail;
 import com.intelligentresume.resume.dto.ResumeVersionSummary;
+import com.intelligentresume.resume.dto.RestoreResumeVersionRequest;
 import com.intelligentresume.resume.dto.SaveVersionRequest;
 import com.intelligentresume.resume.service.ResumeVersionService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -45,8 +46,10 @@ public class ResumeVersionController {
 
     @PostMapping("/api/resumes/{resumeId}/versions/{versionId}/restore")
     public ResponseEntity<ApiResponse<ResumeVersionDetail>> restore(
-            @PathVariable Long resumeId, @PathVariable Long versionId, HttpServletRequest httpRequest) {
-        ResumeVersionDetail detail = versionService.restore(resumeId, versionId, currentUserId(httpRequest));
+            @PathVariable Long resumeId, @PathVariable Long versionId,
+            @Valid @RequestBody(required = false) RestoreResumeVersionRequest request,
+            HttpServletRequest httpRequest) {
+        ResumeVersionDetail detail = versionService.restore(resumeId, versionId, request, currentUserId(httpRequest));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(detail, traceId(httpRequest)));
     }

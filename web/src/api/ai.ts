@@ -34,8 +34,10 @@ export interface GenerateTaskRequest {
   additionalInput?: Record<string, unknown>
 }
 
-export const JOB_GENERATION_POLICY_VERSION = 'v1.1.0'
+export const JOB_GENERATION_POLICY_VERSION = 'v1.2.0'
 export const JOB_GENERATION_DATA_CATEGORIES = ['CAREER_MATERIAL', 'JOB_DESCRIPTION', 'PERSONAL_PROFILE'] as const
+export const AI_CONSENT_TASK_SCOPES = ['JOB_MATERIAL_SELECTION', 'JOB_GENERATION', 'RESUME_OPTIMIZE', 'ACHIEVEMENT_GUIDANCE', 'COMMUNICATION_GENERATE', 'MATERIAL_IMPORT', 'INLINE_OPTIMIZE', 'INTERVIEW_COACH', 'ATS_ANALYSIS'] as const
+export const AI_CONSENT_DATA_CATEGORIES = ['RESUME', 'INTERVIEW_ANSWER', ...JOB_GENERATION_DATA_CATEGORIES] as const
 
 export function hasJobGenerationConsent(consent: ConsentResponse | null | undefined) {
   return consent?.status === 'GRANTED'
@@ -43,6 +45,13 @@ export function hasJobGenerationConsent(consent: ConsentResponse | null | undefi
     && consent.taskScopes.includes('JOB_MATERIAL_SELECTION')
     && consent.taskScopes.includes('JOB_GENERATION')
     && JOB_GENERATION_DATA_CATEGORIES.every(category => consent.dataCategories.includes(category))
+}
+
+export function hasFullAiConsent(consent: ConsentResponse | null | undefined) {
+  return consent?.status === 'GRANTED'
+    && consent.policyVersion === JOB_GENERATION_POLICY_VERSION
+    && AI_CONSENT_TASK_SCOPES.every(scope => consent.taskScopes.includes(scope))
+    && AI_CONSENT_DATA_CATEGORIES.every(category => consent.dataCategories.includes(category))
 }
 
 export type MaterialSelectionRequest = GenerateTaskRequest
@@ -69,7 +78,7 @@ export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELL
 
 export interface AiTask {
   id: number
-  taskType: 'JOB_MATERIAL_SELECTION' | 'JOB_GENERATION' | 'EXPORT_PDF'
+  taskType: 'JOB_MATERIAL_SELECTION' | 'JOB_GENERATION' | 'INLINE_OPTIMIZE' | 'ACHIEVEMENT_GUIDANCE' | 'MATERIAL_IMPORT' | 'ATS_ANALYSIS' | 'COMMUNICATION_GENERATE' | 'EXPORT_PDF'
   parentTaskId?: number | null
   jobDescriptionId: number | null
   status: TaskStatus
@@ -98,11 +107,10 @@ export interface InlineOptimizeRequest {
 }
 
 export interface InlineOptimizeResponse {
-  recordId: number
-  section: string
   originalContent: string
   candidates: { content: string; suggestion: string }[]
   requiresManualConfirmation: boolean
+  emptyReason?: string
 }
 
 export interface AchievementGuidanceResponse {
@@ -157,6 +165,10 @@ export function getTask(id: number) {
   return apiClient.get<ApiResponse<AiTask>>(`/api/ai/tasks/${id}`)
 }
 
+export function listTaskContinuations() {
+  return apiClient.get<ApiResponse<AiTask[]>>('/api/ai/tasks/continuations')
+}
+
 export function retryTask(id: number) {
   return apiClient.post<ApiResponse<AiTask>>(`/api/ai/tasks/${id}/retry`)
 }
@@ -174,7 +186,19 @@ export function rejectTask(id: number, taskUpdatedAt: string) {
 }
 
 export function inlineOptimize(payload: InlineOptimizeRequest) {
-  return apiClient.post<ApiResponse<InlineOptimizeResponse>>('/api/ai/inline-optimize', payload)
+  return apiClient.post<ApiResponse<AiTask>>('/api/ai/inline-optimize', payload)
+}
+
+export async function waitForAiTaskResult<T>(taskId: number, maxAttempts = 30): Promise<T> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000))
+    const task = (await getTask(taskId)).data.data
+    if (task.status === 'SUCCESS' && task.resultJson) return task.resultJson as unknown as T
+    if (task.status === 'FAILED' || task.status === 'CANCELLED') {
+      throw new Error(task.errorMessage || 'AI 任务执行失败')
+    }
+  }
+  throw new Error('AI 任务执行超时，请稍后重试')
 }
 
 export function guideAchievement(payload: { resumeVersionId: number; section: string; content: string }) {

@@ -58,7 +58,7 @@ class ExportStorageServiceTest {
         byte[] content = "to be deleted".getBytes();
         ExportStorageService.StoredFile stored = service.store(content, "pdf");
 
-        service.delete(stored.storageKey());
+        assertTrue(service.delete(stored.storageKey()));
         assertNull(service.read(stored.storageKey()));
     }
 

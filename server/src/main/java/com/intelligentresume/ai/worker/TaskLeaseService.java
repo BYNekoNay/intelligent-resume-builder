@@ -61,23 +61,31 @@ public class TaskLeaseService {
      * 续租:延长任务的租约过期时间。
      */
     @Transactional
-    public void renew(AiTask task, String owner) {
-        task.setLeaseExpiresAt(LocalDateTime.now().plusSeconds(properties.getLeaseSeconds()));
-        taskRepository.save(task);
+    public boolean renew(Long taskId, String owner) {
+        LocalDateTime leaseUntil = LocalDateTime.now().plusSeconds(properties.getLeaseSeconds());
+        return taskRepository.renewLease(taskId, owner, leaseUntil) == 1;
     }
 
     /**
      * 释放成功:设置 SUCCESS 状态和结果,清除租约。
      */
     @Transactional
-    public void releaseSuccess(AiTask task, Map<String, Object> result) {
-        task.setStatus(AiTaskStatus.SUCCESS);
-        task.setResultJson(result);
-        task.setLeaseOwner(null);
-        task.setLeaseExpiresAt(null);
-        task.setErrorMessage(null);
-        taskRepository.save(task);
+    public boolean releaseSuccess(AiTask task, String owner, Map<String, Object> result) {
+        AiTask stored = taskRepository.findRunningByIdAndOwnerForUpdate(task.getId(), owner).orElse(null);
+        if (stored == null) {
+            log.warn("Discarding stale success for task {} from owner {}", task.getId(), owner);
+            return false;
+        }
+        stored.setStatus(AiTaskStatus.SUCCESS);
+        stored.setResultJson(result);
+        stored.setConfirmationStatus(task.getConfirmationStatus());
+        stored.setLeaseOwner(null);
+        stored.setLeaseExpiresAt(null);
+        stored.setErrorMessage(null);
+        taskRepository.save(stored);
+        copyExecutionState(stored, task);
         log.debug("Task {} completed successfully", task.getId());
+        return true;
     }
 
     /**
@@ -85,18 +93,34 @@ public class TaskLeaseService {
      * 可重试且未超过最大重试次数 → PENDING(等待下次领取);否则 → FAILED。
      */
     @Transactional
-    public void releaseFailed(AiTask task, String errorMessage, boolean retryable) {
-        if (retryable && task.getRetryCount() < properties.getMaxRetries()) {
-            task.setStatus(AiTaskStatus.PENDING);
+    public boolean releaseFailed(AiTask task, String owner, String errorMessage, boolean retryable) {
+        AiTask stored = taskRepository.findRunningByIdAndOwnerForUpdate(task.getId(), owner).orElse(null);
+        if (stored == null) {
+            log.warn("Discarding stale failure for task {} from owner {}", task.getId(), owner);
+            return false;
+        }
+        if (retryable && stored.getRetryCount() < properties.getMaxRetries()) {
+            stored.setStatus(AiTaskStatus.PENDING);
             log.debug("Task {} failed (retryable), reset to PENDING (retry {}/{})",
-                    task.getId(), task.getRetryCount(), properties.getMaxRetries());
+                    task.getId(), stored.getRetryCount(), properties.getMaxRetries());
         } else {
-            task.setStatus(AiTaskStatus.FAILED);
+            stored.setStatus(AiTaskStatus.FAILED);
             log.debug("Task {} failed permanently: {}", task.getId(), errorMessage);
         }
-        task.setErrorMessage(errorMessage);
-        task.setLeaseOwner(null);
-        task.setLeaseExpiresAt(null);
-        taskRepository.save(task);
+        stored.setErrorMessage(errorMessage);
+        stored.setLeaseOwner(null);
+        stored.setLeaseExpiresAt(null);
+        taskRepository.save(stored);
+        copyExecutionState(stored, task);
+        return true;
+    }
+
+    private void copyExecutionState(AiTask source, AiTask target) {
+        target.setStatus(source.getStatus());
+        target.setResultJson(source.getResultJson());
+        target.setConfirmationStatus(source.getConfirmationStatus());
+        target.setErrorMessage(source.getErrorMessage());
+        target.setLeaseOwner(source.getLeaseOwner());
+        target.setLeaseExpiresAt(source.getLeaseExpiresAt());
     }
 }

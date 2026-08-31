@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { AlertTriangle, Check, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -10,18 +10,34 @@ import {
   type MaterialSelectionItem,
   type MaterialSelectionResult,
 } from '@/api/ai'
+import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useAiTaskStore } from '@/stores/aiTask'
+import { useLocale } from '@/i18n'
 
+const { t } = useLocale()
 const route = useRoute()
 const router = useRouter()
 const taskStore = useAiTaskStore()
+const MATERIAL_TYPE_KEYS: Record<string, string> = {
+  WORK_EXPERIENCE: 'materialSelection.typeWorkExperience',
+  PROJECT_EXPERIENCE: 'materialSelection.typeProjectExperience',
+  EDUCATION: 'materialSelection.typeEducation',
+  SKILL: 'materialSelection.typeSkill',
+  CERTIFICATE: 'materialSelection.typeCertificate',
+  AWARD: 'materialSelection.typeAward',
+  HIGHLIGHT: 'materialSelection.typeHighlight',
+  ACHIEVEMENT: 'materialSelection.typeAchievement',
+  LEADERSHIP_EXPERIENCE: 'materialSelection.typeLeadership',
+  SKILL_EVIDENCE: 'materialSelection.typeSkillEvidence',
+}
 const task = ref<AiTask | null>(null)
 const loading = ref(true)
 const confirming = ref(false)
 const error = ref('')
 const selectedIds = ref(new Set<number>())
 const forcedIds = ref(new Set<number>())
-let timer: number | null = null
+const pollingTimedOut = ref(false)
+const polling = useTaskPolling<AiTask>()
 
 const taskId = computed(() => Number(route.query.taskId))
 const result = computed<MaterialSelectionResult>(() => {
@@ -48,21 +64,20 @@ const manuallyExcludedItems = computed(() => result.value.excluded
 onMounted(async () => {
   if (!Number.isInteger(taskId.value) || taskId.value <= 0) {
     loading.value = false
-    error.value = '选材任务参数无效，请返回生成工作台重新开始。'
+    error.value = t('materialSelection.errorInvalidTask')
     return
   }
   await loadTask(true)
 })
 
-onBeforeUnmount(() => {
-  if (timer !== null) window.clearTimeout(timer)
-})
-
 async function loadTask(initialize = false) {
+  loading.value = true
+  error.value = ''
+  pollingTimedOut.value = false
   try {
     task.value = (await getTask(taskId.value)).data.data
     if (task.value.taskType !== 'JOB_MATERIAL_SELECTION') {
-      error.value = '该任务不是岗位选材任务。'
+      error.value = t('materialSelection.errorWrongTaskType')
       loading.value = false
       return
     }
@@ -72,20 +87,52 @@ async function loadTask(initialize = false) {
       return
     }
     if (task.value.status === 'FAILED' || task.value.status === 'CANCELLED') {
-      error.value = task.value.errorMessage || 'AI 选材失败，请重试。'
+      error.value = task.value.errorMessage
+        || (task.value.status === 'CANCELLED' ? t('common.taskCancelled') : t('materialSelection.errorAiFailed'))
       loading.value = false
       return
     }
-    timer = window.setTimeout(() => void loadTask(initialize), 1500)
+    startPolling(initialize)
   } catch (e: any) {
-    error.value = e.response?.data?.message || '暂时无法读取选材结果，请检查网络后重试。'
+    error.value = e.response?.data?.message || t('materialSelection.errorLoadFailed')
     loading.value = false
   }
 }
 
+function startPolling(initialize: boolean) {
+  pollingTimedOut.value = false
+  polling.start({
+    taskId: taskId.value,
+    fetchTask: async (id) => (await getTask(id)).data.data,
+    onTask: (next) => {
+      task.value = next
+      if (next.status === 'SUCCESS') {
+        if (initialize) selectedIds.value = new Set(result.value.recommended.map(item => item.materialId))
+        loading.value = false
+      } else if (next.status === 'FAILED' || next.status === 'CANCELLED') {
+        error.value = next.errorMessage
+          || (next.status === 'CANCELLED' ? t('common.taskCancelled') : t('materialSelection.errorAiFailed'))
+        loading.value = false
+      }
+    },
+    shouldStop: (next) => next.status === 'SUCCESS' || next.status === 'FAILED' || next.status === 'CANCELLED',
+    onTimeout: () => {
+      pollingTimedOut.value = true
+      error.value = t('common.taskTimeout')
+      loading.value = false
+    },
+    onError: (e: any) => {
+      // 与原实现一致：单次读取失败视为终止并展示错误
+      error.value = e.response?.data?.message || t('materialSelection.errorLoadFailed')
+      loading.value = false
+      polling.stop()
+    },
+  })
+}
+
 function add(item: MaterialSelectionItem, force = false) {
   if (selectedIds.value.size >= 30) {
-    error.value = '一次最多确认 30 条资料，请先移除不必要的资料。'
+    error.value = t('materialSelection.errorMaxLimit')
     return
   }
   selectedIds.value = new Set(selectedIds.value).add(item.materialId)
@@ -104,7 +151,7 @@ function remove(item: MaterialSelectionItem) {
 
 async function confirmSelection() {
   if (!task.value || selectedIds.value.size === 0) {
-    error.value = '请至少选择一条真实资料后再生成简历。'
+    error.value = t('materialSelection.errorNoSelection')
     return
   }
   confirming.value = true
@@ -120,7 +167,7 @@ async function confirmSelection() {
     taskStore.remember(generationTask.id)
     await router.push(`/generate/confirm?taskId=${generationTask.id}`)
   } catch (e: any) {
-    error.value = e.response?.data?.message || '无法确认选材，请检查资料后重试。'
+    error.value = e.response?.data?.message || t('materialSelection.errorConfirmFailed')
   } finally {
     confirming.value = false
   }
@@ -135,101 +182,98 @@ async function retry() {
     await loadTask(true)
   } catch (e: any) {
     loading.value = false
-    error.value = e.response?.data?.message || '无法重试选材。'
+    error.value = e.response?.data?.message || t('materialSelection.errorRetryFailed')
   }
 }
 
 function typeLabel(type: string) {
-  return ({
-    WORK_EXPERIENCE: '工作经历', PROJECT_EXPERIENCE: '项目经历', EDUCATION: '教育背景',
-    SKILL: '技能', CERTIFICATE: '证书', AWARD: '荣誉', HIGHLIGHT: '亮点',
-    ACHIEVEMENT: '量化成果', LEADERSHIP_EXPERIENCE: '管理 / 协作', SKILL_EVIDENCE: '技能证据',
-  } as Record<string, string>)[type] ?? '职业资料'
+  return t(MATERIAL_TYPE_KEYS[type] ?? 'materialSelection.typeDefault')
 }
 </script>
 
 <template>
   <main class="selection-page">
     <header class="selection-header">
-      <p class="eyebrow"><Sparkles :size="14" /> AI 选材</p>
-      <h1>确认用于这份简历的资料</h1>
-      <p>AI 已根据岗位要求整理候选，你可以在生成前添加或移除资料。</p>
+      <p class="eyebrow"><Sparkles :size="14" /> {{ t('materialSelection.eyebrow') }}</p>
+      <h1>{{ t('materialSelection.title') }}</h1>
+      <p>{{ t('materialSelection.subtitle') }}</p>
+      <div class="selection-route" aria-hidden="true"><span class="done"><Check :size="12" />{{ t('generationWorkbench.stepTargetJob') }}</span><i></i><span class="active">{{ t('generationWorkbench.stepMaterialScope') }}</span><i></i><span>{{ t('generationWorkbench.stepAiSelection') }}</span></div>
     </header>
 
     <section v-if="loading" class="status-panel" aria-live="polite">
       <span class="spinner"></span>
-      <h2>正在理解岗位并筛选资料</h2>
-      <p>系统只会从你的资料库中选择，不会补造经历。</p>
+      <h2>{{ t('materialSelection.loadingTitle') }}</h2>
+      <p>{{ t('materialSelection.loadingDesc') }}</p>
     </section>
 
     <section v-else-if="error && (!task || task.status !== 'SUCCESS')" class="status-panel error-panel">
       <AlertTriangle :size="24" />
       <p>{{ error }}</p>
-      <button v-if="task?.status === 'FAILED'" class="btn-primary" @click="retry"><RefreshCw :size="15" />重新选材</button>
-      <router-link v-else class="btn-secondary" to="/generate">返回生成工作台</router-link>
+      <button v-if="task?.status === 'FAILED' || pollingTimedOut" class="btn-primary" @click="retry"><RefreshCw :size="15" />{{ t('materialSelection.retrySelection') }}</button>
+      <router-link v-else class="btn-secondary" to="/generate">{{ t('materialSelection.backToWorkspace') }}</router-link>
     </section>
 
     <template v-else-if="task?.status === 'SUCCESS'">
       <section class="selection-section selected-section">
         <div class="section-heading">
-          <div><h2>将用于生成</h2><p>生成模型只会收到这里确认的资料。</p></div>
+          <div><h2>{{ t('materialSelection.selectedTitle') }}</h2><p>{{ t('materialSelection.selectedDesc') }}</p></div>
           <span class="count">{{ selectedItems.length }} / 30</span>
         </div>
-        <p v-if="selectedItems.length === 0" class="empty-hint">尚未选择资料，请从下方候选中添加。</p>
+        <p v-if="selectedItems.length === 0" class="empty-hint">{{ t('materialSelection.emptyHint') }}</p>
         <article v-for="item in selectedItems" :key="item.materialId" class="material-row selected">
           <div class="material-copy">
-            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || '未命名资料' }}</strong></div>
+            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || t('materialSelection.unnamedMaterial') }}</strong></div>
             <p v-if="item.reason">{{ item.reason }}</p>
             <ul v-if="item.matchedRequirements?.length" class="requirement-list">
               <li v-for="requirement in item.matchedRequirements" :key="requirement">{{ requirement }}</li>
             </ul>
           </div>
-          <button class="icon-action remove" title="从本次生成中移除" @click="remove(item)"><Trash2 :size="17" /><span>移除</span></button>
+          <button class="icon-action remove" :title="t('materialSelection.removeTitle')" @click="remove(item)"><Trash2 :size="17" /><span>{{ t('materialSelection.remove') }}</span></button>
         </article>
       </section>
 
       <section v-if="unselectedItems.length" class="selection-section">
-        <div class="section-heading"><div><h2>其他候选</h2><p>相关度较低或岗位篇幅有限，默认不使用。</p></div></div>
+        <div class="section-heading"><div><h2>{{ t('materialSelection.otherCandidates') }}</h2><p>{{ t('materialSelection.otherCandidatesDesc') }}</p></div></div>
         <article v-for="item in unselectedItems" :key="item.materialId" class="material-row">
           <div class="material-copy">
-            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || '未命名资料' }}</strong></div>
-            <p>{{ item.reason || '与当前岗位的直接关联较弱。' }}</p>
+            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || t('materialSelection.unnamedMaterial') }}</strong></div>
+            <p>{{ item.reason || t('materialSelection.weakRelevance') }}</p>
           </div>
-          <button class="icon-action add" @click="add(item)"><Plus :size="17" /><span>加入</span></button>
+          <button class="icon-action add" @click="add(item)"><Plus :size="17" /><span>{{ t('materialSelection.add') }}</span></button>
         </article>
       </section>
 
       <section v-if="excludedItems.length" class="selection-section excluded-section">
-        <div class="section-heading"><div><h2>默认排除的资料</h2><p>这些资料按你的全局偏好不参与生成，只有明确加入才会使用。</p></div></div>
+        <div class="section-heading"><div><h2>{{ t('materialSelection.defaultExcluded') }}</h2><p>{{ t('materialSelection.defaultExcludedDesc') }}</p></div></div>
         <article v-for="item in excludedItems" :key="item.materialId" class="material-row">
           <div class="material-copy">
-            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || '未命名资料' }}</strong></div>
-            <p>{{ item.reason || '你已在资料库中设置为默认不使用。' }}</p>
+            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || t('materialSelection.unnamedMaterial') }}</strong></div>
+            <p>{{ item.reason || t('materialSelection.globallyExcluded') }}</p>
           </div>
-          <button class="icon-action force" @click="add(item, true)"><Plus :size="17" /><span>本次强制加入</span></button>
+          <button class="icon-action force" @click="add(item, true)"><Plus :size="17" /><span>{{ t('materialSelection.forceAddThisTime') }}</span></button>
         </article>
       </section>
 
       <section v-if="manuallyExcludedItems.length" class="selection-section excluded-section">
-        <div class="section-heading"><div><h2>本次已排除的资料</h2><p>这些资料已明确排除，不能在本次生成中重新加入。</p></div></div>
+        <div class="section-heading"><div><h2>{{ t('materialSelection.excludedThisTime') }}</h2><p>{{ t('materialSelection.excludedThisTimeDesc') }}</p></div></div>
         <article v-for="item in manuallyExcludedItems" :key="item.materialId" class="material-row">
           <div class="material-copy">
-            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || '未命名资料' }}</strong></div>
-            <p>{{ item.reason || '已在生成工作台中排除。' }}</p>
+            <div class="material-title"><span>{{ typeLabel(item.materialType) }}</span><strong>{{ item.title || t('materialSelection.unnamedMaterial') }}</strong></div>
+            <p>{{ item.reason || t('materialSelection.excludedInWorkbench') }}</p>
           </div>
         </article>
       </section>
 
       <section v-if="result.missingRequirements.length" class="gap-band">
-        <div><AlertTriangle :size="18" /><h2>尚未覆盖的岗位要求</h2></div>
+        <div><AlertTriangle :size="18" /><h2>{{ t('materialSelection.uncoveredTitle') }}</h2></div>
         <ul><li v-for="gap in result.missingRequirements" :key="gap">{{ gap }}</li></ul>
       </section>
 
       <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
       <footer class="page-actions">
-        <router-link class="btn-secondary" to="/generate">重新配置</router-link>
+        <router-link class="btn-secondary" to="/generate">{{ t('materialSelection.reconfigure') }}</router-link>
         <button class="btn-primary" :disabled="confirming || selectedItems.length === 0" @click="confirmSelection">
-          <Check :size="16" />{{ confirming ? '正在创建草稿...' : '确认选材并生成简历' }}
+          <Check :size="16" />{{ confirming ? t('materialSelection.creatingDraft') : t('materialSelection.confirmAndGenerate') }}
         </button>
       </footer>
     </template>
@@ -237,46 +281,52 @@ function typeLabel(type: string) {
 </template>
 
 <style scoped>
-.selection-page { max-width: 840px; margin: 0 auto; padding: 2rem 1rem 3rem; }
-.selection-header { margin-bottom: 1.75rem; }
-.selection-header h1 { margin: 0.35rem 0; font-size: 1.6rem; }
-.selection-header > p:last-child, .section-heading p, .material-copy p { color: #64748b; }
-.selection-section { padding: 1.2rem 0; border-top: 1px solid #e2e8f0; }
-.selected-section { border-top: 2px solid #0e7490; }
-.section-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: start; margin-bottom: 0.8rem; }
-.section-heading h2, .gap-band h2, .status-panel h2 { margin: 0; font-size: 1rem; }
-.section-heading p { margin: 0.25rem 0 0; font-size: 0.84rem; }
-.count { color: #0e7490; font-weight: 700; }
-.material-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 76px; padding: 0.85rem 0; border-top: 1px solid #f1f5f9; }
-.material-row.selected { border-left: 3px solid #10b981; padding-left: 0.8rem; }
+.selection-page { display: grid; gap: 24px; width: min(100%, 920px); margin: 0 auto; padding: 8px 0 48px; }
+.selection-header { display: grid; gap: 0; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
+.selection-header .eyebrow { justify-self: start; }
+.selection-header h1 { margin: 5px 0 7px; color: var(--text-primary); font-family: var(--font-display); font-size: 34px; letter-spacing: 0; }
+.selection-header > p:not(.eyebrow) { max-width: 680px; margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
+.selection-route { display: grid; grid-template-columns: auto 34px auto 34px auto; align-items: center; justify-content: end; gap: 7px; margin-top: 20px; color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; font-weight: 700; }
+.selection-route span { display: inline-flex; align-items: center; gap: 4px; }
+.selection-route i { height: 1px; background: var(--border); }
+.selection-route .done { color: var(--text-primary); }
+.selection-route .active { color: var(--accent); }
+.selection-section { display: grid; gap: 0; padding: 22px 24px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); box-shadow: var(--shadow-sm); }
+.selected-section { border-left: 4px solid var(--accent); }
+.excluded-section { background: color-mix(in srgb, var(--bg-page) 55%, var(--bg-surface)); }
+.section-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; margin-bottom: 10px; padding-bottom: 15px; border-bottom: 1px solid var(--border-soft); }
+.section-heading h2, .gap-band h2, .status-panel h2 { margin: 0; color: var(--text-primary); font-size: 15px; }
+.section-heading p { margin: 4px 0 0; color: var(--text-secondary); font-size: 10px; line-height: 1.55; }
+.count { display: grid; min-width: 46px; height: 28px; place-items: center; border: 1px solid var(--border); border-radius: 5px; color: var(--accent); background: var(--bg-page); font-family: var(--font-utility); font-size: 10px; font-weight: 700; }
+.material-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; min-height: 74px; padding: 13px 4px; border-bottom: 1px solid var(--border-soft); }
+.material-row:last-child { border-bottom: 0; }
+.material-row.selected { padding-left: 12px; border-left: 3px solid var(--success); }
 .material-copy { min-width: 0; }
-.material-title { display: flex; align-items: center; gap: 0.55rem; }
-.material-title span { color: #0e7490; font-size: 0.72rem; font-weight: 700; }
-.material-title strong { overflow-wrap: anywhere; }
-.material-copy p { margin: 0.35rem 0 0; font-size: 0.84rem; }
-.requirement-list { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.45rem 0 0; padding: 0; list-style: none; }
-.requirement-list li { padding: 0.15rem 0.4rem; border-radius: 3px; background: #ecfeff; color: #155e75; font-size: 0.72rem; }
-.icon-action, .btn-primary, .btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-height: 36px; border-radius: 6px; white-space: nowrap; cursor: pointer; text-decoration: none; }
-.icon-action { flex: 0 0 auto; padding: 0 0.7rem; background: #fff; border: 1px solid #cbd5e1; color: #334155; }
-.icon-action.add { color: #047857; border-color: #a7f3d0; }
-.icon-action.remove { color: #b91c1c; border-color: #fecaca; }
-.icon-action.force { color: #9a3412; border-color: #fdba74; }
-.gap-band { margin: 1rem 0; padding: 1rem; border-left: 3px solid #f59e0b; background: #fffbeb; }
-.gap-band > div { display: flex; align-items: center; gap: 0.5rem; color: #92400e; }
-.gap-band ul { margin: 0.65rem 0 0; color: #78350f; }
-.status-panel { display: grid; justify-items: center; gap: 0.8rem; padding: 3rem 1rem; text-align: center; border-block: 1px solid #e2e8f0; }
-.error-panel { color: #b91c1c; }
-.spinner { width: 28px; height: 28px; border: 3px solid #cbd5e1; border-top-color: #0e7490; border-radius: 50%; animation: spin .75s linear infinite; }
-.inline-error { color: #b91c1c; }
-.page-actions { display: flex; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; }
-.btn-primary { padding: 0 1rem; border: 1px solid #0e7490; background: #0e7490; color: #fff; }
-.btn-secondary { padding: 0 1rem; border: 1px solid #cbd5e1; background: #fff; color: #334155; }
+.material-title { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.material-title span { min-height: 21px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--accent); background: var(--accent-light); font-size: 9px; font-weight: 700; }
+.material-title strong { overflow-wrap: anywhere; color: var(--text-primary); font-size: 12px; }
+.material-copy p { margin: 5px 0 0; color: var(--text-secondary); font-size: 10px; line-height: 1.55; }
+.requirement-list { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0 0; padding: 0; list-style: none; }
+.requirement-list li { padding: 3px 6px; border-radius: 3px; color: var(--info); background: var(--info-light); font-size: 9px; }
+.icon-action, .btn-primary, .btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 11px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); background: var(--bg-surface); font-size: 11px; font-weight: 650; white-space: nowrap; cursor: pointer; text-decoration: none; }
+.icon-action.add { border-color: color-mix(in srgb, var(--success) 28%, var(--border)); color: var(--success); }
+.icon-action.remove { border-color: color-mix(in srgb, var(--danger) 28%, var(--border)); color: var(--danger); }
+.icon-action.force { border-color: color-mix(in srgb, var(--highlight) 32%, var(--border)); color: var(--highlight); }
+.icon-action:hover, .btn-secondary:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.gap-band { margin: 0; padding: 17px 20px; border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--border)); border-left: 4px solid var(--warning); border-radius: 7px; background: var(--warning-light); }
+.gap-band > div { display: flex; align-items: center; gap: 7px; color: var(--warning); }
+.gap-band ul { margin: 9px 0 0; padding-left: 20px; color: var(--text-secondary); font-size: 11px; }
+.status-panel { display: grid; justify-items: center; gap: 10px; padding: 48px 20px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); text-align: center; }
+.status-panel p { margin: 0; color: var(--text-secondary); font-size: 11px; }
+.error-panel { color: var(--danger); }
+.spinner { width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .75s linear infinite; }
+.empty-hint { margin: 0; padding: 18px 0; color: var(--text-secondary); font-size: 11px; }
+.inline-error { margin: 0; color: var(--danger); font-size: 11px; }
+.page-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); box-shadow: var(--shadow-sm); }
+.btn-primary { border-color: var(--accent); color: #fff; background: var(--accent); }
+.btn-primary:hover:not(:disabled) { border-color: var(--accent-hover); background: var(--accent-hover); }
 .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 600px) {
-  .material-row { align-items: stretch; flex-direction: column; }
-  .icon-action { width: 100%; }
-  .page-actions { display: grid; grid-template-columns: 1fr; }
-}
+@media (max-width: 600px) { .selection-page { padding-top: 0; } .selection-header h1 { font-size: 29px; } .selection-route { grid-template-columns: auto 15px auto 15px auto; justify-content: stretch; font-size: 8px; } .selection-section { padding: 18px 15px; } .material-row { align-items: stretch; grid-template-columns: 1fr; } .icon-action { width: 100%; } .page-actions { display: grid; grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1.8s; } }
 </style>

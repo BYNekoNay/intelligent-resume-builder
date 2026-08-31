@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ArrowLeft, ArrowRight, BriefcaseBusiness, Check, Database, FileText, ShieldCheck, Sparkles } from 'lucide-vue-next'
 import { useCareerMaterialStore } from '@/stores/careerMaterial'
 import { useJobDescriptionStore } from '@/stores/jobDescription'
 import { useAiTaskStore } from '@/stores/aiTask'
 import { getConsent, hasJobGenerationConsent, selectMaterialsForJob, type MaterialSelectionRequest } from '@/api/ai'
 import type { CareerMaterialSummary, MaterialType } from '@/api/careerMaterial'
+import { useLocale } from '@/i18n'
+
+const { t } = useLocale()
 
 const PENDING_GENERATION_KEY = 'pending-job-generation'
 
@@ -43,7 +47,7 @@ const resolvedResumeTitle = computed(() => {
   const company = jdMode.value === 'select' ? (selectedJd.value?.companyName ?? '') : companyName.value
   const position = jdMode.value === 'select' ? (selectedJd.value?.title ?? '') : positionTitle.value
   if (company && position) return `${company} - ${position}`
-  return position || company || '岗位定制简历'
+  return position || company || t('generationWorkbench.fallbackResumeTitle')
 })
 
 const canProceedStep1 = computed(() => {
@@ -180,12 +184,12 @@ async function resumePendingGeneration() {
   try {
     const consent = (await getConsent()).data.data
     if (!hasJobGenerationConsent(consent)) {
-      error.value = 'AI 授权尚未生效，请重新授权后再试。'
+      error.value = t('generationWorkbench.consentNotActive')
       return
     }
     await submitGeneration(pending.payload, pending.idempotencyKey)
   } catch (e: any) {
-    error.value = e.response?.data?.message || e.message || '生成请求失败'
+    error.value = e.response?.data?.message || e.message || t('generationWorkbench.generationFailed')
   } finally {
     generating.value = false
   }
@@ -210,61 +214,53 @@ async function startGeneration() {
 
     await submitGeneration(payload, idempotencyKey)
   } catch (e: any) {
-    error.value = e.response?.data?.message || e.message || '生成请求失败'
+    error.value = e.response?.data?.message || e.message || t('generationWorkbench.generationFailed')
   } finally {
     generating.value = false
   }
 }
 
-const TYPE_LABELS: Record<MaterialType, string> = {
-  WORK_EXPERIENCE: '工作经历',
-  PROJECT_EXPERIENCE: '项目经历',
-  EDUCATION: '教育背景',
-  SKILL: '技能',
-  CERTIFICATE: '证书',
-  AWARD: '荣誉',
-  HIGHLIGHT: '亮点',
-  ACHIEVEMENT: '量化成果',
-  LEADERSHIP_EXPERIENCE: '管理 / 协作经历',
-  SKILL_EVIDENCE: '技能证据',
-}
+const TYPE_LABELS = computed<Record<MaterialType, string>>(() => ({
+  WORK_EXPERIENCE: t('generationWorkbench.typeWorkExperience'),
+  PROJECT_EXPERIENCE: t('generationWorkbench.typeProjectExperience'),
+  EDUCATION: t('generationWorkbench.typeEducation'),
+  SKILL: t('generationWorkbench.typeSkill'),
+  CERTIFICATE: t('generationWorkbench.typeCertificate'),
+  AWARD: t('generationWorkbench.typeAward'),
+  HIGHLIGHT: t('generationWorkbench.typeHighlight'),
+  ACHIEVEMENT: t('generationWorkbench.typeAchievement'),
+  LEADERSHIP_EXPERIENCE: t('generationWorkbench.typeLeadershipExperience'),
+  SKILL_EVIDENCE: t('generationWorkbench.typeSkillEvidence'),
+  VOLUNTEER_EXPERIENCE: t('generationWorkbench.typeVolunteerExperience'),
+  COURSE: t('generationWorkbench.typeCourse'),
+  PUBLICATION: t('generationWorkbench.typePublication'),
+}))
 </script>
 
 <template>
-  <div class="workbench">
+  <main class="generation-workbench">
     <header class="workbench-header">
-      <h1>根据目标岗位生成简历</h1>
-      <p class="subtitle">从你的资料库出发，AI 为你定制一份岗位简历</p>
+      <p class="eyebrow"><Sparkles :size="14" /> {{ t('generationWorkbench.eyebrow') }}</p>
+      <h1>{{ t('generationWorkbench.title') }}</h1>
+      <p class="subtitle">{{ t('generationWorkbench.subtitle') }}</p>
     </header>
 
-    <!-- Step indicators -->
-    <div class="steps-indicator">
-      <div :class="['step-dot', { active: step === 1, done: step > 1 }]">
-        <span class="dot">1</span>
-        <span class="label">确定目标岗位</span>
-      </div>
-      <div class="step-line" :class="{ active: step > 1 }"></div>
-      <div :class="['step-dot', { active: step === 2, done: step > 2 }]">
-        <span class="dot">2</span>
-        <span class="label">选择资料范围</span>
-      </div>
-      <div class="step-line" :class="{ active: step > 2 }"></div>
-      <div :class="['step-dot', { active: step === 3 }]">
-        <span class="dot">3</span>
-        <span class="label">AI 选材</span>
-      </div>
-    </div>
+    <ol class="steps-indicator" :aria-label="t('generationWorkbench.progressLabel')">
+      <li :class="{ active: step === 1, done: step > 1 }"><span><Check v-if="step > 1" :size="13" /><template v-else>1</template></span><div><small>{{ t('generationWorkbench.stepLabel').replace('{step}', '1') }}</small><strong>{{ t('generationWorkbench.stepTargetJob') }}</strong></div></li>
+      <li :class="{ active: step === 2, done: step > 2 }"><span><Check v-if="step > 2" :size="13" /><template v-else>2</template></span><div><small>{{ t('generationWorkbench.stepLabel').replace('{step}', '2') }}</small><strong>{{ t('generationWorkbench.stepMaterialScope') }}</strong></div></li>
+      <li :class="{ active: step === 3 }"><span>3</span><div><small>{{ t('generationWorkbench.stepLabel').replace('{step}', '3') }}</small><strong>{{ t('generationWorkbench.stepAiSelection') }}</strong></div></li>
+    </ol>
 
-    <!-- Step 1: JD Selection -->
-    <section v-if="step === 1" class="step-content">
-      <div class="mode-toggle">
-        <button :class="{ active: jdMode === 'select' }" @click="jdMode = 'select'">选择已有岗位</button>
-        <button :class="{ active: jdMode === 'paste' }" @click="jdMode = 'paste'">粘贴 JD</button>
+    <section v-if="step === 1" class="step-content workbench-panel">
+      <header class="panel-heading"><span><BriefcaseBusiness :size="19" /></span><div><p class="section-kicker">{{ t('generationWorkbench.targetEyebrow') }}</p><h2>{{ t('generationWorkbench.targetTitle') }}</h2><p>{{ t('generationWorkbench.targetDescription') }}</p></div></header>
+      <div class="mode-toggle" role="group" :aria-label="t('generationWorkbench.targetModeLabel')">
+        <button type="button" :class="{ active: jdMode === 'select' }" :aria-pressed="jdMode === 'select'" @click="jdMode = 'select'"><Database :size="15" />{{ t('generationWorkbench.modeSelectExisting') }}</button>
+        <button type="button" :class="{ active: jdMode === 'paste' }" :aria-pressed="jdMode === 'paste'" @click="jdMode = 'paste'"><FileText :size="15" />{{ t('generationWorkbench.modePasteJd') }}</button>
       </div>
 
       <div v-if="jdMode === 'select'" class="jd-select">
         <p v-if="jdStore.items.length === 0" class="empty-hint">
-          暂无已保存的岗位描述，请切换到"粘贴 JD"模式。
+          {{ t('generationWorkbench.noSavedJd') }}
         </p>
         <div v-else class="jd-list">
           <label
@@ -273,44 +269,35 @@ const TYPE_LABELS: Record<MaterialType, string> = {
             :class="['jd-card', { selected: selectedJdId === jd.id }]"
           >
             <input type="radio" :value="jd.id" v-model="selectedJdId" class="sr-only" />
-            <div class="jd-title">{{ jd.title }}</div>
-            <div class="jd-company" v-if="jd.companyName">{{ jd.companyName }}</div>
-            <div class="jd-preview">{{ jd.jdText?.slice(0, 80) }}...</div>
+            <span class="radio-mark"><Check v-if="selectedJdId === jd.id" :size="13" /></span>
+            <span class="jd-copy"><strong>{{ jd.title }}</strong><small v-if="jd.companyName">{{ jd.companyName }}</small><p>{{ jd.jdText?.slice(0, 110) }}...</p></span>
           </label>
         </div>
       </div>
 
       <div v-else class="jd-paste">
         <div class="form-row">
-          <input v-model="companyName" placeholder="公司名称（可选）" class="input" />
-          <input v-model="positionTitle" placeholder="岗位名称（推荐）" class="input" />
+          <label>{{ t('generationWorkbench.companyName') }}<input v-model="companyName" :placeholder="t('generationWorkbench.companyNamePlaceholder')" class="input" /></label>
+          <label>{{ t('generationWorkbench.positionTitle') }}<input v-model="positionTitle" :placeholder="t('generationWorkbench.positionTitlePlaceholder')" class="input" /></label>
         </div>
-        <textarea
-          v-model="pastedJdText"
-          placeholder="粘贴职位描述原文（至少 20 字）..."
-          class="textarea"
-          rows="10"
-        ></textarea>
-        <p class="char-count">{{ pastedJdText.length }} 字</p>
+        <label class="jd-text-field">{{ t('generationWorkbench.jdTextLabel') }}<textarea v-model="pastedJdText" :placeholder="t('generationWorkbench.jdTextPlaceholder')" class="textarea" rows="10"></textarea><span class="char-count">{{ pastedJdText.length }} {{ t('generationWorkbench.charUnit') }}</span></label>
       </div>
 
       <div class="step-actions">
-        <button class="btn-primary" :disabled="!canProceedStep1" @click="step = 2">
-          下一步：选择资料
+        <span>{{ t('generationWorkbench.stepOneHint') }}</span>
+        <button class="btn-neon btn-primary" :disabled="!canProceedStep1" @click="step = 2">
+          {{ t('generationWorkbench.nextSelectMaterials') }} <ArrowRight :size="16" />
         </button>
       </div>
     </section>
 
-    <!-- Step 2: Material Selection -->
-    <section v-if="step === 2" class="step-content">
-      <p class="step-desc">
-        标记必须使用或不使用的资料，其余交给 AI 根据岗位相关性自动判断。
-      </p>
+    <section v-if="step === 2" class="step-content workbench-panel">
+      <header class="panel-heading"><span><Database :size="19" /></span><div><p class="section-kicker">{{ t('generationWorkbench.scopeEyebrow') }}</p><h2>{{ t('generationWorkbench.scopeTitle') }}</h2><p>{{ t('generationWorkbench.step2Desc') }}</p></div></header>
 
       <div v-if="materialStore.items.length === 0" class="empty-hint">
-        资料库为空。建议先
-        <router-link to="/career-materials">完善资料库</router-link>
-        再生成简历。
+        {{ t('generationWorkbench.emptyMaterialsPrefix') }}
+        <router-link to="/career-materials">{{ t('generationWorkbench.emptyMaterialsLink') }}</router-link>
+        {{ t('generationWorkbench.emptyMaterialsSuffix') }}
       </div>
 
       <div v-else class="material-list">
@@ -321,52 +308,51 @@ const TYPE_LABELS: Record<MaterialType, string> = {
         >
           <div class="material-info">
             <span class="material-type">{{ TYPE_LABELS[m.materialType] ?? m.materialType }}</span>
-            <span class="material-title">{{ m.title }}</span>
-            <span v-if="m.usagePreference === 'PREFERRED'" class="preference-badge preferred">优先资料</span>
-            <span v-else-if="m.usagePreference === 'EXCLUDED'" class="preference-badge excluded">默认排除</span>
+            <strong class="material-title">{{ m.title }}</strong>
+            <small v-if="m.usagePreference === 'PREFERRED'" class="preference-badge preferred">{{ t('generationWorkbench.badgePreferred') }}</small>
+            <small v-else-if="m.usagePreference === 'EXCLUDED'" class="preference-badge excluded">{{ t('generationWorkbench.badgeExcluded') }}</small>
           </div>
           <div class="material-actions">
             <button
               :class="['tag-btn', { active: (materialDecisions[m.id] ?? 'default') === 'must' }]"
               @click="setDecision(m.id, (materialDecisions[m.id] ?? 'default') === 'must' ? 'default' : 'must')"
-            >必须使用</button>
+            >{{ t('generationWorkbench.btnMustUse') }}</button>
             <button
               :class="['tag-btn exclude', { active: (materialDecisions[m.id] ?? 'default') === 'exclude' }]"
               @click="setDecision(m.id, (materialDecisions[m.id] ?? 'default') === 'exclude' ? 'default' : 'exclude')"
-            >不使用</button>
+            >{{ t('generationWorkbench.btnExclude') }}</button>
           </div>
         </div>
       </div>
 
       <div class="selection-summary" v-if="materialStore.items.length > 0">
-        <span>必须使用 {{ materialsByDecision.must.length }} 条</span>
-        <span>不使用 {{ materialsByDecision.exclude.length }} 条</span>
-        <span>AI 自动判断 {{ materialsByDecision.auto.length }} 条</span>
+        <span><strong>{{ materialsByDecision.must.length }}</strong>{{ t('generationWorkbench.summaryMustPrefix') }}</span>
+        <span><strong>{{ materialsByDecision.auto.length }}</strong>{{ t('generationWorkbench.summaryAutoPrefix') }}</span>
+        <span><strong>{{ materialsByDecision.exclude.length }}</strong>{{ t('generationWorkbench.summaryExcludePrefix') }}</span>
       </div>
 
       <div class="step-actions">
-        <button class="btn-secondary" @click="step = 1">上一步</button>
-        <button class="btn-primary" @click="step = 3" :disabled="materialStore.items.length === 0">
-          下一步：开始生成
+        <button class="btn-neon btn-ghost" @click="step = 1"><ArrowLeft :size="16" />{{ t('generationWorkbench.prevStep') }}</button>
+        <button class="btn-neon btn-primary" @click="step = 3" :disabled="materialStore.items.length === 0">
+          {{ t('generationWorkbench.nextStartGeneration') }} <ArrowRight :size="16" />
         </button>
       </div>
     </section>
 
-    <!-- Step 3: Generate -->
-    <section v-if="step === 3" class="step-content">
+    <section v-if="step === 3" class="step-content workbench-panel review-panel">
+      <header class="panel-heading"><span><ShieldCheck :size="19" /></span><div><p class="section-kicker">{{ t('generationWorkbench.reviewEyebrow') }}</p><h2>{{ t('generationWorkbench.confirmTitle') }}</h2><p>{{ t('generationWorkbench.reviewDescription') }}</p></div></header>
       <div class="generate-summary">
-        <h3>选材配置确认</h3>
         <div class="summary-item">
-          <span class="label">目标岗位：</span>
+          <span class="label">{{ t('generationWorkbench.labelTargetJob') }}</span>
           <span v-if="jdMode === 'select'">{{ selectedJd?.title }} {{ selectedJd?.companyName ? `@ ${selectedJd.companyName}` : '' }}</span>
-          <span v-else>{{ positionTitle || '自定义岗位' }} {{ companyName ? `@ ${companyName}` : '' }}</span>
+          <span v-else>{{ positionTitle || t('generationWorkbench.customPosition') }} {{ companyName ? `@ ${companyName}` : '' }}</span>
         </div>
         <div class="summary-item">
-          <span class="label">资料范围：</span>
-          <span>必须 {{ materialsByDecision.must.length }} / 排除 {{ materialsByDecision.exclude.length }} / 自动 {{ materialsByDecision.auto.length }}</span>
+          <span class="label">{{ t('generationWorkbench.labelMaterialScope') }}</span>
+          <span>{{ t('generationWorkbench.scopeMust') }} {{ materialsByDecision.must.length }} / {{ t('generationWorkbench.scopeExclude') }} {{ materialsByDecision.exclude.length }} / {{ t('generationWorkbench.scopeAuto') }} {{ materialsByDecision.auto.length }}</span>
         </div>
         <div class="summary-item">
-          <span class="label">简历命名：</span>
+          <span class="label">{{ t('generationWorkbench.labelResumeName') }}</span>
           <span>{{ resolvedResumeTitle }}</span>
         </div>
       </div>
@@ -374,14 +360,14 @@ const TYPE_LABELS: Record<MaterialType, string> = {
       <p v-if="error" class="error-msg">{{ error }}</p>
 
       <div class="step-actions">
-        <button class="btn-secondary" @click="step = 2">上一步</button>
-        <button class="btn-primary btn-generate" @click="startGeneration" :disabled="generating">
+        <button class="btn-neon btn-ghost" @click="step = 2"><ArrowLeft :size="16" />{{ t('generationWorkbench.prevStep') }}</button>
+        <button class="btn-neon btn-primary btn-generate" @click="startGeneration" :disabled="generating">
           <span v-if="generating" class="spinner"></span>
-          {{ generating ? '正在分析资料...' : '开始 AI 选材' }}
+          <Sparkles v-else :size="16" />{{ generating ? t('generationWorkbench.generating') : t('generationWorkbench.startGeneration') }}
         </button>
       </div>
     </section>
-  </div>
+  </main>
 </template>
 
 <style scoped>
@@ -694,4 +680,78 @@ const TYPE_LABELS: Record<MaterialType, string> = {
   overflow: hidden;
   clip: rect(0,0,0,0);
 }
+
+/* Evidence-led generation workflow. */
+.generation-workbench { display: grid; gap: 26px; width: min(100%, 980px); margin: 0 auto; padding: 8px 0 48px; }
+.workbench-header { max-width: 720px; }
+.workbench-header h1 { margin: 5px 0 7px; color: var(--text-primary); font-family: var(--font-display); font-size: 36px; font-weight: 700; letter-spacing: 0; }
+.workbench-header .subtitle { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
+.steps-indicator { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 0; border-block: 1px solid var(--border); list-style: none; }
+.steps-indicator li { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; min-height: 64px; padding: 11px 16px; color: var(--text-tertiary); }
+.steps-indicator li:not(:last-child)::after { position: absolute; top: 16px; right: 0; bottom: 16px; width: 1px; background: var(--border-soft); content: ''; }
+.steps-indicator li > span { display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--bg-surface); font-family: var(--font-utility); font-size: 10px; }
+.steps-indicator li > div { display: grid; gap: 2px; min-width: 0; }
+.steps-indicator li small { font-family: var(--font-utility); font-size: 8px; font-weight: 700; }
+.steps-indicator li strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.steps-indicator li.active { color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); }
+.steps-indicator li.active > span { border-color: var(--accent); color: #fff; background: var(--accent); }
+.steps-indicator li.done { color: var(--text-primary); }
+.steps-indicator li.done > span { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.step-content.workbench-panel { display: grid; gap: 22px; padding: 26px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); box-shadow: var(--shadow-sm); animation: workflow-enter .18s ease-out; }
+.panel-heading { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: start; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--border-soft); }
+.panel-heading > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 6px; color: var(--accent); background: var(--accent-light); }
+.section-kicker { margin: 0 0 3px; color: var(--text-tertiary); font-family: var(--font-utility); font-size: 10px; font-weight: 700; }
+.panel-heading h2 { margin: 0; color: var(--text-primary); font-size: 17px; }
+.panel-heading p:last-child { margin: 5px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
+.mode-toggle { display: inline-grid; grid-template-columns: 1fr 1fr; gap: 3px; width: min(100%, 430px); margin: 0; padding: 3px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-page); }
+.mode-toggle button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 7px 12px; border: 0; border-radius: 4px; color: var(--text-secondary); background: transparent; font-size: 11px; font-weight: 650; cursor: pointer; }
+.mode-toggle button.active { border: 0; color: var(--accent); background: var(--bg-surface); box-shadow: var(--shadow-sm); }
+.jd-list, .material-list { display: grid; gap: 0; max-height: 390px; overflow-y: auto; border-top: 1px solid var(--border); scrollbar-width: thin; }
+.jd-card { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 11px; padding: 15px 8px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; cursor: pointer; }
+.jd-card:hover { border-color: var(--border); background: color-mix(in srgb, var(--accent-light) 45%, transparent); }
+.jd-card.selected { border-color: var(--border); background: var(--accent-light); box-shadow: inset 3px 0 0 var(--accent); }
+.radio-mark { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: #fff; background: var(--bg-surface); }
+.jd-card.selected .radio-mark { border-color: var(--accent); background: var(--accent); }
+.jd-copy { display: grid; min-width: 0; gap: 3px; }
+.jd-copy strong { color: var(--text-primary); font-size: 13px; }
+.jd-copy small { color: var(--accent); font-size: 10px; font-weight: 650; }
+.jd-copy p { display: -webkit-box; margin: 3px 0 0; overflow: hidden; color: var(--text-secondary); font-size: 10px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.jd-paste { display: grid; gap: 14px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 0; }
+.form-row label, .jd-text-field { display: grid; gap: 6px; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
+.input, .textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); background: var(--bg-input); font: inherit; font-size: 13px; }
+.textarea { resize: vertical; }
+.input:focus, .textarea:focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-light); }
+.jd-text-field { position: relative; }
+.jd-text-field .char-count { justify-self: end; margin: -27px 10px 10px 0; padding: 2px 5px; color: var(--text-tertiary); background: var(--bg-input); font-family: var(--font-utility); font-size: 9px; font-weight: 500; }
+.material-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; min-height: 66px; padding: 12px 8px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
+.material-card.must { border-color: var(--border); background: var(--accent-light); box-shadow: inset 3px 0 0 var(--accent); }
+.material-card.exclude { border-color: var(--border); background: var(--danger-light); box-shadow: inset 3px 0 0 var(--danger); opacity: .72; }
+.material-info { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.material-type, .preference-badge { min-height: 21px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); background: var(--bg-page); font-size: 9px; font-weight: 700; }
+.material-title { margin-right: 3px; overflow-wrap: anywhere; color: var(--text-primary); font-size: 12px; }
+.preference-badge.preferred { border-color: color-mix(in srgb, var(--highlight) 35%, var(--border)); color: var(--highlight); background: var(--highlight-light); }
+.preference-badge.excluded { color: var(--text-tertiary); }
+.material-actions { display: flex; gap: 5px; }
+.tag-btn { min-height: 31px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); background: var(--bg-surface); font-size: 10px; font-weight: 650; cursor: pointer; }
+.tag-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tag-btn.active { border-color: var(--accent); color: #fff; background: var(--accent); }
+.tag-btn.exclude.active { border-color: var(--danger); color: #fff; background: var(--danger); }
+.selection-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--bg-page); color: var(--text-secondary); font-size: 10px; }
+.selection-summary span { display: flex; align-items: baseline; gap: 6px; }
+.selection-summary strong { color: var(--text-primary); font-family: var(--font-utility); font-size: 16px; }
+.generate-summary { display: grid; gap: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.summary-item { display: grid; grid-template-columns: minmax(140px, .35fr) minmax(0, 1fr); gap: 20px; padding: 15px 4px; border-bottom: 1px solid var(--border-soft); color: var(--text-primary); font-size: 12px; }
+.summary-item .label { color: var(--text-tertiary); font-size: 10px; font-weight: 650; }
+.step-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin: 0; padding-top: 18px; border-top: 1px solid var(--border-soft); }
+.step-actions > span { margin-right: auto; color: var(--text-tertiary); font-size: 10px; }
+.step-actions .btn-neon { min-height: 38px; padding: 0 14px; }
+.step-actions .btn-neon.btn-primary { border-color: var(--accent); color: #fff; background: var(--accent); }
+.step-actions .btn-neon.btn-primary:hover:not(:disabled) { border-color: var(--accent-hover); background: var(--accent-hover); }
+.empty-hint { margin: 0; padding: 28px 18px; border-block: 1px solid var(--border-soft); color: var(--text-secondary); background: transparent; font-size: 12px; text-align: center; }
+.empty-hint a { color: var(--accent); }
+.error-msg { margin: 0; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border)); border-radius: 6px; color: var(--danger); background: var(--danger-light); font-size: 11px; }
+@keyframes workflow-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@media (max-width: 680px) { .generation-workbench { gap: 20px; padding-top: 0; } .workbench-header h1 { font-size: 30px; } .steps-indicator li { grid-template-columns: 24px minmax(0, 1fr); gap: 6px; padding: 9px 7px; } .steps-indicator li > span { width: 23px; height: 23px; } .steps-indicator li small { display: none; } .steps-indicator li strong { font-size: 9px; white-space: normal; } .step-content.workbench-panel { padding: 20px 16px; } .form-row { grid-template-columns: 1fr; } .material-card { align-items: stretch; grid-template-columns: 1fr; } .material-actions { display: grid; grid-template-columns: 1fr 1fr; } .tag-btn { width: 100%; } .selection-summary { grid-template-columns: 1fr; } .summary-item { grid-template-columns: 1fr; gap: 4px; } .step-actions { align-items: stretch; flex-direction: column-reverse; } .step-actions .btn-neon { width: 100%; justify-content: center; } .step-actions > span { margin: 0; text-align: center; } }
+@media (prefers-reduced-motion: reduce) { .step-content.workbench-panel { animation: none; } }
 </style>

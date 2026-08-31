@@ -1,10 +1,13 @@
-# 部署与发布准备
+# 部署状态说明
+
+当前可执行部署流程、故障排查、回滚和 ECS 注销前检查已统一到[部署运行手册](./DEPLOYMENT.md)。本文件保留运行边界与架构背景，不再作为发布步骤来源。
 
 本文件是当前版本的运行事实来源。`01` 至 `13` 与 `docs/agent-tasks/` 中的 MVP 文档保留为历史设计、任务执行记录，不应覆盖本文件、根目录 `README.md` 或实际代码的现行行为。
 
 ## 当前交付
 
-- 业务闭环：个人档案与职业目标、资料库、JD 智能选材、人工确认、结构化岗位简历、版本归档/恢复、PDF、投递和面试资产。
+- 业务闭环：个人档案与职业目标、资料库、JD 智能选材、人工确认、结构化岗位简历、版本归档/恢复、七种模板 PDF、ATS、投递、沟通草稿、简历导入、有限轮次面试和面试答案资产。
+- 业务数据边界：投递、ATS、沟通、面试与答案资产均持久化并校验用户归属；跨用户资源统一返回不存在。导入文件只在请求内解析，不保存原文件。沟通草稿永不自动发送，必须由用户人工确认。
 - AI：使用真实百炼调用；选材和生成是两阶段异步任务，生成内容保留确认资料来源。
 - 观测：API 在内部暴露 `/actuator/prometheus`；AI/PDF 成功率、时延、失败分类、队列积压和 AI 配额均有 Prometheus 指标、Grafana 看板和告警规则。
 - 可靠性：AI 与 PDF 任务均采用数据库租约领取，应用重启或节点退出后，过期租约可由其他实例重新领取。
@@ -46,7 +49,7 @@ docker compose --env-file production.env.example -f docker-compose.prod.yml conf
 .\scripts\Test-ReleaseReadiness.ps1
 ```
 
-Gitee CI 定义在 `.gitee/workflows/ci.yml`，包含：后端测试和 Flyway 迁移验证、前端构建及 Playwright 回归、PDF 服务测试、生产 Compose 静态校验和 Git 空白检查。浏览器仅在 CI 临时环境安装，不要求开发机下载 Chromium。
+GitHub Actions 提供发布前的 CI 证据；在仓库配置分支保护或 ruleset 前，它不是强制合并门禁。其 `CI` 工作流在面向 `master` 的 Pull Request、`master` 推送和手动运行时验证后端、Web 与 PDF 服务。`.gitee/workflows/ci.yml` 是同步仓库的补充质量门禁，包含后端测试和 Flyway 迁移验证、前端构建及 Playwright 回归、PDF 服务测试、生产 Compose 静态校验和 Git 空白检查，但不发布镜像或部署 ECS。浏览器仅在 CI 临时环境安装，不要求开发机下载 Chromium。具体触发条件、Secrets 与分支保护见 [GitHub CI/CD 流水线](./CI.md)。
 
 真实百炼全流程仍是凭据环境下的显式验收：
 

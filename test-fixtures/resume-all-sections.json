@@ -1,0 +1,31 @@
+{
+  "basics": {
+    "name": "Fixture Candidate",
+    "title": "Platform Engineer",
+    "email": "fixture@example.invalid",
+    "phone": "13800138000",
+    "location": { "city": "Shanghai" },
+    "summary": "SUMMARY_MARKER"
+  },
+  "objective": { "targetRole": "Staff Engineer", "summary": "OBJECTIVE_MARKER" },
+  "links": [{ "label": "Portfolio", "url": "LINK_MARKER" }],
+  "work": [{ "company": "WORK_MARKER", "position": "Engineer", "highlights": [{ "text": "WORK_HIGHLIGHT_MARKER" }] }],
+  "volunteering": [{ "organization": "VOLUNTEERING_MARKER", "role": "Mentor" }],
+  "skills": [{ "name": "SKILL_MARKER" }],
+  "projects": [{ "name": "PROJECT_MARKER", "role": "Lead" }],
+  "education": [{ "school": "EDUCATION_MARKER", "degree": "BSc" }],
+  "courses": [{ "name": "COURSE_MARKER", "provider": "Provider" }],
+  "certificates": [{ "name": "CERTIFICATE_MARKER", "issuer": "Issuer" }],
+  "publications": [{ "title": "PUBLICATION_MARKER", "publisher": "Publisher" }],
+  "awards": [{ "name": "AWARD_MARKER", "issuer": "Issuer" }],
+  "languages": [{ "name": "LANGUAGE_MARKER", "level": "Professional" }],
+  "customSections": [
+    { "title": "CUSTOM_ONE_MARKER", "entries": [{ "name": "Custom One" }] },
+    { "title": "CUSTOM_TWO_MARKER", "entries": [{ "name": "Custom Two" }] }
+  ],
+  "template": { "code": "modern" },
+  "layout": {
+    "sectionOrder": ["awards", "objective", "links", "work", "volunteering", "skills", "projects", "education", "courses", "certificates", "publications", "languages", "customSections"]
+  },
+  "unknownFutureField": [{ "value": "IGNORED_UNKNOWN_MARKER" }]
+}

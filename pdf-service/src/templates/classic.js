@@ -1,7 +1,5 @@
 // 固定模板只接受结构化 JSON Resume 数据，不加载远程图片、字体或样式。
 
-export const TEMPLATE_CODES = new Set(['classic', 'modern', 'minimal'])
-
 export function escapeHtml(value) {
   if (value === null || value === undefined) return ''
   return String(value)
@@ -17,8 +15,7 @@ export function rejectExternalUrl(value) {
   return /^(?:[a-z]+:|\/\/)/i.test(value.trim())
 }
 
-function templateStyles(templateCode) {
-  const variants = {
+const TEMPLATE_STYLES = {
     classic: `
       body{color:#18212f;background:#fbfcfe;font-family:Georgia,"Songti SC",serif}
       .paper-header{border-bottom:3px solid #283c59}
@@ -40,8 +37,33 @@ function templateStyles(templateCode) {
       h2{color:#222;font-weight:500;letter-spacing:.18em}h2::after{width:10mm;background:#222}.entry strong{font-family:"Songti SC",Georgia,serif;font-weight:600}.meta{color:#666}
       .chips span{padding:1mm .5mm;border:0;border-bottom:1px solid #aaa;border-radius:0;color:#333}
     `,
-  }
-  return variants[templateCode]
+    ats: `
+      body{color:#111;background:#fff;font-family:Arial,"Microsoft YaHei",sans-serif}
+      .paper-header{border-bottom:1px solid #111}.paper-header h1,.paper-header .role,h2{color:#111}.contact,.meta{color:#333}
+      h2::after{background:#111}.chips span{padding:0;border:0;border-radius:0;color:#111}.chips span:not(:last-child)::after{content:",";margin-right:2mm}
+    `,
+    executive: `
+      body{color:#182432;background:#fdfdfc;font-family:Georgia,"Songti SC",serif}
+      .paper-header{padding-left:6mm;border-left:5px solid #9b7b3f;border-bottom:1px solid #d8ceb9}.paper-header h1,h2{color:#182432}.paper-header .role,.contact,.meta{color:#625c50}
+      h2::after{background:#9b7b3f}.chips span{border:1px solid #cfc4ae;border-radius:2px;color:#493f2c}
+    `,
+    compact: `
+      body{color:#17212b;background:#fff;font-family:"Microsoft YaHei",Arial,sans-serif}
+      .paper-header{padding-bottom:3mm;margin-bottom:4mm;border-bottom:2px solid #2d6a78}section{margin-bottom:calc(var(--resume-section-gap) * .66)}
+      .paper-header h1,h2{color:#183f49}.paper-header .role,.contact,.meta{color:#49646b}h2::after{background:#4f8d99}.entry{margin-bottom:calc(var(--resume-entry-gap) * .66)}
+      .chips span{padding:.5mm 1.5mm;border:1px solid #bcd0d4;border-radius:2px;color:#214f59}
+    `,
+    academic: `
+      body{color:#202020;background:#fff;font-family:"Times New Roman","Songti SC",serif}
+      .paper-header{border-bottom:2px double #333}.paper-header h1,h2{color:#111}.paper-header .role,.contact,.meta{color:#444}
+      h2{font-variant:small-caps}h2::after{background:#555}.chips span{padding:0;border:0;border-radius:0;color:#222}.chips span:not(:last-child)::after{content:" · ";white-space:pre}
+    `,
+}
+
+export const TEMPLATE_CODES = new Set(Object.keys(TEMPLATE_STYLES))
+
+function templateStyles(templateCode) {
+  return TEMPLATE_STYLES[templateCode]
 }
 
 function boundedNumber(value, fallback, min, max) {
@@ -77,27 +99,69 @@ export function renderResumeHtml(templateCode, payload) {
   const resume = payload?.resumeJson ?? payload ?? {}
   const layout = resume.layout ?? {}
   const basics = resume.basics ?? {}
+  const objective = resume.objective ?? {}
   const arrays = (key) => Array.isArray(resume[key]) ? resume[key] : []
+  const links = arrays('links')
   const work = arrays('work')
+  const volunteering = arrays('volunteering')
   const skills = arrays('skills')
   const projects = arrays('projects')
   const education = arrays('education')
+  const courses = arrays('courses')
   const certificates = arrays('certificates')
+  const publications = arrays('publications')
+  const awards = arrays('awards')
   const languages = arrays('languages')
+  const customSections = arrays('customSections')
   const text = (value) => escapeHtml(value ?? '')
   const list = (items, render) => items.map(render).join('')
-  const section = (title, content) => content ? `<section><h2>${title}</h2>${content}</section>` : ''
+  const section = (title, content) => content ? `<section><h2>${text(title)}</h2>${content}</section>` : ''
   const highlights = (item) => Array.isArray(item.highlights) && item.highlights.length
     ? `<ul>${list(item.highlights, (point) => `<li>${text(point?.text ?? point?.value ?? point)}</li>`)}</ul>`
     : ''
-  const dates = (item) => [item.startDate, item.endDate].filter(Boolean).map(text).join(' — ')
+  // Structural-first, period-fallback precedence. Mirrors ResumePaper.vue formatDateRange.
+  const dates = (item) => {
+    const structured = [item.startDate, item.endDate].filter(Boolean)
+    if (structured.length) return structured.map(text).join(' — ')
+    return item.period ? text(item.period) : ''
+  }
+  const description = (item) => item.description ? `<p>${text(item.description)}</p>` : ''
+  const entry = (item, title, subtitle = '', date = dates(item)) => `<article class="entry"><strong>${text(title)}</strong><span>${text(subtitle)}</span><small>${date}</small>${description(item)}${highlights(item)}</article>`
 
-  const workHtml = list(work, (item) => `<article class="entry"><strong>${text(item.company || item.name || '公司名称')}</strong><span>${text(item.position || item.role)}</span><small>${dates(item)}</small>${item.description ? `<p>${text(item.description)}</p>` : ''}${highlights(item)}</article>`)
+  const objectiveHtml = objective.summary
+    ? `<p class="meta">${[objective.targetRole, objective.targetIndustry, objective.location].filter(Boolean).map(text).join(' · ')}</p><p class="summary">${text(objective.summary)}</p>`
+    : ''
+  const linksHtml = list(links, (item) => entry(item, item.label || item.name, item.url || '', ''))
+  const workHtml = list(work, (item) => entry(item, item.company || item.name || '公司名称', item.position || item.role))
+  const volunteeringHtml = list(volunteering, (item) => entry(item, item.organization || item.name, item.role || item.position))
   const skillsHtml = list(skills, (item) => `<span>${text(item?.name ?? item?.keyword ?? item)}</span>`)
-  const projectsHtml = list(projects, (item) => `<article class="entry"><strong>${text(item.name || '项目名称')}</strong><span>${text(item.role || item.position)}</span>${item.description ? `<p>${text(item.description)}</p>` : ''}${highlights(item)}</article>`)
-  const educationHtml = list(education, (item) => `<article class="entry"><strong>${text(item.school || item.name)}</strong><span>${[item.degree, item.major || item.area].filter(Boolean).map(text).join(' · ')}</span><small>${dates(item)}</small></article>`)
-  const certificatesHtml = list(certificates, (item) => `<article class="entry"><strong>${text(item.name || '证书名称')}</strong><span>${text(item.issuer)}</span><small>${text(item.date)}</small></article>`)
+  const projectsHtml = list(projects, (item) => entry(item, item.name || '项目名称', item.role || item.position))
+  const educationHtml = list(education, (item) => entry(item, item.school || item.name, [item.degree, item.major || item.area].filter(Boolean).join(' · ')))
+  const coursesHtml = list(courses, (item) => entry(item, item.name, item.provider || '', text(item.date)))
+  const certificatesHtml = list(certificates, (item) => entry(item, item.name || '证书名称', item.issuer || '', text(item.date)))
+  const publicationsHtml = list(publications, (item) => entry(item, item.title || item.name, item.publisher || item.url || '', text(item.date)))
+  const awardsHtml = list(awards, (item) => entry(item, item.name || item.title, item.issuer || item.organization || '', text(item.date)))
   const languagesHtml = list(languages, (item) => `<span>${[item.name || item.language, item.level || item.fluency].filter(Boolean).map(text).join(' · ')}</span>`)
+  const customSectionsHtml = list(customSections, (group) => section(group.title || '自定义模块', list(Array.isArray(group.entries) ? group.entries : [], (item) => entry(item, item.name, [item.organization, item.role].filter(Boolean).join(' · ')))))
+  const sectionHtml = {
+    objective: section('求职目标', objectiveHtml),
+    links: section('个人链接', linksHtml),
+    work: section('工作经历', workHtml),
+    volunteering: section('实习 / 志愿经历', volunteeringHtml),
+    skills: section('专业技能', skillsHtml ? `<div class="chips">${skillsHtml}</div>` : ''),
+    projects: section('项目经历', projectsHtml),
+    education: section('教育经历', educationHtml),
+    courses: section('培训课程', coursesHtml),
+    certificates: section('专业证书', certificatesHtml),
+    publications: section('研究成果', publicationsHtml),
+    awards: section('奖项荣誉', awardsHtml),
+    languages: section('语言能力', languagesHtml ? `<div class="chips">${languagesHtml}</div>` : ''),
+    customSections: customSectionsHtml,
+  }
+  const defaultOrder = Object.keys(sectionHtml)
+  const savedOrder = Array.isArray(layout.sectionOrder) ? layout.sectionOrder.filter((key) => defaultOrder.includes(key)) : []
+  const orderedSections = [...new Set(savedOrder), ...defaultOrder.filter((key) => !savedOrder.includes(key))]
+    .map((key) => sectionHtml[key]).join('')
   const location = typeof basics.location === 'string' ? basics.location : basics.location?.city
   const contact = [basics.phone, basics.email, location].filter(Boolean).map(text).join(' · ')
 
@@ -112,12 +176,7 @@ export function renderResumeHtml(templateCode, payload) {
   </style></head><body>
     <header class="paper-header"><h1>${text(basics.name || '你的姓名')}</h1><p class="role">${text(basics.title || basics.position || basics.label || '目标岗位')}</p><div class="contact">${contact}</div></header>
     ${section('个人概要', basics.summary ? `<p class="summary">${text(basics.summary)}</p>` : '')}
-    ${section('工作经历', workHtml)}
-    ${section('专业技能', skillsHtml ? `<div class="chips">${skillsHtml}</div>` : '')}
-    ${section('项目经历', projectsHtml)}
-    ${section('教育经历', educationHtml)}
-    ${section('专业证书', certificatesHtml)}
-    ${section('语言能力', languagesHtml ? `<div class="chips">${languagesHtml}</div>` : '')}
+    ${orderedSections}
   </body></html>`
 }
 

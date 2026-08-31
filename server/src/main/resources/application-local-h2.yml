@@ -21,7 +21,7 @@ server:
 
 app:
   cors:
-    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5176,http://127.0.0.1:5176
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:5174
   jwt:
     secret: local-h2-only-secret-local-h2-only-32bytes-min-length
     issuer: intelligent-resume-builder-local-h2
@@ -33,7 +33,7 @@ app:
   ai:
     worker:
       poll-interval-ms: 200
-      lease-seconds: 60
+      lease-seconds: 180
       max-retries: 1
       batch-size: 1
   pdf:
@@ -43,5 +43,4 @@ app:
     max-input-bytes: 65536
     max-output-bytes: 1048576
     file-ttl-hours: 1
-    allowed-template-codes: classic,modern,minimal
     output-dir: ./build/local-h2-pdf-output

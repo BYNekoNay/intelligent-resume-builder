@@ -155,13 +155,14 @@ class ScoringControllerIT {
 
     @Test
     @Order(5)
-    @DisplayName("未登录访问 POST 返回 403")
-    void postMatch_unauthenticated_403() throws Exception {
+    @DisplayName("未登录访问 POST 返回 40101")
+    void postMatch_unauthenticated_40101() throws Exception {
         mockMvc.perform(post("/api/scoring/match")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"resumeVersionId": 1, "jobDescriptionId": 1}
                                 """))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
     }
 }

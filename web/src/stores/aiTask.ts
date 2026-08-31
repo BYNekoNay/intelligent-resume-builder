@@ -17,13 +17,16 @@ export const useAiTaskStore = defineStore('ai-task', () => {
     return userId ? `${TASK_STORAGE_PREFIX}.${userId}` : null
   }
 
-  function remember(id: number) {
-    const key = storageKey()
+  function remember(id: number, key = storageKey()) {
     if (key) localStorage.setItem(key, String(id))
   }
 
-  function forget() {
-    const key = storageKey()
+  function rememberedId(key = storageKey()) {
+    const id = Number(key ? localStorage.getItem(key) : null)
+    return Number.isInteger(id) && id > 0 ? id : null
+  }
+
+  function forget(key = storageKey()) {
     if (key) localStorage.removeItem(key)
   }
 
@@ -32,26 +35,54 @@ export const useAiTaskStore = defineStore('ai-task', () => {
       || (task.status === 'SUCCESS' && task.confirmationStatus !== 'CONFIRMED' && task.confirmationStatus !== 'REJECTED')
   }
 
-  async function load(id: number) {
+  function isCurrentStorageKey(key: string | null) {
+    return key !== null && storageKey() === key
+  }
+
+  async function load(id: number, key = storageKey()) {
     const res = await getTask(id)
-    current.value = res.data.data
-    if (needsRecovery(current.value)) {
-      remember(id)
+    if (!isCurrentStorageKey(key)) return null
+    const task = res.data.data
+    current.value = task
+    if (needsRecovery(task)) {
+      remember(id, key)
     } else {
-      forget()
+      forget(key)
     }
-    return current.value
+    return task
+  }
+
+  async function restore() {
+    stopPolling()
+    current.value = null
+    error.value = null
+    const key = storageKey()
+    const id = rememberedId(key)
+    if (!id) return null
+    try {
+      return await load(id, key)
+    } catch {
+      if (!isCurrentStorageKey(key)) return null
+      current.value = null
+      error.value = 'TASK_STATUS_UNAVAILABLE'
+      return null
+    }
   }
 
   function startPolling(id: number) {
     stopPolling()
     polling.value = true
     error.value = null
+    const key = storageKey()
     let attempt = 0
     const tick = async () => {
       if (!polling.value) return
       try {
-        const task = await load(id)
+        const task = await load(id, key)
+        if (!task) {
+          polling.value = false
+          return
+        }
         if (TERMINAL_STATUSES.has(task.status)) {
           polling.value = false
           return
@@ -68,9 +99,8 @@ export const useAiTaskStore = defineStore('ai-task', () => {
   }
 
   function restorePolling() {
-    const key = storageKey()
-    const id = Number(key ? localStorage.getItem(key) : null)
-    if (Number.isInteger(id) && id > 0) startPolling(id)
+    const id = rememberedId()
+    if (id) startPolling(id)
   }
 
   function clear() {
@@ -88,5 +118,5 @@ export const useAiTaskStore = defineStore('ai-task', () => {
     }
   }
 
-  return { current, polling, error, load, remember, startPolling, restorePolling, stopPolling, clear }
+  return { current, polling, error, load, restore, remember, needsRecovery, startPolling, restorePolling, stopPolling, clear }
 })

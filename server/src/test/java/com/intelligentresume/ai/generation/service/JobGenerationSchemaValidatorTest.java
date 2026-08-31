@@ -107,6 +107,20 @@ class JobGenerationSchemaValidatorTest {
     }
 
     @Test
+    @DisplayName("正常路径: 新增内容模块携带来源时通过")
+    void extendedResumeSections_pass() {
+        Map<String, Object> draft = Map.of(
+                "objective", Map.of("summary", "Target role summary"),
+                "volunteering", List.of(Map.of("organization", "Community", "_sources", List.of(Map.of("materialId", 1L)))),
+                "courses", List.of(Map.of("name", "Cloud course", "_sources", List.of(Map.of("materialId", 1L)))),
+                "publications", List.of(Map.of("title", "Paper", "_sources", List.of(Map.of("materialId", 1L)))),
+                "customSections", List.of(Map.of("title", "Leadership", "_sources", List.of(Map.of("materialId", 1L))))
+        );
+
+        assertDoesNotThrow(() -> validator.validate(draft, "v1.0.0", Set.of(1L)));
+    }
+
+    @Test
     @DisplayName("失败路径: 字节数超过 max 抛出")
     void overSize_fails() {
         // 使用极小的 maxOutputBytes

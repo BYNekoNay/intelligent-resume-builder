@@ -23,6 +23,7 @@ pdf-output/
 .env.*.local
 .env.live-ai
 deploy/production.env
+deploy/production.ip-test.env
 .local-validation/
 .idea/
 .vscode/
@@ -34,6 +35,9 @@ deploy/production.env
 *.bak
 .DS_Store
 Thumbs.db
+
+# Personal documents (not for repository)
+docs/实习面试项目应对手册.md
 
 # Package manager diagnostics
 npm-debug.log*

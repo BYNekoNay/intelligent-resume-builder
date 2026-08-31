@@ -81,6 +81,16 @@ public class BailianAiProvider implements AiProvider {
     }
 
     @Override
+    public String modelCode() {
+        return model;
+    }
+
+    @Override
+    public boolean isAvailable() {
+        return apiKey != null && !apiKey.isBlank();
+    }
+
+    @Override
     public boolean supports(AiTaskType type) {
         return true;
     }
@@ -102,7 +112,8 @@ public class BailianAiProvider implements AiProvider {
             Map<String, Object> requestBody = new LinkedHashMap<>();
             requestBody.put("model", model);
             requestBody.put("messages", messages);
-            requestBody.put("temperature", 0.7);
+            requestBody.put("temperature",
+                    ctx.type() == AiTaskType.INTERVIEW_COACH || ctx.type() == AiTaskType.ATS_ANALYSIS ? 0.1 : 0.7);
             requestBody.put("response_format", Map.of("type", "json_object"));
 
             log.debug("Calling Bailian API: model={}, taskType={}, messagesCount={}",

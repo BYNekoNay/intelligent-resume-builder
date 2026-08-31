@@ -2,20 +2,47 @@ package com.intelligentresume.communication.controller;
 
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
+import com.intelligentresume.communication.dto.CommunicationResponse;
+import com.intelligentresume.communication.dto.GenerateCommunicationRequest;
+import com.intelligentresume.communication.service.CommunicationService;
+import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
+import com.intelligentresume.common.error.BusinessException;
+import com.intelligentresume.common.error.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 @RestController
 @RequestMapping("/api/communications")
 public class CommunicationController {
+    private final CommunicationService service;
+    public CommunicationController(CommunicationService service) { this.service = service; }
 
     @PostMapping("/generate")
-    public ApiResponse<Map<String, Object>> generate(@RequestBody Map<String, Object> body, HttpServletRequest httpRequest) {
-        return ApiResponse.success(Map.of(
-            "body", "Generated communication draft.", "subject", "Application"
-        ), traceId(httpRequest));
+    public ApiResponse<CommunicationResponse> generate(@Valid @RequestBody GenerateCommunicationRequest request, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.generate(request, currentUserId(httpRequest)), traceId(httpRequest));
+    }
+
+    @PostMapping("/ai-generate")
+    public ResponseEntity<ApiResponse<AiTaskStatusResponse>> generateWithAi(
+            @Valid @RequestBody GenerateCommunicationRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            HttpServletRequest httpRequest) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new BusinessException(ErrorCode.VALIDATION, "缺少 Idempotency-Key");
+        }
+        AiTaskStatusResponse task = service.generateWithAi(request, idempotencyKey.trim(), currentUserId(httpRequest));
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(ApiResponse.success(task, traceId(httpRequest)));
+    }
+    private Long currentUserId(HttpServletRequest request) {
+        Object attr = request.getAttribute("currentUserId");
+        if (attr == null) {
+            throw new BusinessException(ErrorCode.UNAUTHENTICATED);
+        }
+        return (Long) attr;
     }
 
     private String traceId(HttpServletRequest request) {

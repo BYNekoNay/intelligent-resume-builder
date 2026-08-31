@@ -66,7 +66,7 @@ class JobGenerationControllerIT {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"policyVersion":"v1.1.0","providerCode":"bailian",
+                                {"policyVersion":"v1.2.0","providerCode":"bailian",
                                  "taskScopes":["JOB_MATERIAL_SELECTION","JOB_GENERATION"],
                                  "dataCategories":["JOB_DESCRIPTION","CAREER_MATERIAL","PERSONAL_PROFILE"],
                                  "noticeHash":"test"}

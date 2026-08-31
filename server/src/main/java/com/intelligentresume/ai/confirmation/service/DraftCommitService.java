@@ -191,8 +191,8 @@ public class DraftCommitService {
                 String outputPath = sel.get("outputPath") != null
                         ? sel.get("outputPath").toString() : "";
 
-                // 读取 CareerMaterial 快照（即使后续被软删，快照仍可读）
-                Map<String, Object> matSnapshot = materialRepository.findById(materialId)
+                // 读取 CareerMaterial 快照（带 userId 过滤，避免越权读取他人资料；即使后续被软删，快照仍可读）
+                Map<String, Object> matSnapshot = materialRepository.findByIdAndUserId(materialId, userId)
                         .map(this::buildSnapshot)
                         .orElse(Map.of("id", materialId, "note", "资料已不存在"));
 
@@ -285,6 +285,10 @@ public class DraftCommitService {
             case "skills" -> MaterialType.SKILL;
             case "projects" -> MaterialType.PROJECT_EXPERIENCE;
             case "certificates" -> MaterialType.CERTIFICATE;
+            case "volunteering" -> MaterialType.VOLUNTEER_EXPERIENCE;
+            case "courses" -> MaterialType.COURSE;
+            case "publications" -> MaterialType.PUBLICATION;
+            case "customSections" -> MaterialType.LEADERSHIP_EXPERIENCE;
             default -> MaterialType.HIGHLIGHT;
         };
     }

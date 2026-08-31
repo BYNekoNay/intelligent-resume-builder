@@ -14,7 +14,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.mockito.ArgumentCaptor;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -63,7 +68,7 @@ class CareerMaterialServiceTest {
     @Test
     @DisplayName("边界路径: 列出空列表")
     void list_empty() {
-        when(repository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of());
+        when(repository.findSummaries(100L, null)).thenReturn(List.of());
 
         List<CareerMaterialSummary> list = service.list(100L, null);
 
@@ -73,15 +78,78 @@ class CareerMaterialServiceTest {
     @Test
     @DisplayName("边界路径: 按 materialType 过滤")
     void list_filterByType() {
-        CareerMaterial m = material(1L, 100L, MaterialType.SKILL, "Java");
-        when(repository.findByUserIdAndMaterialTypeOrderByUpdatedAtDesc(100L, MaterialType.SKILL))
-                .thenReturn(List.of(m));
+        CareerMaterialSummary summary = new CareerMaterialSummary(
+                1L, MaterialType.SKILL, "Java", UsagePreference.NORMAL, LocalDateTime.now());
+        when(repository.findSummaries(100L, MaterialType.SKILL)).thenReturn(List.of(summary));
 
         List<CareerMaterialSummary> list = service.list(100L, MaterialType.SKILL);
 
         assertEquals(1, list.size());
         assertEquals(MaterialType.SKILL, list.get(0).materialType());
-        verify(repository, never()).findByUserIdOrderByUpdatedAtDesc(anyLong());
+        verify(repository).findSummaries(100L, MaterialType.SKILL);
+    }
+
+    @Test
+    @DisplayName("workspace search returns excerpts and full type counts")
+    void search_returnsPageExcerptAndTypeCounts() {
+        CareerMaterial achievement = material(7L, 100L, MaterialType.ACHIEVEMENT, "Latency optimization");
+        achievement.setSourceText(null);
+        achievement.setUsagePreference(UsagePreference.PREFERRED);
+        achievement.setContentJson(Map.of(
+                "outcome", "Core endpoints remained stable at peak load",
+                "metricDisplayValue", "P99 latency fell by about 30%"));
+
+        when(repository.search(eq(100L), eq(MaterialType.ACHIEVEMENT), eq(UsagePreference.PREFERRED),
+                eq("latency"), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(achievement), PageRequest.of(0, 25), 1));
+        when(repository.countByType(100L)).thenReturn(List.of(
+                new CareerMaterialTypeCount(MaterialType.ACHIEVEMENT, 3L),
+                new CareerMaterialTypeCount(MaterialType.SKILL, 5L)));
+
+        CareerMaterialSearchPage result = service.search(
+                100L, "  latency  ", MaterialType.ACHIEVEMENT, UsagePreference.PREFERRED,
+                0, 25, "updatedAt,desc");
+
+        assertEquals(1, result.items().size());
+        assertEquals("Core endpoints remained stable at peak load · P99 latency fell by about 30%",
+                result.items().get(0).excerpt());
+        assertEquals(3L, result.typeCounts().get(MaterialType.ACHIEVEMENT));
+        assertEquals(5L, result.typeCounts().get(MaterialType.SKILL));
+        assertEquals(0, result.page());
+        assertEquals(25, result.size());
+    }
+
+    @Test
+    @DisplayName("workspace search rejects invalid paging and sorting")
+    void search_rejectsInvalidPagingAndSort() {
+        assertEquals(ErrorCode.VALIDATION, assertThrows(BusinessException.class,
+                () -> service.search(100L, null, null, null, -1, 25, "updatedAt,desc"))
+                .getErrorCode());
+        assertEquals(ErrorCode.VALIDATION, assertThrows(BusinessException.class,
+                () -> service.search(100L, null, null, null, 0, 101, "updatedAt,desc"))
+                .getErrorCode());
+        assertEquals(ErrorCode.VALIDATION, assertThrows(BusinessException.class,
+                () -> service.search(100L, null, null, null, 0, 25, "title,desc"))
+                .getErrorCode());
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("workspace search builds every supported stable sort")
+    void search_buildsSupportedStableSorts() {
+        when(repository.search(eq(100L), isNull(), isNull(), isNull(), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(4), 0));
+        when(repository.countByType(100L)).thenReturn(List.of());
+
+        service.search(100L, "  ", null, null, 0, 25, "updatedAt,desc");
+        service.search(100L, null, null, null, 0, 25, "updatedAt,asc");
+        service.search(100L, null, null, null, 0, 25, "title,asc");
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(repository, times(3)).search(eq(100L), isNull(), isNull(), isNull(), captor.capture());
+        assertEquals("updatedAt: DESC,id: ASC", captor.getAllValues().get(0).getSort().toString());
+        assertEquals("updatedAt: ASC,id: ASC", captor.getAllValues().get(1).getSort().toString());
+        assertEquals("title: ASC,id: ASC", captor.getAllValues().get(2).getSort().toString());
     }
 
     @Test

@@ -27,7 +27,12 @@ function requireServiceToken(req, res, next) {
 }
 
 app.get('/health', (_request, response) => {
-  response.json({ service: 'intelligent-resume-pdf-service', status: 'UP', stage: 'SCAFFOLD' })
+  response.json({
+    service: 'intelligent-resume-pdf-service',
+    status: 'UP',
+    version: '0.1.0',
+    capabilities: ['pdf-render', 'seven-resume-templates', 'ordered-resume-sections'],
+  })
 })
 
 function assertSafePayload(payload) {

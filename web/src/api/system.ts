@@ -3,7 +3,8 @@ import { apiClient, type ApiResponse } from './client'
 export interface SystemHealth {
   service: string
   status: 'UP'
-  stage: 'SCAFFOLD'
+  version: string
+  capabilities: string[]
 }
 
 export async function getSystemHealth(): Promise<ApiResponse<SystemHealth>> {

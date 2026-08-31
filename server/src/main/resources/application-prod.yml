@@ -12,6 +12,11 @@ management:
       exposure:
         include: health,info,prometheus
 
+# 生产环境降低 INFO 噪音，仅保留 WARN 及以上（MDC 仅含 traceId/taskId 等非敏感字段）
+logging:
+  level:
+    root: WARN
+
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}

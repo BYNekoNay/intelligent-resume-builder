@@ -3,9 +3,12 @@ package com.intelligentresume.auth.service;
 import com.intelligentresume.auth.domain.AuthSession;
 import com.intelligentresume.auth.domain.User;
 import com.intelligentresume.auth.dto.CurrentUserResponse;
+import com.intelligentresume.auth.dto.ChangeEmailRequest;
+import com.intelligentresume.auth.dto.ChangePasswordRequest;
 import com.intelligentresume.auth.dto.LoginRequest;
 import com.intelligentresume.auth.dto.RegisterRequest;
 import com.intelligentresume.auth.dto.TokenResponse;
+import com.intelligentresume.auth.dto.UpdateProfileRequest;
 import com.intelligentresume.auth.repository.AuthSessionRepository;
 import com.intelligentresume.auth.repository.UserRepository;
 import com.intelligentresume.auth.jwt.TokenService;
@@ -117,12 +120,6 @@ public class AuthService {
         session.setRevokeReason("rotated");
         authSessionRepository.save(session);
 
-        AuthSession next = new AuthSession();
-        next.setUserId(user.getId());
-        next.setTokenFamilyId(session.getTokenFamilyId());
-        next.setRefreshTokenHash(tokenService.hashToken(presentedRefreshToken));
-        // 注意:issued/expires 由调用方刷新原文 token 后再赋,见 issueNewFamily
-
         // 直接发新一对(保持原 family)
         String newRefresh = tokenService.issueRefreshToken();
         AuthSession fresh = new AuthSession();
@@ -186,6 +183,35 @@ public class AuthService {
                 user.getDisplayName());
     }
 
+    @Transactional
+    public CurrentUserResponse updateProfile(Long userId, UpdateProfileRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));
+        user.setDisplayName(request.displayName().trim());
+        userRepository.save(user);
+        return new CurrentUserResponse(user.getId(), user.getUsername(), user.getEmail(), user.getDisplayName());
+    }
+
+    @Transactional
+    public void changeEmail(Long userId, ChangeEmailRequest request) {
+        User user = requireCurrentPassword(userId, request.currentPassword());
+        String email = request.email().trim().toLowerCase();
+        if (!email.equalsIgnoreCase(user.getEmail()) && userRepository.existsByEmail(email)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "邮箱已被占用");
+        }
+        user.setEmail(email);
+        userRepository.save(user);
+        logoutAll(userId);
+    }
+
+    @Transactional
+    public void changePassword(Long userId, ChangePasswordRequest request) {
+        User user = requireCurrentPassword(userId, request.currentPassword());
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        userRepository.save(user);
+        logoutAll(userId);
+    }
+
     // ----------------------------------------------------------------
     // private helpers
     // ----------------------------------------------------------------
@@ -204,6 +230,15 @@ public class AuthService {
         authSessionRepository.save(session);
 
         return tokensFor(user, refresh);
+    }
+
+    private User requireCurrentPassword(Long userId, String currentPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));
+        if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.UNAUTHENTICATED, "当前密码不正确");
+        }
+        return user;
     }
 
     private TokenResponse tokensFor(User user, String refresh) {

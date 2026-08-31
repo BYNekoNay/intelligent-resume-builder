@@ -34,12 +34,13 @@ class ExportServiceTest {
     @Mock private ExportTaskRepository exportTaskRepository;
     @Mock private ResumeVersionRepository resumeVersionRepository;
     @Mock private ExportStorageService storageService;
+    @Mock private ExportExpiryService expiryService;
 
     private ExportService service;
 
     @BeforeEach
     void setUp() {
-        service = new ExportService(exportTaskRepository, resumeVersionRepository, storageService, 24);
+        service = new ExportService(exportTaskRepository, resumeVersionRepository, storageService, expiryService, 24);
     }
 
     @Test
@@ -65,12 +66,30 @@ class ExportServiceTest {
     }
 
     @Test
-    @DisplayName("失败路径: templateCode 不是 classic 返回 VALIDATION")
+    @DisplayName("失败路径: templateCode 不在支持列表时返回 VALIDATION")
     void create_invalidTemplate_validationFails() {
-        CreateExportRequest req = new CreateExportRequest(1L, "modern");
+        CreateExportRequest req = new CreateExportRequest(1L, "unknown");
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.create(req, 100L));
         assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("正常路径: 支持编辑器提供的非 classic 模板")
+    void create_supportedTemplate_pending() {
+        ResumeVersion version = new ResumeVersion();
+        version.setId(1L);
+        version.setCreatedBy(100L);
+        when(resumeVersionRepository.findById(1L)).thenReturn(Optional.of(version));
+        when(exportTaskRepository.save(any())).thenAnswer(invocation -> {
+            ExportTask task = invocation.getArgument(0);
+            task.setId(2L);
+            return task;
+        });
+
+        ExportTaskStatusResponse response = service.create(new CreateExportRequest(1L, "academic"), 100L);
+
+        assertEquals("academic", response.templateCode());
     }
 
     @Test
@@ -105,6 +124,7 @@ class ExportServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.download(1L, 100L));
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+        verifyNoInteractions(expiryService);
     }
 
     @Test
@@ -121,6 +141,7 @@ class ExportServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.download(1L, 100L));
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+        verify(expiryService).expireIfDue(eq(1L), any(LocalDateTime.class));
     }
 
     @Test
@@ -162,11 +183,10 @@ class ExportServiceTest {
         task.setStatus(ExportStatus.SUCCESS);
         task.setExpiresAt(LocalDateTime.now().minusHours(1));
         when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(task));
-        when(exportTaskRepository.save(any())).thenReturn(task);
 
         ExportTaskStatusResponse resp = service.get(1L, 100L);
         assertEquals("EXPIRED", resp.status());
-        verify(exportTaskRepository).save(task);
+        verify(expiryService).expireIfDue(eq(1L), any(LocalDateTime.class));
     }
 
     @Test

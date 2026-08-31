@@ -33,6 +33,26 @@ The database user needs permission to create and migrate the `intelligent_resume
 .\scripts\Stop-LocalValidation.ps1
 ```
 
+For a fresh disposable database, use the project's supported MySQL 8.4 runtime and start the same flow with:
+
+```powershell
+.\scripts\Start-LocalValidation.ps1 -DisposableDatabase
+Set-Location web
+npm run test:e2e:local
+Set-Location ..
+.\scripts\Stop-LocalValidation.ps1
+```
+
+The disposable mode records only the strictly validated schema and user names in the ignored process manifest. The generated password stays in the child process environment and is never written to disk; the stop script removes the exact temporary schema and user.
+
+MySQL 5.7 is not a supported fresh-install target because the published V18 migration uses a MySQL 8 window function. To test against real data from an existing MySQL 5.7 schema already at Flyway V19, clone it into an isolated database instead:
+
+```powershell
+.\scripts\Start-LocalValidation.ps1 -CloneDatabase intelligent_resume
+```
+
+Clone mode requires a V19 source, copies every base table and verifies row counts and the required V18/V19 schema invariants. Only the clone is baselined at V19 and migrated through V21. The source schema and its Flyway history are never modified. Stop the current validation environment before starting another isolated database; the script rejects silent reuse of an existing API on port `8080`.
+
 The start script uses the already-running local MySQL instance, then starts PDF service on `3001`, API on `8080`, and web on `5173`. It explicitly targets the web process at `http://127.0.0.1:8080`, so stale developer-only `web/.env` ports do not affect this validation lane.
 The full-flow script creates and deletes one synthetic user. It verifies authentication, resume/material/JD creation, consent, job generation and confirmation, scoring, editable communication/application data, interview-answer assets, cross-user isolation, and authorized PDF download. It calls Bailian with synthetic data. With `-VerifyPdfRecovery`, it additionally stops the PDF service, verifies a failed export, restarts the service, and verifies that retry succeeds.
 
@@ -53,7 +73,7 @@ Each run writes a redacted JSON report and a readable Markdown summary under `.l
 
 ## 验证范围说明
 
-当前本地验证覆盖 M1/M2（MVP 闭环）及面试答案资产的基础操作。M3/M4 阶段功能（ATS 体检、成果量化引导、沟通文案生成、AI 面试多轮对话、投递状态流转）的本地验证将在对应阶段实现后补充。验证通过不等于 MVP 验收通过——MVP 验收还需满足 02 §9.1 和 07 §9 的全部条件。
+当前本地验证覆盖 M1/M2（MVP 闭环）及面试答案资产的基础操作。ATS、成果量化引导、沟通文案、AI 面试多轮对话和投递状态流转已经实现，但默认全流程尚未覆盖其全部 AI 与状态转换路径；对应模块测试和专项 E2E 是当前验证依据。验证通过不等于完整发布验收通过——发布前仍需完成本文列出的专项验证与环境检查。
 
 ## Failure drill
 
@@ -78,6 +98,16 @@ Remove-Item Env:BAILIAN_LIVE_TEST
 ```
 
 The gate uses synthetic prompts, validates structured responses, and prints field/count summaries rather than source content.
+
+## MySQL 5.7 migration gate
+
+With the local MySQL 5.7 service running, execute the disposable migration gate from the repository root:
+
+```powershell
+.\scripts\Invoke-MySql57MigrationGate.ps1
+```
+
+The gate creates a randomly named schema and least-scope temporary user, loads a data-free V19 schema fixture, baselines it at V19, applies V20 and V21, verifies the AI interview table, both uniqueness constraints, and the output-language column, then removes the exact schema and user in a `finally` block. It proves the V19-to-V21 upgrade path on MySQL 5.7; it does not claim that a fresh MySQL 5.7 database can execute every historical migration. It does not print generated credentials.
 
 ## Browser local-services smoke
 

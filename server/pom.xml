@@ -91,12 +91,7 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- T06 AI Spring AI 适配层(MVP 仅引入接口与 Mock) -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-core</artifactId>
-            <version>1.0.0-M6</version>
-        </dependency>
+        <!-- T10 PDF 与文档解析 -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>

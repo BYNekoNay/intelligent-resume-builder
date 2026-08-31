@@ -16,7 +16,8 @@ public class SystemController {
     public ApiResponse<SystemHealthResponse> health(HttpServletRequest request) {
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
         SystemHealthResponse payload = new SystemHealthResponse(
-                "intelligent-resume-server", "UP", "SCAFFOLD");
+                "intelligent-resume-server", "UP", "0.1.0",
+                java.util.List.of("resume", "ai-tasks", "ats", "applications", "communications", "interviews", "imports", "pdf-export"));
         return ApiResponse.success(payload, traceId);
     }
 }

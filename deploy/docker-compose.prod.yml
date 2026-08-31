@@ -112,6 +112,31 @@ services:
       - grafana-data:/var/lib/grafana
     networks: [private]
 
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    profiles: [monitoring]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      ALERTMANAGER_WEBHOOK_URL: ${ALERTMANAGER_WEBHOOK_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_TO: ${SMTP_TO:-}
+    volumes:
+      - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.template.yml:ro
+      - ../monitoring/alertmanager/entrypoint.sh:/entrypoint.sh:ro
+      - alertmanager-data:/alertmanager
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      # 仅绑定本机回环，避免把告警控制台暴露到公网（与 Grafana 一致走 Edge 反代/SSH 隧道）。
+      - "127.0.0.1:9093:9093"
+    networks: [private]
+
 networks:
   public:
   private:
@@ -122,3 +147,4 @@ volumes:
   pdf-output:
   prometheus-data:
   grafana-data:
+  alertmanager-data:
