@@ -19,7 +19,7 @@ app:
   worker-scheduling:
     enabled: false
   cors:
-    allowed-origins: http://localhost:5173,http://127.0.0.1:5176
+    allowed-origins: http://localhost:5173
   resume:
     json-schema:
       max-bytes: 262144
@@ -134,5 +134,4 @@ app:
     max-input-bytes: 65536
     max-output-bytes: 1048576
     file-ttl-hours: 1
-    allowed-template-codes: classic,modern,minimal
     output-dir: ./build/test-pdf-output
