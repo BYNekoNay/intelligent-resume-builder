@@ -26,6 +26,75 @@ export const SECTION_KEYS = [
 
 export type SectionKey = (typeof SECTION_KEYS)[number]
 
+const ATS_SECTION_ALIASES: Record<string, SectionKey> = {
+  basics: 'basics',
+  summary: 'basics',
+  profile: 'basics',
+  'personal summary': 'basics',
+  'professional summary': 'basics',
+  '个人信息': 'basics',
+  '个人概要': 'basics',
+  objective: 'objective',
+  'career objective': 'objective',
+  'target role': 'objective',
+  '求职目标': 'objective',
+  links: 'links',
+  profiles: 'links',
+  '个人链接': 'links',
+  work: 'work',
+  experience: 'work',
+  'work experience': 'work',
+  'professional experience': 'work',
+  employment: 'work',
+  '工作经历': 'work',
+  '工作经验': 'work',
+  volunteering: 'volunteering',
+  volunteer: 'volunteering',
+  'volunteer experience': 'volunteering',
+  '志愿经历': 'volunteering',
+  skills: 'skills',
+  skill: 'skills',
+  'technical skills': 'skills',
+  '技能': 'skills',
+  '专业技能': 'skills',
+  projects: 'projects',
+  project: 'projects',
+  'project experience': 'projects',
+  '项目经历': 'projects',
+  education: 'education',
+  academic: 'education',
+  '教育背景': 'education',
+  courses: 'courses',
+  course: 'courses',
+  training: 'courses',
+  '课程培训': 'courses',
+  certificates: 'certificates',
+  certificate: 'certificates',
+  certifications: 'certificates',
+  '专业证书': 'certificates',
+  publications: 'publications',
+  publication: 'publications',
+  research: 'publications',
+  '研究成果': 'publications',
+  awards: 'awards',
+  award: 'awards',
+  honors: 'awards',
+  '奖项荣誉': 'awards',
+  languages: 'languages',
+  language: 'languages',
+  '语言能力': 'languages',
+  customsections: 'customSections',
+  'custom sections': 'customSections',
+  '自定义模块': 'customSections',
+}
+
+/** Map explicit ATS section identifiers to editor keys; generic prose stays unmapped. */
+export function mapAtsSection(value: unknown): SectionKey | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().toLocaleLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
+  return ATS_SECTION_ALIASES[normalized] ?? null
+}
+
 /** Sections that appear in the body (everything except the header basics block). */
 export const CONTENT_SECTION_KEYS = SECTION_KEYS.filter(
   (key): key is Exclude<SectionKey, 'basics'> => key !== 'basics',

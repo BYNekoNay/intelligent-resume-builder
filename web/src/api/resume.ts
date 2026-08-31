@@ -20,6 +20,7 @@ export interface ResumeVersion {
   createdAt: string
   archivedAt: string | null
   restoredFromVersionId: number | null
+  generationContext?: Record<string, unknown> | null
 }
 
 export interface ResumeVersionSummary {
@@ -31,6 +32,7 @@ export interface ResumeVersionSummary {
   createdAt: string
   archivedAt: string | null
   restoredFromVersionId: number | null
+  generationContext?: Record<string, unknown> | null
 }
 
 export function createResume(title: string, resumeJson: Record<string, unknown>) {
@@ -69,8 +71,13 @@ export function setCurrentVersion(resumeId: number, versionId: number) {
   return apiClient.patch<ApiResponse<void>>(`/api/resumes/${resumeId}/current-version`, { versionId })
 }
 
-export function restoreResumeVersion(resumeId: number, versionId: number) {
-  return apiClient.post<ApiResponse<ResumeVersion>>(`/api/resumes/${resumeId}/versions/${versionId}/restore`)
+export type AtsRestoreProvenance = {
+  atsResultId: number
+  atsItem: string
+}
+
+export function restoreResumeVersion(resumeId: number, versionId: number, provenance?: AtsRestoreProvenance) {
+  return apiClient.post<ApiResponse<ResumeVersion>>(`/api/resumes/${resumeId}/versions/${versionId}/restore`, provenance)
 }
 
 export function archiveResumeVersion(resumeId: number, versionId: number) {

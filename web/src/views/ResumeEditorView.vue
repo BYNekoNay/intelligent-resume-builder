@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
-import { ArrowLeft, BookOpen, GripVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sparkles, WandSparkles, X } from 'lucide-vue-next'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { ArrowLeft, BookOpen, FilePlus2, GripVertical, LockKeyhole, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sparkles, WandSparkles } from 'lucide-vue-next'
 import type { AxiosError } from 'axios'
-import { createManualVersion, getResume, getResumeVersion, listVersions } from '@/api/resume'
+import { createManualVersion, getResume, getResumeVersion, listVersions, restoreResumeVersion, type ResumeVersion } from '@/api/resume'
+import { getAtsCheck, type AtsCheckResponse } from '@/api/ats'
 import { getMaterial, listMaterials, type CareerMaterial, type CareerMaterialSummary, type MaterialType } from '@/api/careerMaterial'
 import { inlineOptimize, waitForAiTaskResult, type InlineOptimizeResponse } from '@/api/ai'
 import { useLocale } from '@/i18n'
@@ -12,13 +13,14 @@ import sampleResume from '@/data/sampleResume'
 import ResumeEditorNavigation, { type ResumeEditorSection } from '@/components/resume/ResumeEditorNavigation.vue'
 import ResumePaper from '@/components/resume/ResumePaper.vue'
 import { useResumeEditorDraft } from '@/composables/useResumeEditorDraft'
-import { SECTION_KEYS, DEFAULT_SECTION_ORDER, resolveSectionOrder, type SectionKey, type ContentSectionKey } from '@/resume/sectionRegistry'
+import { SECTION_KEYS, DEFAULT_SECTION_ORDER, mapAtsSection, resolveSectionOrder, type SectionKey, type ContentSectionKey } from '@/resume/sectionRegistry'
 
 const { t } = useLocale()
 function message(key: string, values: Record<string, string | number> = {}) {
   return Object.entries(values).reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), t(`resumeEditor.${key}`))
 }
 const props = defineProps<{ id: string }>()
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const content = ref('')
@@ -46,6 +48,18 @@ let designReturnFocus: HTMLElement | null = null
 const aiConsentHref = computed(() => `/ai-consent?redirect=${encodeURIComponent(`/resumes/${props.id}/edit`)}`)
 
 const currentVersionId = ref<number | null>(null)
+const atsSourceVersionId = ref<number | null>(null)
+const historicalSourceReadOnly = ref(false)
+const creatingEditableVersion = ref(false)
+const editableCreationError = ref('')
+const pendingEditableSuccessorId = ref<number | null>(null)
+const atsAnnouncement = ref('')
+type AtsHandoffContext = {
+  resultId: number
+  section: SectionKey
+  item: string
+}
+const atsContext = ref<AtsHandoffContext | null>(null)
 const sectionKeys = SECTION_KEYS
 type SortableSection = ContentSectionKey
 const activeSection = ref<SectionKey>('basics')
@@ -75,6 +89,15 @@ const materialLibraryLoading = ref(false)
 const materialInsertLoading = ref(false)
 const selectedMaterialId = ref<number | null>(null)
 let editorLoadSequence = 0
+/**
+ * Route-scoped editor context epoch (KTD-4/KTD-5). Advanced synchronously
+ * before every resume-ID or ATS handoff-query reload inside loadEditor().
+ * Async editor actions capture the epoch when they start and must prove it is
+ * still active before mutating content, drafts, errors, controls, loading
+ * state, or navigation. This prevents a stale same-resume ATS handoff
+ * completion from polluting the newer editor context.
+ */
+let editorContextEpoch = 0
 
 const userId = computed(() => auth.currentUser?.id)
 const resumeId = computed(() => props.id)
@@ -97,6 +120,7 @@ function openPreview() {
   void nextTick(() => previewBackButtonRef.value?.focus())
 }
 function openDesign() {
+  if (historicalSourceReadOnly.value) return
   designScrollPosition = window.scrollY
   designReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   showDesign.value = true
@@ -249,6 +273,61 @@ const navigationSections = computed<ResumeEditorSection[]>(() => [
   { key: 'customSections', label: t('resumeEditor.customSectionsLabel'), meta: customSections.value.length ? localizedItemCount(customSections.value.length) : t('resumeEditor.optional'), complete: customSections.value.length > 0 },
 ])
 
+function positiveQueryInteger(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const parsed = typeof raw === 'string' ? Number(raw) : NaN
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function sectionLabel(section: SectionKey) {
+  return navigationSections.value.find(item => item.key === section)?.label ?? section
+}
+
+function handoffItem(result: AtsCheckResponse, rawItem: unknown, section: SectionKey): AtsHandoffContext | null {
+  const value = Array.isArray(rawItem) ? rawItem[0] : rawItem
+  if (typeof value !== 'string') return null
+  const match = /^(evidence|action):(0|[1-9]\d*)$/.exec(value)
+  if (!match) return null
+  const index = Number(match[2])
+  if (match[1] === 'evidence') {
+    const item = result.aiInsights?.evidenceFindings[index]
+    if (!item || mapAtsSection(item.section) !== section) return null
+    return { resultId: result.id, section, item: value }
+  }
+  const item = result.aiInsights?.prioritizedActions[index]
+  if (!item || mapAtsSection(item.section) !== section) return null
+  return { resultId: result.id, section, item: value }
+}
+
+async function resolveAtsHandoff(requestedResumeId: number) {
+  const section = mapAtsSection(Array.isArray(route.query.section) ? route.query.section[0] : route.query.section)
+  const resultId = positiveQueryInteger(route.query.atsResultId)
+  const sourceVersionId = positiveQueryInteger(route.query.sourceVersionId)
+  if (!section || !resultId || !sourceVersionId) return null
+  try {
+    const result = (await getAtsCheck(resultId)).data.data
+    if (result.resumeId !== requestedResumeId || result.resumeVersionId !== sourceVersionId) return null
+    const context = handoffItem(result, route.query.atsItem, section)
+    return context ? { context, sourceVersionId } : null
+  } catch {
+    error.value = t('resumeEditor.atsContextUnavailable')
+    return null
+  }
+}
+
+function isAtsEditableSuccessor(version: ResumeVersion | null, context: AtsHandoffContext, sourceVersionId: number) {
+  if (!version || version.restoredFromVersionId !== sourceVersionId) return false
+  const provenance = version.generationContext?.atsProvenance
+  const match = /^(evidence|action):(0|[1-9]\d*)$/.exec(context.item)
+  if (!provenance || typeof provenance !== 'object' || Array.isArray(provenance) || !match) return false
+  const fields = provenance as Record<string, unknown>
+  return fields.resultId === context.resultId
+    && fields.sourceVersionId === sourceVersionId
+    && fields.mappedSection === context.section
+    && fields.itemKind === match[1]
+    && fields.itemIndex === Number(match[2])
+}
+
 const materialTypesBySection: Partial<Record<SectionKey, MaterialType[]>> = {
   work: ['WORK_EXPERIENCE', 'HIGHLIGHT', 'ACHIEVEMENT', 'LEADERSHIP_EXPERIENCE'],
   volunteering: ['VOLUNTEER_EXPERIENCE', 'LEADERSHIP_EXPERIENCE', 'ACHIEVEMENT'],
@@ -264,16 +343,17 @@ const canInsertMaterial = computed(() => materialCandidates.value.length > 0 && 
 
 async function loadMaterialLibrary() {
   if (materialLibraryLoading.value || materialLibrary.value.length) return
+  const epoch = editorContextEpoch
   const targetResumeId = props.id
   materialLibraryLoading.value = true
   error.value = ''
   try {
     const materials = (await listMaterials()).data.data
-    if (props.id === targetResumeId) materialLibrary.value = materials
+    if (props.id === targetResumeId && epoch === editorContextEpoch) materialLibrary.value = materials
   } catch {
-    if (props.id === targetResumeId) error.value = t('resumeEditor.materialLibraryLoadFailed')
+    if (props.id === targetResumeId && epoch === editorContextEpoch) error.value = t('resumeEditor.materialLibraryLoadFailed')
   } finally {
-    if (props.id === targetResumeId) materialLibraryLoading.value = false
+    if (props.id === targetResumeId && epoch === editorContextEpoch) materialLibraryLoading.value = false
   }
 }
 function textFromMaterial(material: CareerMaterial, keys: string[]) {
@@ -281,34 +361,51 @@ function textFromMaterial(material: CareerMaterial, keys: string[]) {
   for (const key of keys) if (typeof content[key] === 'string' && content[key].trim()) return content[key] as string
   return material.sourceText?.trim() || ''
 }
+/**
+ * Carry structured time bounds (and a legacy period) from a material into an
+ * inserted resume entry when the source material supports them. Empty values
+ * are omitted so a manual insertion never fabricates an empty date field.
+ */
+function timeFieldsFromMaterial(material: CareerMaterial) {
+  const content = material.contentJson ?? {}
+  const startDate = typeof content.startDate === 'string' ? content.startDate.trim() : ''
+  const endDate = typeof content.endDate === 'string' ? content.endDate.trim() : ''
+  const period = typeof content.period === 'string' ? content.period.trim() : ''
+  return {
+    ...(startDate ? { startDate } : {}),
+    ...(endDate ? { endDate } : {}),
+    ...(period ? { period } : {}),
+  }
+}
 async function insertMaterial() {
   const id = selectedMaterialId.value
   if (!id || materialInsertLoading.value) return
+  const epoch = editorContextEpoch
   const targetSection = activeSection.value
   const targetResumeId = props.id
   materialInsertLoading.value = true
   error.value = ''
   try {
     const { data } = await getMaterial(id)
-    if (props.id !== targetResumeId) return
+    if (props.id !== targetResumeId || epoch !== editorContextEpoch) return
     const material = data.data
     const outcome = textFromMaterial(material, ['outcome', 'result', 'outcomeEvidence'])
     const description = textFromMaterial(material, ['description', 'summary', 'applicationDescription', 'responsibilityScope'])
-    if (targetSection === 'work') updateResume((d) => { d.work = [...(Array.isArray(d.work) ? d.work : []), { company: textFromMaterial(material, ['company', 'organization']) || material.title, position: textFromMaterial(material, ['position', 'role']), description, highlights: outcome ? [outcome] : [] }] })
-    if (targetSection === 'projects') updateResume((d) => { d.projects = [...(Array.isArray(d.projects) ? d.projects : []), { name: textFromMaterial(material, ['name']) || material.title, role: textFromMaterial(material, ['role', 'position']), description, highlights: outcome ? [outcome] : [] }] })
+    if (targetSection === 'work') updateResume((d) => { d.work = [...(Array.isArray(d.work) ? d.work : []), { company: textFromMaterial(material, ['company', 'organization']) || material.title, position: textFromMaterial(material, ['position', 'role']), ...timeFieldsFromMaterial(material), description, highlights: outcome ? [outcome] : [] }] })
+    if (targetSection === 'projects') updateResume((d) => { d.projects = [...(Array.isArray(d.projects) ? d.projects : []), { name: textFromMaterial(material, ['name']) || material.title, role: textFromMaterial(material, ['role', 'position']), ...timeFieldsFromMaterial(material), description, highlights: outcome ? [outcome] : [] }] })
     if (targetSection === 'skills') updateResume((d) => { d.skills = [...(Array.isArray(d.skills) ? d.skills : []), { name: textFromMaterial(material, ['skillName', 'name']) || material.title }] })
-    if (targetSection === 'education') updateResume((d) => { d.education = [...(Array.isArray(d.education) ? d.education : []), { school: textFromMaterial(material, ['school', 'institution']) || material.title, degree: textFromMaterial(material, ['degree']), major: textFromMaterial(material, ['major', 'area']) }] })
-    if (targetSection === 'volunteering') updateResume((d) => { d.volunteering = [...(Array.isArray(d.volunteering) ? d.volunteering : []), { organization: textFromMaterial(material, ['organization', 'company']) || material.title, role: textFromMaterial(material, ['role', 'position']), description, highlights: outcome ? [outcome] : [] }] })
+    if (targetSection === 'education') updateResume((d) => { d.education = [...(Array.isArray(d.education) ? d.education : []), { school: textFromMaterial(material, ['school', 'institution']) || material.title, degree: textFromMaterial(material, ['degree']), major: textFromMaterial(material, ['major', 'area']), ...timeFieldsFromMaterial(material) }] })
+    if (targetSection === 'volunteering') updateResume((d) => { d.volunteering = [...(Array.isArray(d.volunteering) ? d.volunteering : []), { organization: textFromMaterial(material, ['organization', 'company']) || material.title, role: textFromMaterial(material, ['role', 'position']), ...timeFieldsFromMaterial(material), description, highlights: outcome ? [outcome] : [] }] })
     if (targetSection === 'courses') updateResume((d) => { d.courses = [...(Array.isArray(d.courses) ? d.courses : []), { name: textFromMaterial(material, ['name', 'courseName']) || material.title, provider: textFromMaterial(material, ['provider', 'institution']), date: textFromMaterial(material, ['date']), description }] })
     if (targetSection === 'certificates') updateResume((d) => { d.certificates = [...(Array.isArray(d.certificates) ? d.certificates : []), { name: textFromMaterial(material, ['name', 'title']) || material.title, issuer: textFromMaterial(material, ['issuer', 'organization']), date: textFromMaterial(material, ['date']) }] })
     if (targetSection === 'publications') updateResume((d) => { d.publications = [...(Array.isArray(d.publications) ? d.publications : []), { title: textFromMaterial(material, ['title', 'name']) || material.title, publisher: textFromMaterial(material, ['publisher', 'issuer']), date: textFromMaterial(material, ['date']), url: textFromMaterial(material, ['url', 'link']), description }] })
     if (targetSection === 'awards') updateResume((d) => { d.awards = [...(Array.isArray(d.awards) ? d.awards : []), { name: textFromMaterial(material, ['name', 'title']) || material.title, issuer: textFromMaterial(material, ['issuer', 'organization']), date: textFromMaterial(material, ['date']), description }] })
-    if (targetSection === 'customSections') updateResume((d) => { d.customSections = [...(Array.isArray(d.customSections) ? d.customSections : []), { title: material.title, entries: [{ name: material.title, organization: textFromMaterial(material, ['organization', 'company']), role: textFromMaterial(material, ['role', 'position']), description, highlights: outcome ? [outcome] : [] }] }] })
+    if (targetSection === 'customSections') updateResume((d) => { d.customSections = [...(Array.isArray(d.customSections) ? d.customSections : []), { title: material.title, entries: [{ name: material.title, organization: textFromMaterial(material, ['organization', 'company']), role: textFromMaterial(material, ['role', 'position']), ...timeFieldsFromMaterial(material), description, highlights: outcome ? [outcome] : [] }] }] })
     selectedMaterialId.value = null
   } catch {
-    if (props.id === targetResumeId) error.value = t('resumeEditor.materialInsertFailed')
+    if (props.id === targetResumeId && epoch === editorContextEpoch) error.value = t('resumeEditor.materialInsertFailed')
   } finally {
-    if (props.id === targetResumeId) materialInsertLoading.value = false
+    if (props.id === targetResumeId && epoch === editorContextEpoch) materialInsertLoading.value = false
   }
 }
 
@@ -319,27 +416,43 @@ function toggleSection(section: SectionKey) {
 }
 function expandSection(section: SectionKey) { collapsedSections.value = new Set(sectionKeys.filter((k) => k !== section)) }
 async function jumpToSection(section: SectionKey) {
-  expandSection(section); await nextTick()
-  document.getElementById(`resume-${section}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  activeSection.value = section
+  expandSection(section)
+  await nextTick()
+  const target = document.getElementById(`resume-${section}`)
+  if (!target) return
+  target.tabIndex = -1
+  target.focus({ preventScroll: true })
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+}
+
+async function applyAtsArrival() {
+  const context = atsContext.value
+  if (!context) return
+  await nextTick()
+  await jumpToSection(context.section)
+  atsAnnouncement.value = message('atsArrivalAnnouncement', { section: sectionLabel(context.section) })
 }
 
 async function openAiAssistant(scope: 'field' | 'section', label: string, section: string, value: unknown, apply?: (value: string) => void) {
   const contentValue = Array.isArray(value) ? value.filter(Boolean).join('\n') : String(value ?? '').trim()
   aiAssistant.value = { scope, label, section, content: contentValue, loading: false, result: null, error: '', needsConsent: false, apply }
   if (!contentValue || !currentVersionId.value) return
+  const epoch = editorContextEpoch
   aiAssistant.value.loading = true
   try {
     const createdTask = (await inlineOptimize({ resumeVersionId: currentVersionId.value, section, content: contentValue })).data.data
     const result = await waitForAiTaskResult<InlineOptimizeResponse>(createdTask.id)
-    if (aiAssistant.value?.section === section && aiAssistant.value.content === contentValue) aiAssistant.value.result = result
+    if (epoch === editorContextEpoch && aiAssistant.value?.section === section && aiAssistant.value.content === contentValue) aiAssistant.value.result = result
   } catch (requestError: any) {
-    if (aiAssistant.value?.section === section) {
+    if (epoch === editorContextEpoch && aiAssistant.value?.section === section) {
       aiAssistant.value.needsConsent = requestError?.response?.data?.code === 40302
       aiAssistant.value.error = aiAssistant.value.needsConsent
         ? t('resumeEditor.consentRequired')
         : t('resumeEditor.aiUnavailable')
     }
-  } finally { if (aiAssistant.value?.section === section) aiAssistant.value.loading = false }
+  } finally { if (epoch === editorContextEpoch && aiAssistant.value?.section === section) aiAssistant.value.loading = false }
 }
 
 function applyAiCandidate(value: string) {
@@ -391,7 +504,7 @@ watch(showPreview, () => { void connectPreviewObserver() })
 function handleKeydown(event: KeyboardEvent) {
   if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
   event.preventDefault()
-  if (dirty.value && sourceValid.value && !saving.value) void save()
+  if (!historicalSourceReadOnly.value && dirty.value && sourceValid.value && !saving.value) void save()
 }
 function goBack() { router.back() }
 
@@ -400,7 +513,8 @@ onBeforeRouteLeave(() => {
   return window.confirm(t('resumeEditor.leaveConfirm'))
 })
 onBeforeRouteUpdate((to, from) => {
-  if (to.params.id === from.params.id || !dirty.value) return true
+  if (!dirty.value) return true
+  if (to.params.id === from.params.id && to.fullPath === from.fullPath) return true
   return window.confirm(t('resumeEditor.leaveConfirm'))
 })
 
@@ -481,7 +595,7 @@ function removeSkill(index: number) { const item = skills.value[index]; const la
 function addEducation() { expandSection('education'); updateResume((d) => { d.education = [...(Array.isArray(d.education) ? d.education : []), { school: '', degree: '', major: '', startDate: '', endDate: '' }] }) }
 function setEducation(index: number, field: string, value: string) { updateResume((d) => { const items = Array.isArray(d.education) ? [...d.education] : []; items[index] = { ...(items[index] ?? {}), [field]: value }; d.education = items }) }
 function removeEducation(index: number) { const label = education.value[index]?.school || message('educationItem', { index: index + 1 }); removeWithUndo(label, (d) => { d.education = (Array.isArray(d.education) ? d.education : []).filter((_: unknown, i: number) => i !== index) }) }
-function addProject() { expandSection('projects'); updateResume((d) => { d.projects = [...(Array.isArray(d.projects) ? d.projects : []), { name: '', role: '', description: '', highlights: [] }] }) }
+function addProject() { expandSection('projects'); updateResume((d) => { d.projects = [...(Array.isArray(d.projects) ? d.projects : []), { name: '', role: '', startDate: '', endDate: '', description: '', highlights: [] }] }) }
 function setProject(index: number, field: string, value: unknown) { updateResume((d) => { const items = Array.isArray(d.projects) ? [...d.projects] : []; items[index] = { ...(items[index] ?? {}), [field]: value }; d.projects = items }) }
 function removeProject(index: number) { const label = projects.value[index]?.name || message('projectItem', { index: index + 1 }); removeWithUndo(label, (d) => { d.projects = (Array.isArray(d.projects) ? d.projects : []).filter((_: unknown, i: number) => i !== index) }) }
 function moveItem(section: SortableSection, index: number, direction: -1 | 1) {
@@ -542,32 +656,105 @@ function defaultResumeJson() { return { basics: { name: '' }, objective: { targe
 
 async function loadEditor() {
   const loadSequence = ++editorLoadSequence
+  editorContextEpoch += 1
   const requestedResumeId = Number(props.id)
   loading.value = true
   loadFailed.value = false
   error.value = ''
   currentVersionId.value = null
+  atsSourceVersionId.value = null
+  historicalSourceReadOnly.value = false
+  atsContext.value = null
+  atsAnnouncement.value = ''
+  // Invalidate route-scoped async state from the previous editor context:
+  // stale material/insert/save/inline completions must not affect this load.
+  materialLibraryLoading.value = false
+  materialInsertLoading.value = false
+  selectedMaterialId.value = null
+  saving.value = false
+  aiAssistant.value = null
+  let loadedPendingSuccessor = false
   try {
-    const resumeResponse = await getResume(requestedResumeId)
-    let loadedVersionId = resumeResponse.data.data.currentVersionId
+    const [resumeResponse, handoff] = await Promise.all([
+      getResume(requestedResumeId),
+      resolveAtsHandoff(requestedResumeId),
+    ])
+    const currentResumeVersionId = resumeResponse.data.data.currentVersionId
+    let loadedVersionId = currentResumeVersionId
+    let requestedEditableSuccessor = false
+    if (handoff) {
+      const requestedEditVersionId = positiveQueryInteger(route.query.editVersionId)
+      requestedEditableSuccessor = requestedEditVersionId === currentResumeVersionId
+        && requestedEditVersionId !== handoff.sourceVersionId
+      loadedVersionId = requestedEditableSuccessor ? requestedEditVersionId : handoff.sourceVersionId
+      atsSourceVersionId.value = handoff.sourceVersionId
+      atsContext.value = handoff.context
+    }
     if (loadedVersionId == null) {
       const versionsResponse = await listVersions(requestedResumeId)
       loadedVersionId = versionsResponse.data.data[0]?.id ?? null
     }
-    const currentVersion = loadedVersionId
+    let currentVersion = loadedVersionId
       ? (await getResumeVersion(loadedVersionId)).data.data
       : null
+    if (handoff && requestedEditableSuccessor
+      && !isAtsEditableSuccessor(currentVersion, handoff.context, handoff.sourceVersionId)) {
+      loadedVersionId = handoff.sourceVersionId
+      currentVersion = (await getResumeVersion(loadedVersionId)).data.data
+    }
     if (loadSequence !== editorLoadSequence) return
+    historicalSourceReadOnly.value = Boolean(handoff && loadedVersionId !== currentResumeVersionId)
     currentVersionId.value = loadedVersionId
     content.value = JSON.stringify(currentVersion?.resumeJson ?? defaultResumeJson(), null, 2)
     initialContent.value = content.value
-    readDraft()
+    if (!historicalSourceReadOnly.value) readDraft()
+    loadedPendingSuccessor = currentVersionId.value === pendingEditableSuccessorId.value && !historicalSourceReadOnly.value
+    if (loadedPendingSuccessor) {
+      pendingEditableSuccessorId.value = null
+      editableCreationError.value = ''
+    }
     void connectPreviewObserver()
   } catch {
     if (loadSequence !== editorLoadSequence) return
+    const requestedEditableSuccessorId = positiveQueryInteger(route.query.editVersionId)
+    if (atsContext.value && requestedEditableSuccessorId && requestedEditableSuccessorId === pendingEditableSuccessorId.value) {
+      editableCreationError.value = t('resumeEditor.atsCreateEditableFailed')
+      const query = { ...route.query }
+      delete query.editVersionId
+      await router.replace({ query })
+      return
+    }
     loadFailed.value = true
   } finally {
-    if (loadSequence === editorLoadSequence) loading.value = false
+    if (loadSequence === editorLoadSequence) {
+      loading.value = false
+      if (atsContext.value) await applyAtsArrival()
+      if (loadedPendingSuccessor) atsAnnouncement.value = t('resumeEditor.atsEditableCreated')
+    }
+  }
+}
+
+async function createEditableSuccessor() {
+  const sourceVersionId = atsSourceVersionId.value
+  const context = atsContext.value
+  if (!sourceVersionId || !context || creatingEditableVersion.value) return
+  creatingEditableVersion.value = true
+  editableCreationError.value = ''
+  try {
+    const successorId = pendingEditableSuccessorId.value
+      ?? (await restoreResumeVersion(Number(props.id), sourceVersionId, {
+        atsResultId: context.resultId,
+        atsItem: context.item,
+      })).data.data.id
+    pendingEditableSuccessorId.value = successorId
+    resetDraft()
+    await router.replace({
+      query: { ...route.query, editVersionId: String(successorId) },
+    })
+  } catch {
+    editableCreationError.value = t('resumeEditor.atsCreateEditableFailed')
+  } finally {
+    creatingEditableVersion.value = false
   }
 }
 
@@ -587,6 +774,16 @@ watch(() => props.id, () => {
   void loadEditor()
 })
 
+watch(
+  () => [route.query.section, route.query.atsResultId, route.query.sourceVersionId, route.query.atsItem, route.query.editVersionId],
+  (next, previous) => {
+    if (next.every((value, index) => value === previous[index])) return
+    resetDraft()
+    summary.value = ''
+    void loadEditor()
+  },
+)
+
 onMounted(() => {
   try { sidebarCollapsed.value = localStorage.getItem('resume-editor-sidebar-collapsed') === 'true' } catch { /* storage is optional */ }
   // The content-first editor no longer supports a collapsed editing canvas.
@@ -598,23 +795,25 @@ onMounted(() => {
 onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeUnload); window.removeEventListener('keydown', handleKeydown); previewResizeObserver?.disconnect(); if (undoTimer) clearTimeout(undoTimer) })
 
 async function save() {
+  if (historicalSourceReadOnly.value) return
   let resumeJson: Record<string, unknown>
   try { resumeJson = JSON.parse(content.value) as Record<string, unknown> } catch { error.value = t('resumeEditor.resumeJsonInvalid'); return }
+  const epoch = editorContextEpoch
   const submittedResumeId = props.id
   saving.value = true; error.value = ''
   try {
     await createManualVersion(Number(submittedResumeId), resumeJson, summary.value.trim() || undefined)
     clearDraftFor(submittedResumeId)
-    if (props.id !== submittedResumeId) return
+    if (props.id !== submittedResumeId || epoch !== editorContextEpoch) return
     initialContent.value = content.value
     await router.push({ name: 'resume-detail', params: { id: submittedResumeId } })
   } catch (requestError) {
-    if (props.id === submittedResumeId) {
+    if (props.id === submittedResumeId && epoch === editorContextEpoch) {
       const apiMessage = (requestError as AxiosError<{ message?: string }>).response?.data?.message?.trim()
       error.value = apiMessage || t('resumeEditor.saveFailed')
     }
   }
-  finally { if (props.id === submittedResumeId) saving.value = false }
+  finally { if (props.id === submittedResumeId && epoch === editorContextEpoch) saving.value = false }
 }
 </script>
 
@@ -623,16 +822,25 @@ async function save() {
     <header v-if="!loadFailed && !showPreview" class="studio-head">
       <div><p class="eyebrow">{{ t('resumeEditor.studioEyebrow') }}</p><h1>{{ t('resumeEditor.title') }}</h1><p>{{ t('resumeEditor.studioSubtitle') }}</p></div>
       <div class="studio-actions">
-        <button class="btn-neon btn-ghost btn-sample" type="button" @click="loadSample"><BookOpen :size="16" /> {{ t('resumeEditor.loadSample') }}</button>
-        <button class="btn-neon btn-ghost" type="button" @click="openTemplatePicker">{{ t('resumeEditor.chooseTemplate') }}</button>
-        <button class="btn-neon btn-ghost" type="button" @click="showDesign ? closeDesign() : openDesign()">{{ showDesign ? t('resumeEditor.backToContent') : t('resumeEditor.designAdvanced') }}</button>
+        <button v-if="!historicalSourceReadOnly" class="btn-neon btn-ghost btn-sample" type="button" @click="loadSample"><BookOpen :size="16" /> {{ t('resumeEditor.loadSample') }}</button>
+        <button v-if="!historicalSourceReadOnly" class="btn-neon btn-ghost" type="button" @click="openTemplatePicker">{{ t('resumeEditor.chooseTemplate') }}</button>
+        <button v-if="!historicalSourceReadOnly" class="btn-neon btn-ghost" type="button" @click="showDesign ? closeDesign() : openDesign()">{{ showDesign ? t('resumeEditor.backToContent') : t('resumeEditor.designAdvanced') }}</button>
         <button v-if="showDesign" class="btn-neon btn-ghost" type="button" @click="showSource = !showSource">{{ showSource ? t('resumeEditor.closeJson') : t('resumeEditor.editJson') }}</button>
         <button class="btn-neon btn-ghost" type="button" @click="openPreview">{{ t('resumeEditor.preview') }}</button>
         <button class="btn-neon btn-ghost" type="button" @click="goBack">{{ t('common.back') }}</button>
-        <button v-if="showDesign" class="btn-neon btn-primary" type="button" :disabled="saving || !sourceValid || !dirty" @click="save">{{ saving ? t('common.saving') : dirty ? t('resumeEditor.saveNewVersion') : t('resumeEditor.contentSynced') }}</button>
-        <button v-else form="resume-form" class="btn-neon btn-primary" :disabled="saving || !sourceValid || !dirty">{{ saving ? t('common.saving') : dirty ? t('resumeEditor.saveNewVersion') : t('resumeEditor.contentSynced') }}</button>
+        <button v-if="showDesign && !historicalSourceReadOnly" class="btn-neon btn-primary" type="button" :disabled="saving || !sourceValid || !dirty" @click="save">{{ saving ? t('common.saving') : dirty ? t('resumeEditor.saveNewVersion') : t('resumeEditor.contentSynced') }}</button>
+        <button v-else-if="!historicalSourceReadOnly" form="resume-form" class="btn-neon btn-primary" :disabled="saving || !sourceValid || !dirty">{{ saving ? t('common.saving') : dirty ? t('resumeEditor.saveNewVersion') : t('resumeEditor.contentSynced') }}</button>
       </div>
     </header>
+    <p class="sr-only" role="status" aria-live="polite">{{ atsAnnouncement }}</p>
+    <nav v-if="!loadFailed && atsContext" class="ats-handoff-return" :aria-label="t('resumeEditor.atsReturnNavigation')">
+      <RouterLink :to="`/ats?result=${atsContext.resultId}`"><ArrowLeft :size="14" />{{ t('resumeEditor.atsReturnToReport') }}</RouterLink>
+    </nav>
+    <section v-if="!loadFailed && historicalSourceReadOnly" class="ats-version-lock" role="status">
+      <LockKeyhole :size="18" />
+      <div><strong>{{ t('resumeEditor.atsHistoricalTitle') }}</strong><p>{{ t('resumeEditor.atsHistoricalDescription') }}</p><p v-if="editableCreationError" class="form-error" role="alert">{{ editableCreationError }}</p></div>
+      <button class="btn-neon btn-primary" type="button" :disabled="creatingEditableVersion" @click="createEditableSuccessor"><FilePlus2 :size="15" />{{ creatingEditableVersion ? t('resumeEditor.atsCreatingEditable') : editableCreationError ? t('common.retry') : t('resumeEditor.atsCreateEditable') }}</button>
+    </section>
     <div v-if="!loadFailed && showTemplatePicker" class="template-picker-overlay" role="dialog" :aria-label="t('resumeEditor.templateChooserTitle')" @click.self="closeTemplatePicker">
       <section class="template-picker-dialog">
         <header><div><p class="eyebrow">{{ t('resumeEditor.templateLabel') }}</p><h2>{{ t('resumeEditor.templateChooserTitle') }}</h2><p>{{ t('resumeEditor.templateChooserDescription') }}</p></div><button class="btn-neon btn-ghost" type="button" @click="closeTemplatePicker">{{ t('common.close') }}</button></header>
@@ -719,7 +927,8 @@ async function save() {
           </section>
           </div>
         </aside>
-        <form v-if="!showDesign" id="resume-form" class="studio-editor" :class="[{ 'is-collapsed': editorPanelCollapsed }, `active-${activeSection}`]" @submit.prevent="save">
+        <form v-if="!showDesign" id="resume-form" class="studio-editor" :class="[{ 'is-collapsed': editorPanelCollapsed, 'is-read-only': historicalSourceReadOnly }, `active-${activeSection}`]" :aria-label="historicalSourceReadOnly ? t('resumeEditor.atsReadOnlyFormLabel') : t('resumeEditor.editorFormLabel')" :aria-readonly="historicalSourceReadOnly" @submit.prevent="save">
+        <fieldset class="editor-fields" :disabled="historicalSourceReadOnly">
         <header class="property-panel-heading"><div><span>{{ t('resumeEditor.contentProperties') }}</span><strong>{{ t('resumeEditor.editResumeContent') }}</strong><small>{{ t('resumeEditor.contentPanelDescription') }}</small></div><button class="property-toggle" type="button" :aria-expanded="!editorPanelCollapsed" :title="editorPanelCollapsed ? t('resumeEditor.expandEditor') : t('resumeEditor.collapseEditor')" @click="toggleEditorPanel"><PanelRightOpen v-if="editorPanelCollapsed" :size="16" /><PanelRightClose v-else :size="16" /></button></header>
         <div v-if="materialTypesBySection[activeSection]?.length" class="material-insert-bar">
           <button type="button" class="btn-neon btn-ghost" @click="loadMaterialLibrary">{{ materialLibraryLoading ? t('resumeEditor.loadingMaterials') : t('resumeEditor.loadMaterials') }}</button>
@@ -786,6 +995,8 @@ async function save() {
           <article v-for="(item, index) in projects" :key="index" class="work-editor" :class="{ 'is-drag-over-before': isDragTarget('projects', index, false), 'is-drag-over-after': isDragTarget('projects', index, true) }" @dragover.prevent="updateDragTarget('projects', index, $event)" @drop.prevent="dropItem('projects', index, $event)"><div class="work-editor-head"><strong>{{ message('projectItem', { index: index + 1 }) }}</strong><div class="item-order-actions"><button type="button" class="drag-handle" draggable="true" :title="t('resumeEditor.dragSort')" :aria-label="t('resumeEditor.dragSort')" @dragstart="startItemDrag('projects', index, $event)" @dragend="endItemDrag"><GripVertical :size="16" /></button><button type="button" class="item-move" :disabled="index === 0" :title="t('resumeEditor.moveUp')" @click="moveItem('projects', index, -1)">↑</button><button type="button" class="item-move" :disabled="index === projects.length - 1" :title="t('resumeEditor.moveDown')" @click="moveItem('projects', index, 1)">↓</button><button type="button" @click="removeProject(index)">{{ t('common.delete') }}</button></div></div><div class="field-grid">
             <label>{{ t('resumeEditor.projectName') }}<input :value="item.name ?? ''" @input="setProject(index, 'name', ($event.target as HTMLInputElement).value)" /></label>
             <label>{{ t('resumeEditor.projectRole') }}<input :value="item.role ?? item.position ?? ''" @input="setProject(index, 'role', ($event.target as HTMLInputElement).value)" /></label>
+            <label>{{ t('resumeEditor.startDate') }}<input :value="item.startDate ?? ''" placeholder="2023-01" @input="setProject(index, 'startDate', ($event.target as HTMLInputElement).value)" /></label>
+            <label>{{ t('resumeEditor.endDate') }}<input :value="item.endDate ?? ''" :placeholder="t('resumeEditor.current')" @input="setProject(index, 'endDate', ($event.target as HTMLInputElement).value)" /></label>
             <label class="span-two"><span class="field-label-row"><span>{{ t('resumeEditor.projectDescription') }}</span><button type="button" class="ai-field-action" @click="openAiAssistant('field', message('projectItem', { index: index + 1 }) + ' · ' + t('resumeEditor.projectDescription'), 'projectDescription', item.description, value => setProject(index, 'description', value))"><WandSparkles :size="13" /> {{ t('resumeEditor.polish') }}</button></span><textarea :value="item.description ?? ''" rows="3" @input="setProject(index, 'description', ($event.target as HTMLTextAreaElement).value)" /></label>
             <label class="span-two"><span class="field-label-row"><span>{{ t('resumeEditor.projectOutcomes') }}</span><button type="button" class="ai-field-action" @click="openAiAssistant('field', message('projectItem', { index: index + 1 }) + ' · ' + t('resumeEditor.projectOutcomes'), 'projectHighlights', item.highlights, value => setProject(index, 'highlights', value.split('\n').map(i => i.trim()).filter(Boolean)))"><WandSparkles :size="13" /> {{ t('resumeEditor.strengthenOutcomes') }}</button></span><textarea :value="Array.isArray(item.highlights) ? item.highlights.join('\n') : ''" rows="4" :placeholder="t('resumeEditor.projectOutcomesPlaceholder')" @input="setProject(index, 'highlights', ($event.target as HTMLTextAreaElement).value.split('\n').map(v => v.trim()).filter(Boolean))" /></label>
           </div></article>
@@ -834,7 +1045,8 @@ async function save() {
         <div class="editor-note"><strong>{{ t('resumeEditor.advancedEditing') }}</strong><span>{{ t('resumeEditor.advancedEditingDescription') }}</span></div>
         <label v-if="showSource" class="source-editor open"><span>{{ t('resumeEditor.resumeSource') }}</span><textarea v-model="content" :rows="28" required spellcheck="false" /><small :class="sourceValid ? 'source-ok' : 'source-invalid'">{{ sourceValid ? t('resumeEditor.jsonValid') : t('resumeEditor.jsonInvalidSave') }}</small></label>
         <div v-if="undoRemoval" class="editor-undo" role="status"><span>{{ message('undoRemoved', { label: undoRemoval.label }) }}</span><button type="button" @click="restoreRemoval">{{ t('resumeEditor.undo') }}</button></div>
-        <div class="editor-save-dock"><span><strong>{{ dirty ? t('resumeEditor.unsavedChanges') : t('resumeEditor.contentSynced') }}</strong><small>{{ t('resumeEditor.shortcutSave') }}</small></span><div class="editor-save-actions"><button v-if="activeSection !== 'languages'" class="btn-neon btn-ghost" type="button" @click="nextSection">{{ t('resumeEditor.nextSection') }}</button><button class="btn-neon btn-primary" :disabled="saving || !sourceValid || !dirty">{{ saving ? t('common.saving') : t('resumeEditor.saveNewVersion') }}</button></div></div>
+        <div class="editor-save-dock"><span><strong>{{ historicalSourceReadOnly ? t('resumeEditor.atsReadOnlyDock') : dirty ? t('resumeEditor.unsavedChanges') : t('resumeEditor.contentSynced') }}</strong><small>{{ historicalSourceReadOnly ? t('resumeEditor.atsHistoricalShort') : t('resumeEditor.shortcutSave') }}</small></span><div v-if="!historicalSourceReadOnly" class="editor-save-actions"><button v-if="activeSection !== 'languages'" class="btn-neon btn-ghost" type="button" @click="nextSection">{{ t('resumeEditor.nextSection') }}</button><button class="btn-neon btn-primary" :disabled="saving || !sourceValid || !dirty">{{ saving ? t('common.saving') : t('resumeEditor.saveNewVersion') }}</button></div></div>
+        </fieldset>
         </form>
       </div>
     </div>
@@ -843,8 +1055,8 @@ async function save() {
         <div><p class="eyebrow">{{ t('resumeEditor.previewMode') }}</p><h1>{{ t('resumeEditor.previewWorkspaceLabel') }}</h1></div>
         <div class="preview-toolbar-actions">
           <button ref="previewBackButtonRef" class="btn-neon btn-ghost" type="button" @click="closePreview"><ArrowLeft :size="16" /> {{ t('resumeEditor.returnToEditing') }}</button>
-          <button class="btn-neon btn-ghost" type="button" @click="openTemplatePicker">{{ t('resumeEditor.chooseTemplate') }}</button>
-          <button class="btn-neon btn-primary" type="button" :disabled="saving || !sourceValid || !dirty" @click="save">{{ saving ? t('common.saving') : dirty ? t('resumeEditor.saveNewVersion') : t('resumeEditor.contentSynced') }}</button>
+          <button v-if="!historicalSourceReadOnly" class="btn-neon btn-ghost" type="button" @click="openTemplatePicker">{{ t('resumeEditor.chooseTemplate') }}</button>
+          <button v-if="!historicalSourceReadOnly" class="btn-neon btn-primary" type="button" :disabled="saving || !sourceValid || !dirty" @click="save">{{ saving ? t('common.saving') : dirty ? t('resumeEditor.saveNewVersion') : t('resumeEditor.contentSynced') }}</button>
         </div>
       </header>
       <div class="preview-page-meta"><span>{{ templateName }}</span><span :class="{ 'preview-warning': previewPageCount > 1 }">{{ previewPageEstimate() }}</span></div>

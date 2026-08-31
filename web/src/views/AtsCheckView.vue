@@ -3,11 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   AlertTriangle, BrainCircuit, CheckCircle2, FileSearch, ListChecks,
-  Quote, RefreshCw, SearchCheck, ShieldCheck, Sparkles,
+  PencilLine, Quote, RefreshCw, SearchCheck, ShieldCheck, Sparkles,
 } from 'lucide-vue-next'
 import { getAtsCheck, retryAtsAi, runAtsCheck, type AtsCheckResponse } from '@/api/ats'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useLocale } from '@/i18n'
+import { mapAtsSection } from '@/resume/sectionRegistry'
 
 const POLL_INTERVAL_MS = 1_500
 const POLL_TIMEOUT_MS = 90_000
@@ -120,6 +121,21 @@ function sourceLabel(current: AtsCheckResponse) {
   return current.analysisStatus === 'RULES_ONLY' ? t('ats.sourceRulesOnly') : t('ats.sourceRules')
 }
 
+function editorLocation(section: string, kind: 'evidence' | 'action', index: number) {
+  if (!result.value || result.value.resumeId === null) return null
+  const mappedSection = mapAtsSection(section)
+  if (!mappedSection) return null
+  return {
+    path: `/resumes/${result.value.resumeId}/edit`,
+    query: {
+      section: mappedSection,
+      atsResultId: String(result.value.id),
+      sourceVersionId: String(result.value.resumeVersionId),
+      atsItem: `${kind}:${index}`,
+    },
+  }
+}
+
 onMounted(async () => {
   await load()
   const id = Number(route.query.result)
@@ -192,11 +208,11 @@ onBeforeUnmount(stopPolling)
         </div>
 
         <div class="insight-columns">
-          <section><h3>{{ t('ats.evidenceQuality') }}</h3><article v-for="item in result.aiInsights.evidenceFindings" :key="`${item.section}-${item.assessment}`"><strong>{{ item.section }}</strong><p>{{ item.assessment }}</p><small>{{ item.suggestion }}</small></article></section>
+          <section><h3>{{ t('ats.evidenceQuality') }}</h3><article v-for="(item, index) in result.aiInsights.evidenceFindings" :key="`${item.section}-${item.assessment}`"><strong>{{ item.section }}</strong><p>{{ item.assessment }}</p><small>{{ item.suggestion }}</small><RouterLink v-if="editorLocation(item.section, 'evidence', index)" class="insight-edit-link" :to="editorLocation(item.section, 'evidence', index)!"><PencilLine :size="13" />{{ t('atsOpenEvidenceInEditor') }}</RouterLink></article></section>
           <section><h3>{{ t('ats.readabilityRisks') }}</h3><ul><li v-for="risk in result.aiInsights.readabilityRisks" :key="risk">{{ risk }}</li><li v-if="!result.aiInsights.readabilityRisks.length">{{ t('ats.noRisks') }}</li></ul></section>
         </div>
 
-        <div class="insight-section action-list"><h3>{{ t('ats.aiActions') }}</h3><article v-for="item in result.aiInsights.prioritizedActions" :key="`${item.priority}-${item.section}-${item.action}`"><span>{{ item.priority }}</span><div><strong>{{ item.section }}</strong><p>{{ item.action }}</p><small>{{ t('ats.basis') }} · {{ item.basis }}</small></div></article></div>
+        <div class="insight-section action-list"><h3>{{ t('ats.aiActions') }}</h3><article v-for="(item, index) in result.aiInsights.prioritizedActions" :key="`${item.priority}-${item.section}-${item.action}`"><span>{{ item.priority }}</span><div><strong>{{ item.section }}</strong><p>{{ item.action }}</p><small>{{ t('ats.basis') }} · {{ item.basis }}</small><RouterLink v-if="editorLocation(item.section, 'action', index)" class="insight-edit-link" :to="editorLocation(item.section, 'action', index)!"><PencilLine :size="13" />{{ t('atsOpenActionInEditor') }}</RouterLink></div></article></div>
       </section>
 
       <div class="ats-findings"><section class="priority-findings"><h3><AlertTriangle :size="15" />{{ t('ats.priorities') }}</h3><ol><li v-for="priority in result.priorities" :key="priority">{{ priority }}</li><li v-if="!result.priorities.length">{{ t('ats.noPriorities') }}</li></ol></section><section class="passed-findings"><h3><CheckCircle2 :size="15" />{{ t('ats.passed') }}</h3><ul><li v-for="passed in result.passedChecks" :key="passed">{{ passed }}</li></ul></section><section class="risk-findings"><h3><AlertTriangle :size="15" />{{ t('ats.risks') }}</h3><ul><li v-for="risk in result.risks" :key="risk">{{ risk }}</li><li v-if="!result.risks.length">{{ t('ats.noRisks') }}</li></ul></section></div>
@@ -235,6 +251,7 @@ onBeforeUnmount(stopPolling)
 .insight-section { padding: 18px 0; border-top: 1px solid var(--border-soft); }.coverage-list { display: grid; margin-top: 11px; }.coverage-list article { padding: 11px 0; border-top: 1px solid var(--border-soft); }.coverage-list article:first-child { border-top: 0; }.coverage-list article header { display: flex; justify-content: space-between; gap: 12px; }.coverage-list article header span, .action-list > article > span { padding: 3px 5px; border-radius: 4px; color: var(--warning); background: var(--warning-light); font-size: 8px; font-weight: 750; }.coverage-list article header span.matched { color: var(--success); background: var(--success-light); }.coverage-list article header span.missing { color: var(--danger); background: var(--danger-light); }.coverage-list article p, .insight-columns article p, .action-list article p { margin: 5px 0; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }.coverage-list article small { display: flex; align-items: flex-start; gap: 5px; color: var(--text-tertiary); font-size: 9px; line-height: 1.5; }
 .insight-columns { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border-soft); }.insight-columns > section { padding: 18px 18px 18px 0; }.insight-columns > section + section { padding-right: 0; padding-left: 18px; border-left: 1px solid var(--border-soft); }.insight-columns article { padding: 10px 0; border-bottom: 1px solid var(--border-soft); }.insight-columns article strong { font-size: 10px; }.insight-columns article small, .action-list article small { color: var(--text-tertiary); font-size: 9px; line-height: 1.5; }.insight-columns ul { display: grid; gap: 7px; margin: 11px 0 0; padding-left: 17px; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }
 .action-list > article { display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--border-soft); }.action-list > article > span { align-self: start; text-align: center; }.action-list > article strong { font-size: 10px; }
+.insight-edit-link { display: flex; align-items: center; gap: 5px; width: fit-content; margin-top: 9px; color: var(--accent); font-size: 10px; font-weight: 700; text-decoration: none; }.insight-edit-link:hover { text-decoration: underline; }.insight-edit-link:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
 .ats-findings { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.ats-findings section { padding: 15px 17px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--bg-page); }.ats-findings .risk-findings { grid-column: 1 / -1; }.ats-findings h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 9px; color: var(--text-primary); font-size: 11px; }.priority-findings h3, .risk-findings h3 { color: var(--warning); }.passed-findings h3 { color: var(--success); }.ats-findings ol, .ats-findings ul { display: grid; gap: 6px; margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }.result-disclaimer { color: var(--text-tertiary); font-size: 9px; line-height: 1.55; }
 .spinning { animation: spin .8s linear infinite; }
 @keyframes analyze { from { transform: translateX(-110%); } to { transform: translateX(270%); } } @keyframes spin { to { transform: rotate(360deg); } }

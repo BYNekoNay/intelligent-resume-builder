@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { AlertTriangle, BarChart3, BookmarkPlus, CheckCircle2, FileText, Loader2, Mic2, Play, RefreshCw, Send, Shield, Sparkles } from 'lucide-vue-next'
 import { createInterviewAsset } from '@/api/interviewAsset'
 import {
@@ -12,6 +12,7 @@ import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useLocale } from '@/i18n'
 
 const { locale, t } = useLocale()
+const route = useRoute()
 const router = useRouter()
 
 const consentRedirectUrl = '/ai-consent?redirect=/interviews'
@@ -282,8 +283,15 @@ async function recoverSession() {
 }
 
 onMounted(() => {
-  void loadOptions()
-  void recoverSession()
+  void loadOptions().then(() => {
+    const requestedJobId = Number(route.query.jobDescriptionId)
+    if (Number.isInteger(requestedJobId) && jobs.value.some(job => job.id === requestedJobId)) {
+      jobId.value = String(requestedJobId)
+      interviewMode.value = 'JD_TARGETED'
+      return
+    }
+    void recoverSession()
+  })
 })
 
 onBeforeUnmount(stopStatePoll)
