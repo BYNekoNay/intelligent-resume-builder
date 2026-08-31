@@ -964,7 +964,7 @@ test('loads a personal profile suggestion without saving it automatically', asyn
   await mockAuthenticatedApi(page)
   let savedProfile: unknown
   await page.route('**/api/personal-profile/import-suggestion*', route => route.fulfill({ json: response({
-    fullName: 'BYNeko', email: '2149752131@qq.com', phone: '13800000000', location: '杭州',
+    fullName: 'BYNeko', email: 'e2e-profile@example.com', phone: '13800000000', location: '杭州',
     website: 'https://example.com', profileSummary: '专注高并发后端系统。',
   }) }))
   await page.route('**/api/personal-profile', async route => {
@@ -982,7 +982,7 @@ test('loads a personal profile suggestion without saving it automatically', asyn
   await expect(page.getByLabel('姓名')).toHaveValue('BYNeko')
   expect(savedProfile).toBeUndefined()
   await page.getByRole('button', { name: '保存个人档案' }).click()
-  await expect.poll(() => savedProfile).toMatchObject({ fullName: 'BYNeko', email: '2149752131@qq.com' })
+  await expect.poll(() => savedProfile).toMatchObject({ fullName: 'BYNeko', email: 'e2e-profile@example.com' })
 })
 
 test('restores the server profile after the user discards edits', async ({ page }) => {
