@@ -1,0 +1,85 @@
+sequenceDiagram
+    participant U as InterviewView/HistoryView
+    participant C as InterviewController
+    participant R as InterviewReportService
+    participant F as InterviewFollowUpAiService
+    participant T as AiTaskService
+    participant S as InterviewStartService
+    participant A as InterviewAssetService
+
+    U->>C: GET /api/interviews/{id}/report
+    C->>R: report(id, userId)
+    R-->>U: { ...rounds[] }
+    U->>C: POST /api/interviews/{id}/follow-up { weakness }
+    C->>F: createFollowUpTask(id, weakness, userId)
+    F->>T: create(INTERVIEW_COACH, input.operation=FOLLOW_UP_PRACTICE, idemKey)
+    T-->>U: 202 { taskId, status: PENDING }
+    loop 轮询
+        U->>T: GET /api/ai/tasks/{taskId}
+        T-->>U: SUCCESS { resultJson.candidates[] }
+    end
+    U->>U: 编辑候选练习题
+    U->>C: POST /api/interviews/start { sourceType, resumeVersionId, jobDescriptionId, initialQuestion }
+    C->>S: start(request, userId, idemKey)
+    S-->>U: AWAITING_ANSWER { currentQuestion }
+    U->>A: POST /api/interview-answer-assets { interviewRecordId, sectionKeys }
+    A-->>U: 201 { asset, sectionKeys }
+
+sequenceDiagram
+    participant U as CommunicationView
+    participant C as CommunicationController
+    participant S as CommunicationTemplateService
+    participant P as TemplatePlaceholderService
+    participant D as CommunicationService
+
+    U->>C: GET /api/communications/templates?scene=FOLLOW_UP
+    C->>S: list(userId, scene)
+    S-->>U: [{ id, name, scene, type, isSystem }]
+    U->>C: GET /api/communications/templates/{id}/preview?resumeVersionId&jobDescriptionId
+    C->>S: preview(id, resumeVersionId, jobDescriptionId, userId)
+    S->>P: fill(bodyText, resumeJson, job)
+    P-->>S: { filledBody, missingPlaceholders }
+    S-->>U: { filledBody, missingPlaceholders }
+    U->>U: 编辑正文
+    U->>C: POST /api/communications/drafts { resumeVersionId, jobDescriptionId, type, draftText, templateId }
+    C->>D: saveDraft(request, userId)
+    D-->>U: { sentAutomatically:false, requiresManualConfirmation:true }
+
+sequenceDiagram
+    participant U as ApplicationsView
+    participant C as ApplicationController
+    participant S as ApplicationService
+
+    U->>C: GET /api/applications
+    C->>S: list(userId, followUp=ALL)
+    S-->>U: [{ ..., nextFollowUpAt }]
+    U->>C: GET /api/applications/stats
+    C->>S: stats(userId)
+    S-->>U: { byStatus, conversionRates, avgStageDurationDays }
+    alt 合法迁移
+        U->>C: PATCH /api/applications/{id}/status { status, version }
+        C->>S: updateStatus(id, request, userId)
+        S-->>U: 200 { updated record }
+    else 非法迁移
+        U->>U: toast(不允许该状态迁移) 且不发起请求
+    else 乐观锁冲突
+        C-->>U: 40901 CONFLICT
+        U->>U: toast(记录已更新，请刷新) + reload
+    end
+
+sequenceDiagram
+    participant U as ResumeDetailView / CompareVersionsView
+    participant V as ResumeVersionController
+    participant R as ResumeVersionService
+
+    U->>U: 版本行点击「对比」(base=current, compare=v)
+    U->>V: GET /api/resume-versions/{baseId}
+    V->>R: get(baseId, userId)
+    R-->>U: resumeJson(base)
+    U->>V: GET /api/resume-versions/{compareId}
+    V->>R: get(compareId, userId)
+    R-->>U: resumeJson(compare)
+    U->>U: resumeDiff(baseJson, compareJson) → 章节/字段级差异
+    U->>V: POST /api/resumes/{resumeId}/versions/{versionId}/restore
+    V->>R: restore(resumeId, versionId, userId)
+    R-->>U: 201 { RESTORED 版本，原版本保留 }

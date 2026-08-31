@@ -1,0 +1,123 @@
+classDiagram
+    class InterviewController {
+        +report(id, req) ApiResponse
+        +listHistory(jobDescriptionId, page, size, req) ApiResponse
+        +createFollowUp(id, request, idemKey, req) ResponseEntity
+    }
+    class InterviewReportService {
+        +report(id, userId) InterviewReportResponse
+    }
+    class InterviewReportResponse {
+        +Integer totalScore
+        +List~String~ strengths
+        +List~String~ weaknesses
+        +List~RoundDetail~ rounds
+    }
+    class RoundDetail {
+        +Integer roundNo
+        +String questionText
+        +String answerText
+        +Integer roundScore
+        +DimensionScores dimensionScores
+        +List~String~ strengths
+        +List~String~ improvements
+        +String suggestedAnswer
+        +EvaluationSource evaluationSource
+    }
+    class InterviewHistoryService {
+        +list(userId, jobDescriptionId, page, size) List~InterviewSessionSummaryResponse~
+    }
+    class InterviewSessionSummaryResponse {
+        +Long id
+        +Long jobDescriptionId
+        +Integer actualQuestionCount
+        +Integer totalScore
+    }
+    class InterviewFollowUpAiService {
+        +executeTask(AiTask task) Map
+    }
+    class InterviewStartService {
+        +start(request, userId, idemKey) InterviewStateResponse
+    }
+    class StartInterviewRequest {
+        +InterviewSourceType sourceType
+        +Long resumeVersionId
+        +Long jobDescriptionId
+        +String initialQuestion
+    }
+    class InterviewAssetService {
+        +create(request, userId) InterviewAssetResponse
+        +list(userId, jobId, keyword, sectionKey, interviewRecordId) List~InterviewAssetResponse~
+    }
+    class InterviewAnswerAsset {
+        +Long userId
+        +Long interviewRecordId
+        +String questionText
+        +String originalAnswerText
+    }
+    class InterviewAssetSection {
+        +Long assetId
+        +String sectionKey
+        +Long materialId
+    }
+    class CommunicationTemplateService {
+        +list(userId, scene, type, language) List~TemplateSummaryResponse~
+        +preview(id, resumeVersionId, jobDescriptionId, userId) TemplatePreviewResponse
+        +saveCustom(request, userId) TemplateSummaryResponse
+        +update(id, request, userId) TemplateSummaryResponse
+        +delete(id, userId) void
+    }
+    class TemplatePlaceholderService {
+        +validate(bodyText) List~String~
+        +fill(bodyText, resumeJson, job) FillResult
+    }
+    class CommunicationTemplate {
+        +Long userId
+        +TemplateScene scene
+        +CommunicationType templateType
+        +String bodyText
+        +boolean isSystem
+        +int usageCount
+    }
+    class CommunicationController {
+        +listTemplates(scene, type, req) ApiResponse
+        +previewTemplate(id, resumeVersionId, jobDescriptionId, req) ApiResponse
+        +saveDraft(request, req) ApiResponse
+        +saveTemplate(request, req) ResponseEntity
+    }
+    class ApplicationService {
+        +list(userId, followUp) List~ApplicationResponse~
+        +stats(userId) ApplicationStatsResponse
+        +updateStatus(id, request, userId) ApplicationResponse
+    }
+    class ApplicationRecord {
+        +ApplicationStatus status
+        +LocalDateTime appliedAt
+        +LocalDateTime nextFollowUpAt
+        +Long version
+    }
+    class ApplicationStatsResponse {
+        +int total
+        +List~StatusCount~ byStatus
+        +ConversionRates conversionRates
+        +StageDurations avgStageDurationDays
+    }
+    class TaskExecutionService {
+        +execute(AiTask task, String owner)
+    }
+
+    InterviewController --> InterviewReportService
+    InterviewController --> InterviewHistoryService
+    InterviewController --> InterviewFollowUpAiService
+    InterviewController --> InterviewStartService
+    InterviewReportService ..> InterviewReportResponse : 组装 rounds
+    InterviewReportResponse *-- RoundDetail
+    InterviewFollowUpAiService --> TaskExecutionService : worker 分发
+    InterviewAssetService --> InterviewAnswerAsset
+    InterviewAssetService --> InterviewAssetSection
+    CommunicationController --> CommunicationTemplateService
+    CommunicationTemplateService --> TemplatePlaceholderService
+    CommunicationTemplateService --> CommunicationTemplate
+    ApplicationController --> ApplicationService
+    ApplicationService --> ApplicationRecord
+    ApplicationService ..> ApplicationStatsResponse
