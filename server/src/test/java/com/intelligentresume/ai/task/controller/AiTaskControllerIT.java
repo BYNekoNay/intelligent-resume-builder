@@ -187,18 +187,19 @@ class AiTaskControllerIT {
                 .andExpect(jsonPath("$.data.policyVersion").value("v1.2.0"));
     }
 
-    // ---- 6. 未登录 → 403 ----
+    // ---- 6. 未登录 → 40101 ----
 
     @Test
     @Order(8)
-    @DisplayName("未登录访问 AI 接口 → 403（Spring Security 拦截）")
-    void withoutAuth_403() throws Exception {
+    @DisplayName("未登录访问 AI 接口 → 40101（安全框架统一拦截）")
+    void withoutAuth_40101() throws Exception {
         mockMvc.perform(post("/api/ai/tasks")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"taskType": "RESUME_OPTIMIZE"}
                                 """))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
     }
 
     @Test

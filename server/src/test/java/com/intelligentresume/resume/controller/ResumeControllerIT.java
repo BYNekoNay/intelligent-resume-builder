@@ -231,17 +231,15 @@ class ResumeControllerIT {
 
     @Test
     @Order(10)
-    @DisplayName("未登录访问 POST 返回 403(Spring Security 拦截,未到达 Controller)")
+    @DisplayName("未登录访问 POST 返回 40101(安全框架统一拦截)")
     void postWithoutAuth_40101() throws Exception {
-        // 偏差说明:T03 手册期望 40101,但 /api/resumes 不在 permitAll 白名单中,
-        // Spring Security 在请求到达 Controller 前即返回 403。
-        // /api/auth/** 端点返回 401 是因为 permitAll 后由 Controller 抛出 UNAUTHENTICATED。
         mockMvc.perform(post("/api/resumes")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title":"未登录简历"}
                                 """))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
     }
 
     @Test

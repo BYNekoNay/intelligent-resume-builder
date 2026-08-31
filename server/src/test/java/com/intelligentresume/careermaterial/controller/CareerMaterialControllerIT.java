@@ -280,10 +280,8 @@ class CareerMaterialControllerIT {
 
     @Test
     @Order(9)
-    @DisplayName("未登录访问 POST 返回 403(Spring Security 拦截)")
+    @DisplayName("未登录访问 POST/GET 返回 40101(安全框架统一拦截)")
     void postWithoutAuth_40101() throws Exception {
-        // 偏差说明:同 T03,/api/career-materials 不在 permitAll 白名单,
-        // Spring Security 返回 403 而非手册期望的 40101。
         mockMvc.perform(post("/api/career-materials")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -293,9 +291,11 @@ class CareerMaterialControllerIT {
                                   "contentJson": {"name": "test"}
                                 }
                                 """))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
 
         mockMvc.perform(get("/api/career-materials/search"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
     }
 }

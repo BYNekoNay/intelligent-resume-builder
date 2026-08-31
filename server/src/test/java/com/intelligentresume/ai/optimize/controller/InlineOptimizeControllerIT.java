@@ -66,7 +66,8 @@ class InlineOptimizeControllerIT {
         mockMvc.perform(post("/api/ai/inline-optimize")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
     }
 
     @Test

@@ -215,13 +215,14 @@ class ExportControllerIT {
 
     @Test
     @Order(10)
-    @DisplayName("未登录返回 403")
-    void unauthenticated_403() throws Exception {
+    @DisplayName("未登录返回 40101")
+    void unauthenticated_40101() throws Exception {
         mockMvc.perform(post("/api/exports/pdf")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"resumeVersionId": 1, "templateCode": "classic"}
                                 """))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
     }
 }

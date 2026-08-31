@@ -111,7 +111,8 @@ class PersonalProfileControllerIT {
     @Test
     void profileEndpointsRequireAuthenticationAndValidateEmail() throws Exception {
         mockMvc.perform(get("/api/personal-profile"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
 
         String token = register("invalid");
         mockMvc.perform(put("/api/personal-profile")

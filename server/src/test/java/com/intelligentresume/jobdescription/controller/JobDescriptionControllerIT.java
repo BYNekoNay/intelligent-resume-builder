@@ -121,13 +121,14 @@ class JobDescriptionControllerIT {
 
     @Test
     @Order(5)
-    @DisplayName("未登录访问 POST 返回 403(Spring Security 拦截)")
+    @DisplayName("未登录访问 POST 返回 40101(安全框架统一拦截)")
     void postWithoutAuth_40101() throws Exception {
         mockMvc.perform(post("/api/jobs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title":"未登录","jdText":"测试文本"}
                                 """))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
     }
 }
