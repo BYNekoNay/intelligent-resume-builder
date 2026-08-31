@@ -101,7 +101,7 @@ class DraftCommitServiceTest {
         mat.setMaterialType(MaterialType.WORK_EXPERIENCE);
         mat.setContentJson(Map.of("company", "ABC"));
         mat.setUsagePreference(UsagePreference.NORMAL);
-        when(materialRepository.findById(1L)).thenReturn(Optional.of(mat));
+        when(materialRepository.findByIdAndUserId(1L, USER_ID)).thenReturn(Optional.of(mat));
 
         ResumeVersion version = new ResumeVersion();
         version.setId(50L);
@@ -137,7 +137,7 @@ class DraftCommitServiceTest {
         when(resumeRepository.findByIdAndUserId(10L, USER_ID))
                 .thenReturn(Optional.of(new com.intelligentresume.resume.domain.Resume()));
         when(normalizer.normalize(any(), any())).thenReturn(new LinkedHashMap<>());
-        when(materialRepository.findById(1L)).thenReturn(Optional.empty());
+        when(materialRepository.findByIdAndUserId(1L, USER_ID)).thenReturn(Optional.empty());
 
         CareerMaterial savedMat = new CareerMaterial();
         savedMat.setId(99L);
