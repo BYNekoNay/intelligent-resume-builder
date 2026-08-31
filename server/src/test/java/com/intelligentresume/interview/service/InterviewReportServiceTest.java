@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -171,5 +172,41 @@ class InterviewReportServiceTest {
         assertEquals(6, response.dimensionScores().structureClarity());
         assertEquals(5, response.dimensionScores().roleCompetency());
         assertEquals(2, response.dimensionScores().authenticityReflection());
+    }
+
+    @Test
+    @DisplayName("report：按 interview_record 组装逐轮明细 rounds（含单轮五维/反馈/建议答案）")
+    void report_assemblesRoundDetails() {
+        InterviewSession session = session(1L, InterviewStatus.COMPLETED, 6);
+        session.setCompletionReason(CompletionReason.USER_FINISHED);
+        when(sessionRepository.findByIdAndUserId(1L, 7L)).thenReturn(Optional.of(session));
+        InterviewRecord r1 = record(1, 60, EvaluationSource.AI, "s1");
+        r1.setFeedbackJson(Map.of(
+                "dimensionScores", Map.of("relevance", 10, "evidenceSpecificity", 8,
+                        "structureClarity", 6, "roleCompetency", 5, "authenticityReflection", 2),
+                "strengths", List.of("s1"),
+                "improvements", List.of("i1"),
+                "suggestedAnswer", "建议答案1"));
+        InterviewRecord r2 = record(2, 80, EvaluationSource.RULE, "s2");
+        when(recordRepository.findBySessionIdOrderByCreatedAtAsc(1L)).thenReturn(List.of(r1, r2));
+
+        InterviewReportResponse response = service.report(1L, 7L);
+
+        assertNotNull(response.rounds());
+        assertEquals(2, response.rounds().size());
+        InterviewReportResponse.RoundDetail first = response.rounds().get(0);
+        assertEquals(1, first.roundNo());
+        assertEquals("Q1", first.questionText());
+        assertEquals("A1", first.answerText());
+        assertEquals(60, first.roundScore());
+        assertEquals(EvaluationSource.AI, first.evaluationSource());
+        assertNotNull(first.dimensionScores());
+        assertEquals(10, first.dimensionScores().relevance());
+        assertEquals(List.of("s1"), first.strengths());
+        assertEquals(List.of("i1"), first.improvements());
+        assertEquals("建议答案1", first.suggestedAnswer());
+        // 第二条 RULE 记录也有逐轮明细
+        assertEquals(EvaluationSource.RULE, response.rounds().get(1).evaluationSource());
+        assertEquals(80, response.rounds().get(1).roundScore());
     }
 }

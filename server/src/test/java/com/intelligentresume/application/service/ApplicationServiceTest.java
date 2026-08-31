@@ -284,6 +284,40 @@ class ApplicationServiceTest {
         verify(repository).findByUserIdAndFollowUp(eq(USER_ID), eq("ALL"), any(), any(), any());
     }
 
+    @Test
+    @DisplayName("list: followUp=TODAY 透传给仓库做今日日界筛选")
+    void list_todayFollowUp_delegatesToday() {
+        when(repository.findByUserIdAndFollowUp(eq(USER_ID), eq("TODAY"), any(), any(), any()))
+                .thenReturn(List.of(record(1L, USER_ID, ApplicationStatus.APPLIED, 1L)));
+
+        var responses = service.list(USER_ID, "TODAY");
+
+        assertEquals(1, responses.size());
+        verify(repository).findByUserIdAndFollowUp(eq(USER_ID), eq("TODAY"), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("list: followUp=OVERDUE 透传给仓库做逾期非终态筛选")
+    void list_overdueFollowUp_delegatesOverdue() {
+        when(repository.findByUserIdAndFollowUp(eq(USER_ID), eq("OVERDUE"), any(), any(), any()))
+                .thenReturn(List.of(record(2L, USER_ID, ApplicationStatus.INTERVIEWING, 2L)));
+
+        var responses = service.list(USER_ID, "overdue");
+
+        assertEquals(1, responses.size());
+        verify(repository).findByUserIdAndFollowUp(eq(USER_ID), eq("OVERDUE"), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("list: 未知 followUp 值回退为 ALL")
+    void list_unknownFollowUp_fallsBackToAll() {
+        when(repository.findByUserIdAndFollowUp(eq(USER_ID), eq("ALL"), any(), any(), any())).thenReturn(List.of());
+
+        service.list(USER_ID, "SOMETHING_ELSE");
+
+        verify(repository).findByUserIdAndFollowUp(eq(USER_ID), eq("ALL"), any(), any(), any());
+    }
+
     // ---- 统计 ----
 
     @Test
