@@ -2,6 +2,8 @@ package com.intelligentresume.resume.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.ats.domain.AtsCheckResult;
+import com.intelligentresume.ats.repository.AtsCheckResultRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -10,6 +12,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -28,6 +34,7 @@ class ResumeControllerIT {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private AtsCheckResultRepository atsCheckResultRepository;
 
     /** 用户 A 的 access token（Order 1 注册后填充） */
     private static String tokenA;
@@ -35,6 +42,7 @@ class ResumeControllerIT {
     private static String tokenB;
     /** 用户 A 创建的简历 ID */
     private static Long resumeIdA;
+    private static Long versionIdA;
 
     // ---- 辅助方法 ----
 
@@ -187,6 +195,9 @@ class ResumeControllerIT {
                 .andExpect(jsonPath("$.data.sourceType").value("MANUAL"))
                 .andReturn();
 
+        versionIdA = objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
         // 验证版本列表
         mockMvc.perform(get("/api/resumes/" + resumeIdA + "/versions")
                         .header("Authorization", "Bearer " + tokenA))
@@ -231,5 +242,69 @@ class ResumeControllerIT {
                                 {"title":"未登录简历"}
                                 """))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @Order(11)
+    @DisplayName("ATS 溯源恢复只接收标识，并在详情和历史中返回服务端派生上下文")
+    void restoreWithAtsProvenance_returnsValidatedContext() throws Exception {
+        MvcResult job = mockMvc.perform(post("/api/jobs")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Platform Engineer\",\"companyName\":\"Example\",\"jdText\":\"Java reliability\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long jobDescriptionId = objectMapper.readTree(job.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+        AtsCheckResult result = new AtsCheckResult();
+        result.setUserId(userId(tokenA));
+        result.setResumeVersionId(versionIdA);
+        result.setJobDescriptionId(jobDescriptionId);
+        result.setIdempotencyKey("resume-ats-provenance");
+        result.setRequestFingerprint("resume-ats-provenance-fingerprint");
+        result.setTotalScore(BigDecimal.valueOf(72));
+        result.setResultJson(Map.of(
+                "analysisStatus", "COMPLETED",
+                "aiInsights", Map.of(
+                        "evidenceFindings", List.of(Map.of(
+                                "section", "work",
+                                "suggestion", "Quantify delivery impact")),
+                        "prioritizedActions", List.of())));
+        result = atsCheckResultRepository.save(result);
+
+        mockMvc.perform(post("/api/resumes/" + resumeIdA + "/versions/" + versionIdA + "/restore")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"atsResultId\":%d,\"atsItem\":\"evidence:0\"}".formatted(result.getId())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.generationContext.atsProvenance.resultId").value(result.getId()))
+                .andExpect(jsonPath("$.data.generationContext.atsProvenance.sourceVersionId").value(versionIdA))
+                .andExpect(jsonPath("$.data.generationContext.atsProvenance.mappedSection").value("work"))
+                .andExpect(jsonPath("$.data.generationContext.atsProvenance.optimizationObjective")
+                        .value("Quantify delivery impact"));
+
+        mockMvc.perform(get("/api/resumes/" + resumeIdA + "/versions")
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].generationContext.atsProvenance.resultId").value(result.getId()));
+    }
+
+    @Test
+    @Order(12)
+    @DisplayName("未提供 ATS 溯源时仍可按原有恢复契约创建版本")
+    void restoreWithoutAtsProvenance_remainsCompatible() throws Exception {
+        mockMvc.perform(post("/api/resumes/" + resumeIdA + "/versions/" + versionIdA + "/restore")
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.restoredFromVersionId").value(versionIdA))
+                .andExpect(jsonPath("$.data.generationContext").doesNotExist());
+    }
+
+    private Long userId(String token) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/auth/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString()).path("data").path("id").asLong();
     }
 }
