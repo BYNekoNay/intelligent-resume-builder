@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 
 const apiBaseUrl = process.env.LOCAL_E2E_API_URL ?? 'http://127.0.0.1:8080'
@@ -32,6 +32,16 @@ async function switchToEnglish(page: Page) {
   const englishButton = page.getByRole('button', { name: 'EN', exact: true })
   await englishButton.click()
   await expect(englishButton).toHaveAttribute('aria-pressed', 'true')
+}
+
+async function cleanupSyntheticAccount(page: Page, accessToken: string, testInfo: TestInfo) {
+  if (testInfo.status === 'timedOut' || testInfo.status === 'interrupted') return
+  testInfo.setTimeout(testInfo.timeout + 10_000)
+  const cleanup = await page.request.delete(`${apiBaseUrl}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    timeout: 5_000,
+  })
+  expect(cleanup.status()).toBe(200)
 }
 
 function invokePdfFault(action: 'StopPdf' | 'StartPdf') {
@@ -95,8 +105,12 @@ test.describe('@local-services local application smoke', () => {
       const titleInput = page.getByLabel('Resume title')
       await expect(titleInput).toBeVisible({ timeout: 75_000 })
       await titleInput.fill(title)
-      await page.getByRole('button', { name: 'Confirm & create editable resume' }).click()
-      await expect(page).toHaveURL(/\/resumes\/\d+$/)
+      const [createResponse] = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/resumes')),
+        page.getByRole('button', { name: 'Confirm & create editable resume' }).click(),
+      ])
+      expect(createResponse.status(), `Resume creation failed: ${await createResponse.text()}`).toBe(201)
+      await expect(page).toHaveURL(/\/resumes\/\d+$/, { timeout: 30_000 })
       await expect(page.locator('.workspace-page')).toContainText(title)
     } finally {
       if (accessToken) {
@@ -208,7 +222,7 @@ test.describe('@local-services local application smoke', () => {
     }
   })
 
-  test('runs the core resume journey through the visible local UI', async ({ page }) => {
+  test('runs the core resume journey through the visible local UI', async ({ page }, testInfo) => {
     test.setTimeout(900_000)
     const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`
     const resumeTitle = `Local UI resume ${suffix}`
@@ -220,11 +234,12 @@ test.describe('@local-services local application smoke', () => {
       accessToken = await registerSyntheticAccount(page, 'journey', suffix)
       await switchToEnglish(page)
 
-      const materialForm = page.locator('form').first()
+      await page.locator('.new-icon-action').click()
+      const materialForm = page.locator('.material-form')
       await materialForm.locator('input').fill(materialTitle)
       await materialForm.locator('textarea').first().fill('Built a local validation project with Java and Spring Boot.')
       await materialForm.getByRole('button', { name: 'Save material' }).click()
-      await expect(page.getByText(materialTitle)).toBeVisible()
+      await expect(page.getByRole('heading', { name: materialTitle })).toBeVisible()
 
       await page.goto('/resumes')
       const resumeForm = page.locator('form').first()
@@ -262,8 +277,13 @@ test.describe('@local-services local application smoke', () => {
 
       const acceptButtons = page.getByRole('button', { name: 'Accept', exact: true })
       await expect(acceptButtons.first()).toBeVisible({ timeout: 180_000 })
-      for (let index = 0; index < await acceptButtons.count(); index += 1) {
-        await acceptButtons.nth(index).click()
+      const reviewSections = page.locator('.section-navigation__item')
+      for (let sectionIndex = 0; sectionIndex < await reviewSections.count(); sectionIndex += 1) {
+        await reviewSections.nth(sectionIndex).click()
+        const pendingAcceptButtons = page.getByRole('button', { name: 'Accept', exact: true, pressed: false })
+        while (await pendingAcceptButtons.count()) {
+          await pendingAcceptButtons.first().click()
+        }
       }
       const confirmationSubmit = page.getByRole('button', { name: 'Confirm & create resume' })
       await expect(confirmationSubmit).toBeEnabled()
@@ -288,6 +308,14 @@ test.describe('@local-services local application smoke', () => {
       await expect(page).toHaveURL(/\/resumes\/\d+$/)
       await page.locator('.version-card').first().getByRole('button', { name: 'Export PDF' }).click()
       await expect(page).toHaveURL(/\/exports\/\d+$/)
+      const pdfFailure = page.getByText('PDF generation failed', { exact: true })
+      await Promise.race([
+        page.getByText('PDF is ready', { exact: true }).waitFor({ state: 'visible', timeout: 30_000 }),
+        pdfFailure.waitFor({ state: 'visible', timeout: 30_000 }),
+      ])
+      if (await pdfFailure.isVisible()) {
+        await page.getByRole('button', { name: 'Retry export' }).click()
+      }
       await expect(page.getByText('PDF is ready', { exact: true })).toBeVisible({ timeout: 30_000 })
 
       await page.goto('/communications')
@@ -302,7 +330,7 @@ test.describe('@local-services local application smoke', () => {
       await draftEditor.fill('Edited local UI application email.')
       await page.getByRole('button', { name: 'Use in application' }).click()
       await expect(page).toHaveURL(/\/applications$/)
-      await expect(page.locator('textarea').nth(1)).toHaveValue('Edited local UI application email.')
+      await expect(page.getByLabel('Email body')).toHaveValue('Edited local UI application email.')
       await page.getByRole('button', { name: 'Create draft' }).click()
       const applicationTicket = page.locator('.application-ticket').filter({ hasText: jobTitle })
       await expect(applicationTicket).toHaveCount(1)
@@ -319,7 +347,16 @@ test.describe('@local-services local application smoke', () => {
       await page.reload()
       await expect(applicationTicket.getByRole('combobox', { name: 'Application stage' })).toHaveValue('APPLIED')
 
-      await page.goto('/ats')
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.goto('/')
+      const nextAction = page.locator('.next-action-primary')
+      await expect(nextAction).toContainText('Continue your recent resume')
+      await expect(nextAction).toContainText(jobTitle)
+      await expect(nextAction.getByRole('link', { name: 'Continue editing' })).toBeVisible()
+      await page.screenshot({ path: testInfo.outputPath('local-dashboard-desktop-1440x900.png'), fullPage: true })
+      await page.locator('.workflow-card').filter({ hasText: 'Find expression gaps' }).click()
+      await expect(page).toHaveURL(/\/ats$/)
+
       const atsSelects = page.locator('form select')
       await atsSelects.nth(0).selectOption({ label: resumeTitle })
       await atsSelects.nth(1).selectOption({ index: 1 })
@@ -332,6 +369,56 @@ test.describe('@local-services local application smoke', () => {
       await expect(atsResult.getByRole('heading', { name: 'Rule priorities' })).toBeVisible()
       await expect(atsResult.getByRole('heading', { name: 'Passed checks' })).toBeVisible()
       await expect(atsResult.getByRole('heading', { name: 'Rule risks and evidence' })).toBeVisible()
+
+      const mappedEditorLink = atsResult.locator('.insight-edit-link[href*="section=basics"], .insight-edit-link[href*="section=work"]').first()
+      await expect(mappedEditorLink).toBeVisible()
+      const mappedEditorHref = await mappedEditorLink.getAttribute('href')
+      expect(mappedEditorHref).toMatch(/^\/resumes\/\d+\/edit\?section=(basics|work)/)
+      await page.screenshot({ path: testInfo.outputPath('local-ats-desktop-1440x900.png'), fullPage: true })
+      await mappedEditorLink.click()
+
+      const returnToReport = page.getByRole('navigation', { name: 'ATS report navigation' })
+        .getByRole('link', { name: 'Return to ATS report' })
+      await expect(returnToReport).toBeVisible()
+      const reportHref = await returnToReport.getAttribute('href')
+      expect(reportHref).toMatch(/^\/ats\?result=\d+$/)
+      await expect(page.getByRole('form', { name: 'Resume content editor' })).toHaveAttribute('aria-readonly', 'false')
+      if (mappedEditorHref!.includes('section=work')) {
+        const company = page.getByLabel('Company').first()
+        if (await company.count() === 0) {
+          await page.getByRole('button', { name: 'Add work experience' }).click()
+        }
+        await expect(company).toBeEditable()
+        await company.fill(`Current Version Systems ${suffix}`)
+      } else {
+        const name = page.getByLabel('Name')
+        await expect(name).toBeEditable()
+        await name.fill(`Current Version Candidate ${suffix}`)
+      }
+      await page.locator('.editor-save-dock').getByRole('button', { name: 'Save new version' }).click()
+      await expect(page).toHaveURL(/\/resumes\/\d+$/)
+      const newestVersion = page.locator('.version-card').first()
+      const setCurrent = newestVersion.getByRole('button', { name: 'Set as current' })
+      await expect(newestVersion).toBeVisible({ timeout: 10_000 })
+      await expect(setCurrent).toBeVisible()
+      page.once('dialog', dialog => dialog.accept())
+      await Promise.all([
+        page.waitForResponse(response => response.url().endsWith('/current-version') && response.status() === 200),
+        setCurrent.click(),
+      ])
+      await expect(newestVersion.getByText('Current', { exact: true })).toBeVisible()
+
+      await page.goto(reportHref!)
+      const historicalEditorLink = atsResult.locator(`.insight-edit-link[href="${mappedEditorHref}"]`).first()
+      await expect(historicalEditorLink).toBeVisible()
+      await historicalEditorLink.click()
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(page.getByRole('form', { name: 'Read-only analyzed resume version' })).toHaveAttribute('aria-readonly', 'true')
+      await page.screenshot({ path: testInfo.outputPath('local-ats-editor-mobile-390x844.png'), fullPage: true })
+      await page.getByRole('button', { name: 'Create editable version' }).click()
+      await expect(page).toHaveURL(/sourceVersionId=\d+.*editVersionId=\d+/)
+      await expect(page.getByRole('form', { name: 'Resume content editor' })).toHaveAttribute('aria-readonly', 'false')
+      await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).resolves.toBe(true)
 
       await page.goto('/interviews')
       const interviewSelects = page.locator('select')
@@ -363,13 +450,19 @@ test.describe('@local-services local application smoke', () => {
       await page.getByRole('button', { name: 'Interview report' }).click()
       await expect(page.getByText('Total score', { exact: true })).toBeVisible()
       await expect(page.locator('article').filter({ hasText: 'Resume suggestions' })).toBeVisible()
-      await page.getByRole('button', { name: 'Save as answer asset' }).click()
-      await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+      const [assetResponse] = await Promise.all([
+        page.waitForResponse(response => response.url().endsWith('/api/interview-answer-assets'), { timeout: 30_000 }),
+        page.getByRole('button', { name: 'Save as answer asset' }).click(),
+      ])
+      expect(assetResponse.status(), `Answer asset save failed: ${await assetResponse.text()}`).toBe(201)
+      await expect(page.getByText('Saved', { exact: true })).toBeVisible({ timeout: 10_000 })
 
       await page.goto('/interview-assets')
-      const assetFilter = page.locator('form.compact-form')
+      const assetFilter = page.locator('form').filter({ has: page.getByLabel('Job') })
       const unrelatedAnswer = `Unscoped answer asset ${suffix}`
-      const assetEditor = page.locator('form.workspace-card').nth(1)
+      const assetEditor = page.locator('form').filter({ has: page.getByLabel('Question') })
+      await expect(assetFilter).toBeVisible({ timeout: 10_000 })
+      await expect(assetEditor).toBeVisible({ timeout: 10_000 })
       await assetEditor.getByLabel('Question').fill(`Unscoped question ${suffix}`)
       await assetEditor.getByLabel('Original answer').fill(unrelatedAnswer)
       await assetEditor.getByRole('button', { name: 'Save asset' }).click()
@@ -393,11 +486,7 @@ test.describe('@local-services local application smoke', () => {
       await expect(page.getByText(resumeTitle)).toBeVisible()
     } finally {
       if (accessToken) {
-        const cleanup = await page.request.delete(`${apiBaseUrl}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          timeout: 5_000,
-        })
-        expect(cleanup.status()).toBe(200)
+        await cleanupSyntheticAccount(page, accessToken, testInfo)
       }
     }
   })
