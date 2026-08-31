@@ -116,7 +116,7 @@ try {
     $match = Invoke-Api POST '/api/scoring/match' @{ resumeVersionId = $confirmed.resumeVersionId; jobDescriptionId = $job.id } $token $null
     Add-Check 'resume-scoring' { if (-not $match.matchResultId) { throw 'Scoring did not create a match result.' } }
     $communication = Invoke-Api POST '/api/communications/generate' @{ resumeVersionId = $confirmed.resumeVersionId; jobDescriptionId = $job.id; type = 'EMAIL' } $token $null
-    Add-Check 'communication-draft' { if ([string]::IsNullOrWhiteSpace($communication.body)) { throw 'Communication generation returned an empty body.' } }
+    Add-Check 'communication-draft' { if ([string]::IsNullOrWhiteSpace($communication.draft)) { throw 'Communication generation returned an empty body.' } }
     $application = Invoke-Api POST '/api/applications' @{ jobDescriptionId = $job.id; resumeVersionId = $confirmed.resumeVersionId; status = 'DRAFT'; coverLetterText = $null; emailBodyText = 'Synthetic local validation email body.'; openingMessageText = $null } $token $null
     Add-Check 'application-create' { if (-not $application.id) { throw 'Application creation did not return an ID.' } }
     $asset = Invoke-Api POST '/api/interview-answer-assets' @{ interviewRecordId = $null; questionText = 'What did you build?'; originalAnswerText = 'I built the synthetic local validation flow.'; suggestedAnswerText = $null; feedbackJson = @{ localValidation = $true } } $token $null

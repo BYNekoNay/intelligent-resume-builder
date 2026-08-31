@@ -90,7 +90,7 @@ public class JobGenerationSchemaValidator {
                 throw new BusinessException(ErrorCode.VALIDATION,
                         path + ": must include exactly one of _source, _sources, or _pending");
             }
-            if (hasSource && allowedMaterialIds != null && !"basics".equals(path)) {
+            if (hasSource && allowedMaterialIds != null && !"basics".equals(path) && !"objective".equals(path)) {
                 validateSourceIds(map, path, allowedMaterialIds);
             }
             for (Map.Entry<String, Object> entry : map.entrySet()) {
