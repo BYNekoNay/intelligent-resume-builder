@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, BookOpen, FilePlus2, GripVertical, LockKeyhole, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sparkles, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, BookOpen, GripVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sparkles, WandSparkles } from 'lucide-vue-next'
 import type { AxiosError } from 'axios'
 import { createManualVersion, getResume, getResumeVersion, listVersions, restoreResumeVersion, type ResumeVersion } from '@/api/resume'
 import { getAtsCheck, type AtsCheckResponse } from '@/api/ats'
@@ -12,6 +12,11 @@ import { useAuthStore } from '@/stores/auth'
 import sampleResume from '@/data/sampleResume'
 import ResumeEditorNavigation, { type ResumeEditorSection } from '@/components/resume/ResumeEditorNavigation.vue'
 import ResumePaper from '@/components/resume/ResumePaper.vue'
+import AtsHandoffReturnNav from '@/components/resume/AtsHandoffReturnNav.vue'
+import AtsVersionLockBanner from '@/components/resume/AtsVersionLockBanner.vue'
+import TemplatePickerDialog from '@/components/resume/TemplatePickerDialog.vue'
+import SampleConfirmDialog from '@/components/resume/SampleConfirmDialog.vue'
+import DraftRestoreBanner from '@/components/resume/DraftRestoreBanner.vue'
 import { useResumeEditorDraft } from '@/composables/useResumeEditorDraft'
 import { SECTION_KEYS, DEFAULT_SECTION_ORDER, mapAtsSection, resolveSectionOrder, type SectionKey, type ContentSectionKey } from '@/resume/sectionRegistry'
 
@@ -833,37 +838,12 @@ async function save() {
       </div>
     </header>
     <p class="sr-only" role="status" aria-live="polite">{{ atsAnnouncement }}</p>
-    <nav v-if="!loadFailed && atsContext" class="ats-handoff-return" :aria-label="t('resumeEditor.atsReturnNavigation')">
-      <RouterLink :to="`/ats?result=${atsContext.resultId}`"><ArrowLeft :size="14" />{{ t('resumeEditor.atsReturnToReport') }}</RouterLink>
-    </nav>
-    <section v-if="!loadFailed && historicalSourceReadOnly" class="ats-version-lock" role="status">
-      <LockKeyhole :size="18" />
-      <div><strong>{{ t('resumeEditor.atsHistoricalTitle') }}</strong><p>{{ t('resumeEditor.atsHistoricalDescription') }}</p><p v-if="editableCreationError" class="form-error" role="alert">{{ editableCreationError }}</p></div>
-      <button class="btn-neon btn-primary" type="button" :disabled="creatingEditableVersion" @click="createEditableSuccessor"><FilePlus2 :size="15" />{{ creatingEditableVersion ? t('resumeEditor.atsCreatingEditable') : editableCreationError ? t('common.retry') : t('resumeEditor.atsCreateEditable') }}</button>
-    </section>
-    <div v-if="!loadFailed && showTemplatePicker" class="template-picker-overlay" role="dialog" :aria-label="t('resumeEditor.templateChooserTitle')" @click.self="closeTemplatePicker">
-      <section class="template-picker-dialog">
-        <header><div><p class="eyebrow">{{ t('resumeEditor.templateLabel') }}</p><h2>{{ t('resumeEditor.templateChooserTitle') }}</h2><p>{{ t('resumeEditor.templateChooserDescription') }}</p></div><button class="btn-neon btn-ghost" type="button" @click="closeTemplatePicker">{{ t('common.close') }}</button></header>
-        <div class="template-options template-options-dialog">
-          <button v-for="opt in templateOptions" :key="opt.code" type="button" :class="{ active: templateCode === opt.code }" :aria-pressed="templateCode === opt.code" @click="setTemplate(opt.code)"><span class="template-swatch" :class="`swatch-${opt.code}`" /><strong>{{ opt.name() }}</strong><small>{{ opt.description() }}</small><span v-if="templateCode === opt.code" class="template-selected">{{ t('resumeEditor.templateSelected') }}</span></button>
-        </div>
-      </section>
-    </div>
+    <AtsHandoffReturnNav v-if="!loadFailed && atsContext" :result-id="atsContext.resultId" />
+    <AtsVersionLockBanner v-if="!loadFailed && historicalSourceReadOnly" :creating="creatingEditableVersion" :error="editableCreationError" @create="createEditableSuccessor" />
+    <TemplatePickerDialog v-if="!loadFailed && showTemplatePicker" :template-code="templateCode" :template-options="templateOptions" @select="setTemplate" @close="closeTemplatePicker" />
     <p v-if="error && !loadFailed" class="form-error" role="alert">{{ error }}</p>
-    <div v-if="!loadFailed && showSampleConfirm" class="sample-confirm-overlay" @click.self="showSampleConfirm = false">
-      <div class="sample-confirm-card">
-        <h3>{{ t('resumeEditor.loadSampleTitle') }}</h3>
-        <p>{{ t('resumeEditor.loadSampleDesc') }}</p>
-        <div class="sample-confirm-actions">
-          <button class="btn-neon btn-ghost" type="button" @click="showSampleConfirm = false">{{ t('common.cancel') }}</button>
-          <button class="btn-neon btn-primary" type="button" @click="loadSample">{{ t('resumeEditor.confirmLoadSample') }}</button>
-        </div>
-      </div>
-    </div>
-    <div v-if="!loadFailed && restoreCandidate" class="draft-restore-banner" role="dialog" :aria-label="t('resumeEditor.restoreDraftTitle')">
-      <div><strong>{{ t('resumeEditor.restoreDraftTitle') }}</strong><p>{{ t('resumeEditor.restoreDraftDescription') }}</p></div>
-      <div><button class="btn-neon btn-ghost" type="button" @click="clearDraft">{{ t('resumeEditor.discardDraft') }}</button><button class="btn-neon btn-primary" type="button" @click="applyDraft">{{ t('resumeEditor.restoreDraft') }}</button></div>
-    </div>
+    <SampleConfirmDialog v-if="!loadFailed && showSampleConfirm" @confirm="loadSample" @close="showSampleConfirm = false" />
+    <DraftRestoreBanner v-if="!loadFailed && restoreCandidate" @restore="applyDraft" @discard="clearDraft" />
     <p v-if="loading">{{ t('common.loading') }}</p>
     <section v-else-if="loadFailed" class="editor-load-error" role="alert">
       <p class="eyebrow">{{ t('common.error') }}</p><h1>{{ t('resumeEditor.loadErrorTitle') }}</h1><p>{{ t('resumeEditor.loadErrorDescription') }}</p>
