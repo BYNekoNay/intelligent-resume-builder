@@ -6,6 +6,9 @@ import java.util.Map;
 
 public record AtsCheckResponse(
         Long id,
+        Long resumeId,
+        Long resumeVersionId,
+        Long jobDescriptionId,
         BigDecimal totalScore,
         Map<String, Object> checks,
         List<String> passedChecks,

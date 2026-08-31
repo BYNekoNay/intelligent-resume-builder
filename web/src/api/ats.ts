@@ -2,6 +2,9 @@ import { apiClient, type ApiResponse } from './client'
 
 export interface AtsCheckResponse {
   id: number
+  resumeId: number | null
+  resumeVersionId: number
+  jobDescriptionId: number
   totalScore: number
   checks: Record<string, unknown>
   passedChecks: string[]

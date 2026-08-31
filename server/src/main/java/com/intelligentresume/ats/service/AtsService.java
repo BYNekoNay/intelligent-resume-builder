@@ -256,11 +256,16 @@ public class AtsService {
 
     private AtsCheckResponse toResponse(AtsCheckResult entity) {
         Map<String, Object> json = entity.getResultJson();
+        AtsAnalysisStatus analysisStatus = enumValue(AtsAnalysisStatus.class, json.get("analysisStatus"), AtsAnalysisStatus.RULES_FALLBACK);
+        Long resumeId = analysisStatus == AtsAnalysisStatus.ANALYZING ? null : versionRepository.findById(entity.getResumeVersionId())
+                .map(ResumeVersion::getResumeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在"));
         return new AtsCheckResponse(
-                entity.getId(), entity.getTotalScore(), map(json.get("checks")),
+                entity.getId(), resumeId, entity.getResumeVersionId(), entity.getJobDescriptionId(),
+                entity.getTotalScore(), map(json.get("checks")),
                 strings(json.get("passedChecks")), strings(json.get("risks")), strings(json.get("priorities")),
                 String.valueOf(json.getOrDefault("disclaimer", DISCLAIMER)),
-                enumValue(AtsAnalysisStatus.class, json.get("analysisStatus"), AtsAnalysisStatus.RULES_FALLBACK),
+                analysisStatus,
                 enumValue(AtsAnalysisSource.class, json.get("analysisSource"), AtsAnalysisSource.RULES),
                 longValue(json.get("aiTaskId")), convert(json.get("aiInsights"), AtsAiInsights.class),
                 convert(json.get("fallback"), AtsFallbackInfo.class));

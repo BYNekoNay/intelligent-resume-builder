@@ -1,6 +1,7 @@
 package com.intelligentresume.ats.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.ats.repository.AtsCheckResultRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -9,6 +10,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import java.util.LinkedHashMap;
+
+import static org.hamcrest.Matchers.nullValue;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -21,8 +26,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AtsControllerIT {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private AtsCheckResultRepository atsRepository;
     private static String tokenA;
     private static String tokenB;
+    private static long resumeId;
     private static long versionId;
     private static long jobId;
     private static long atsResultId;
@@ -32,7 +39,7 @@ class AtsControllerIT {
     void prepare() throws Exception {
         tokenA = register("ats_a", "ats_a@example.com");
         tokenB = register("ats_b", "ats_b@example.com");
-        long resumeId = id(postJson("/api/resumes", tokenA, "{\"title\":\"ATS resume\"}"));
+        resumeId = id(postJson("/api/resumes", tokenA, "{\"title\":\"ATS resume\"}"));
         versionId = id(postJson("/api/resumes/" + resumeId + "/versions", tokenA, """
                 {"resumeJson":{"basics":{"name":"Alice","summary":"Java Spring Boot engineer"},"work":[{"company":"ACME","description":"MySQL reliability"}],"skills":[{"name":"Java"}]},"sourceType":"MANUAL"}
                 """));
@@ -51,6 +58,9 @@ class AtsControllerIT {
                         .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d}".formatted(versionId, jobId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").isNumber())
+                .andExpect(jsonPath("$.data.resumeId").value(resumeId))
+                .andExpect(jsonPath("$.data.resumeVersionId").value(versionId))
+                .andExpect(jsonPath("$.data.jobDescriptionId").value(jobId))
                 .andExpect(jsonPath("$.data.totalScore").isNumber())
                 .andExpect(jsonPath("$.data.checks.structure").isNumber())
                 .andExpect(jsonPath("$.data.checks.keywordCoverage").isNumber())
@@ -69,6 +79,9 @@ class AtsControllerIT {
                         .header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(atsResultId))
+                .andExpect(jsonPath("$.data.resumeId").value(resumeId))
+                .andExpect(jsonPath("$.data.resumeVersionId").value(versionId))
+                .andExpect(jsonPath("$.data.jobDescriptionId").value(jobId))
                 .andExpect(jsonPath("$.data.analysisStatus").value("RULES_FALLBACK"));
     }
 
@@ -82,6 +95,9 @@ class AtsControllerIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.resumeId").value(resumeId))
+                .andExpect(jsonPath("$.data.resumeVersionId").value(versionId))
+                .andExpect(jsonPath("$.data.jobDescriptionId").value(jobId))
                 .andReturn();
         long repeatedId = objectMapper.readTree(repeated.getResponse().getContentAsString())
                 .path("data").path("id").asLong();
@@ -97,6 +113,34 @@ class AtsControllerIT {
 
     @Test
     @Order(4)
+    void returnsNullResumeIdWhileAiAnalysisIsPending() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/ats/check")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "ats-pending-contract")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"useAi\":false}".formatted(versionId, jobId)))
+                .andExpect(status().isOk())
+                .andReturn();
+        long pendingId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        var pending = atsRepository.findById(pendingId).orElseThrow();
+        var state = new LinkedHashMap<>(pending.getResultJson());
+        state.put("analysisStatus", "ANALYZING");
+        pending.setResultJson(state);
+        atsRepository.saveAndFlush(pending);
+
+        mockMvc.perform(get("/api/ats/checks/" + pendingId)
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.resumeId").value(nullValue()))
+                .andExpect(jsonPath("$.data.resumeVersionId").value(versionId))
+                .andExpect(jsonPath("$.data.jobDescriptionId").value(jobId))
+                .andExpect(jsonPath("$.data.analysisStatus").value("ANALYZING"));
+    }
+
+    @Test
+    @Order(5)
     void rejectsCrossUserResources() throws Exception {
         mockMvc.perform(post("/api/ats/check")
                         .header("Authorization", "Bearer " + tokenB)
