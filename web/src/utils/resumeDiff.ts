@@ -173,14 +173,14 @@ function diffEntries(baseArr: unknown[] | null, compareArr: unknown[] | null): E
   return entries
 }
 
-function sectionType(base: unknown, compare: unknown, hasDetailDiff: boolean): SectionChangeType {
+function sectionType(base: unknown, compare: unknown): SectionChangeType {
   const baseBlank = isBlank(base)
   const compareBlank = isBlank(compare)
   if (baseBlank && compareBlank) return 'UNCHANGED'
   if (baseBlank && !compareBlank) return 'ADDED'
   if (!baseBlank && compareBlank) return 'REMOVED'
   if (canonical(base) === canonical(compare)) return 'UNCHANGED'
-  return hasDetailDiff ? 'CHANGED' : 'CHANGED'
+  return 'CHANGED'
 }
 
 /**
@@ -196,10 +196,9 @@ export function diffResumeVersions(baseJson: Record<string, unknown>, compareJso
         isJsonArray(base) ? base : null,
         isJsonArray(compare) ? compare : null,
       )
-      const hasChange = entries.some((entry) => entry.type !== 'UNCHANGED')
       return {
         sectionKey,
-        type: sectionType(base, compare, hasChange),
+        type: sectionType(base, compare),
         base,
         compare,
         entries,
@@ -213,7 +212,7 @@ export function diffResumeVersions(baseJson: Record<string, unknown>, compareJso
     )
     return {
       sectionKey,
-      type: sectionType(base, compare, fields.length > 0),
+      type: sectionType(base, compare),
       base,
       compare,
       entries: [],
