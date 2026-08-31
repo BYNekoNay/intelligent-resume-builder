@@ -44,6 +44,11 @@ public interface ExportTaskRepository extends JpaRepository<ExportTask, Long> {
     int acquireLease(@Param("id") Long id, @Param("owner") String owner,
                      @Param("leaseUntil") java.time.LocalDateTime leaseUntil);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT e FROM ExportTask e WHERE e.id = :id " +
+            "AND e.status = com.intelligentresume.export.domain.ExportStatus.RUNNING AND e.leaseOwner = :owner")
+    Optional<ExportTask> findRunningByIdAndOwnerForUpdate(@Param("id") Long id, @Param("owner") String owner);
+
     long countByStatus(ExportStatus status);
 
     @Query("SELECT MIN(e.createdAt) FROM ExportTask e WHERE e.status = com.intelligentresume.export.domain.ExportStatus.PENDING")
