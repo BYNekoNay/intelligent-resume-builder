@@ -67,6 +67,10 @@ public class InterviewStartService {
         int maxQ = (int) Math.floor(target * 1.5);
         InterviewOutputLanguage outputLanguage = request.outputLanguage() != null
                 ? request.outputLanguage() : InterviewOutputLanguage.ZH_CN;
+        String initialQuestion = request.initialQuestion() == null ? null : request.initialQuestion().trim();
+        if (initialQuestion != null && initialQuestion.isBlank()) {
+            initialQuestion = null;
+        }
 
         // 验证来源
         promptContextAssembler.validateSource(request, userId);
@@ -166,6 +170,28 @@ public class InterviewStartService {
                             new BusinessException(
                                     "FORBIDDEN".equals(failedAttempt.getErrorCode()) ? ErrorCode.FORBIDDEN : ErrorCode.RATE_LIMITED,
                                     failedAttempt.getErrorMessage())) : null);
+        }
+
+        // 提供 initialQuestion 时跳过 AI 首题生成，会话直接进入 AWAITING_ANSWER
+        if (initialQuestion != null) {
+            String practiceQuestion = initialQuestion;
+            tx.executeWithoutResult(s -> {
+                InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId).orElseThrow();
+                if (session.getStatus() != InterviewStatus.GENERATING_QUESTION) {
+                    throw new BusinessException(ErrorCode.CONFLICT, "会话状态已变更");
+                }
+                session.setCurrentQuestion(practiceQuestion);
+                session.setStatus(InterviewStatus.AWAITING_ANSWER);
+                sessionRepository.save(session);
+
+                InterviewAiAttempt attempt = attemptRepository.findById(preparation.attemptId()).orElseThrow();
+                attempt.setStatus(AiAttemptStatus.SUCCESS);
+                attempt.setResultJson(Map.of("question", practiceQuestion));
+                attempt.setPendingAnswer(null);
+                attemptRepository.save(attempt);
+            });
+            InterviewSession session = sessionRepository.findById(sessionId).orElseThrow();
+            return stateAssembler.buildStateResponse(session, null, null);
         }
 
         // Phase 2: 事务外调用 AI

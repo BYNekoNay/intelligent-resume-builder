@@ -24,8 +24,14 @@ public class ApplicationController {
     }
 
     @GetMapping
-    public ApiResponse<List<ApplicationResponse>> list(HttpServletRequest httpRequest) {
-        return ApiResponse.success(service.list(currentUserId(httpRequest)), traceId(httpRequest));
+    public ApiResponse<List<ApplicationResponse>> list(@RequestParam(required = false) String followUp,
+                                                       HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.list(currentUserId(httpRequest), followUp), traceId(httpRequest));
+    }
+
+    @GetMapping("/stats")
+    public ApiResponse<ApplicationStatsResponse> stats(HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.stats(currentUserId(httpRequest)), traceId(httpRequest));
     }
 
     @PostMapping

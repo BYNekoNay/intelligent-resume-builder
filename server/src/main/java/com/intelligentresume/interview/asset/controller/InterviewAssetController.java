@@ -24,8 +24,11 @@ public class InterviewAssetController {
     @GetMapping
     public ApiResponse<List<InterviewAssetResponse>> list(@RequestParam(required = false) Long jobDescriptionId,
                                                           @RequestParam(required = false) String keyword,
+                                                          @RequestParam(required = false) String sectionKey,
+                                                          @RequestParam(required = false) Long interviewRecordId,
                                                           HttpServletRequest httpRequest) {
-        return ApiResponse.success(service.list(currentUserId(httpRequest), jobDescriptionId, keyword), traceId(httpRequest));
+        return ApiResponse.success(service.list(currentUserId(httpRequest), jobDescriptionId, keyword,
+                sectionKey, interviewRecordId), traceId(httpRequest));
     }
 
     @PostMapping

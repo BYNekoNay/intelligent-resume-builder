@@ -24,6 +24,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -272,13 +273,61 @@ class ApplicationServiceTest {
     void list_returnsOwnedRecords() {
         ApplicationRecord older = record(1L, USER_ID, ApplicationStatus.DRAFT, 1L);
         ApplicationRecord newer = record(2L, USER_ID, ApplicationStatus.APPLIED, 2L);
-        when(repository.findByUserIdOrderByUpdatedAtDesc(USER_ID)).thenReturn(List.of(newer, older));
+        when(repository.findByUserIdAndFollowUp(eq(USER_ID), eq("ALL"), any(), any(), any()))
+                .thenReturn(List.of(newer, older));
 
-        var responses = service.list(USER_ID);
+        var responses = service.list(USER_ID, null);
 
         assertEquals(2, responses.size());
         assertEquals(ApplicationStatus.APPLIED, responses.get(0).status());
         assertEquals(ApplicationStatus.DRAFT, responses.get(1).status());
-        verify(repository).findByUserIdOrderByUpdatedAtDesc(USER_ID);
+        verify(repository).findByUserIdAndFollowUp(eq(USER_ID), eq("ALL"), any(), any(), any());
+    }
+
+    // ---- 统计 ----
+
+    @Test
+    @DisplayName("stats: 转化率与占比符合共享约定公式，分母为 0 返回 null")
+    void stats_computesConversionRatesAndPercentages() {
+        // 3 APPLIED + 2 INTERVIEWING + 1 OFFERED + 1 REJECTED = 7
+        ApplicationRecord r1 = record(1L, USER_ID, ApplicationStatus.APPLIED, 1L);
+        ApplicationRecord r2 = record(2L, USER_ID, ApplicationStatus.APPLIED, 1L);
+        ApplicationRecord r3 = record(3L, USER_ID, ApplicationStatus.APPLIED, 1L);
+        ApplicationRecord r4 = record(4L, USER_ID, ApplicationStatus.INTERVIEWING, 1L);
+        ApplicationRecord r5 = record(5L, USER_ID, ApplicationStatus.INTERVIEWING, 1L);
+        ApplicationRecord r6 = record(6L, USER_ID, ApplicationStatus.OFFERED, 1L);
+        ApplicationRecord r7 = record(7L, USER_ID, ApplicationStatus.REJECTED, 1L);
+        when(repository.findByUserIdOrderByUpdatedAtDesc(USER_ID))
+                .thenReturn(List.of(r1, r2, r3, r4, r5, r6, r7));
+
+        var stats = service.stats(USER_ID);
+
+        assertEquals(7, stats.total());
+        // byStatus：APPLIED 3/7=42.9, INTERVIEWING 2/7=28.6, OFFERED 1/7=14.3
+        var applied = stats.byStatus().stream()
+                .filter(item -> item.status() == ApplicationStatus.APPLIED).findFirst().orElseThrow();
+        assertEquals(42.9, applied.percent(), 0.01);
+        // appliedToInterviewing = (2+1)/(3+2+1) = 3/6 = 0.5
+        assertEquals(0.5, stats.conversionRates().appliedToInterviewing(), 0.001);
+        // interviewingToOffered = 1/(2+1) = 0.333
+        assertEquals(0.333, stats.conversionRates().interviewingToOffered(), 0.001);
+        // appliedToOffered = 1/6 = 0.167
+        assertEquals(0.167, stats.conversionRates().appliedToOffered(), 0.001);
+    }
+
+    @Test
+    @DisplayName("stats: 无记录时 total=0 且各值为 null")
+    void stats_emptyRecords_returnsNulls() {
+        when(repository.findByUserIdOrderByUpdatedAtDesc(USER_ID)).thenReturn(List.of());
+
+        var stats = service.stats(USER_ID);
+
+        assertEquals(0, stats.total());
+        assertNull(stats.conversionRates().appliedToInterviewing());
+        assertNull(stats.conversionRates().interviewingToOffered());
+        assertNull(stats.conversionRates().appliedToOffered());
+        assertNull(stats.avgStageDurationDays().applied());
+        assertNull(stats.avgStageDurationDays().interviewing());
+        assertNull(stats.avgStageDurationDays().totalToOffer());
     }
 }

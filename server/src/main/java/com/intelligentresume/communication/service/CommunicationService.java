@@ -9,9 +9,12 @@ import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.communication.domain.CommunicationDraft;
 import com.intelligentresume.communication.domain.CommunicationGenerationSource;
 import com.intelligentresume.communication.domain.CommunicationOutputLanguage;
+import com.intelligentresume.communication.domain.CommunicationTemplate;
 import com.intelligentresume.communication.dto.CommunicationResponse;
 import com.intelligentresume.communication.dto.GenerateCommunicationRequest;
+import com.intelligentresume.communication.dto.SaveDraftRequest;
 import com.intelligentresume.communication.repository.CommunicationDraftRepository;
+import com.intelligentresume.communication.repository.CommunicationTemplateRepository;
 import com.intelligentresume.jobdescription.domain.JobDescription;
 import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
 import com.intelligentresume.resume.domain.ResumeVersion;
@@ -29,16 +32,19 @@ public class CommunicationService {
     private final CommunicationDraftRepository draftRepository;
     private final CommunicationAiPromptBuilder promptBuilder;
     private final AiTaskService aiTaskService;
+    private final CommunicationTemplateRepository templateRepository;
 
     public CommunicationService(ResumeVersionRepository versionRepository, JobDescriptionRepository jobRepository,
                                 CommunicationDraftRepository draftRepository,
                                 CommunicationAiPromptBuilder promptBuilder,
-                                AiTaskService aiTaskService) {
+                                AiTaskService aiTaskService,
+                                CommunicationTemplateRepository templateRepository) {
         this.versionRepository = versionRepository;
         this.jobRepository = jobRepository;
         this.draftRepository = draftRepository;
         this.promptBuilder = promptBuilder;
         this.aiTaskService = aiTaskService;
+        this.templateRepository = templateRepository;
     }
 
     public AiTaskStatusResponse generateWithAi(GenerateCommunicationRequest request, String idempotencyKey,
@@ -60,6 +66,33 @@ public class CommunicationService {
     private JobDescription ownedJob(Long id, Long userId) {
         return jobRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位描述不存在"));
+    }
+
+    /**
+     * 确认保存草稿（绝不发送）。templateId 存在时校验模板可见性并 usage_count+1。
+     */
+    @Transactional
+    public CommunicationResponse saveDraft(SaveDraftRequest request, Long userId) {
+        ResumeVersion version = ownedResumeVersion(request.resumeVersionId(), userId);
+        JobDescription job = ownedJob(request.jobDescriptionId(), userId);
+        if (request.templateId() != null) {
+            CommunicationTemplate template = templateRepository.findById(request.templateId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "沟通模板不存在"));
+            if (template.getUserId() != null && !userId.equals(template.getUserId())) {
+                throw new BusinessException(ErrorCode.NOT_FOUND, "沟通模板不存在");
+            }
+            template.setUsageCount(template.getUsageCount() + 1);
+            templateRepository.save(template);
+        }
+        CommunicationDraft entity = new CommunicationDraft();
+        entity.setUserId(userId);
+        entity.setResumeVersionId(request.resumeVersionId());
+        entity.setJobDescriptionId(request.jobDescriptionId());
+        entity.setType(request.type());
+        entity.setDraftText(request.draftText());
+        draftRepository.save(entity);
+        return new CommunicationResponse(request.type(), request.draftText(), false, true,
+                CommunicationGenerationSource.TEMPLATE);
     }
 
     @Transactional

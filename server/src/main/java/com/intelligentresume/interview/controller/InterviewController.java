@@ -4,14 +4,19 @@ import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.interview.dto.*;
 import com.intelligentresume.interview.service.InterviewService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/interviews")
@@ -21,11 +26,29 @@ public class InterviewController {
 
     public InterviewController(InterviewService service) { this.service = service; }
 
+    @GetMapping
+    public ApiResponse<List<InterviewSessionSummaryResponse>> listHistory(
+            @RequestParam(required = false) Long jobDescriptionId, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.listHistory(currentUserId(httpRequest), jobDescriptionId), traceId(httpRequest));
+    }
+
     @PostMapping("/start")
     public ApiResponse<InterviewStateResponse> start(@Valid @RequestBody StartInterviewRequest request,
                                                       @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 64) String idempotencyKey,
                                                       HttpServletRequest httpRequest) {
         return ApiResponse.success(service.start(request, currentUserId(httpRequest), idempotencyKey), traceId(httpRequest));
+    }
+
+    @PostMapping("/{id}/follow-up")
+    public ResponseEntity<ApiResponse<AiTaskStatusResponse>> createFollowUp(
+            @PathVariable Long id,
+            @Valid @RequestBody FollowUpPracticeRequest request,
+            @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 64) String idempotencyKey,
+            HttpServletRequest httpRequest) {
+        AiTaskStatusResponse task = service.createFollowUp(id, request.weakness(),
+                currentUserId(httpRequest), idempotencyKey);
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(ApiResponse.success(task, traceId(httpRequest)));
     }
 
     @GetMapping("/{id}")

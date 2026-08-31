@@ -19,6 +19,7 @@ import com.intelligentresume.ats.service.AtsAiAnalysisException;
 import com.intelligentresume.ats.dto.AtsAiInsights;
 import com.intelligentresume.ats.dto.AtsFallbackCode;
 import com.intelligentresume.communication.service.CommunicationAiService;
+import com.intelligentresume.interview.service.InterviewFollowUpAiService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -50,7 +51,7 @@ class TaskExecutionServiceTest {
                 mock(JobMaterialSelectionService.class), consentService, mock(AppObservability.class),
                 new FailureCategoryClassifier(), new InlineOptimizeResultFormatter(),
                 mock(AtsAiAnalysisService.class), mock(AtsResultStateService.class), communicationService,
-                new AiTaskWorkerProperties());
+                mock(InterviewFollowUpAiService.class), new AiTaskWorkerProperties());
         AiTask task = new AiTask();
         task.setId(4L);
         task.setUserId(1L);
@@ -85,7 +86,7 @@ class TaskExecutionServiceTest {
                 mock(JobMaterialSelectionService.class), consentService, mock(AppObservability.class),
                 new FailureCategoryClassifier(), new InlineOptimizeResultFormatter(), analysisService, stateService,
                 mock(CommunicationAiService.class),
-                new AiTaskWorkerProperties());
+                mock(InterviewFollowUpAiService.class), new AiTaskWorkerProperties());
         AiTask task = atsTask();
 
         service.execute(task, "worker-1");
@@ -113,7 +114,7 @@ class TaskExecutionServiceTest {
                 mock(JobMaterialSelectionService.class), consentService, mock(AppObservability.class),
                 new FailureCategoryClassifier(), new InlineOptimizeResultFormatter(), analysisService, stateService,
                 mock(CommunicationAiService.class),
-                new AiTaskWorkerProperties());
+                mock(InterviewFollowUpAiService.class), new AiTaskWorkerProperties());
         AiTask task = atsTask();
 
         service.execute(task, "worker-1");
@@ -139,7 +140,7 @@ class TaskExecutionServiceTest {
                 mock(JobMaterialSelectionService.class), consentService, mock(AppObservability.class),
                 new FailureCategoryClassifier(), new InlineOptimizeResultFormatter(),
                 mock(AtsAiAnalysisService.class), mock(AtsResultStateService.class),
-                mock(CommunicationAiService.class), new AiTaskWorkerProperties());
+                mock(CommunicationAiService.class), mock(InterviewFollowUpAiService.class), new AiTaskWorkerProperties());
         AiTask task = new AiTask();
         task.setId(1L);
         task.setUserId(1L);
@@ -181,7 +182,7 @@ class TaskExecutionServiceTest {
                 mock(JobMaterialSelectionService.class), consentService, mock(AppObservability.class),
                 new FailureCategoryClassifier(), new InlineOptimizeResultFormatter(),
                 mock(AtsAiAnalysisService.class), mock(AtsResultStateService.class),
-                mock(CommunicationAiService.class), properties);
+                mock(CommunicationAiService.class), mock(InterviewFollowUpAiService.class), properties);
         AiTask task = new AiTask();
         task.setId(2L);
         task.setUserId(1L);

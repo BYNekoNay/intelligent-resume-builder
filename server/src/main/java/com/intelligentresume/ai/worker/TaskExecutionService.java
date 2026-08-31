@@ -15,17 +15,21 @@ import com.intelligentresume.ats.service.AtsAiAnalysisException;
 import com.intelligentresume.ats.service.AtsAiAnalysisService;
 import com.intelligentresume.ats.service.AtsResultStateService;
 import com.intelligentresume.ats.dto.AtsFallbackCode;
+import com.intelligentresume.common.error.BusinessException;
+import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.common.observability.AiFailureCategory;
 import com.intelligentresume.common.observability.AppObservability;
 import com.intelligentresume.common.observability.FailureCategoryClassifier;
 import com.intelligentresume.common.observability.WorkerTraceContext;
 import com.intelligentresume.communication.service.CommunicationAiException;
 import com.intelligentresume.communication.service.CommunicationAiService;
+import com.intelligentresume.interview.service.InterviewFollowUpAiService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import jakarta.annotation.PreDestroy;
 
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
 import java.time.Duration;
@@ -55,6 +59,7 @@ public class TaskExecutionService {
     private final AtsAiAnalysisService atsAiAnalysisService;
     private final AtsResultStateService atsResultStateService;
     private final CommunicationAiService communicationAiService;
+    private final InterviewFollowUpAiService interviewFollowUpAiService;
     private final AiTaskWorkerProperties workerProperties;
     private final ScheduledExecutorService heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "ai-task-lease-heartbeat");
@@ -73,6 +78,7 @@ public class TaskExecutionService {
                                 AtsAiAnalysisService atsAiAnalysisService,
                                 AtsResultStateService atsResultStateService,
                                 CommunicationAiService communicationAiService,
+                                InterviewFollowUpAiService interviewFollowUpAiService,
                                 AiTaskWorkerProperties workerProperties) {
         this.providerRegistry = providerRegistry;
         this.leaseService = leaseService;
@@ -85,6 +91,7 @@ public class TaskExecutionService {
         this.atsAiAnalysisService = atsAiAnalysisService;
         this.atsResultStateService = atsResultStateService;
         this.communicationAiService = communicationAiService;
+        this.interviewFollowUpAiService = interviewFollowUpAiService;
         this.workerProperties = workerProperties;
     }
 
@@ -112,6 +119,8 @@ public class TaskExecutionService {
                     executeAtsAnalysis(task, owner);
                 } else if (task.getTaskType() == AiTaskType.COMMUNICATION_GENERATE) {
                     executeCommunicationGeneration(task, owner);
+                } else if (task.getTaskType() == AiTaskType.INTERVIEW_COACH && isFollowUpPractice(task)) {
+                    executeInterviewFollowUp(task, owner);
                 } else {
                     executeDefault(task, owner);
                 }
@@ -140,9 +149,40 @@ public class TaskExecutionService {
                     List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE");
             case ATS_ANALYSIS -> List.of("RESUME", "JOB_DESCRIPTION");
             case COMMUNICATION_GENERATE -> List.of("RESUME", "JOB_DESCRIPTION");
+            case INTERVIEW_COACH -> {
+                List<String> interviewCategories = new ArrayList<>(List.of("RESUME", "INTERVIEW_ANSWER"));
+                if (task.getInputSnapshotJson() != null
+                        && task.getInputSnapshotJson().get("jobDescriptionId") != null) {
+                    interviewCategories.add("JOB_DESCRIPTION");
+                }
+                yield interviewCategories;
+            }
             default -> List.of();
         };
         return consentService.hasValidConsent(task.getUserId(), task.getTaskType().name(), categories);
+    }
+
+    private boolean isFollowUpPractice(AiTask task) {
+        Map<String, Object> snapshot = task.getInputSnapshotJson();
+        if (snapshot != null && snapshot.get("input") instanceof Map<?, ?> input) {
+            return "FOLLOW_UP_PRACTICE".equals(input.get("operation"));
+        }
+        return "FOLLOW_UP_PRACTICE".equals(snapshot == null ? null : snapshot.get("operation"));
+    }
+
+    private void executeInterviewFollowUp(AiTask task, String owner) {
+        try {
+            Map<String, Object> result = interviewFollowUpAiService.executeTask(task);
+            leaseService.releaseSuccess(task, owner, result);
+        } catch (BusinessException e) {
+            log.warn("Interview follow-up AI execution failed: errorCode={}, exception={}",
+                    e.getErrorCode(), e.getClass().getSimpleName());
+            leaseService.releaseFailed(task, owner, e.getMessage(),
+                    e.getErrorCode() == ErrorCode.AI_FAILURE || e.getErrorCode() == ErrorCode.INTERNAL);
+        } catch (RuntimeException e) {
+            log.warn("Unexpected interview follow-up AI execution error: exception={}", e.getClass().getSimpleName());
+            leaseService.releaseFailed(task, owner, "Interview follow-up AI execution failed", true);
+        }
     }
 
     private void executeMaterialSelection(AiTask task, String owner) {

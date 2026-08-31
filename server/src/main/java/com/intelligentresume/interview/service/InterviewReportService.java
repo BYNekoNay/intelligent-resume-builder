@@ -77,6 +77,8 @@ public class InterviewReportService {
                     null, 0, 0, null, null, 0, 0, List.of());
         }
 
+        List<InterviewReportResponse.RoundDetail> rounds = records.stream().map(this::roundDetail).toList();
+
         int total = (int) Math.round(records.stream().mapToInt(InterviewRecord::getRoundScore).average().orElse(0));
 
         // 五维聚合
@@ -120,7 +122,36 @@ public class InterviewReportService {
                 session.getTargetQuestionCount(), n,
                 session.getCompletionReason(), reportSource,
                 aiCount, ruleCount,
-                List.of()
+                rounds
         );
+    }
+
+    @SuppressWarnings("unchecked")
+    private InterviewReportResponse.RoundDetail roundDetail(InterviewRecord record) {
+        Map<String, Object> feedback = record.getFeedbackJson();
+        InterviewReportResponse.DimensionScores dims = null;
+        Object rawDims = feedback.get("dimensionScores");
+        if (rawDims instanceof Map<?, ?> m) {
+            dims = new InterviewReportResponse.DimensionScores(
+                    stateAssembler.num(m.get("relevance")),
+                    stateAssembler.num(m.get("evidenceSpecificity")),
+                    stateAssembler.num(m.get("structureClarity")),
+                    stateAssembler.num(m.get("roleCompetency")),
+                    stateAssembler.num(m.get("authenticityReflection")));
+        }
+        return new InterviewReportResponse.RoundDetail(
+                record.getRoundNo(), record.getQuestionText(), record.getAnswerText(), record.getRoundScore(),
+                dims,
+                stringList(feedback.get("strengths")),
+                stringList(feedback.get("improvements")),
+                feedback.get("suggestedAnswer") instanceof String suggested ? suggested : null,
+                record.getEvaluationSource());
+    }
+
+    private List<String> stringList(Object value) {
+        if (value instanceof List<?> list) {
+            return list.stream().filter(String.class::isInstance).map(String.class::cast).toList();
+        }
+        return List.of();
     }
 }
