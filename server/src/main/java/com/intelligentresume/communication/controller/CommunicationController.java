@@ -37,7 +37,13 @@ public class CommunicationController {
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(task, traceId(httpRequest)));
     }
-    private Long currentUserId(HttpServletRequest request) { Object value = request.getAttribute("currentUserId"); return value instanceof Long id ? id : null; }
+    private Long currentUserId(HttpServletRequest request) {
+        Object attr = request.getAttribute("currentUserId");
+        if (attr == null) {
+            throw new BusinessException(ErrorCode.UNAUTHENTICATED);
+        }
+        return (Long) attr;
+    }
 
     private String traceId(HttpServletRequest request) {
         return (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);

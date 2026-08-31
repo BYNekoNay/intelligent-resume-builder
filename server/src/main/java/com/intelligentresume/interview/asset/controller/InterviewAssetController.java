@@ -2,6 +2,8 @@ package com.intelligentresume.interview.asset.controller;
 
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
+import com.intelligentresume.common.error.BusinessException;
+import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.interview.asset.dto.InterviewAssetRequest;
 import com.intelligentresume.interview.asset.dto.InterviewAssetResponse;
 import com.intelligentresume.interview.asset.service.InterviewAssetService;
@@ -44,8 +46,11 @@ public class InterviewAssetController {
     }
 
     private Long currentUserId(HttpServletRequest request) {
-        Object value = request.getAttribute("currentUserId");
-        return value instanceof Long id ? id : null;
+        Object attr = request.getAttribute("currentUserId");
+        if (attr == null) {
+            throw new BusinessException(ErrorCode.UNAUTHENTICATED);
+        }
+        return (Long) attr;
     }
 
     private String traceId(HttpServletRequest request) {

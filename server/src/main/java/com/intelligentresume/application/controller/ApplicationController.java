@@ -2,6 +2,8 @@ package com.intelligentresume.application.controller;
 
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
+import com.intelligentresume.common.error.BusinessException;
+import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.application.dto.*;
 import com.intelligentresume.application.service.ApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,8 +51,11 @@ public class ApplicationController {
     }
 
     private Long currentUserId(HttpServletRequest request) {
-        Object value = request.getAttribute("currentUserId");
-        return value instanceof Long id ? id : null;
+        Object attr = request.getAttribute("currentUserId");
+        if (attr == null) {
+            throw new BusinessException(ErrorCode.UNAUTHENTICATED);
+        }
+        return (Long) attr;
     }
 
     private String traceId(HttpServletRequest request) {

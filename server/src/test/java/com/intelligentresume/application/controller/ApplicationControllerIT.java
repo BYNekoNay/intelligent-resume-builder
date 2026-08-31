@@ -112,6 +112,14 @@ class ApplicationControllerIT {
                 .andExpect(jsonPath("$.data").isEmpty());
     }
 
+    @Test
+    @Order(5)
+    void unauthenticated_returns40101() throws Exception {
+        mockMvc.perform(get("/api/applications"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
+    }
+
     private String register(String username, String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
