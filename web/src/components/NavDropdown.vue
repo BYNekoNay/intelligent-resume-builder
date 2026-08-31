@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, useId } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 
 defineProps<{
@@ -9,6 +9,7 @@ defineProps<{
 
 const open = ref(false)
 const dropdown = ref<HTMLElement | null>(null)
+const groupId = useId()
 
 function toggle() { open.value = !open.value }
 function close() { open.value = false }
@@ -39,13 +40,13 @@ onBeforeUnmount(() => {
       class="nav-group-trigger"
       :class="{ active: active || open }"
       :aria-expanded="open"
-      aria-haspopup="menu"
+      :aria-controls="groupId"
       @click="toggle"
     >
       <span>{{ label }}</span>
       <ChevronDown :size="14" class="chevron" :class="{ open }" />
     </button>
-    <div v-if="open" class="nav-group-menu" role="menu" @click="close">
+    <div v-if="open" :id="groupId" class="nav-group-menu" role="group" :aria-label="label" @click="close">
       <slot />
     </div>
   </div>
@@ -126,6 +127,21 @@ onBeforeUnmount(() => {
   text-decoration: none;
   white-space: nowrap;
   transition: background 0.12s, color 0.12s;
+}
+
+.nav-group-menu :deep(.nav-item-copy) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nav-group-menu :deep(.nav-item-copy small) {
+  max-width: 260px;
+  color: var(--text-tertiary, #79867e);
+  font-size: 10px;
+  font-weight: 450;
+  line-height: 1.4;
+  white-space: normal;
 }
 
 .nav-group-menu :deep(a:hover) {

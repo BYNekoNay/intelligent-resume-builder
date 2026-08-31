@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   CircleDot,
+  ClipboardList,
   ClipboardCheck,
   FilePenLine,
   FileSearch,
@@ -14,26 +15,110 @@ import {
   Import,
   LibraryBig,
   Radar,
+  RefreshCw,
   Sparkles,
   Target,
 } from 'lucide-vue-next'
 import { getSystemHealth, type SystemHealth } from '@/api/system'
 import { listResumes, type ResumeSummary } from '@/api/resume'
+import { listApplications, type ApplicationRecord } from '@/api/application'
+import { listTaskContinuations, type AiTask } from '@/api/ai'
 import { useAuthStore } from '@/stores/auth'
 import { useLocale } from '@/i18n'
 
 const health = ref<SystemHealth | null>(null)
 const healthLoading = ref(true)
 const resumes = ref<ResumeSummary[]>([])
-const resumesLoading = ref(false)
+const applications = ref<ApplicationRecord[]>([])
+const continuations = ref<AiTask[]>([])
+const workspaceLoading = ref(false)
+const workspaceError = ref(false)
+const workspaceLoaded = ref(false)
 const auth = useAuthStore()
 const { locale, t } = useLocale()
 
-const latestResume = computed(() => [...resumes.value].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null)
-const primaryPath = computed(() => auth.accessToken ? '/generate' : '/register')
+function byUpdatedAtAndId<T extends { id: number; updatedAt: string }>(left: T, right: T) {
+  return right.updatedAt.localeCompare(left.updatedAt) || right.id - left.id
+}
+
+const latestResume = computed(() => [...resumes.value].sort(byUpdatedAtAndId)[0] ?? null)
+const applicationsByRecency = computed(() => [...applications.value].sort(byUpdatedAtAndId))
+const interviewingApplications = computed(() => applicationsByRecency.value.filter(item => item.status === 'INTERVIEWING'))
+const draftApplications = computed(() => applicationsByRecency.value.filter(item => item.status === 'DRAFT'))
+const resumableTasks = computed(() => [...continuations.value].sort(byUpdatedAtAndId))
+const primaryPath = computed(() => auth.accessToken && primaryWorkspaceAction.value ? primaryWorkspaceAction.value.to : auth.accessToken ? '/generate' : '/register')
 const secondaryPath = computed(() => auth.accessToken ? '/resume-import' : '/login')
-const primaryLabel = computed(() => auth.accessToken ? t('home.primaryAuthenticated') : t('home.primaryGuest'))
+const primaryLabel = computed(() => auth.accessToken && primaryWorkspaceAction.value ? t(primaryWorkspaceAction.value.actionKey) : auth.accessToken ? t('home.primaryAuthenticated') : t('home.primaryGuest'))
 const secondaryLabel = computed(() => auth.accessToken ? t('home.secondaryAuthenticated') : t('home.secondaryGuest'))
+
+interface WorkspaceAction {
+  key: string
+  icon: any
+  titleKey: string
+  descriptionKey: string
+  actionKey: string
+  to: string
+}
+
+const workspaceActions = computed<WorkspaceAction[]>(() => {
+  const actions: WorkspaceAction[] = []
+
+  for (const interviewingApplication of interviewingApplications.value) {
+    actions.push({
+      key: `interview-${interviewingApplication.id}`,
+      icon: BriefcaseBusiness,
+      titleKey: 'home.nextInterviewTitle',
+      descriptionKey: 'home.nextInterviewDesc',
+      actionKey: 'home.prepareInterview',
+      to: `/interviews?jobDescriptionId=${interviewingApplication.jobDescriptionId}`,
+    })
+  }
+
+  for (const draftApplication of draftApplications.value) {
+    actions.push({
+      key: `application-${draftApplication.id}`,
+      icon: ClipboardList,
+      titleKey: 'home.nextApplicationTitle',
+      descriptionKey: 'home.nextApplicationDesc',
+      actionKey: 'home.continueApplication',
+      to: '/applications',
+    })
+  }
+
+  for (const task of resumableTasks.value) {
+    const selection = task.taskType === 'JOB_MATERIAL_SELECTION'
+    const awaitingConfirmation = task.status === 'SUCCESS'
+    actions.push({
+      key: `task-${task.id}`,
+      icon: Sparkles,
+      titleKey: selection
+        ? (awaitingConfirmation ? 'home.nextSelectionTitle' : 'home.nextSelectionProgressTitle')
+        : (awaitingConfirmation ? 'home.nextGenerationTitle' : 'home.nextGenerationProgressTitle'),
+      descriptionKey: selection
+        ? (awaitingConfirmation ? 'home.nextSelectionDesc' : 'home.nextSelectionProgressDesc')
+        : (awaitingConfirmation ? 'home.nextGenerationDesc' : 'home.nextGenerationProgressDesc'),
+      actionKey: selection ? 'home.continueSelection' : 'home.continueGeneration',
+      to: selection ? `/generate/materials?taskId=${task.id}` : `/generate/confirm?taskId=${task.id}`,
+    })
+  }
+
+  if (latestResume.value) {
+    actions.push({
+      key: `resume-${latestResume.value.id}`,
+      icon: FileText,
+      titleKey: 'home.nextResumeTitle',
+      descriptionKey: 'home.nextResumeDesc',
+      actionKey: 'home.currentContinue',
+      to: `/resumes/${latestResume.value.id}/edit`,
+    })
+  }
+
+  return actions
+})
+
+const primaryWorkspaceAction = computed(() => workspaceActions.value[0] ?? null)
+const secondaryWorkspaceActions = computed(() => workspaceActions.value.slice(1))
+const showEmptyStartAction = computed(() => workspaceLoaded.value && !workspaceError.value && !primaryWorkspaceAction.value)
 
 const workflow = [
   { icon: LibraryBig, to: '/career-materials', stepKey: 'home.workflowEvidenceStep', titleKey: 'home.workflowEvidenceTitle', descKey: 'home.workflowEvidenceDesc' },
@@ -56,19 +141,33 @@ function updatedLabel(value: string) {
   return t('home.currentUpdated').replace('{date}', formatDate(value))
 }
 
+async function loadWorkspace() {
+  if (!auth.accessToken) return
+  workspaceLoading.value = true
+  workspaceError.value = false
+  const [resumeResult, applicationResult, continuationResult] = await Promise.allSettled([
+    listResumes(),
+    listApplications(),
+    listTaskContinuations(),
+  ])
+
+  if (resumeResult.status === 'fulfilled') resumes.value = resumeResult.value.data.data
+  else workspaceError.value = true
+  if (applicationResult.status === 'fulfilled') applications.value = applicationResult.value.data.data
+  else workspaceError.value = true
+  if (continuationResult.status === 'fulfilled') continuations.value = continuationResult.value.data.data
+  else workspaceError.value = true
+  workspaceLoaded.value = true
+  workspaceLoading.value = false
+}
+
 onMounted(async () => {
   const healthPromise = getSystemHealth()
     .then(response => { health.value = response.data })
     .catch(() => { health.value = null })
     .finally(() => { healthLoading.value = false })
 
-  if (auth.accessToken) {
-    resumesLoading.value = true
-    await listResumes()
-      .then(response => { resumes.value = response.data.data })
-      .catch(() => { resumes.value = [] })
-      .finally(() => { resumesLoading.value = false })
-  }
+  await loadWorkspace()
 
   await healthPromise
 })
@@ -76,7 +175,7 @@ onMounted(async () => {
 
 <template>
   <div class="home-workspace">
-    <section class="home-command" aria-labelledby="home-title">
+    <section class="home-command" :class="{ authenticated: auth.accessToken }" aria-labelledby="home-title">
       <div class="home-command-copy">
         <p class="home-kicker"><Target :size="15" /> {{ t('home.badge') }}</p>
         <h1 id="home-title">{{ t('home.title') }}</h1>
@@ -102,10 +201,10 @@ onMounted(async () => {
         </ul>
       </div>
 
-      <aside class="home-proof-panel" :aria-label="t('home.proofLabel')">
+      <aside v-if="!auth.accessToken" class="home-proof-panel" :aria-label="t('home.proofLabel')">
         <header>
           <div>
-            <span>{{ t('home.proofEyebrow') }}</span>
+            <span>{{ t('home.proofExample') }}</span>
             <strong>{{ t('home.proofTitle') }}</strong>
           </div>
           <span class="proof-status"><CircleDot :size="13" /> {{ t('home.proofStatus') }}</span>
@@ -149,31 +248,45 @@ onMounted(async () => {
       </aside>
     </section>
 
-    <section v-if="auth.accessToken" class="current-work" aria-labelledby="current-work-title">
-      <div>
-        <p class="section-label">{{ t('home.currentEyebrow') }}</p>
-        <h2 id="current-work-title">{{ t('home.currentTitle') }}</h2>
-      </div>
+    <section v-if="auth.accessToken" class="next-action-workspace" role="region" :aria-label="t('home.nextActionRegion')">
+      <header>
+        <p class="section-label">{{ t('home.nextActionEyebrow') }}</p>
+        <h2>{{ t('home.nextActionRegion') }}</h2>
+      </header>
 
-      <div v-if="resumesLoading" class="current-work-loading" role="status">{{ t('home.currentLoading') }}</div>
-      <div v-else-if="latestResume" class="current-resume-row">
-        <span class="current-resume-icon"><FileText :size="20" /></span>
-        <div>
-          <strong>{{ latestResume.title }}</strong>
-          <small>{{ updatedLabel(latestResume.updatedAt) }}</small>
+      <div v-if="workspaceLoading" class="current-work-loading" role="status">{{ t('home.nextActionLoading') }}</div>
+      <template v-else>
+        <article v-if="primaryWorkspaceAction" class="next-action-primary">
+          <span class="next-action-icon"><component :is="primaryWorkspaceAction.icon" :size="22" /></span>
+          <div>
+            <h3>{{ t(primaryWorkspaceAction.titleKey) }}</h3>
+            <p>{{ t(primaryWorkspaceAction.descriptionKey) }}</p>
+            <small v-if="primaryWorkspaceAction.key.startsWith('resume-') && latestResume">{{ latestResume.title }} · {{ updatedLabel(latestResume.updatedAt) }}</small>
+          </div>
+          <RouterLink class="btn-neon btn-primary" :to="primaryWorkspaceAction.to">
+            {{ t(primaryWorkspaceAction.actionKey) }} <ArrowRight :size="15" />
+          </RouterLink>
+        </article>
+        <article v-else-if="showEmptyStartAction" class="next-action-primary">
+          <span class="next-action-icon"><Import :size="22" /></span>
+          <div><h3>{{ t('home.nextStartTitle') }}</h3><p>{{ t('home.nextStartDesc') }}</p></div>
+          <RouterLink class="btn-neon btn-primary" to="/resume-import">{{ t('home.currentImport') }} <ArrowRight :size="15" /></RouterLink>
+        </article>
+
+        <p v-if="workspaceError" class="workspace-status-warning" role="status">
+          {{ t('home.nextActionUnavailable') }}
+          <button type="button" @click="loadWorkspace"><RefreshCw :size="14" />{{ t('home.nextActionRetry') }}</button>
+        </p>
+
+        <div v-if="secondaryWorkspaceActions.length" class="next-action-secondary">
+          <span>{{ t('home.otherWork') }}</span>
+          <RouterLink v-for="action in secondaryWorkspaceActions" :key="action.key" :to="action.to">
+            <component :is="action.icon" :size="16" />
+            <span>{{ t(action.actionKey) }}</span>
+            <ArrowRight :size="14" />
+          </RouterLink>
         </div>
-        <RouterLink :to="`/resumes/${latestResume.id}/edit`">
-          {{ t('home.currentContinue') }} <ArrowRight :size="15" />
-        </RouterLink>
-      </div>
-      <div v-else class="current-resume-row current-resume-empty">
-        <span class="current-resume-icon"><FileText :size="20" /></span>
-        <div>
-          <strong>{{ t('home.currentEmptyTitle') }}</strong>
-          <small>{{ t('home.currentEmptyDesc') }}</small>
-        </div>
-        <RouterLink to="/resume-import">{{ t('home.currentImport') }} <ArrowRight :size="15" /></RouterLink>
-      </div>
+      </template>
     </section>
 
     <section class="home-workflow" aria-labelledby="workflow-title">
@@ -224,6 +337,11 @@ onMounted(async () => {
   gap: 72px;
   min-height: 540px;
   padding: 28px 0 10px;
+}
+
+.home-command.authenticated {
+  grid-template-columns: minmax(0, 760px);
+  min-height: 390px;
 }
 
 .home-command-copy {
@@ -504,72 +622,133 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-.current-work {
+.next-action-workspace {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  align-items: center;
-  gap: 40px;
-  padding: 24px 0;
+  gap: 18px;
+  padding: 28px 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 
-.current-work .section-label,
+.next-action-workspace .section-label,
 .home-workflow .section-label {
   margin-bottom: 6px;
 }
 
-.current-work h2,
+.next-action-workspace h2,
 .home-workflow h2 {
   margin: 0;
   font-size: 24px;
   letter-spacing: 0;
 }
 
-.current-resume-row {
+.next-action-primary {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
 }
 
-.current-resume-icon {
+.next-action-icon {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
   place-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   border-radius: 6px;
-  background: var(--bg-surface);
+  background: var(--accent-light);
   color: var(--accent);
 }
 
-.current-resume-row div {
+.next-action-primary > div {
   display: grid;
-  gap: 2px;
+  gap: 4px;
 }
 
-.current-resume-row strong {
-  font-size: 14px;
+.next-action-primary h3 {
+  margin: 0;
+  font-size: 16px;
 }
 
-.current-resume-row small,
+.next-action-primary p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.next-action-primary small,
 .current-work-loading {
   color: var(--text-tertiary);
   font-size: 12px;
 }
 
-.current-resume-row > a {
-  display: inline-flex;
+.next-action-secondary {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  color: var(--accent);
-  font-size: 13px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.next-action-secondary > span {
+  margin-right: 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
   font-weight: 700;
 }
 
-.current-resume-row > a:hover {
+.next-action-secondary a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: var(--bg-surface);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.next-action-secondary a:hover {
+  border-color: var(--accent);
+  background: var(--accent-light);
   text-decoration: none;
+}
+
+.workspace-status-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--warning);
+  color: var(--warning);
+  background: var(--warning-light);
+  font-size: 12px;
+}
+
+.workspace-status-warning button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 5px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .home-workflow {
@@ -750,18 +929,18 @@ onMounted(async () => {
     font-size: 15px;
   }
 
-  .current-work,
   .home-workflow > header {
     grid-template-columns: 1fr;
     gap: 18px;
   }
 
-  .current-resume-row {
-    grid-template-columns: 42px minmax(0, 1fr);
+  .next-action-primary {
+    grid-template-columns: 48px minmax(0, 1fr);
   }
 
-  .current-resume-row > a {
+  .next-action-primary > a {
     grid-column: 2;
+    justify-self: start;
   }
 }
 
@@ -778,6 +957,22 @@ onMounted(async () => {
   .home-actions a {
     justify-content: center;
     width: 100%;
+  }
+
+  .next-action-primary {
+    grid-template-columns: 1fr;
+    padding: 18px 16px;
+  }
+
+  .next-action-primary > a {
+    grid-column: auto;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .workspace-status-warning {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .proof-layout {

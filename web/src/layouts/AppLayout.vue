@@ -13,7 +13,7 @@ const route = useRoute()
 const { t } = useLocale()
 const mobileMenuOpen = ref(false)
 
-interface NavItem { to: string; key: string; icon: any }
+interface NavItem { to: string; key: string; icon: any; descriptionKey?: string }
 
 type GroupKey = 'career' | 'resume' | 'prepare' | 'applications'
 
@@ -25,8 +25,8 @@ const groups: Record<GroupKey, NavItem[]> = {
   ],
   resume: [
     { to: '/resumes', key: 'resumes', icon: NotebookPen },
-    { to: '/generate', key: 'generate', icon: Sparkles },
-    { to: '/material-generation', key: 'materialGeneration', icon: Sparkles },
+    { to: '/generate', key: 'generate', icon: Sparkles, descriptionKey: 'generateDesc' },
+    { to: '/material-generation', key: 'materialGeneration', icon: Sparkles, descriptionKey: 'materialGenerationDesc' },
     { to: '/achievement-guidance', key: 'achievements', icon: Target },
   ],
   prepare: [
@@ -41,15 +41,16 @@ const groups: Record<GroupKey, NavItem[]> = {
   ],
 }
 
-const routeToGroup = computed<Record<string, GroupKey>>(() => {
-  const map: Record<string, GroupKey> = {}
+const activeGroup = computed<GroupKey | null>(() => {
   for (const [group, items] of Object.entries(groups)) {
-    for (const item of items) map[item.to] = group as GroupKey
+    const matches = items.some(item => item.to === '/'
+      ? route.path === '/'
+      : route.path === item.to || route.path.startsWith(`${item.to}/`))
+    if (matches) return group as GroupKey
   }
-  return map
+  if (route.path.startsWith('/match/') || route.path.startsWith('/exports/')) return 'resume'
+  return null
 })
-
-const activeGroup = computed<GroupKey | null>(() => routeToGroup.value[route.path] ?? null)
 
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
 
@@ -80,7 +81,10 @@ async function signOut() {
             :to="item.to"
           >
             <component :is="item.icon" :size="15" />
-            {{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}
+            <span class="nav-item-copy">
+              <span>{{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}</span>
+              <small v-if="item.descriptionKey">{{ t(`navGroups.${groupKey}.${item.descriptionKey}`) }}</small>
+            </span>
           </RouterLink>
         </NavDropdown>
       </nav>
@@ -125,7 +129,10 @@ async function signOut() {
           <p>{{ t(`navGroups.${groupKey}.label`) }}</p>
           <RouterLink v-for="item in groups[groupKey]" :key="item.key" :to="item.to">
             <component :is="item.icon" :size="16" />
-            <span>{{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}</span>
+            <span class="nav-item-copy">
+              <span>{{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}</span>
+              <small v-if="item.descriptionKey">{{ t(`navGroups.${groupKey}.${item.descriptionKey}`) }}</small>
+            </span>
           </RouterLink>
         </section>
       </nav>

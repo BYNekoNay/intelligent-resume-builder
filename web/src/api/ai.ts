@@ -165,6 +165,10 @@ export function getTask(id: number) {
   return apiClient.get<ApiResponse<AiTask>>(`/api/ai/tasks/${id}`)
 }
 
+export function listTaskContinuations() {
+  return apiClient.get<ApiResponse<AiTask[]>>('/api/ai/tasks/continuations')
+}
+
 export function retryTask(id: number) {
   return apiClient.post<ApiResponse<AiTask>>(`/api/ai/tasks/${id}/retry`)
 }
