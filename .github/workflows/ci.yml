@@ -36,6 +36,9 @@ jobs:
           cache-dependency-path: server/pom.xml
       - name: Run unit and integration tests
         run: mvn --batch-mode --no-transfer-progress test
+      - name: Validate production Compose manifests
+        working-directory: deploy
+        run: docker compose --env-file production.env.example -f docker-compose.prod.yml config --quiet
 
   web:
     name: Web build and browser tests
