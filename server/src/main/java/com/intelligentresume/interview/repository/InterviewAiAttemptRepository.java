@@ -2,6 +2,7 @@ package com.intelligentresume.interview.repository;
 
 import com.intelligentresume.interview.domain.InterviewAiAttempt;
 import com.intelligentresume.interview.domain.AiAttemptOperationType;
+import com.intelligentresume.interview.domain.AiAttemptStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,7 +17,9 @@ public interface InterviewAiAttemptRepository extends JpaRepository<InterviewAiA
             Long sessionId, AiAttemptOperationType operationType, Integer roundNo);
     List<InterviewAiAttempt> findAllBySessionId(Long sessionId);
     Optional<InterviewAiAttempt> findFirstBySessionIdAndStatusOrderByUpdatedAtDesc(
-            Long sessionId, com.intelligentresume.interview.domain.AiAttemptStatus status);
+            Long sessionId, AiAttemptStatus status);
+    Optional<InterviewAiAttempt> findTopBySessionIdAndStatusOrderByIdDesc(
+            Long sessionId, AiAttemptStatus status);
 
     @Query("""
             select coalesce(sum(a.attemptCount), 0)

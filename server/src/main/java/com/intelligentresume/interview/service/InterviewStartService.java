@@ -159,9 +159,8 @@ public class InterviewStartService {
         // TX1 后检查：如果已进入 AI_ACTION_REQUIRED
         InterviewSession afterTx1 = sessionRepository.findById(sessionId).orElseThrow();
         if (afterTx1.getStatus() == InterviewStatus.AI_ACTION_REQUIRED) {
-            InterviewAiAttempt failedAttempt = attemptRepository.findAllBySessionId(sessionId).stream()
-                    .filter(a -> a.getStatus() == AiAttemptStatus.FAILED)
-                    .reduce((a, b) -> b).orElse(null);
+            InterviewAiAttempt failedAttempt = attemptRepository
+                    .findTopBySessionIdAndStatusOrderByIdDesc(sessionId, AiAttemptStatus.FAILED).orElse(null);
             return stateAssembler.buildStateResponse(afterTx1, null,
                     failedAttempt != null ? stateAssembler.buildAiFailure(failedAttempt.getId(), "INITIAL_QUESTION",
                             new BusinessException(
@@ -184,9 +183,8 @@ public class InterviewStartService {
                         operationSupport.isRetryable(e), operationSupport.providerRequestId(e));
             });
             InterviewSession failed = sessionRepository.findById(sessionId).orElseThrow();
-            InterviewAiAttempt failedAttempt = attemptRepository.findAllBySessionId(sessionId).stream()
-                    .filter(a -> a.getStatus() == AiAttemptStatus.FAILED)
-                    .reduce((a, b) -> b).orElseThrow();
+            InterviewAiAttempt failedAttempt = attemptRepository
+                    .findTopBySessionIdAndStatusOrderByIdDesc(sessionId, AiAttemptStatus.FAILED).orElseThrow();
             return stateAssembler.buildStateResponse(failed, null,
                     stateAssembler.buildAiFailure(failedAttempt.getId(), "INITIAL_QUESTION", e));
         }
