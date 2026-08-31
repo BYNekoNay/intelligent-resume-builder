@@ -31,6 +31,7 @@ public record InterviewReportResponse(
 
     /** 逐轮问答明细（仅基于已有 interview_record 组装，不新增 AI 调用）。 */
     public record RoundDetail(
+            Long recordId,
             Integer roundNo,
             String questionText,
             String answerText,

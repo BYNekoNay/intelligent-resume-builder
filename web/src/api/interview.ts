@@ -10,6 +10,8 @@ export interface StartInterviewRequest {
   interviewMode: 'JD_TARGETED' | 'TECHNICAL' | 'BEHAVIORAL' | 'COMPREHENSIVE'
   targetQuestionCount?: number
   outputLanguage: 'ZH_CN' | 'EN'
+  /** 可选：提供时跳过 AI 首题生成，会话直接进入 AWAITING_ANSWER（用于薄弱项练习） */
+  initialQuestion?: string
 }
 
 // ==================== 响应类型 ====================
@@ -56,6 +58,22 @@ export interface InterviewStateResponse {
   lastEvaluation: LastEvaluation | null
   aiFailure: AiFailureInfo | null
   completionReason: string | null
+  sourceType: 'PLATFORM_RESUME' | 'EXTERNAL_RESUME' | null
+  resumeVersionId: number | null
+  jobDescriptionId: number | null
+}
+
+export interface RoundDetail {
+  recordId: number
+  roundNo: number
+  questionText: string
+  answerText: string
+  roundScore: number
+  dimensionScores: DimensionScores | null
+  strengths: string[]
+  improvements: string[]
+  suggestedAnswer: string | null
+  evaluationSource: 'AI' | 'RULE' | null
 }
 
 export interface InterviewReportResponse {
@@ -72,6 +90,36 @@ export interface InterviewReportResponse {
   evaluationSource: 'AI' | 'RULE' | 'MIXED' | null
   aiEvaluatedRounds: number
   ruleEvaluatedRounds: number
+  rounds: RoundDetail[]
+}
+
+export interface InterviewSessionSummary {
+  id: number
+  jobDescriptionId: number | null
+  resumeVersionId: number | null
+  sourceType: 'PLATFORM_RESUME' | 'EXTERNAL_RESUME'
+  interviewMode: string
+  executionMode: 'AI' | 'RULE' | null
+  completionReason: string | null
+  targetQuestionCount: number
+  actualQuestionCount: number
+  totalScore: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface FollowUpCandidate {
+  question: string
+  focus: string
+  expectedSignals: string[]
+  coverageTags: string[]
+}
+
+export interface FollowUpPracticeResult {
+  operation: 'FOLLOW_UP_PRACTICE'
+  promptVersion: string
+  weakness: string
+  candidates: FollowUpCandidate[]
 }
 
 // ==================== API 函数 ====================
@@ -110,4 +158,14 @@ export function finishInterview(id: number) {
 
 export function getInterviewReport(id: number) {
   return apiClient.get<ApiResponse<InterviewReportResponse>>(`/api/interviews/${id}/report`)
+}
+
+export function listInterviewHistory(params?: { jobDescriptionId?: number }) {
+  return apiClient.get<ApiResponse<InterviewSessionSummary[]>>('/api/interviews', { params })
+}
+
+export function createFollowUp(id: number, weakness: string, idempotencyKey: string) {
+  return apiClient.post<ApiResponse<import('./ai').AiTask>>(`/api/interviews/${id}/follow-up`, { weakness }, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
 }

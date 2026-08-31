@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AlertTriangle, BarChart3, BookmarkPlus, CheckCircle2, FileText, Loader2, Mic2, Play, RefreshCw, Send, Shield, Sparkles } from 'lucide-vue-next'
-import { createInterviewAsset } from '@/api/interviewAsset'
+import { AlertTriangle, BarChart3, BookmarkPlus, CheckCircle2, Clipboard, FileText, Loader2, Mic2, Play, RefreshCw, Send, Shield, Sparkles, Target } from 'lucide-vue-next'
+import { createInterviewAsset, listInterviewAssets } from '@/api/interviewAsset'
+import { getTask, type AiTask } from '@/api/ai'
 import {
-  answerInterview, continueWithRules, finishInterview, getInterviewReport, getInterviewState,
+  answerInterview, continueWithRules, createFollowUp, finishInterview, getInterviewReport, getInterviewState,
   retryAi, startInterview,
-  type AiFailureInfo, type InterviewReportResponse, type InterviewStateResponse, type LastEvaluation,
+  type AiFailureInfo, type FollowUpCandidate, type FollowUpPracticeResult, type InterviewReportResponse, type InterviewStateResponse, type LastEvaluation, type RoundDetail,
 } from '@/api/interview'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
+import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useLocale } from '@/i18n'
 
 const { locale, t } = useLocale()
@@ -50,6 +52,15 @@ const pendingStart = ref<PendingRequest<Parameters<typeof startInterview>[0]> | 
 const pendingAnswer = ref<PendingRequest<{ interviewId: number; answer: string }> | null>(null)
 let statePollTimer: ReturnType<typeof setTimeout> | null = null
 let statePollAttempt = 0
+
+// ==================== 薄弱项练习 ====================
+const practiceWeakness = ref('')
+const practiceLoading = ref(false)
+const practiceError = ref('')
+const practiceCandidates = ref<(FollowUpCandidate & { editing: boolean })[]>([])
+const expandedRounds = ref<Set<number>>(new Set())
+const copyStatus = ref('')
+const { start: startFollowUpPolling, stop: stopFollowUpPolling } = useTaskPolling<AiTask>()
 
 // ==================== 计算属性 ====================
 const status = computed(() => sessionState.value?.status ?? null)
@@ -233,11 +244,142 @@ async function saveAsset() {
   finally { savingAsset.value = false }
 }
 
+// ==================== 报告内逐轮存入资产 / 复制建议答案 ====================
+async function saveRoundAsset(round: RoundDetail) {
+  savingAsset.value = true; error.value = ''
+  try {
+    await createInterviewAsset({
+      interviewRecordId: round.recordId,
+      questionText: round.questionText,
+      originalAnswerText: round.answerText,
+      suggestedAnswerText: round.suggestedAnswer ?? undefined,
+    })
+    if (!savedRecordIds.value.includes(round.recordId)) savedRecordIds.value.push(round.recordId)
+  } catch { error.value = t('interview.saveAssetError') }
+  finally { savingAsset.value = false }
+}
+
+async function copySuggested(round: RoundDetail) {
+  if (!round.suggestedAnswer) return
+  try {
+    await navigator.clipboard.writeText(round.suggestedAnswer)
+    copyStatus.value = t('interview.copied')
+  } catch {
+    copyStatus.value = t('communication.clipboardError')
+  }
+}
+
+function toggleRound(roundNo: number) {
+  const next = new Set(expandedRounds.value)
+  if (next.has(roundNo)) next.delete(roundNo)
+  else next.add(roundNo)
+  expandedRounds.value = next
+}
+
+// ==================== 薄弱项练习（follow-up） ====================
+async function generatePractice(weakness: string) {
+  if (interviewId.value === null) return
+  practiceWeakness.value = weakness
+  practiceCandidates.value = []
+  practiceError.value = ''
+  practiceLoading.value = true
+  try {
+    const key = `follow-up:${crypto.randomUUID()}`
+    const task = (await createFollowUp(interviewId.value, weakness, key)).data.data
+    if (!acceptFollowUpTask(task)) {
+      startFollowUpPolling({
+        taskId: task.id,
+        fetchTask: async (id) => (await getTask(id)).data.data,
+        onTask: acceptFollowUpTask,
+        shouldStop: (current) => current.status === 'SUCCESS' || current.status === 'FAILED' || current.status === 'CANCELLED',
+        onTimeout: () => {
+          practiceLoading.value = false
+          practiceError.value = t('interview.practiceTimeout')
+        },
+        onError: () => {
+          practiceLoading.value = false
+          practiceError.value = t('interview.practiceError')
+        },
+      })
+    }
+  } catch (cause: any) {
+    practiceLoading.value = false
+    const code = cause?.response?.data?.code
+    practiceError.value = code === 40302
+      ? t('interview.consentRequired')
+      : code === 42901 ? t('interview.quotaExceeded') : t('interview.practiceError')
+  }
+}
+
+function acceptFollowUpTask(task: AiTask): boolean {
+  if (task.status === 'SUCCESS' && task.resultJson) {
+    const result = task.resultJson as unknown as FollowUpPracticeResult
+    if (result.operation === 'FOLLOW_UP_PRACTICE' && Array.isArray(result.candidates)) {
+      practiceCandidates.value = result.candidates.map((candidate) => ({ ...candidate, editing: false }))
+      practiceLoading.value = false
+      practiceError.value = ''
+    }
+    return true
+  }
+  if (task.status === 'FAILED' || task.status === 'CANCELLED') {
+    practiceLoading.value = false
+    practiceError.value = task.errorMessage || t('interview.practiceError')
+    return true
+  }
+  return false
+}
+
+async function startPractice(candidateIndex: number) {
+  const candidate = practiceCandidates.value[candidateIndex]
+  if (!candidate || !candidate.question.trim()) return
+  const question = candidate.question.trim()
+  error.value = ''
+  starting.value = true
+  try {
+    const payload: Parameters<typeof startInterview>[0] = {
+      sourceType: sourceType.value,
+      resumeVersionId: sourceType.value === 'PLATFORM_RESUME' ? Number(resumeVersionId.value) : undefined,
+      externalResumeText: sourceType.value === 'EXTERNAL_RESUME' ? resumeText.value : undefined,
+      jobDescriptionId: jobId.value ? Number(jobId.value) : undefined,
+      interviewMode: interviewMode.value,
+      targetQuestionCount: targetQuestionCount.value,
+      outputLanguage: locale.value === 'zh-CN' ? 'ZH_CN' : 'EN',
+      initialQuestion: question,
+    }
+    const result = (await startInterview(payload, `practice:${crypto.randomUUID()}`)).data.data
+    practiceCandidates.value = []
+    practiceWeakness.value = ''
+    stopFollowUpPolling()
+    applySessionState(result)
+  } catch (cause: any) {
+    const code = cause?.response?.data?.code
+    if (code === 40302) {
+      await router.push(consentRedirectUrl)
+      return
+    }
+    error.value = t('interview.startError')
+  } finally {
+    starting.value = false
+  }
+}
+
 // ==================== 加载报告 ====================
 async function loadReport() {
   if (interviewId.value === null) return
-  try { report.value = (await getInterviewReport(interviewId.value)).data.data }
-  catch { error.value = t('interview.loadReportError') }
+  try {
+    report.value = (await getInterviewReport(interviewId.value)).data.data
+    // 预标记已保存态：报告逐轮「存入资产」幂等展示
+    try {
+      const assets = (await listInterviewAssets()).data.data
+      for (const asset of assets) {
+        if (asset.interviewRecordId !== null && !savedRecordIds.value.includes(asset.interviewRecordId)) {
+          savedRecordIds.value.push(asset.interviewRecordId)
+        }
+      }
+    } catch {
+      // 资产列表加载失败不影响报告展示
+    }
+  } catch { error.value = t('interview.loadReportError') }
 }
 
 // ==================== 版本来源标签 ====================
@@ -294,14 +436,20 @@ onMounted(() => {
   })
 })
 
-onBeforeUnmount(stopStatePoll)
+onBeforeUnmount(() => {
+  stopStatePoll()
+  stopFollowUpPolling()
+})
 </script>
 
 <template>
   <section class="workspace-page interview-page">
     <header class="interview-heading">
       <div><p class="eyebrow"><Mic2 :size="14" />{{ t('interview.eyebrow') }}</p><h1>{{ t('interview.title') }}</h1><p class="page-lead">{{ t('interview.subtitle') }}</p></div>
-      <div class="interview-route" :aria-label="t('interview.progressLabel')"><span class="active"><b>1</b>{{ t('interview.routePrepare') }}</span><i /><span :class="{ active: interviewId !== null && !isCompleted }"><b>2</b>{{ t('interview.routePractice') }}</span><i /><span :class="{ active: report }"><b>3</b>{{ t('interview.routeReview') }}</span></div>
+      <div class="interview-heading-actions">
+        <RouterLink class="btn-neon btn-ghost" :to="{ name: 'interview-history' }"><BarChart3 :size="14" />{{ t('interview.historyEntry') }}</RouterLink>
+        <div class="interview-route" :aria-label="t('interview.progressLabel')"><span class="active"><b>1</b>{{ t('interview.routePrepare') }}</span><i /><span :class="{ active: interviewId !== null && !isCompleted }"><b>2</b>{{ t('interview.routePractice') }}</span><i /><span :class="{ active: report }"><b>3</b>{{ t('interview.routeReview') }}</span></div>
+      </div>
     </header>
     <p v-if="error || optionsError" class="form-error" role="alert">{{ error || optionsError }}</p>
 
@@ -431,10 +579,73 @@ onBeforeUnmount(stopStatePoll)
         </div>
         <div class="report-sections">
           <section><h3>{{ t('interview.feedbackStrengths') }}</h3><ul><li v-for="item in report.strengths" :key="item">{{ item }}</li></ul></section>
-          <section><h3>{{ t('interview.feedbackImprovements') }}</h3><ul><li v-for="item in report.weaknesses" :key="item">{{ item }}</li></ul></section>
           <section><h3>{{ t('interview.resumeSuggestions') }}</h3><ul><li v-for="item in report.resumeSuggestions" :key="item">{{ item }}</li></ul></section>
           <section><h3>{{ t('interview.expressionSuggestions') }}</h3><ul><li v-for="item in report.expressionSuggestions" :key="item">{{ item }}</li></ul></section>
         </div>
+
+        <!-- 薄弱项练习 -->
+        <section class="weakness-practice">
+          <h3><Target :size="15" />{{ t('interview.weaknessPractice') }}</h3>
+          <p class="weakness-hint">{{ t('interview.weaknessHint') }}</p>
+          <ul v-if="report.weaknesses.length" class="weakness-list">
+            <li v-for="weakness in report.weaknesses" :key="weakness">
+              <span>{{ weakness }}</span>
+              <button class="btn-neon btn-ghost" type="button" :disabled="practiceLoading" @click="generatePractice(weakness)">
+                <Sparkles :size="14" />{{ practiceLoading && practiceWeakness === weakness ? t('interview.practiceGenerating') : t('interview.generatePractice') }}
+              </button>
+            </li>
+          </ul>
+          <p v-else class="weakness-hint">{{ t('interview.noWeakness') }}</p>
+          <p v-if="practiceError" class="form-error" role="alert">{{ practiceError }}</p>
+
+          <div v-if="practiceCandidates.length" class="practice-candidates">
+            <p class="practice-caption">{{ t('interview.practiceCaption') }}</p>
+            <article v-for="(candidate, index) in practiceCandidates" :key="index" class="practice-candidate">
+              <div class="candidate-head">
+                <span class="ai-badge">{{ t('interview.aiCandidate') }}</span>
+                <span>{{ candidate.focus }}</span>
+              </div>
+              <textarea v-model="practiceCandidates[index].question" rows="3" />
+              <div class="candidate-actions">
+                <button class="btn-neon btn-primary" type="button" :disabled="starting || !candidate.question.trim()" @click="startPractice(index)">
+                  <Play :size="14" />{{ starting ? t('interview.starting') : t('interview.useThisPractice') }}
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- 逐轮明细 -->
+        <section class="rounds-block">
+          <h3>{{ t('interview.roundsTitle') }}</h3>
+          <p v-if="copyStatus" class="disclaimer">{{ copyStatus }}</p>
+          <details v-for="round in report.rounds" :key="round.roundNo" :open="expandedRounds.has(round.roundNo)" class="round-card">
+            <summary @click.prevent="toggleRound(round.roundNo)">
+              <span class="round-no">#{{ round.roundNo }}</span>
+              <span class="round-question">{{ round.questionText }}</span>
+              <span class="round-score">{{ round.roundScore }}</span>
+            </summary>
+            <div class="round-body">
+              <p><strong>{{ t('interview.yourAnswer') }}</strong>{{ round.answerText }}</p>
+              <p v-if="round.suggestedAnswer"><strong>{{ t('interview.suggestedAnswer') }}</strong>{{ round.suggestedAnswer }}</p>
+              <div v-if="round.strengths.length" class="round-feedback">
+                <strong>{{ t('interview.feedbackStrengths') }}</strong><ul><li v-for="item in round.strengths" :key="item">{{ item }}</li></ul>
+              </div>
+              <div v-if="round.improvements.length" class="round-feedback">
+                <strong>{{ t('interview.feedbackImprovements') }}</strong><ul><li v-for="item in round.improvements" :key="item">{{ item }}</li></ul>
+              </div>
+              <div class="round-actions">
+                <button v-if="!savedRecordIds.includes(round.recordId)" class="btn-neon btn-secondary" type="button" :disabled="savingAsset" @click="saveRoundAsset(round)">
+                  <BookmarkPlus :size="14" />{{ savingAsset ? t('interview.saving') : t('interview.saveAsset') }}
+                </button>
+                <span v-else class="saved-state"><CheckCircle2 :size="13" />{{ t('interview.saved') }}</span>
+                <button v-if="round.suggestedAnswer" class="btn-neon btn-ghost" type="button" @click="copySuggested(round)">
+                  <Clipboard :size="14" />{{ t('interview.copyAnswer') }}
+                </button>
+              </div>
+            </div>
+          </details>
+        </section>
       </article>
     </div>
   </section>
@@ -517,6 +728,35 @@ onBeforeUnmount(stopStatePoll)
 .interview-report section { margin-top: 18px; }
 .interview-report h3 { margin: 0 0 10px; font-size: 12px; }
 .report-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+.weakness-practice, .rounds-block { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.weakness-practice h3, .rounds-block h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; }
+.weakness-hint { margin: 0 0 10px; color: var(--text-tertiary); font-size: 10px; }
+.weakness-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.weakness-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--bg-page); }
+.weakness-list li > span { color: var(--text-primary); font-size: 11px; line-height: 1.5; }
+.practice-candidates { display: grid; gap: 12px; margin-top: 14px; }
+.practice-caption { margin: 0 0 4px; color: var(--highlight, #d97706); font-size: 10px; font-weight: 700; }
+.practice-candidate { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-left: 3px solid var(--highlight, #d97706); border-radius: 6px; background: var(--bg-surface); }
+.candidate-head { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 10px; }
+.ai-badge { padding: 2px 7px; border-radius: 10px; color: var(--highlight, #d97706); background: var(--highlight-light, #fef3c7); font-size: 9px; font-weight: 700; }
+.practice-candidate textarea { width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font: inherit; font-size: 11px; line-height: 1.6; resize: vertical; }
+.candidate-actions { display: flex; justify-content: flex-end; }
+.rounds-block { display: grid; gap: 10px; }
+.round-card { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-page); }
+.round-card summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 14px; cursor: pointer; list-style: none; }
+.round-card summary::-webkit-details-marker { display: none; }
+.round-no { color: var(--accent); font-family: var(--font-utility); font-size: 11px; font-weight: 700; }
+.round-question { overflow: hidden; color: var(--text-primary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.round-score { color: var(--accent); font-family: var(--font-utility); font-size: 13px; font-weight: 700; }
+.round-body { display: grid; gap: 10px; padding: 4px 14px 14px; border-top: 1px solid var(--border-soft); }
+.round-body p { display: grid; gap: 4px; margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; white-space: pre-wrap; }
+.round-body p strong { color: var(--text-primary); font-size: 10px; }
+.round-feedback { display: grid; gap: 4px; }
+.round-feedback strong { color: var(--text-primary); font-size: 10px; }
+.round-feedback ul { display: grid; gap: 4px; margin: 0; padding-left: 16px; color: var(--text-secondary); font-size: 10px; }
+.round-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.round-actions .btn-neon { min-height: 28px; padding: 0 9px; font-size: 9px; }
+.interview-heading-actions { display: grid; justify-items: end; gap: 8px; }
 @media (max-width: 760px) { .interview-heading { grid-template-columns: 1fr; } .interview-route { justify-content: flex-start; } .interview-setup { grid-template-columns: 1fr; padding: 20px 16px; } .interview-section-heading, .interview-setup .wide-field, .interview-setup > .btn-neon { grid-column: auto; } .interview-setup > .btn-neon, .question-stage .btn-neon { width: 100%; justify-content: center; } .feedback-columns, .report-sections { grid-template-columns: 1fr; } .question-stage, .feedback-panel, .interview-report { padding: 20px 16px; } .dimension-item { grid-template-columns: 90px 1fr 30px; } }
 @media (max-width: 480px) { .interview-heading h1 { font-size: 29px; } .interview-route { width: 100%; } .interview-route i { flex: 1; min-width: 8px; } }
 </style>

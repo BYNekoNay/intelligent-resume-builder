@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Archive, ArrowLeft, BriefcaseBusiness, CheckCircle2, Download, FileClock, Pencil, Plus, RotateCcw } from 'lucide-vue-next'
+import { Archive, ArrowLeft, BriefcaseBusiness, CheckCircle2, Download, FileClock, GitCompareArrows, Pencil, Plus, RotateCcw } from 'lucide-vue-next'
 import { archiveResumeVersion, getResume, listVersions, restoreResumeVersion, setCurrentVersion, unarchiveResumeVersion, updateResumeTitle, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
 import { listJobs, type JobDescription } from '@/api/jobDescription'
+import { listInterviewAssets, type InterviewAsset } from '@/api/interviewAsset'
+import { SECTION_KEYS, type SectionKey } from '@/resume/sectionRegistry'
 import { scoreMatch } from '@/api/scoring'
 import { createExport, type ResumeTemplateCode } from '@/api/export'
 import { useLocale } from '@/i18n'
@@ -30,6 +32,30 @@ const templateNames: Record<ResumeTemplateCode, string> = {
   compact: 'resumeEditor.templateCompact',
   academic: 'resumeEditor.templateAcademic',
 }
+
+const relatedAssets = ref<InterviewAsset[]>([])
+const relatedSectionKey = ref<string>('')
+const sectionLabels: Record<string, string> = {
+  basics: t('resumeEditor.basicsLabel'),
+  objective: t('resumeEditor.objectiveLabel'),
+  links: t('resumeEditor.linksLabel'),
+  work: t('resumeEditor.workLabel'),
+  volunteering: t('resumeEditor.volunteeringLabel'),
+  skills: t('resumeEditor.skillsLabel'),
+  projects: t('resumeEditor.projectsLabel'),
+  education: t('resumeEditor.educationLabel'),
+  courses: t('resumeEditor.coursesLabel'),
+  certificates: t('resumeEditor.certificatesLabel'),
+  publications: t('resumeEditor.publicationsLabel'),
+  awards: t('resumeEditor.awardsLabel'),
+  languages: t('resumeEditor.languagesLabel'),
+  customSections: t('resumeEditor.customSectionsLabel'),
+}
+
+const visibleRelatedAssets = computed(() => {
+  if (!relatedSectionKey.value) return relatedAssets.value
+  return relatedAssets.value.filter((asset) => asset.sectionKeys.includes(relatedSectionKey.value))
+})
 
 function versionTemplate(version: ResumeVersionSummary): ResumeTemplateCode {
   return version.templateCode ?? 'classic'
@@ -77,9 +103,28 @@ async function switchHistoryView(view: 'active' | 'archived') {
 }
 
 onMounted(async () => {
-  try { await load() }
-  catch { error.value = t('resumeDetail.loadError') }
+  try {
+    await load()
+    await loadRelatedAssets()
+  } catch { error.value = t('resumeDetail.loadError') }
 })
+
+async function loadRelatedAssets() {
+  try {
+    relatedAssets.value = (await listInterviewAssets()).data.data
+  } catch {
+    relatedAssets.value = []
+  }
+}
+
+function compareVersion(version: ResumeVersionSummary) {
+  const base = resume.value?.currentVersionId ?? version.id
+  void router.push({
+    name: 'resume-compare',
+    params: { id: props.id },
+    query: { base: String(base), compare: String(version.id) },
+  })
+}
 
 function startTitleEdit() {
   titleDraft.value = resume.value?.title ?? ''
@@ -204,6 +249,7 @@ async function exportPdf(version: ResumeVersionSummary) {
           <template v-if="historyView === 'active'">
             <button v-if="resume?.currentVersionId !== v.id" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="makeCurrent(v)">{{ t('resumeDetail.setCurrent') }}</button>
             <button class="icon-history-action" :title="t('resumeDetail.restoreAction')" :aria-label="`${t('resumeDetail.restoreAction')} v${v.versionNo}`" :disabled="runningAction !== null" @click="restore(v)"><RotateCcw :size="15" /></button>
+            <button class="icon-history-action" :title="t('resumeDetail.compareAction')" :aria-label="`${t('resumeDetail.compareAction')} v${v.versionNo}`" :disabled="runningAction !== null" @click="compareVersion(v)"><GitCompareArrows :size="15" /></button>
             <button v-if="resume?.currentVersionId !== v.id" class="icon-history-action" :title="t('resumeDetail.archiveAction')" :aria-label="`${t('resumeDetail.archiveAction')} v${v.versionNo}`" :disabled="runningAction !== null" @click="archive(v)"><Archive :size="15" /></button>
             <button v-if="resume?.jobDescriptionId" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="score(v)">{{ t('resumeDetail.viewScore') }}</button>
             <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="exportPdf(v)"><Download v-if="runningAction !== v.id" :size="15" />{{ runningAction === v.id ? t('resumeDetail.creatingTask') : t('resumeDetail.exportPdf') }}</button>
@@ -213,6 +259,26 @@ async function exportPdf(version: ResumeVersionSummary) {
             <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="restore(v)"><RotateCcw :size="15" />{{ t('resumeDetail.restoreAction') }}</button>
           </template>
           </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="related-assets" aria-labelledby="related-assets-title">
+      <header class="history-toolbar">
+        <div><p class="section-kicker">{{ t('resumeDetail.assetsEyebrow') }}</p><h2 id="related-assets-title">{{ t('resumeDetail.assetsTitle') }}</h2></div>
+        <select v-model="relatedSectionKey" class="assets-section-filter" :aria-label="t('assets.sectionFilter')">
+          <option value="">{{ t('resumeDetail.assetsAll') }}</option>
+          <option v-for="key in SECTION_KEYS" :key="key" :value="key">{{ sectionLabels[key] }}</option>
+        </select>
+      </header>
+      <p v-if="!visibleRelatedAssets.length" class="history-empty">{{ t('resumeDetail.assetsEmpty') }}</p>
+      <div v-else class="asset-panel-list">
+        <article v-for="asset in visibleRelatedAssets" :key="asset.id" class="asset-panel-card">
+          <h3>{{ asset.questionText }}</h3>
+          <div v-if="asset.sectionKeys.length" class="asset-tags">
+            <span v-for="key in asset.sectionKeys" :key="key" class="asset-tag">{{ sectionLabels[key] }}</span>
+          </div>
+          <p>{{ asset.originalAnswerText }}</p>
         </article>
       </div>
     </section>
@@ -256,6 +322,14 @@ async function exportPdf(version: ResumeVersionSummary) {
 .version-actions .btn-neon { min-height: 32px; padding: 0 9px; font-size: 9px; }
 .icon-history-action { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); background: var(--bg-surface); cursor: pointer; }
 .icon-history-action:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.related-assets { display: grid; gap: 0; margin-top: 26px; padding-top: 4px; }
+.assets-section-filter { min-height: 32px; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-input); color: var(--text-primary); font: inherit; font-size: 10px; }
+.asset-panel-list { display: grid; gap: 10px; padding-top: 12px; }
+.asset-panel-card { padding: 13px 15px; border: 1px solid var(--border); border-left: 3px solid var(--info); border-radius: 6px; background: var(--bg-surface); }
+.asset-panel-card h3 { margin: 0 0 6px; font-size: 12px; }
+.asset-panel-card p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; white-space: pre-wrap; }
+.asset-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
+.asset-tag { padding: 3px 8px; border-radius: 11px; color: var(--accent); background: var(--accent-light); font-size: 9px; font-weight: 700; }
 @media (max-width: 820px) { .history-heading { align-items: stretch; flex-direction: column; } .history-heading .btn-neon { align-self: start; } .version-row { grid-template-columns: 52px minmax(0, 1fr); } .version-actions { grid-column: 2; justify-content: flex-start; } }
 @media (max-width: 560px) { .resume-title-block h1 { font-size: 29px; } .rename-action span { display: none; } .history-heading .btn-neon { width: 100%; justify-content: center; } .history-toolbar { align-items: stretch; flex-direction: column; } .version-history-tabs { width: 100%; } .version-history-tabs button { flex: 1; } .version-row { align-items: start; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; } .version-actions { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .version-actions .btn-neon { width: 100%; justify-content: center; } }
 </style>

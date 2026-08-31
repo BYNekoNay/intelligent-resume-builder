@@ -55,6 +55,7 @@ const messages: Record<Locale, MessageTree> = {
       saving: '正在保存...', save: '保存资产', saveChanges: '保存修改', cancel: '取消', editAction: '编辑', delete: '删除', assetCount: '条已保存答案',
       loading: '正在加载答案资产...', empty: '还没有答案资产。', loadError: '无法加载答案资产，请稍后重试。',
       saveError: '无法保存答案资产。请检查必填项后重试。', deleteError: '无法删除答案资产，请稍后重试。', confirmDelete: '删除这条答案资产？',
+      sectionFilter: '章节筛选', allSections: '全部章节', relatedSections: '关联章节', relatedMaterials: '关联素材', noMaterials: '资料库暂无素材。',
     },
     careerMaterial: {
       eyebrow: '资料库', title: '把经历整理成可复用证据', subtitle: '先确认职业身份，再沉淀真实经历与成果。后续岗位定制只会从你保存的资料中取材。', filterLabel: '筛选资料类型', filterAll: '全部',
@@ -155,6 +156,7 @@ const messages: Record<Locale, MessageTree> = {
       exportError: 'PDF 导出任务创建失败，请稍后重试。', scoreNeedJob: '请先创建并选择一份 JD。',
       switchConfirm: '将 v{no} 设为当前版本？',
       historyLoadError: '版本历史加载失败，请重试。', restoreConfirm: '将 v{no} 恢复为新的当前版本？这会创建一个新版本，不会覆盖现有历史。', restoreError: '恢复版本失败，请重试。', archiveConfirm: '归档 v{no}？归档后不会出现在默认历史中，仍可随时恢复。', archiveError: '归档版本失败，请重试。', unarchiveConfirm: '将 v{no} 恢复到版本历史列表？', unarchiveError: '恢复归档版本失败，请重试。', fallbackTitle: '简历 #{id}', historyFilter: '版本历史筛选', activeHistory: '版本历史', archivedHistory: '已归档', restoreAction: '恢复为新版本', archiveAction: '归档', unarchiveAction: '恢复到历史列表',
+      compareAction: '对比版本', assetsEyebrow: '面试资产', assetsTitle: '相关面试资产', assetsAll: '全部章节', assetsEmpty: '暂无相关面试资产。',
     },
     resumeEditor: {
       title: '把经历写成一页好简历', basicsLabel: '个人信息', basicsFilled: '已填写', basicsEmpty: '待填写',
@@ -207,6 +209,7 @@ const messages: Record<Locale, MessageTree> = {
       advancedEditing: '高级编辑', advancedEditingDescription: '兴趣等少用扩展字段可通过标准 JSON 精确调整。', resumeSource: '简历源数据', jsonValid: 'JSON 格式有效', jsonInvalidSave: 'JSON 格式有误，修复后才能保存', undoRemoved: '已移除“{label}”', undo: '撤销', sourceInvalidEdit: '源数据 JSON 格式有误，请先修复后再继续可视化编辑。', resumeJsonInvalid: '简历 JSON 格式无效。', saveFailed: '版本保存失败，请稍后重试。', shortcutSave: 'Ctrl / Cmd + S',
       previewNamePlaceholder: '你的姓名', previewRolePlaceholder: '目标岗位', previewContactPlaceholder: '电话 · 邮箱 · 城市', emptyStepIdentity: '说明你是谁', emptyStepIdentityDescription: '姓名、目标岗位和联系方式', emptyStepProof: '证明你做成过什么', emptyStepProofDescription: '经历、项目和可量化成果', emptyStepMatch: '匹配目标岗位', emptyStepMatchDescription: '专业技能与教育背景', companyPlaceholder: '公司名称', projectPlaceholder: '项目名称', certificatePlaceholder: '证书名称',
       suggestionRole: '补充目标岗位，让内容有清晰方向。', suggestionSummary: '用三句话概括经验、专业方向与核心优势。', suggestionExperience: '添加一段最能证明能力的经历或项目。', suggestionSkills: '补充与目标岗位直接相关的专业技能。', suggestionComplete: '主体内容已经完整，继续精炼成果表达。',
+      relatedAssetsLabel: '相关面试资产（只读）',
     },
     achievementGuidance: {
       eyebrow: '成就引导', title: '强化简历事实',
@@ -311,6 +314,29 @@ const messages: Record<Locale, MessageTree> = {
       reauthorize: '前往授权', modeMixed: '混合模式',
       confirmFinish: '确定要结束面试吗？结束后将无法继续作答。',
       sourceManual: '手动编辑', sourceAiOptimized: 'AI 优化', sourceJdCustomized: '岗位定制', sourceMaterialCustomized: '资料生成', sourceRestored: '历史恢复', sourceOther: '其他来源',
+      historyEntry: '面试历史', copied: '建议答案已复制。',
+      weaknessPractice: '薄弱项练习', weaknessHint: '针对报告中的薄弱项生成针对性练习题（AI 仅生成候选，确认后才会进入练习）。', noWeakness: '本次面试没有明显薄弱项。',
+      generatePractice: '生成针对性练习', practiceGenerating: '正在生成…', practiceCaption: '以下是 AI 生成的候选练习题（可编辑），选择一条开始练习：',
+      aiCandidate: 'AI 候选', useThisPractice: '用这道题练习', roundsTitle: '逐轮问答明细', suggestedAnswer: '建议答案', copyAnswer: '复制建议答案',
+      practiceTimeout: '练习生成超时，请稍后重试。', practiceError: '练习生成失败，请稍后重试。', consentRequired: '需要 AI 面试授权，请先同意隐私政策。', quotaExceeded: '今日 AI 面试配额已用完。',
+    },
+    history: {
+      backToInterview: '返回面试工作台', eyebrow: '面试历史', title: '历史面试会话', subtitle: '回看已完成的面试报告，追踪面试表现的长期进步。',
+      jobFilter: '岗位筛选', allJobs: '全部岗位', filter: '筛选', loading: '正在加载历史会话…', empty: '还没有完成的面试会话。',
+      loadError: '无法加载历史会话，请稍后重试。', reportError: '无法加载面试报告，请稍后重试。', backToList: '返回列表', reportEyebrow: '只读报告',
+      noJob: '通用面试', jobRef: '岗位', suggestedAnswer: '建议答案', roundsTitle: '逐轮问答明细', questions: '题', score: '平均分',
+    },
+    resumeCompare: {
+      backToDetail: '返回版本历史', eyebrow: '版本对比', title: '简历版本对比', subtitle: '并排比较两个版本，按章节与条目定位变化。',
+      switchSides: '交换左右', baseVersion: '基准版本（左侧）', compareVersion: '对比版本（右侧）', onlyChanged: '只看有变化的章节',
+      summary: '差异摘要', summaryChanged: '有变化章节', summaryAdded: '新增', summaryRemoved: '删除', summaryModified: '修改',
+      sectionType: { UNCHANGED: '无变化', ADDED: '新增', REMOVED: '删除', CHANGED: '有变化' },
+      copyLeft: '复制左侧内容', copyRight: '复制右侧内容', noContent: '（无内容）', items: '条目',
+      restoreBase: '恢复左侧版本 v{no}', restoreCompare: '恢复右侧版本 v{no}', loadError: '无法加载版本数据，请稍后重试。', loading: '正在计算差异…', noVersions: '当前简历还没有可对比的版本。', copied: '内容已复制。',
+    },
+    toast: {
+      applicationConflict: '记录已被其他操作更新，请刷新后重试。', applicationInvalidMove: '不允许该状态迁移。', applicationMoved: '已更新投递状态。', applicationStatusError: '无法更新投递状态，请稍后重试。',
+      draftSaved: '草稿已保存（不会自动发送）。', draftSaveError: '草稿保存失败，请稍后重试。', templateSaved: '模板已保存。', templateSaveError: '模板保存失败，请检查占位符。', templateDeleted: '模板已删除。',
     },
     home: {
       badge: '你的求职工作台',
@@ -499,6 +525,7 @@ const messages: Record<Locale, MessageTree> = {
       saving: 'Saving...', save: 'Save asset', saveChanges: 'Save changes', cancel: 'Cancel', editAction: 'Edit', delete: 'Delete', assetCount: 'saved answers',
       loading: 'Loading answer assets...', empty: 'No answer assets yet.', loadError: 'Unable to load answer assets. Please try again.',
       saveError: 'Unable to save this answer asset. Check the required fields and try again.', deleteError: 'Unable to delete this answer asset. Please try again.', confirmDelete: 'Delete this answer asset?',
+      sectionFilter: 'Section filter', allSections: 'All sections', relatedSections: 'Related sections', relatedMaterials: 'Related materials', noMaterials: 'No materials in the library yet.',
     },
     careerMaterial: {
       eyebrow: 'Materials', title: 'Turn Experience into Reusable Evidence', subtitle: 'Confirm your career identity, then preserve real experience and outcomes. Role tailoring only uses material you save here.', filterLabel: 'Filter type', filterAll: 'All',
@@ -599,6 +626,7 @@ const messages: Record<Locale, MessageTree> = {
       exportError: 'Failed to create PDF export task. Please try again.', scoreNeedJob: 'Create and select a JD first.',
       switchConfirm: 'Set v{no} as the current version?',
       historyLoadError: 'Unable to load version history. Try again.', restoreConfirm: 'Restore v{no} as a new current version? This creates a version without overwriting history.', restoreError: 'Unable to restore this version. Try again.', archiveConfirm: 'Archive v{no}? It will leave the default history but can be restored later.', archiveError: 'Unable to archive this version. Try again.', unarchiveConfirm: 'Return v{no} to version history?', unarchiveError: 'Unable to restore this archived version. Try again.', fallbackTitle: 'Resume #{id}', historyFilter: 'Version history filter', activeHistory: 'Version history', archivedHistory: 'Archived', restoreAction: 'Restore as new version', archiveAction: 'Archive', unarchiveAction: 'Return to history',
+      compareAction: 'Compare', assetsEyebrow: 'Interview assets', assetsTitle: 'Related Interview Assets', assetsAll: 'All sections', assetsEmpty: 'No related interview assets yet.',
     },
     resumeEditor: {
       title: 'Turn your experience into a one-page resume', basicsLabel: 'Personal Info', basicsFilled: 'Filled', basicsEmpty: 'Pending',
@@ -651,6 +679,7 @@ const messages: Record<Locale, MessageTree> = {
       advancedEditing: 'Advanced editing', advancedEditingDescription: 'Use standard JSON to adjust less common fields such as interests precisely.', resumeSource: 'Resume source data', jsonValid: 'Valid JSON', jsonInvalidSave: 'Invalid JSON. Fix it before saving.', undoRemoved: 'Removed “{label}”', undo: 'Undo', sourceInvalidEdit: 'The source JSON is invalid. Fix it before continuing visual editing.', resumeJsonInvalid: 'The resume JSON is invalid.', saveFailed: 'Unable to save the version. Please try again later.', shortcutSave: 'Ctrl / Cmd + S',
       previewNamePlaceholder: 'Your name', previewRolePlaceholder: 'Target role', previewContactPlaceholder: 'Phone · email · city', emptyStepIdentity: 'Introduce yourself', emptyStepIdentityDescription: 'Name, target role, and contact details', emptyStepProof: 'Prove what you accomplished', emptyStepProofDescription: 'Experience, projects, and measurable outcomes', emptyStepMatch: 'Match the target role', emptyStepMatchDescription: 'Relevant skills and education', companyPlaceholder: 'Company name', projectPlaceholder: 'Project name', certificatePlaceholder: 'Certificate name',
       suggestionRole: 'Add a target role to give the content a clear direction.', suggestionSummary: 'Use three sentences to summarize your experience, focus, and strengths.', suggestionExperience: 'Add the experience or project that best proves your ability.', suggestionSkills: 'Add skills directly relevant to the target role.', suggestionComplete: 'The core content is complete. Keep refining the outcome language.',
+      relatedAssetsLabel: 'Related interview assets (read-only)',
     },
     achievementGuidance: {
       eyebrow: 'Achievement guidance', title: 'Strengthen Resume Facts',
@@ -755,6 +784,29 @@ const messages: Record<Locale, MessageTree> = {
       reauthorize: 'Go to authorization', modeMixed: 'Mixed mode',
       confirmFinish: 'Are you sure you want to finish? You will not be able to continue answering.',
       sourceManual: 'Manual edit', sourceAiOptimized: 'AI optimized', sourceJdCustomized: 'Role tailored', sourceMaterialCustomized: 'Material generated', sourceRestored: 'Restored history', sourceOther: 'Other source',
+      historyEntry: 'Interview history', copied: 'Suggested answer copied.',
+      weaknessPractice: 'Weakness practice', weaknessHint: 'Generate targeted practice questions for the weaknesses in this report (AI only drafts candidates; practice starts after you confirm).', noWeakness: 'No notable weaknesses in this interview.',
+      generatePractice: 'Generate practice', practiceGenerating: 'Generating…', practiceCaption: 'AI-drafted practice questions below (editable). Pick one to start practicing:',
+      aiCandidate: 'AI draft', useThisPractice: 'Practice with this', roundsTitle: 'Round details', suggestedAnswer: 'Suggested answer', copyAnswer: 'Copy answer',
+      practiceTimeout: 'Practice generation timed out. Try again later.', practiceError: 'Practice generation failed. Try again later.', consentRequired: 'AI interview consent is required. Review the privacy policy first.', quotaExceeded: 'Daily AI interview quota reached.',
+    },
+    history: {
+      backToInterview: 'Back to interview workspace', eyebrow: 'Interview history', title: 'Past Interview Sessions', subtitle: 'Review completed interview reports and track your long-term progress.',
+      jobFilter: 'Job filter', allJobs: 'All jobs', filter: 'Filter', loading: 'Loading history…', empty: 'No completed interview sessions yet.',
+      loadError: 'Unable to load history. Please try again.', reportError: 'Unable to load the interview report. Please try again.', backToList: 'Back to list', reportEyebrow: 'Read-only report',
+      noJob: 'General interview', jobRef: 'Job', suggestedAnswer: 'Suggested answer', roundsTitle: 'Round details', questions: 'questions', score: 'Avg score',
+    },
+    resumeCompare: {
+      backToDetail: 'Back to version history', eyebrow: 'Version compare', title: 'Compare Resume Versions', subtitle: 'Compare two versions side by side and locate changes by section and item.',
+      switchSides: 'Swap sides', baseVersion: 'Base version (left)', compareVersion: 'Compare version (right)', onlyChanged: 'Show changed sections only',
+      summary: 'Diff summary', summaryChanged: 'Changed sections', summaryAdded: 'Added', summaryRemoved: 'Removed', summaryModified: 'Modified',
+      sectionType: { UNCHANGED: 'Unchanged', ADDED: 'Added', REMOVED: 'Removed', CHANGED: 'Changed' },
+      copyLeft: 'Copy left content', copyRight: 'Copy right content', noContent: '(no content)', items: 'items',
+      restoreBase: 'Restore left version v{no}', restoreCompare: 'Restore right version v{no}', loadError: 'Unable to load version data. Please try again.', loading: 'Computing diff…', noVersions: 'This resume has no versions to compare yet.', copied: 'Content copied.',
+    },
+    toast: {
+      applicationConflict: 'This record was updated by another action. Refresh and try again.', applicationInvalidMove: 'This status change is not allowed.', applicationMoved: 'Application status updated.', applicationStatusError: 'Unable to update status. Please try again.',
+      draftSaved: 'Draft saved (never sent automatically).', draftSaveError: 'Unable to save the draft. Please try again.', templateSaved: 'Template saved.', templateSaveError: 'Unable to save the template. Check the placeholders.', templateDeleted: 'Template deleted.',
     },
     home: {
       badge: 'Your job search workspace',

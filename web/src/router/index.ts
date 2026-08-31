@@ -12,6 +12,7 @@ import { lazyChunkRetryKey } from './lazyChunkRecovery'
 const ResumeListView = () => import('@/views/ResumeListView.vue')
 const ResumeDetailView = () => import('@/views/ResumeDetailView.vue')
 const ResumeEditorView = () => import('@/views/ResumeEditorView.vue')
+const CompareVersionsView = () => import('@/views/CompareVersionsView.vue')
 const CareerMaterialView = () => import('@/views/CareerMaterialView.vue')
 const JobDescriptionView = () => import('@/views/JobDescriptionView.vue')
 const GenerationWorkbenchView = () => import('@/views/GenerationWorkbenchView.vue')
@@ -24,6 +25,7 @@ const AtsCheckView = () => import('@/views/AtsCheckView.vue')
 const ApplicationsView = () => import('@/views/ApplicationsView.vue')
 const MaterialResumeGenerationView = () => import('@/views/MaterialResumeGenerationView.vue')
 const InterviewView = () => import('@/views/InterviewView.vue')
+const InterviewHistoryView = () => import('@/views/InterviewHistoryView.vue')
 const ResumeImportView = () => import('@/views/ResumeImportView.vue')
 const CommunicationView = () => import('@/views/CommunicationView.vue')
 const InterviewAssetsView = () => import('@/views/InterviewAssetsView.vue')
@@ -62,6 +64,7 @@ const router = createRouter({
         { path: 'resumes', name: 'resume-list', component: ResumeListView, meta: { requiresAuth: true } },
         { path: 'resumes/:id', name: 'resume-detail', component: ResumeDetailView, props: true, meta: { requiresAuth: true } },
         { path: 'resumes/:id/edit', name: 'resume-editor', component: ResumeEditorView, props: true, meta: { requiresAuth: true } },
+        { path: 'resumes/:id/compare', name: 'resume-compare', component: CompareVersionsView, props: true, meta: { requiresAuth: true } },
         { path: 'career-materials', name: 'career-materials', component: CareerMaterialView, meta: { requiresAuth: true } },
         { path: 'generate', name: 'generate', component: GenerationWorkbenchView, meta: { requiresAuth: true } },
         { path: 'generate/materials', name: 'generate-materials', component: MaterialSelectionConfirmView, meta: { requiresAuth: true } },
@@ -74,6 +77,7 @@ const router = createRouter({
         { path: 'applications', name: 'applications', component: ApplicationsView, meta: { requiresAuth: true } },
         { path: 'material-generation', name: 'material-generation', component: MaterialResumeGenerationView, meta: { requiresAuth: true } },
         { path: 'interviews', name: 'interviews', component: InterviewView, meta: { requiresAuth: true } },
+        { path: 'interviews/history', name: 'interview-history', component: InterviewHistoryView, meta: { requiresAuth: true } },
         { path: 'resume-import', name: 'resume-import', component: ResumeImportView, meta: { requiresAuth: true } },
         { path: 'communications', name: 'communications', component: CommunicationView, meta: { requiresAuth: true } },
         { path: 'interview-assets', name: 'interview-assets', component: InterviewAssetsView, meta: { requiresAuth: true } },

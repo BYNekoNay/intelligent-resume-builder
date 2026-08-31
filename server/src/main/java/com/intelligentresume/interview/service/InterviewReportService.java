@@ -140,7 +140,7 @@ public class InterviewReportService {
                     stateAssembler.num(m.get("authenticityReflection")));
         }
         return new InterviewReportResponse.RoundDetail(
-                record.getRoundNo(), record.getQuestionText(), record.getAnswerText(), record.getRoundScore(),
+                record.getId(), record.getRoundNo(), record.getQuestionText(), record.getAnswerText(), record.getRoundScore(),
                 dims,
                 stringList(feedback.get("strengths")),
                 stringList(feedback.get("improvements")),

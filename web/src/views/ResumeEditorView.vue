@@ -19,6 +19,7 @@ import SampleConfirmDialog from '@/components/resume/SampleConfirmDialog.vue'
 import DraftRestoreBanner from '@/components/resume/DraftRestoreBanner.vue'
 import { useResumeEditorDraft } from '@/composables/useResumeEditorDraft'
 import { SECTION_KEYS, DEFAULT_SECTION_ORDER, mapAtsSection, resolveSectionOrder, type SectionKey, type ContentSectionKey } from '@/resume/sectionRegistry'
+import { listInterviewAssets, type InterviewAsset } from '@/api/interviewAsset'
 
 const { t } = useLocale()
 function message(key: string, values: Record<string, string | number> = {}) {
@@ -68,6 +69,20 @@ const atsContext = ref<AtsHandoffContext | null>(null)
 const sectionKeys = SECTION_KEYS
 type SortableSection = ContentSectionKey
 const activeSection = ref<SectionKey>('basics')
+const relatedSectionAssets = ref<InterviewAsset[]>([])
+const relatedAssetsLoading = ref(false)
+watch(activeSection, () => { void loadRelatedSectionAssets() }, { immediate: true })
+async function loadRelatedSectionAssets() {
+  if (!activeSection.value) return
+  relatedAssetsLoading.value = true
+  try {
+    relatedSectionAssets.value = (await listInterviewAssets({ sectionKey: activeSection.value })).data.data
+  } catch {
+    relatedSectionAssets.value = []
+  } finally {
+    relatedAssetsLoading.value = false
+  }
+}
 type DragLocation = { section: SortableSection; index: number; after: boolean }
 const collapsedSections = ref<Set<SectionKey>>(new Set(sectionKeys.filter((section) => section !== 'basics')))
 const draggedItem = ref<{ section: SortableSection; index: number } | null>(null)
@@ -919,6 +934,12 @@ async function save() {
           <button v-if="materialLibrary.length" type="button" class="btn-neon btn-primary" :disabled="!canInsertMaterial" @click="insertMaterial">{{ materialInsertLoading ? t('resumeEditor.insertingMaterial') : t('resumeEditor.insertMaterial') }}</button>
           <small v-if="materialLibrary.length && !materialCandidates.length">{{ t('resumeEditor.noMaterialsForSection') }}</small>
         </div>
+        <div v-if="relatedSectionAssets.length" class="related-assets-bar">
+          <span class="related-assets-title">{{ t('resumeEditor.relatedAssetsLabel') }}</span>
+          <p v-for="asset in relatedSectionAssets" :key="asset.id" class="related-asset-item">
+            <strong>{{ asset.questionText }}</strong>{{ asset.originalAnswerText }}
+          </p>
+        </div>
         <aside v-if="aiAssistant" class="ai-assistant-panel" aria-live="polite">
           <header><span class="ai-orb"><Sparkles :size="15" /></span><div><small>{{ aiAssistant.scope === 'field' ? t('resumeEditor.aiFieldPolish') : t('resumeEditor.aiSectionOptimize') }}</small><strong>{{ aiAssistant.label }}</strong></div><button type="button" :aria-label="t('resumeEditor.closeAiAssistant')" @click="closeAiAssistant"><X :size="16" /></button></header>
           <p v-if="aiAssistant.content">{{ t('resumeEditor.aiContentNotice') }}</p>
@@ -1050,3 +1071,10 @@ async function save() {
     </section>
   </section>
 </template>
+
+<style scoped>
+.related-assets-bar { display: grid; gap: 7px; margin: 2px 0 10px; padding: 10px 12px; border: 1px solid var(--border-soft); border-left: 3px solid var(--info); border-radius: 6px; background: var(--bg-page); }
+.related-assets-title { color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; font-weight: 700; }
+.related-asset-item { display: grid; gap: 2px; margin: 0; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }
+.related-asset-item strong { overflow: hidden; color: var(--text-primary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+</style>
