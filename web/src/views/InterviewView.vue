@@ -336,13 +336,28 @@ async function startPractice(candidateIndex: number) {
   error.value = ''
   starting.value = true
   try {
+    // 练习会话复用原会话的 sourceType/resumeVersionId/jobDescriptionId，保证事实同源
+    const session = sessionState.value
+    const srcType: 'PLATFORM_RESUME' | 'EXTERNAL_RESUME' = session?.sourceType ?? sourceType.value
+    const versionId = session?.resumeVersionId ?? (srcType === 'PLATFORM_RESUME' ? Number(resumeVersionId.value) : undefined)
+    const jobDescId = session?.jobDescriptionId ?? (jobId.value ? Number(jobId.value) : undefined)
+    if (srcType === 'PLATFORM_RESUME' && !versionId) {
+      error.value = t('interview.selectVersionFirst')
+      return
+    }
+    if (srcType === 'EXTERNAL_RESUME' && !resumeText.value.trim()) {
+      error.value = t('interview.externalResumeRequired')
+      return
+    }
     const payload: Parameters<typeof startInterview>[0] = {
-      sourceType: sourceType.value,
-      resumeVersionId: sourceType.value === 'PLATFORM_RESUME' ? Number(resumeVersionId.value) : undefined,
-      externalResumeText: sourceType.value === 'EXTERNAL_RESUME' ? resumeText.value : undefined,
-      jobDescriptionId: jobId.value ? Number(jobId.value) : undefined,
-      interviewMode: interviewMode.value,
-      targetQuestionCount: targetQuestionCount.value,
+      sourceType: srcType,
+      resumeVersionId: srcType === 'PLATFORM_RESUME' ? versionId : undefined,
+      externalResumeText: srcType === 'EXTERNAL_RESUME' ? resumeText.value : undefined,
+      jobDescriptionId: jobDescId,
+      interviewMode: session?.executionMode === 'RULE'
+        ? (session?.jobDescriptionId ? 'JD_TARGETED' : 'TECHNICAL')
+        : interviewMode.value,
+      targetQuestionCount: session?.targetQuestionCount ?? targetQuestionCount.value,
       outputLanguage: locale.value === 'zh-CN' ? 'ZH_CN' : 'EN',
       initialQuestion: question,
     }
