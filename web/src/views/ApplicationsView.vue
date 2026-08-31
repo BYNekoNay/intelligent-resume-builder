@@ -18,16 +18,21 @@ import {
 import {
   createApplication,
   deleteApplication,
+  getApplicationStats,
   listApplications,
   updateApplication,
   updateApplicationStatus,
   type ApplicationRecord,
+  type ApplicationStats,
   type ApplicationStatus,
+  type FollowUpFilter,
 } from '@/api/application'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
+import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
 
 const records = ref<ApplicationRecord[]>([])
+const stats = ref<ApplicationStats | null>(null)
 const loading = ref(true)
 const saving = ref(false)
 const loadingEdit = ref(false)
@@ -40,9 +45,14 @@ const resumeVersionId = ref('')
 const coverLetterText = ref('')
 const emailBodyText = ref('')
 const openingMessageText = ref('')
+const nextFollowUpAt = ref('')
 const feedbackDraft = ref<Record<number, string>>({})
 const expandedRecordId = ref<number | null>(null)
+const followUpFilter = ref<FollowUpFilter>('ALL')
+const draggingRecordId = ref<number | null>(null)
+const dragOverLane = ref<ApplicationStatus | null>(null)
 const { locale, t } = useLocale()
+const { toasts, success: toastSuccess, error: toastError, dismiss } = useToast()
 const {
   resumes,
   jobs,
@@ -56,6 +66,7 @@ const {
 } = useResumeJobOptions()
 
 const statuses: ApplicationStatus[] = ['DRAFT', 'APPLIED', 'INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN']
+const terminalStatuses: ApplicationStatus[] = ['OFFERED', 'REJECTED', 'WITHDRAWN']
 
 const filteredRecords = computed(() => {
   const query = searchQuery.value.trim().toLocaleLowerCase(locale.value)
@@ -79,13 +90,22 @@ const offerCount = computed(() => records.value.filter(record => record.status =
 async function load() {
   loading.value = true
   try {
-    records.value = (await listApplications()).data.data
+    const [listResponse, statsResponse] = await Promise.all([
+      listApplications(followUpFilter.value),
+      getApplicationStats(),
+    ])
+    records.value = listResponse.data.data
+    stats.value = statsResponse.data.data
     feedbackDraft.value = Object.fromEntries(records.value.map(record => [record.id, record.feedbackText ?? '']))
   } catch {
     error.value = t('applications.loadError')
   } finally {
     loading.value = false
   }
+}
+
+async function changeFollowUpFilter() {
+  await load()
 }
 
 function resetForm() {
@@ -96,6 +116,7 @@ function resetForm() {
   coverLetterText.value = ''
   emailBodyText.value = ''
   openingMessageText.value = ''
+  nextFollowUpAt.value = ''
 }
 
 function openComposer() {
@@ -127,6 +148,7 @@ async function edit(record: ApplicationRecord) {
   coverLetterText.value = record.coverLetterText ?? ''
   emailBodyText.value = record.emailBodyText ?? ''
   openingMessageText.value = record.openingMessageText ?? ''
+  nextFollowUpAt.value = record.nextFollowUpAt ? record.nextFollowUpAt.slice(0, 16) : ''
   try {
     await selectResumeVersion(record.resumeVersionId)
     error.value = ''
@@ -146,6 +168,7 @@ async function save() {
     coverLetterText: coverLetterText.value || undefined,
     emailBodyText: emailBodyText.value || undefined,
     openingMessageText: openingMessageText.value || undefined,
+    nextFollowUpAt: nextFollowUpAt.value ? new Date(nextFollowUpAt.value).toISOString() : null,
   }
   try {
     if (editingId.value === null) {
@@ -161,6 +184,7 @@ async function save() {
       records.value = records.value.map(record => record.id === updated.id ? updated : record)
     }
     resetForm()
+    await load()
   } catch {
     error.value = t('applications.saveError')
   } finally {
@@ -209,6 +233,21 @@ function formatDate(value: string | null) {
   return new Intl.DateTimeFormat(locale.value, { month: 'short', day: 'numeric' }).format(new Date(value))
 }
 
+function formatFollowUp(value: string | null) {
+  if (!value) return ''
+  return new Intl.DateTimeFormat(locale.value, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+}
+
+function isOverdue(record: ApplicationRecord) {
+  if (!record.nextFollowUpAt) return false
+  if (terminalStatuses.includes(record.status)) return false
+  return new Date(record.nextFollowUpAt).getTime() < Date.now()
+}
+
+function showFollowUp(record: ApplicationRecord) {
+  return record.nextFollowUpAt && !terminalStatuses.includes(record.status)
+}
+
 function messageCount(record: ApplicationRecord) {
   return [record.coverLetterText, record.emailBodyText, record.openingMessageText].filter(Boolean).length
 }
@@ -223,9 +262,84 @@ async function changeStatus(record: ApplicationRecord, status: ApplicationStatus
     )).data.data
     Object.assign(record, updated)
     feedbackDraft.value[record.id] = record.feedbackText ?? ''
-  } catch {
-    error.value = t('applications.statusError')
+  } catch (cause: any) {
+    if (cause?.response?.data?.code === 40901) {
+      toastError(t('toast.applicationConflict'))
+      await load()
+    } else {
+      toastError(t('toast.applicationStatusError'))
+    }
   }
+}
+
+// ==================== 原生 HTML5 拖拽 ====================
+
+function onCardDragStart(record: ApplicationRecord, event: DragEvent) {
+  draggingRecordId.value = record.id
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', String(record.id))
+  }
+}
+
+function onCardDragEnd() {
+  draggingRecordId.value = null
+  dragOverLane.value = null
+}
+
+function onLaneDragOver(status: ApplicationStatus, event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  dragOverLane.value = status
+}
+
+function onLaneDragLeave() {
+  dragOverLane.value = null
+}
+
+async function onLaneDrop(status: ApplicationStatus, event: DragEvent) {
+  event.preventDefault()
+  dragOverLane.value = null
+  const recordId = Number(event.dataTransfer?.getData('text/plain') ?? draggingRecordId.value)
+  const record = records.value.find(item => item.id === recordId)
+  if (!record) return
+  if (record.status === status) return
+  // 非法迁移：toast 阻止，不发起任何请求、不移列
+  if (!allowedStatuses(record.status).includes(status)) {
+    toastError(t('toast.applicationInvalidMove'))
+    return
+  }
+  try {
+    const updated = (await updateApplicationStatus(
+      record.id,
+      status,
+      record.version,
+      feedbackDraft.value[record.id] ?? record.feedbackText ?? undefined,
+    )).data.data
+    records.value = records.value.map(item => item.id === updated.id ? updated : item)
+    feedbackDraft.value[updated.id] = updated.feedbackText ?? ''
+    toastSuccess(t('toast.applicationMoved'))
+  } catch (cause: any) {
+    // 乐观锁冲突：toast + 重新拉列表
+    if (cause?.response?.data?.code === 40901) {
+      toastError(t('toast.applicationConflict'))
+      await load()
+    } else {
+      toastError(t('toast.applicationStatusError'))
+    }
+  }
+}
+
+function formatPercent(value: number | null) {
+  return value === null ? '—' : `${value}%`
+}
+
+function formatRate(value: number | null) {
+  return value === null ? '—' : `${Math.round(value * 100)}%`
+}
+
+function formatDays(value: number | null) {
+  return value === null ? '—' : `${value}${t('applications.daysUnit')}`
 }
 
 async function remove(record: ApplicationRecord) {
@@ -273,10 +387,20 @@ onMounted(async () => {
     </header>
 
     <section class="pipeline-summary" :aria-label="t('applications.title')">
-      <div><span>{{ t('applications.recordCount') }}</span><strong>{{ records.length }}</strong></div>
+      <div><span>{{ t('applications.recordCount') }}</span><strong>{{ stats?.total ?? records.length }}</strong></div>
       <div><span>{{ t('applications.statusApplied') }}</span><strong>{{ appliedCount }}</strong></div>
       <div><span>{{ t('applications.statusInterviewing') }}</span><strong>{{ interviewCount }}</strong></div>
       <div><span>{{ t('applications.statusOffered') }}</span><strong>{{ offerCount }}</strong></div>
+    </section>
+
+    <section v-if="stats" class="funnel-summary" :aria-label="t('applications.funnelTitle')">
+      <div class="funnel-title"><span>{{ t('applications.funnelTitle') }}</span><small>{{ t('applications.funnelSubtitle') }}</small></div>
+      <div class="funnel-metric"><span>{{ t('applications.convAppliedInterviewing') }}</span><strong>{{ formatRate(stats.conversionRates.appliedToInterviewing) }}</strong></div>
+      <div class="funnel-metric"><span>{{ t('applications.convInterviewingOffered') }}</span><strong>{{ formatRate(stats.conversionRates.interviewingToOffered) }}</strong></div>
+      <div class="funnel-metric"><span>{{ t('applications.convAppliedOffered') }}</span><strong>{{ formatRate(stats.conversionRates.appliedToOffered) }}</strong></div>
+      <div class="funnel-metric"><span>{{ t('applications.avgApplied') }}</span><strong>{{ formatDays(stats.avgStageDurationDays.applied) }}</strong></div>
+      <div class="funnel-metric"><span>{{ t('applications.avgInterviewing') }}</span><strong>{{ formatDays(stats.avgStageDurationDays.interviewing) }}</strong></div>
+      <div class="funnel-metric"><span>{{ t('applications.avgTotalToOffer') }}</span><strong>{{ formatDays(stats.avgStageDurationDays.totalToOffer) }}</strong></div>
     </section>
 
     <form v-if="composerOpen" class="workspace-card compact-form application-composer" @submit.prevent="save">
@@ -295,6 +419,7 @@ onMounted(async () => {
       <label>{{ t('applications.cover') }}<textarea v-model="coverLetterText" rows="4" /></label>
       <label>{{ t('applications.email') }}<textarea v-model="emailBodyText" rows="4" /></label>
       <label>{{ t('applications.opening') }}<textarea v-model="openingMessageText" rows="4" /></label>
+      <label>{{ t('applications.nextFollowUp') }}<input v-model="nextFollowUpAt" type="datetime-local" /></label>
       <div class="job-actions"><button class="btn-neon btn-primary" :disabled="saving || loadingEdit || optionsLoading"><Save :size="16" />{{ saving ? t('applications.saving') : editingId === null ? t('applications.createDraft') : t('applications.saveChanges') }}</button><button class="btn-neon btn-ghost" type="button" :disabled="loadingEdit" @click="resetForm">{{ t('applications.cancel') }}</button></div>
     </form>
 
@@ -302,15 +427,15 @@ onMounted(async () => {
 
     <div class="pipeline-toolbar">
       <label class="pipeline-search"><Search :size="16" /><span class="sr-only">{{ t('applications.title') }}</span><input v-model="searchQuery" type="search" :placeholder="t('applications.job')" /></label>
-      <span><Archive :size="14" />{{ t('applications.subtitle') }}</span>
+      <label class="follow-up-filter">{{ t('applications.followUpFilter') }}<select v-model="followUpFilter" @change="changeFollowUpFilter"><option value="ALL">{{ t('applications.followUpAll') }}</option><option value="TODAY">{{ t('applications.followUpToday') }}</option><option value="OVERDUE">{{ t('applications.followUpOverdue') }}</option></select></label>
     </div>
 
     <p v-if="loading" class="pipeline-loading">{{ t('applications.loading') }}</p>
     <div v-else-if="records.length" class="application-board">
-      <section v-for="lane in lanes" :key="lane.status" class="pipeline-lane" :class="`lane-${lane.status.toLowerCase()}`">
+      <section v-for="lane in lanes" :key="lane.status" class="pipeline-lane" :class="[`lane-${lane.status.toLowerCase()}`, { 'is-drag-over': dragOverLane === lane.status }]" @dragover="onLaneDragOver(lane.status, $event)" @dragleave="onLaneDragLeave" @drop="onLaneDrop(lane.status, $event)">
         <header><span class="lane-marker" /><h2>{{ statusLabel(lane.status) }}</h2><strong>{{ lane.records.length }}</strong></header>
         <div class="lane-records">
-          <article v-for="record in lane.records" :key="record.id" class="application-ticket">
+          <article v-for="record in lane.records" :key="record.id" class="application-ticket" :class="{ 'is-dragging': draggingRecordId === record.id }" draggable="true" @dragstart="onCardDragStart(record, $event)" @dragend="onCardDragEnd">
             <header>
               <div><span>{{ recordCompany(record) }}</span><h3>{{ recordTitle(record) }}</h3></div>
               <button class="icon-button" type="button" :title="t('applications.editAction')" :disabled="loadingEdit" @click="edit(record)"><Pencil :size="14" /></button>
@@ -321,6 +446,7 @@ onMounted(async () => {
               <span><MailCheck :size="13" />{{ messageCount(record) }}/3</span>
             </div>
             <div class="ticket-date"><CalendarDays :size="13" />{{ formatDate(record.appliedAt || record.updatedAt) }}</div>
+            <div v-if="showFollowUp(record)" class="ticket-follow-up" :class="{ overdue: isOverdue(record) }"><CalendarDays :size="13" />{{ t('applications.nextFollowUp') }}: {{ formatFollowUp(record.nextFollowUpAt) }}</div>
             <label class="stage-control"><span>{{ t('applications.status') }}</span><select :value="record.status" :aria-label="t('applications.status')" @change="changeStatus(record, ($event.target as HTMLSelectElement).value as ApplicationStatus)"><option v-for="status in allowedStatuses(record.status)" :key="status" :value="status">{{ statusLabel(status) }}</option></select></label>
             <button class="ticket-expand" type="button" :aria-expanded="expandedRecordId === record.id" @click="expandedRecordId = expandedRecordId === record.id ? null : record.id"><span>{{ t('applications.feedback') }}</span><ChevronDown :size="15" /></button>
             <div v-if="expandedRecordId === record.id" class="ticket-details">
@@ -335,6 +461,14 @@ onMounted(async () => {
       </section>
     </div>
     <div v-else class="empty-state application-empty"><BriefcaseBusiness :size="24" /><strong>{{ t('applications.empty') }}</strong><button class="btn-neon btn-secondary" type="button" @click="openComposer"><Plus :size="15" />{{ t('applications.create') }}</button></div>
+
+    <div class="toast-region" aria-live="polite">
+      <TransitionGroup name="toast">
+        <div v-for="toast in toasts" :key="toast.id" class="toast-item" :class="`toast-${toast.type}`" @click="dismiss(toast.id)">
+          {{ toast.message }}
+        </div>
+      </TransitionGroup>
+    </div>
   </section>
 </template>
 
@@ -348,6 +482,13 @@ onMounted(async () => {
 .pipeline-summary div:last-child { border-right: 0; }
 .pipeline-summary span { color: var(--text-tertiary); font-size: 10px; font-weight: 700; }
 .pipeline-summary strong { color: var(--text-primary); font-family: var(--font-utility); font-size: 22px; }
+.funnel-summary { display: grid; grid-template-columns: 1.4fr repeat(6, minmax(0, 1fr)); align-items: center; gap: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface); overflow: hidden; }
+.funnel-title { display: grid; gap: 3px; padding: 12px 16px; background: var(--accent-light); }
+.funnel-title span { color: var(--accent); font-size: 11px; font-weight: 700; }
+.funnel-title small { color: var(--text-secondary); font-size: 9px; }
+.funnel-metric { display: grid; gap: 3px; padding: 12px 14px; border-left: 1px solid var(--border-soft); }
+.funnel-metric span { color: var(--text-tertiary); font-size: 9px; font-weight: 700; }
+.funnel-metric strong { color: var(--text-primary); font-family: var(--font-utility); font-size: 16px; }
 .application-composer { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 16px; padding: 24px; border-left: 4px solid var(--accent); }
 .application-section-heading { grid-column: 1 / -1; display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--border-soft); }
 .application-section-heading > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 6px; color: var(--accent); background: var(--accent-light); }
@@ -361,8 +502,11 @@ onMounted(async () => {
 .pipeline-search { display: flex; width: min(100%, 360px); height: 38px; align-items: center; gap: 8px; padding: 0 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input); color: var(--text-tertiary); }
 .pipeline-search:focus-within { border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-light); }
 .pipeline-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: 11px; }
+.follow-up-filter { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 10px; font-weight: 700; }
+.follow-up-filter select { height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-input); color: var(--text-primary); font: inherit; font-size: 10px; }
 .application-board { display: grid; grid-template-columns: repeat(6, minmax(220px, 1fr)); gap: 12px; padding-bottom: 12px; overflow-x: auto; scroll-snap-type: x proximity; }
-.pipeline-lane { min-height: 390px; border: 1px solid var(--border); border-radius: 7px; background: color-mix(in srgb, var(--bg-page) 72%, var(--bg-surface)); scroll-snap-align: start; }
+.pipeline-lane { min-height: 390px; border: 1px solid var(--border); border-radius: 7px; background: color-mix(in srgb, var(--bg-page) 72%, var(--bg-surface)); scroll-snap-align: start; transition: background 0.15s ease; }
+.pipeline-lane.is-drag-over { background: var(--accent-light); border-color: var(--accent); }
 .pipeline-lane > header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
 .pipeline-lane h2 { margin: 0; font-size: 11px; }
 .pipeline-lane header strong { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; color: var(--text-secondary); background: var(--bg-page); font-family: var(--font-utility); font-size: 9px; }
@@ -372,7 +516,8 @@ onMounted(async () => {
 .lane-offered .lane-marker { background: var(--success); }
 .lane-rejected .lane-marker, .lane-withdrawn .lane-marker { background: var(--border-strong); }
 .lane-records { display: grid; align-content: start; gap: 9px; padding: 9px; }
-.application-ticket { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); box-shadow: var(--shadow-sm); }
+.application-ticket { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); box-shadow: var(--shadow-sm); cursor: grab; }
+.application-ticket.is-dragging { opacity: 0.45; }
 .application-ticket > header { display: flex; align-items: start; justify-content: space-between; gap: 8px; padding: 12px 12px 8px; }
 .application-ticket header span { display: block; overflow: hidden; color: var(--text-tertiary); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .application-ticket h3 { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 12px; line-height: 1.4; }
@@ -383,6 +528,8 @@ onMounted(async () => {
 .ticket-lineage span, .ticket-date { display: inline-flex; min-width: 0; align-items: center; gap: 4px; }
 .ticket-lineage span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ticket-date { padding: 8px 12px 4px; color: var(--text-tertiary); font-size: 9px; }
+.ticket-follow-up { display: inline-flex; align-items: center; gap: 4px; padding: 3px 12px; color: var(--text-secondary); font-size: 9px; }
+.ticket-follow-up.overdue { color: var(--danger, #ef4444); font-weight: 700; }
 .stage-control { display: grid; gap: 5px; padding: 7px 12px 10px; color: var(--text-tertiary); font-size: 9px; font-weight: 700; }
 .stage-control select { width: 100%; padding: 7px 8px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-primary); background: var(--bg-input); font: inherit; font-size: 10px; }
 .ticket-expand { display: flex; width: 100%; min-height: 34px; align-items: center; justify-content: space-between; padding: 0 12px; border: 0; border-top: 1px solid var(--border-soft); color: var(--text-secondary); background: transparent; font: inherit; font-size: 9px; font-weight: 700; cursor: pointer; }
@@ -399,6 +546,13 @@ onMounted(async () => {
 .pipeline-loading { min-height: 260px; color: var(--text-secondary); }
 .application-empty { display: grid; min-height: 260px; place-items: center; align-content: center; gap: 12px; }
 .application-empty strong { font-size: 13px; }
-@media (max-width: 900px) { .pipeline-summary { grid-template-columns: repeat(2, 1fr); }.pipeline-summary div:nth-child(2) { border-right: 0; }.pipeline-summary div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }.application-composer { grid-template-columns: 1fr 1fr; }.application-board { grid-template-columns: repeat(6, minmax(240px, 78vw)); } }
-@media (max-width: 680px) { .applications-heading { align-items: stretch; flex-direction: column; }.applications-heading .btn-primary { align-self: start; }.application-composer { grid-template-columns: 1fr; padding: 20px 16px; }.application-section-heading, .application-composer .job-actions { grid-column: auto; }.application-composer .job-actions .btn-neon { flex: 1; justify-content: center; }.pipeline-toolbar { align-items: stretch; flex-direction: column; }.pipeline-search { width: 100%; }.application-board { margin-inline: -16px; padding-inline: 16px; }.pipeline-toolbar > span { display: none; } }
+.toast-region { position: fixed; right: 18px; bottom: 18px; z-index: 60; display: grid; gap: 8px; width: min(320px, calc(100vw - 36px)); }
+.toast-item { padding: 11px 14px; border-radius: 7px; color: #fff; font-size: 11px; line-height: 1.5; box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.16)); cursor: pointer; }
+.toast-success { background: var(--success, #16a34a); }
+.toast-error { background: var(--danger, #ef4444); }
+.toast-info { background: var(--info, #2563eb); }
+.toast-enter-active, .toast-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(6px); }
+@media (max-width: 900px) { .pipeline-summary { grid-template-columns: repeat(2, 1fr); }.pipeline-summary div:nth-child(2) { border-right: 0; }.pipeline-summary div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }.application-composer { grid-template-columns: 1fr 1fr; }.application-board { grid-template-columns: repeat(6, minmax(240px, 78vw)); }.funnel-summary { grid-template-columns: repeat(3, 1fr); }.funnel-title { grid-column: 1 / -1; } }
+@media (max-width: 680px) { .applications-heading { align-items: stretch; flex-direction: column; }.applications-heading .btn-primary { align-self: start; }.application-composer { grid-template-columns: 1fr; padding: 20px 16px; }.application-section-heading, .application-composer .job-actions { grid-column: auto; }.application-composer .job-actions .btn-neon { flex: 1; justify-content: center; }.pipeline-toolbar { align-items: stretch; flex-direction: column; }.pipeline-search { width: 100%; }.application-board { margin-inline: -16px; padding-inline: 16px; }.pipeline-toolbar > span { display: none; }.funnel-summary { grid-template-columns: repeat(2, 1fr); } }
 </style>
