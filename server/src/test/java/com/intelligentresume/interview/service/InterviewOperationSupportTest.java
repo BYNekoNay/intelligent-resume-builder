@@ -108,7 +108,7 @@ class InterviewOperationSupportTest {
     @DisplayName("起始指纹：相同请求参数结果确定")
     void buildStartFingerprint_deterministic() {
         StartInterviewRequest request = new StartInterviewRequest(
-                InterviewSourceType.EXTERNAL_RESUME, null, "ext", 10L, InterviewMode.COMPREHENSIVE, 6, null);
+                InterviewSourceType.EXTERNAL_RESUME, null, "ext", 10L, InterviewMode.COMPREHENSIVE, 6, null, null);
 
         String f1 = support.buildStartFingerprint(USER_ID, request);
         String f2 = support.buildStartFingerprint(USER_ID, request);

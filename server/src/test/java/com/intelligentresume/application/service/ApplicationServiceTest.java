@@ -97,7 +97,7 @@ class ApplicationServiceTest {
     @DisplayName("update: version 不匹配抛 40901 且不落库")
     void update_versionMismatch_throwsConflict() {
         stubOwnedRecord(ApplicationStatus.DRAFT, 2L);
-        UpdateApplicationRequest request = new UpdateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null, 1L);
+        UpdateApplicationRequest request = new UpdateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null, 1L, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.update(RECORD_ID, request, USER_ID));
 
@@ -165,7 +165,7 @@ class ApplicationServiceTest {
     @DisplayName("update: 通过 update 接口改状态被拒绝")
     void update_statusChangeViaUpdateEndpoint_throwsConflict() {
         stubOwnedRecord(ApplicationStatus.DRAFT, 1L);
-        UpdateApplicationRequest request = new UpdateApplicationRequest(JOB_ID, VERSION_ID, ApplicationStatus.APPLIED, null, null, null, 1L);
+        UpdateApplicationRequest request = new UpdateApplicationRequest(JOB_ID, VERSION_ID, ApplicationStatus.APPLIED, null, null, null, 1L, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.update(RECORD_ID, request, USER_ID));
 
@@ -179,7 +179,7 @@ class ApplicationServiceTest {
     @DisplayName("update: 访问他人记录抛 40401")
     void update_foreignUserRecord_throwsNotFound() {
         when(repository.findByIdAndUserId(RECORD_ID, FOREIGN_USER_ID)).thenReturn(Optional.empty());
-        UpdateApplicationRequest request = new UpdateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null, 1L);
+        UpdateApplicationRequest request = new UpdateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null, 1L, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.update(RECORD_ID, request, FOREIGN_USER_ID));
 
@@ -204,7 +204,7 @@ class ApplicationServiceTest {
     @DisplayName("create: 非 DRAFT 初始状态被拒绝")
     void create_nonDraftStatus_throwsConflict() {
         stubValidReferences();
-        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, ApplicationStatus.APPLIED, null, null, null);
+        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, ApplicationStatus.APPLIED, null, null, null, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.create(request, USER_ID));
 
@@ -216,7 +216,7 @@ class ApplicationServiceTest {
     @DisplayName("create: JD 不存在抛 40401")
     void create_missingJobDescription_throwsNotFound() {
         when(jobRepository.findByIdAndUserId(JOB_ID, USER_ID)).thenReturn(Optional.empty());
-        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null);
+        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.create(request, USER_ID));
 
@@ -229,7 +229,7 @@ class ApplicationServiceTest {
     void create_foreignResumeVersion_throwsNotFound() {
         when(jobRepository.findByIdAndUserId(JOB_ID, USER_ID)).thenReturn(Optional.of(new JobDescription()));
         when(versionRepository.findById(VERSION_ID)).thenReturn(Optional.of(version(FOREIGN_USER_ID, null)));
-        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null);
+        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.create(request, USER_ID));
 
@@ -242,7 +242,7 @@ class ApplicationServiceTest {
     void create_deletedResumeVersion_throwsNotFound() {
         when(jobRepository.findByIdAndUserId(JOB_ID, USER_ID)).thenReturn(Optional.of(new JobDescription()));
         when(versionRepository.findById(VERSION_ID)).thenReturn(Optional.of(version(USER_ID, LocalDateTime.now())));
-        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null);
+        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.create(request, USER_ID));
 
@@ -254,7 +254,7 @@ class ApplicationServiceTest {
     void create_validReferences_savesAndReturnsResponse() {
         stubValidReferences();
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, "cover", null, null);
+        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, "cover", null, null, null);
 
         var response = service.create(request, USER_ID);
 

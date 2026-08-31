@@ -122,6 +122,7 @@ public class ApplicationService {
     private ApplicationResponse response(ApplicationRecord record) {
         return new ApplicationResponse(record.getId(), record.getJobDescriptionId(), record.getResumeVersionId(),
                 record.getStatus(), record.getCoverLetterText(), record.getEmailBodyText(), record.getOpeningMessageText(),
-                record.getFeedbackText(), record.getAppliedAt(), record.getVersion(), record.getCreatedAt(), record.getUpdatedAt());
+                record.getFeedbackText(), record.getAppliedAt(), record.getNextFollowUpAt(), record.getVersion(),
+                record.getCreatedAt(), record.getUpdatedAt());
     }
 }

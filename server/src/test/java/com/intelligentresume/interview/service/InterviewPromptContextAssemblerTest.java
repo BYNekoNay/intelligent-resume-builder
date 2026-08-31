@@ -159,7 +159,7 @@ class InterviewPromptContextAssemblerTest {
     @DisplayName("validateSource：平台简历缺少版本抛校验错误")
     void validateSource_platformResumeWithoutVersion() {
         StartInterviewRequest request = new StartInterviewRequest(
-                InterviewSourceType.PLATFORM_RESUME, null, null, null, InterviewMode.COMPREHENSIVE, null, null);
+                InterviewSourceType.PLATFORM_RESUME, null, null, null, InterviewMode.COMPREHENSIVE, null, null, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> assembler.validateSource(request, USER_ID));
 
@@ -171,7 +171,7 @@ class InterviewPromptContextAssemblerTest {
     @DisplayName("validateSource：外部简历文本为空抛校验错误")
     void validateSource_externalResumeBlank() {
         StartInterviewRequest request = new StartInterviewRequest(
-                InterviewSourceType.EXTERNAL_RESUME, null, "   ", null, InterviewMode.COMPREHENSIVE, null, null);
+                InterviewSourceType.EXTERNAL_RESUME, null, "   ", null, InterviewMode.COMPREHENSIVE, null, null, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> assembler.validateSource(request, USER_ID));
 
@@ -184,7 +184,7 @@ class InterviewPromptContextAssemblerTest {
     void validateSource_jdNotOwned() {
         when(jobDescriptionRepository.findByIdAndUserId(10L, USER_ID)).thenReturn(Optional.empty());
         StartInterviewRequest request = new StartInterviewRequest(
-                InterviewSourceType.EXTERNAL_RESUME, null, "ext", 10L, InterviewMode.COMPREHENSIVE, null, null);
+                InterviewSourceType.EXTERNAL_RESUME, null, "ext", 10L, InterviewMode.COMPREHENSIVE, null, null, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> assembler.validateSource(request, USER_ID));
 
@@ -198,7 +198,7 @@ class InterviewPromptContextAssemblerTest {
         JobDescription job = mockJob("JD");
         when(jobDescriptionRepository.findByIdAndUserId(10L, USER_ID)).thenReturn(Optional.of(job));
         StartInterviewRequest request = new StartInterviewRequest(
-                InterviewSourceType.EXTERNAL_RESUME, null, "ext", 10L, InterviewMode.COMPREHENSIVE, null, null);
+                InterviewSourceType.EXTERNAL_RESUME, null, "ext", 10L, InterviewMode.COMPREHENSIVE, null, null, null);
 
         assembler.validateSource(request, USER_ID); // 不应抛异常
     }

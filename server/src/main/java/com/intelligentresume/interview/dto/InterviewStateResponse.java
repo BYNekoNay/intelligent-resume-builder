@@ -3,6 +3,8 @@ package com.intelligentresume.interview.dto;
 import com.intelligentresume.interview.domain.CompletionReason;
 import com.intelligentresume.interview.domain.EvaluationSource;
 import com.intelligentresume.interview.domain.ExecutionMode;
+import com.intelligentresume.interview.domain.InterviewMode;
+import com.intelligentresume.interview.domain.InterviewSourceType;
 import com.intelligentresume.interview.domain.InterviewStatus;
 
 /**
@@ -22,6 +24,9 @@ public class InterviewStateResponse {
     private LastEvaluation lastEvaluation;
     private AiFailureInfo aiFailure;
     private CompletionReason completionReason;
+    private InterviewSourceType sourceType;
+    private Long resumeVersionId;
+    private Long jobDescriptionId;
 
     public InterviewStateResponse() {}
 
@@ -30,7 +35,8 @@ public class InterviewStateResponse {
                                   int completedQuestionCount, int targetQuestionCount,
                                   int minQuestionCount, int maxQuestionCount,
                                   LastEvaluation lastEvaluation, AiFailureInfo aiFailure,
-                                  CompletionReason completionReason) {
+                                  CompletionReason completionReason,
+                                  InterviewSourceType sourceType, Long resumeVersionId, Long jobDescriptionId) {
         this.interviewId = interviewId;
         this.status = status;
         this.executionMode = executionMode;
@@ -43,6 +49,9 @@ public class InterviewStateResponse {
         this.lastEvaluation = lastEvaluation;
         this.aiFailure = aiFailure;
         this.completionReason = completionReason;
+        this.sourceType = sourceType;
+        this.resumeVersionId = resumeVersionId;
+        this.jobDescriptionId = jobDescriptionId;
     }
 
     public Long getInterviewId() { return interviewId; }
@@ -69,6 +78,12 @@ public class InterviewStateResponse {
     public void setAiFailure(AiFailureInfo aiFailure) { this.aiFailure = aiFailure; }
     public CompletionReason getCompletionReason() { return completionReason; }
     public void setCompletionReason(CompletionReason completionReason) { this.completionReason = completionReason; }
+    public InterviewSourceType getSourceType() { return sourceType; }
+    public void setSourceType(InterviewSourceType sourceType) { this.sourceType = sourceType; }
+    public Long getResumeVersionId() { return resumeVersionId; }
+    public void setResumeVersionId(Long resumeVersionId) { this.resumeVersionId = resumeVersionId; }
+    public Long getJobDescriptionId() { return jobDescriptionId; }
+    public void setJobDescriptionId(Long jobDescriptionId) { this.jobDescriptionId = jobDescriptionId; }
 
     // ---- 最后一轮评估摘要 ----
 

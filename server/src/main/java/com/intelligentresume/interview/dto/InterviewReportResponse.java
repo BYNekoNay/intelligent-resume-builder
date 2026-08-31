@@ -18,7 +18,8 @@ public record InterviewReportResponse(
         CompletionReason completionReason,
         EvaluationSource evaluationSource,
         Integer aiEvaluatedRounds,
-        Integer ruleEvaluatedRounds
+        Integer ruleEvaluatedRounds,
+        List<RoundDetail> rounds
 ) {
     public record DimensionScores(
             int relevance,
@@ -26,5 +27,18 @@ public record InterviewReportResponse(
             int structureClarity,
             int roleCompetency,
             int authenticityReflection
+    ) {}
+
+    /** 逐轮问答明细（仅基于已有 interview_record 组装，不新增 AI 调用）。 */
+    public record RoundDetail(
+            Integer roundNo,
+            String questionText,
+            String answerText,
+            Integer roundScore,
+            DimensionScores dimensionScores,
+            List<String> strengths,
+            List<String> improvements,
+            String suggestedAnswer,
+            EvaluationSource evaluationSource
     ) {}
 }

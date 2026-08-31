@@ -27,6 +27,8 @@ public class ApplicationRecord extends BaseEntity {
     private String feedbackText;
     @Column(name = "applied_at")
     private LocalDateTime appliedAt;
+    @Column(name = "next_follow_up_at")
+    private LocalDateTime nextFollowUpAt;
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
@@ -49,5 +51,7 @@ public class ApplicationRecord extends BaseEntity {
     public void setFeedbackText(String feedbackText) { this.feedbackText = feedbackText; }
     public LocalDateTime getAppliedAt() { return appliedAt; }
     public void setAppliedAt(LocalDateTime appliedAt) { this.appliedAt = appliedAt; }
+    public LocalDateTime getNextFollowUpAt() { return nextFollowUpAt; }
+    public void setNextFollowUpAt(LocalDateTime nextFollowUpAt) { this.nextFollowUpAt = nextFollowUpAt; }
     public Long getVersion() { return version; }
 }

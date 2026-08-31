@@ -76,6 +76,6 @@ public class InterviewAssetService {
     private InterviewAssetResponse response(InterviewAnswerAsset asset) {
         return new InterviewAssetResponse(asset.getId(), asset.getInterviewRecordId(), asset.getQuestionText(),
                 asset.getOriginalAnswerText(), asset.getSuggestedAnswerText(), asset.getFeedbackJson(),
-                asset.getCreatedAt(), asset.getUpdatedAt());
+                asset.getCreatedAt(), asset.getUpdatedAt(), List.of(), List.of());
     }
 }

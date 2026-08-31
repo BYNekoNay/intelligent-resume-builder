@@ -74,7 +74,7 @@ public class InterviewReportService {
 
         if (records.isEmpty()) {
             return new InterviewReportResponse(0, "尚未完成任何回答", List.of(), List.of(), List.of(), List.of(),
-                    null, 0, 0, null, null, 0, 0);
+                    null, 0, 0, null, null, 0, 0, List.of());
         }
 
         int total = (int) Math.round(records.stream().mapToInt(InterviewRecord::getRoundScore).average().orElse(0));
@@ -119,7 +119,8 @@ public class InterviewReportService {
                 dimensionScores,
                 session.getTargetQuestionCount(), n,
                 session.getCompletionReason(), reportSource,
-                aiCount, ruleCount
+                aiCount, ruleCount,
+                List.of()
         );
     }
 }

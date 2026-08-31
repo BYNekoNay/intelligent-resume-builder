@@ -10,4 +10,5 @@ public record StartInterviewRequest(@NotNull InterviewSourceType sourceType, Lon
                                     @Size(max = 100000) String externalResumeText,
                                     Long jobDescriptionId, @NotNull InterviewMode interviewMode,
                                     @jakarta.validation.constraints.Min(4) @jakarta.validation.constraints.Max(12) Integer targetQuestionCount,
-                                    InterviewOutputLanguage outputLanguage) {}
+                                    InterviewOutputLanguage outputLanguage,
+                                    @Size(max = 500) String initialQuestion) {}
