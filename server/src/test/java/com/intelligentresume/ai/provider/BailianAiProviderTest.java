@@ -60,7 +60,7 @@ class BailianAiProviderTest {
                 "qwen-plus",
                 10, 60, objectMapper, observability, failureCategoryClassifier
         );
-        AiCallContext ctx = new AiCallContext(AiTaskType.RESUME_OPTIMIZE, Map.of(), 60000);
+        AiCallContext ctx = new AiCallContext(AiTaskType.RESUME_OPTIMIZE, Map.of());
         AiCallResult result = noKeyProvider.call(ctx);
         assertFalse(result.success());
         assertTrue(result.errorMessage().contains("API Key"));
@@ -156,7 +156,7 @@ class BailianAiProviderTest {
         input.put("_dataPrompt", "===DATA===\n测试数据\n===END===");
         input.put("jobDescriptionId", 1L);
 
-        AiCallContext ctx = new AiCallContext(AiTaskType.JOB_GENERATION, input, 5000);
+        AiCallContext ctx = new AiCallContext(AiTaskType.JOB_GENERATION, input);
         // 由于无法连接 API,会返回网络错误(但证明代码路径不抛异常)
         AiCallResult result = provider.call(ctx);
         // 可能成功(如果网络通)或失败(网络不通),但不应抛未捕获异常

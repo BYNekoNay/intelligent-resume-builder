@@ -49,7 +49,6 @@ public class InterviewFollowUpAiService {
 
     private static final Logger log = LoggerFactory.getLogger(InterviewFollowUpAiService.class);
     private static final String PROMPT_VERSION = "interview-follow-up-v1";
-    private static final long PROVIDER_TIMEOUT_MS = 60_000;
     private static final int MIN_CANDIDATES = 3;
     private static final int MAX_CANDIDATES = 5;
 
@@ -194,8 +193,7 @@ public class InterviewFollowUpAiService {
     private AiCallResult callProvider(String userPrompt) {
         AiCallContext ctx = new AiCallContext(
                 AiTaskType.INTERVIEW_COACH,
-                Map.of("_systemPrompt", SYSTEM_PROMPT, "_taskPrompt", userPrompt),
-                PROVIDER_TIMEOUT_MS);
+                Map.of("_systemPrompt", SYSTEM_PROMPT, "_taskPrompt", userPrompt));
         AiCallResult result;
         try {
             result = providerRegistry.route(AiTaskType.INTERVIEW_COACH).call(ctx);

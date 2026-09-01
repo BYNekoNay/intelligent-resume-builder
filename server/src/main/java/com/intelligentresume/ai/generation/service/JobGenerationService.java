@@ -27,7 +27,6 @@ import java.util.regex.Pattern;
 public class JobGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(JobGenerationService.class);
-    private static final long DEFAULT_TIMEOUT_MS = 60_000;
     private static final Pattern LEGACY_SOURCE_ID = Pattern.compile("materialId\\s*=\\s*(\\d+)");
     private final CareerMaterialRepository materialRepository;
     private final JobDescriptionRepository jobRepository;
@@ -116,7 +115,7 @@ public class JobGenerationService {
         providerInput.put("_taskPrompt", prompt.task());
         providerInput.put("_dataPrompt", prompt.data());
         AiCallResult response = providerRegistry.route(AiTaskType.JOB_GENERATION)
-                .call(new AiCallContext(AiTaskType.JOB_GENERATION, providerInput, DEFAULT_TIMEOUT_MS));
+                .call(new AiCallContext(AiTaskType.JOB_GENERATION, providerInput));
         if (!response.success()) {
             throw new BusinessException(ErrorCode.AI_FAILURE, "Resume generation failed: " + response.errorMessage());
         }
@@ -198,7 +197,7 @@ public class JobGenerationService {
         providerInput.put("_taskPrompt", prompt.task());
         providerInput.put("_dataPrompt", prompt.data());
         AiCallResult response = providerRegistry.route(AiTaskType.JOB_GENERATION)
-                .call(new AiCallContext(AiTaskType.JOB_GENERATION, providerInput, DEFAULT_TIMEOUT_MS));
+                .call(new AiCallContext(AiTaskType.JOB_GENERATION, providerInput));
         if (!response.success()) {
             throw new BusinessException(ErrorCode.AI_FAILURE, "Resume generation failed: " + response.errorMessage());
         }

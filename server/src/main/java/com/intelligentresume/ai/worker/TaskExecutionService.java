@@ -46,7 +46,6 @@ import java.util.concurrent.TimeUnit;
 public class TaskExecutionService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskExecutionService.class);
-    private static final long DEFAULT_TIMEOUT_MS = 60_000;
 
     private final AiProviderRegistry providerRegistry;
     private final TaskLeaseService leaseService;
@@ -180,8 +179,8 @@ public class TaskExecutionService {
             leaseService.releaseFailed(task, owner, e.getMessage(),
                     e.getErrorCode() == ErrorCode.AI_FAILURE || e.getErrorCode() == ErrorCode.INTERNAL);
         } catch (RuntimeException e) {
-            log.warn("Unexpected interview follow-up AI execution error: exception={}, message={}",
-                    e.getClass().getSimpleName(), e.getMessage(), e);
+            log.warn("Unexpected interview follow-up AI execution error: exception={}",
+                    e.getClass().getSimpleName());
             leaseService.releaseFailed(task, owner, "Interview follow-up AI execution failed", true);
         }
     }
@@ -221,8 +220,7 @@ public class TaskExecutionService {
         try {
             AiCallContext ctx = new AiCallContext(
                     task.getTaskType(),
-                    providerInput(task),
-                    DEFAULT_TIMEOUT_MS
+                    providerInput(task)
             );
 
             AiCallResult result = providerRegistry.route(task.getTaskType()).call(ctx);

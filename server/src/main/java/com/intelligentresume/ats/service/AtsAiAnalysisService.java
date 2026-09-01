@@ -16,7 +16,6 @@ import java.util.Map;
 
 @Service
 public class AtsAiAnalysisService {
-    private static final long TIMEOUT_MS = 60_000;
     private final AiProviderRegistry providerRegistry;
     private final AtsAiPromptBuilder promptBuilder;
     private final AtsAiResultValidator validator;
@@ -52,7 +51,7 @@ public class AtsAiAnalysisService {
     }
 
     private AiCallResult call(AiProvider provider, Map<String, Object> prompt) {
-        AiCallResult response = provider.call(new AiCallContext(AiTaskType.ATS_ANALYSIS, prompt, TIMEOUT_MS));
+        AiCallResult response = provider.call(new AiCallContext(AiTaskType.ATS_ANALYSIS, prompt));
         if (response.success()) return response;
         String message = response.errorMessage() == null ? "AI ATS analysis failed" : response.errorMessage();
         String normalized = message.toLowerCase();

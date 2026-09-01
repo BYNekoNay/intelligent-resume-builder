@@ -133,8 +133,8 @@ app:
     bailian:
       base-url: ${BAILIAN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
       api-key: ${BAILIAN_API_KEY:}
+      # 已真实验证的推理模型：qwen3.7-plus-2026-05-26（通过 BAILIAN_MODEL 配置）
       model: ${BAILIAN_MODEL:qwen-plus}
-      models: ${BAILIAN_MODELS:qwen-plus,deepseek-v3.2,deepseek-v3.2-exp,deepseek-v3.1,deepseek-r1-0528,deepseek-v3,deepseek-r1,deepseek-r1-distill-qwen-32b,deepseek-r1-distill-qwen-14b}
       connect-timeout-seconds: ${BAILIAN_CONNECT_TIMEOUT_S:10}
       read-timeout-seconds: ${BAILIAN_READ_TIMEOUT_S:300}
     worker:

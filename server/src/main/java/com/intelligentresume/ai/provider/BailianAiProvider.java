@@ -166,16 +166,15 @@ public class BailianAiProvider implements AiProvider {
             return complete(ctx, AiCallResult.fail("百炼 API 网络异常", true, requestId), category, startedAt);
         } catch (RestClientResponseException e) {
             AiFailureCategory category = failureCategoryClassifier.ai(e);
-            String body = e.getResponseBodyAsString();
-            log.warn("Bailian API response failure: taskType={}, category={}, status={}, body={}",
-                    ctx.type(), category, e.getStatusCode().value(),
-                    body == null ? "" : body.substring(0, Math.min(body.length(), 800)));
+            // 隐私约束：不记录响应 body / message（4xx body 可能回显请求片段，含简历/JD）。
+            // 排障使用 status + category + providerRequestId + TraceId 即可在百炼控制台关联。
+            log.warn("Bailian API response failure: taskType={}, category={}, status={}, providerRequestId={}",
+                    ctx.type(), category, e.getStatusCode().value(), requestId);
             return complete(ctx, AiCallResult.fail("百炼 API 调用失败", isRetryableError(e), requestId), category, startedAt);
         } catch (Exception e) {
             AiFailureCategory category = failureCategoryClassifier.ai(e);
-            log.warn("Bailian API call failure: taskType={}, category={}, exception={}, message={}",
-                    ctx.type(), category, e.getClass().getSimpleName(),
-                    e.getMessage() == null ? "" : e.getMessage().substring(0, Math.min(e.getMessage().length(), 800)));
+            log.warn("Bailian API call failure: taskType={}, category={}, exception={}",
+                    ctx.type(), category, e.getClass().getSimpleName());
             boolean retryable = isRetryableError(e);
             return complete(ctx, AiCallResult.fail("百炼 API 调用失败", retryable, requestId), category, startedAt);
         }

@@ -16,7 +16,6 @@ import java.util.Map;
 
 @Service
 public class CommunicationAiService {
-    private static final long TIMEOUT_MS = 60_000;
     private final AiProviderRegistry providerRegistry;
     private final CommunicationAiPromptBuilder promptBuilder;
     private final CommunicationAiResultValidator validator;
@@ -74,7 +73,7 @@ public class CommunicationAiService {
     }
 
     private AiCallResult call(AiProvider provider, Map<String, Object> prompt) {
-        AiCallResult result = provider.call(new AiCallContext(AiTaskType.COMMUNICATION_GENERATE, prompt, TIMEOUT_MS));
+        AiCallResult result = provider.call(new AiCallContext(AiTaskType.COMMUNICATION_GENERATE, prompt));
         if (result.success()) return result;
         throw new CommunicationAiException(
                 result.errorMessage() == null ? "Communication AI provider failed" : result.errorMessage(),

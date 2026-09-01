@@ -30,7 +30,6 @@ public class InterviewAiService {
 
     private static final Logger log = LoggerFactory.getLogger(InterviewAiService.class);
     private static final String PROMPT_VERSION = "interview-coach-v11";
-    private static final long PROVIDER_TIMEOUT_MS = 60000;
 
     private static final String SYSTEM_PROMPT = """
             You are an expert interview coach. Your role is to conduct a structured job interview.
@@ -251,8 +250,7 @@ public class InterviewAiService {
         AiCallContext ctx = new AiCallContext(
                 AiTaskType.INTERVIEW_COACH,
                 Map.of("_systemPrompt", SYSTEM_PROMPT,
-                        "_taskPrompt", userPrompt),
-                PROVIDER_TIMEOUT_MS
+                        "_taskPrompt", userPrompt)
         );
 
         AiCallResult result;
@@ -263,7 +261,8 @@ public class InterviewAiService {
         } catch (BusinessException e) {
             throw new AiInvocationException(e.getErrorCode(), e.getMessage(), null, true);
         } catch (RuntimeException e) {
-            log.warn("Interview AI provider raised an unexpected error", e);
+            // 隐私约束：只记录异常类型，不记录 message/堆栈（可能回显 provider 原文）
+            log.warn("Interview AI provider raised an unexpected error: exception={}", e.getClass().getSimpleName());
             throw new AiInvocationException(ErrorCode.AI_FAILURE, "AI 调用失败", null, true);
         }
 

@@ -26,7 +26,6 @@ public class JobMaterialSelectionService {
 
     private static final int MAX_CANDIDATES = 60;
     private static final int MAX_RECOMMENDED = 12;
-    private static final long TIMEOUT_MS = 60_000;
     private static final Pattern TOKEN_SPLIT = Pattern.compile("[^\\p{L}\\p{N}+#.]+");
     private static final Pattern CJK_SEQUENCE = Pattern.compile("[\\p{IsHan}]+");
 
@@ -100,7 +99,7 @@ public class JobMaterialSelectionService {
         providerInput.put("_taskPrompt", prompt.task());
         providerInput.put("_dataPrompt", prompt.data());
         AiCallResult response = providerRegistry.route(AiTaskType.JOB_MATERIAL_SELECTION)
-                .call(new AiCallContext(AiTaskType.JOB_MATERIAL_SELECTION, providerInput, TIMEOUT_MS));
+                .call(new AiCallContext(AiTaskType.JOB_MATERIAL_SELECTION, providerInput));
         if (!response.success()) {
             throw new BusinessException(ErrorCode.AI_FAILURE, "Material selection failed: " + response.errorMessage());
         }
