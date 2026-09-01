@@ -75,6 +75,16 @@ class ApplicationServiceTest {
         return record;
     }
 
+    /** stats 仓库方法只返回精简投影，单测用匿名实现模拟。 */
+    private ApplicationRecordRepository.StatsProjection projection(ApplicationStatus status) {
+        return new ApplicationRecordRepository.StatsProjection() {
+            @Override public ApplicationStatus getStatus() { return status; }
+            @Override public LocalDateTime getAppliedAt() { return null; }
+            @Override public LocalDateTime getCreatedAt() { return null; }
+            @Override public LocalDateTime getUpdatedAt() { return null; }
+        };
+    }
+
     private ResumeVersion version(Long createdBy, LocalDateTime deletedAt) {
         ResumeVersion version = new ResumeVersion();
         version.setCreatedBy(createdBy);
@@ -324,15 +334,15 @@ class ApplicationServiceTest {
     @DisplayName("stats: 转化率与占比符合共享约定公式，分母为 0 返回 null")
     void stats_computesConversionRatesAndPercentages() {
         // 3 APPLIED + 2 INTERVIEWING + 1 OFFERED + 1 REJECTED = 7
-        ApplicationRecord r1 = record(1L, USER_ID, ApplicationStatus.APPLIED, 1L);
-        ApplicationRecord r2 = record(2L, USER_ID, ApplicationStatus.APPLIED, 1L);
-        ApplicationRecord r3 = record(3L, USER_ID, ApplicationStatus.APPLIED, 1L);
-        ApplicationRecord r4 = record(4L, USER_ID, ApplicationStatus.INTERVIEWING, 1L);
-        ApplicationRecord r5 = record(5L, USER_ID, ApplicationStatus.INTERVIEWING, 1L);
-        ApplicationRecord r6 = record(6L, USER_ID, ApplicationStatus.OFFERED, 1L);
-        ApplicationRecord r7 = record(7L, USER_ID, ApplicationStatus.REJECTED, 1L);
-        when(repository.findByUserIdOrderByUpdatedAtDesc(USER_ID))
-                .thenReturn(List.of(r1, r2, r3, r4, r5, r6, r7));
+        when(repository.findStatsByUserId(USER_ID))
+                .thenReturn(List.of(
+                        projection(ApplicationStatus.APPLIED),
+                        projection(ApplicationStatus.APPLIED),
+                        projection(ApplicationStatus.APPLIED),
+                        projection(ApplicationStatus.INTERVIEWING),
+                        projection(ApplicationStatus.INTERVIEWING),
+                        projection(ApplicationStatus.OFFERED),
+                        projection(ApplicationStatus.REJECTED)));
 
         var stats = service.stats(USER_ID);
 
@@ -352,7 +362,7 @@ class ApplicationServiceTest {
     @Test
     @DisplayName("stats: 无记录时 total=0 且各值为 null")
     void stats_emptyRecords_returnsNulls() {
-        when(repository.findByUserIdOrderByUpdatedAtDesc(USER_ID)).thenReturn(List.of());
+        when(repository.findStatsByUserId(USER_ID)).thenReturn(List.of());
 
         var stats = service.stats(USER_ID);
 

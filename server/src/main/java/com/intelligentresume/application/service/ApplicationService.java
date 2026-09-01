@@ -115,7 +115,9 @@ public class ApplicationService {
 
     @Transactional(readOnly = true)
     public ApplicationStatsResponse stats(Long userId) {
-        List<ApplicationRecord> records = repository.findByUserIdOrderByUpdatedAtDesc(userId);
+        // 只查统计所需列（status/appliedAt/createdAt/updatedAt），避免全量行（含长文本）传输；
+        // 时长聚合在 Java 侧计算，兼容 MySQL 与 H2（不依赖 TIMESTAMPDIFF）。
+        List<ApplicationRecordRepository.StatsProjection> records = repository.findStatsByUserId(userId);
         int total = records.size();
 
         // byStatus：各状态数量 + count/total*100（保留 1 位小数）
@@ -123,7 +125,7 @@ public class ApplicationService {
         for (ApplicationStatus status : ApplicationStatus.values()) {
             counts.put(status, 0L);
         }
-        for (ApplicationRecord record : records) {
+        for (ApplicationRecordRepository.StatsProjection record : records) {
             counts.merge(record.getStatus(), 1L, Long::sum);
         }
         List<ApplicationStatsResponse.StatusCount> byStatus = new ArrayList<>();
@@ -151,7 +153,7 @@ public class ApplicationService {
                 new ApplicationStatsResponse.StageDurations(appliedDuration, interviewingDuration, totalToOffer));
     }
 
-    private long countIn(List<ApplicationRecord> records, ApplicationStatus... statuses) {
+    private long countIn(List<ApplicationRecordRepository.StatsProjection> records, ApplicationStatus... statuses) {
         Set<ApplicationStatus> set = Set.of(statuses);
         return records.stream().filter(record -> set.contains(record.getStatus())).count();
     }
@@ -161,7 +163,7 @@ public class ApplicationService {
         return Math.round(numerator * 1000.0 / denominator) / 1000.0;
     }
 
-    private Double avgAppliedDuration(List<ApplicationRecord> records, LocalDateTime now) {
+    private Double avgAppliedDuration(List<ApplicationRecordRepository.StatsProjection> records, LocalDateTime now) {
         List<Double> days = records.stream()
                 .filter(record -> record.getStatus() == ApplicationStatus.APPLIED)
                 .map(record -> {
@@ -173,7 +175,7 @@ public class ApplicationService {
         return days.isEmpty() ? null : Math.round(days.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10.0) / 10.0;
     }
 
-    private Double avgInterviewingDuration(List<ApplicationRecord> records, LocalDateTime now) {
+    private Double avgInterviewingDuration(List<ApplicationRecordRepository.StatsProjection> records, LocalDateTime now) {
         List<Double> days = records.stream()
                 .filter(record -> record.getStatus() == ApplicationStatus.INTERVIEWING)
                 .map(record -> record.getUpdatedAt() == null ? null
@@ -183,7 +185,7 @@ public class ApplicationService {
         return days.isEmpty() ? null : Math.round(days.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10.0) / 10.0;
     }
 
-    private Double avgTotalToOffer(List<ApplicationRecord> records) {
+    private Double avgTotalToOffer(List<ApplicationRecordRepository.StatsProjection> records) {
         List<Double> days = records.stream()
                 .filter(record -> record.getStatus() == ApplicationStatus.OFFERED)
                 .map(record -> {

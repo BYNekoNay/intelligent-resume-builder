@@ -13,9 +13,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
- * 历史面试会话列表。服务端聚合 actualQuestionCount / totalScore（个人数据量级小）。
+ * 历史面试会话列表。服务端聚合 actualQuestionCount / totalScore。
  */
 @Service
 public class InterviewHistoryService {
@@ -38,12 +40,21 @@ public class InterviewHistoryService {
             jobRepository.findByIdAndUserId(jobDescriptionId, userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位不存在"));
         }
-        return sessionRepository.findCompletedByUserId(userId, InterviewStatus.COMPLETED, jobDescriptionId)
-                .stream().map(this::summary).toList();
+        List<InterviewSession> sessions = sessionRepository.findCompletedByUserId(userId, InterviewStatus.COMPLETED, jobDescriptionId);
+        if (sessions.isEmpty()) {
+            return List.of();
+        }
+        // 一次批量加载所有会话的答题记录，按 sessionId 分组，避免 N 个会话 = N 次查询
+        Map<Long, List<InterviewRecord>> recordsBySession = recordRepository
+                .findBySessionIdInOrderByCreatedAtAsc(sessions.stream().map(InterviewSession::getId).toList())
+                .stream()
+                .collect(Collectors.groupingBy(InterviewRecord::getSessionId));
+        return sessions.stream()
+                .map(session -> summary(session, recordsBySession.getOrDefault(session.getId(), List.of())))
+                .toList();
     }
 
-    private InterviewSessionSummaryResponse summary(InterviewSession session) {
-        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(session.getId());
+    private InterviewSessionSummaryResponse summary(InterviewSession session, List<InterviewRecord> records) {
         int actual = records.size();
         int totalScore = actual == 0 ? 0
                 : (int) Math.round(records.stream().mapToInt(InterviewRecord::getRoundScore).average().orElse(0));

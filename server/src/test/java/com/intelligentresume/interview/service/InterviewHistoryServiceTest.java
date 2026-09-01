@@ -65,22 +65,23 @@ class InterviewHistoryServiceTest {
         return session;
     }
 
-    private InterviewRecord record(int roundNo, int score) {
+    private InterviewRecord record(int roundNo, int score, long sessionId) {
         InterviewRecord record = new InterviewRecord();
         record.setId((long) roundNo);
         record.setRoundNo(roundNo);
         record.setRoundScore(score);
+        record.setSessionId(sessionId);
         return record;
     }
 
     @Test
-    @DisplayName("list：仅返回 COMPLETED 会话，服务端聚合题数与平均分")
+    @DisplayName("list：仅返回 COMPLETED 会话，服务端聚合题数与平均分（批量加载避免 N+1）")
     void list_returnsCompletedWithAggregation() {
         InterviewSession completed = completedSession(1L);
         when(sessionRepository.findCompletedByUserId(USER_ID, InterviewStatus.COMPLETED, null))
                 .thenReturn(List.of(completed));
-        when(recordRepository.findBySessionIdOrderByCreatedAtAsc(1L))
-                .thenReturn(List.of(record(1, 60), record(2, 80), record(3, 100)));
+        when(recordRepository.findBySessionIdInOrderByCreatedAtAsc(List.of(1L)))
+                .thenReturn(List.of(record(1, 60, 1L), record(2, 80, 1L), record(3, 100, 1L)));
 
         var result = service.list(USER_ID, null);
 
@@ -92,6 +93,8 @@ class InterviewHistoryServiceTest {
         assertEquals(InterviewSourceType.PLATFORM_RESUME, result.get(0).sourceType());
         // 仓库查询参数必须锁定 COMPLETED，保证不列出进行中的会话
         verify(sessionRepository).findCompletedByUserId(eq(USER_ID), eq(InterviewStatus.COMPLETED), eq(null));
+        // 使用一次批量查询，而非逐会话 N 次查询
+        verify(recordRepository).findBySessionIdInOrderByCreatedAtAsc(List.of(1L));
     }
 
     @Test
@@ -111,7 +114,7 @@ class InterviewHistoryServiceTest {
         when(jobRepository.findByIdAndUserId(JOB_ID, USER_ID)).thenReturn(Optional.of(new JobDescription()));
         when(sessionRepository.findCompletedByUserId(USER_ID, InterviewStatus.COMPLETED, JOB_ID))
                 .thenReturn(List.of(completedSession(2L)));
-        when(recordRepository.findBySessionIdOrderByCreatedAtAsc(2L)).thenReturn(List.of(record(1, 50)));
+        when(recordRepository.findBySessionIdInOrderByCreatedAtAsc(List.of(2L))).thenReturn(List.of(record(1, 50, 2L)));
 
         var result = service.list(USER_ID, JOB_ID);
 

@@ -34,6 +34,18 @@ if ($isolatedDatabaseRequested) {
 
 $output = Get-LocalValidationDirectory
 $processes = @()
+
+# O-01: 让 pdf-service 的 --env-file=.env 与根 .env 的 PDF_SERVICE_TOKEN 保持一致。
+# Node 的 --env-file 在文件不存在时会直接报错，因此这里确保 pdf-service/.env 存在；
+# 同时把根 .env 的 token 注入进程环境（环境变量优先于 env-file，保证两侧天然一致）。
+$rootEnv = Get-LocalEnvValues -Path (Join-Path $root '.env')
+$pdfToken = if (-not [string]::IsNullOrWhiteSpace($rootEnv['PDF_SERVICE_TOKEN'])) { $rootEnv['PDF_SERVICE_TOKEN'] } else { 'dev-pdf-token-change-me' }
+$env:PDF_SERVICE_TOKEN = $pdfToken
+$pdfEnvPath = Join-Path $root 'pdf-service\.env'
+if (-not (Test-Path -LiteralPath $pdfEnvPath)) {
+    Set-Content -LiteralPath $pdfEnvPath -Value "PDF_SERVICE_TOKEN=$pdfToken" -Encoding utf8
+}
+
 function Start-ValidationProcess {
     param([string]$Name, [int]$Port, [string]$WorkingDirectory, [string]$Command)
     $log = Join-Path $output "$Name.log"

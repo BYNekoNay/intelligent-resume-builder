@@ -101,6 +101,34 @@ class ApplicationControllerIT {
 
     @Test
     @Order(4)
+    void statsReturnsOwnedAggregationAndIsolatesForeignUsers() throws Exception {
+        // 前序用例已将唯一投递记录置为 APPLIED
+        mockMvc.perform(get("/api/applications/stats").header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.byStatus", org.hamcrest.Matchers.hasSize(6)))
+                .andExpect(jsonPath("$.data.byStatus[1].status").value("APPLIED"))
+                .andExpect(jsonPath("$.data.byStatus[1].count").value(1))
+                .andExpect(jsonPath("$.data.byStatus[1].percent").value(100.0))
+                // 无 OFFERED 记录：interviewingToOffered 分母为 0 → null
+                .andExpect(jsonPath("$.data.conversionRates.interviewingToOffered").value(org.hamcrest.Matchers.nullValue()));
+        // 归属隔离：用户 B 看不到用户 A 的投递统计
+        mockMvc.perform(get("/api/applications/stats").header("Authorization", "Bearer " + tokenB))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0))
+                .andExpect(jsonPath("$.data.byStatus", org.hamcrest.Matchers.hasSize(6)));
+    }
+
+    @Test
+    @Order(5)
+    void statsUnauthenticated_returns40101() throws Exception {
+        mockMvc.perform(get("/api/applications/stats"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
+    }
+
+    @Test
+    @Order(6)
     void crossUserCannotMutateAndOwnerCanDelete() throws Exception {
         mockMvc.perform(delete("/api/applications/" + applicationId)
                         .header("Authorization", "Bearer " + tokenB))
@@ -113,7 +141,7 @@ class ApplicationControllerIT {
     }
 
     @Test
-    @Order(5)
+    @Order(7)
     void unauthenticated_returns40101() throws Exception {
         mockMvc.perform(get("/api/applications"))
                 .andExpect(status().isUnauthorized())
