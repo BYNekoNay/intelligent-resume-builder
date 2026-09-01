@@ -90,7 +90,7 @@ The task state and retry outcome belong in the generated redacted summary, never
 
 ## Live Bailian provider gate
 
-Create ignored `.env.live-ai` containing `BAILIAN_API_KEY` and, optionally, `BAILIAN_MODELS`.
+Create ignored `.env.live-ai` containing `BAILIAN_API_KEY` and, optionally, `BAILIAN_MODEL` (verified recommended value: `qwen3.7-plus-2026-05-26`).
 Do not add `AI_PROVIDER` to `.env`; the gate injects it only into its Maven child process.
 
 ```powershell

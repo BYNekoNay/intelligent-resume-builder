@@ -9,7 +9,7 @@ groups:
         annotations:
           summary: AI provider success rate is below 95%
       - alert: AiProviderClientErrorsHigh
-        expr: sum(rate(resume_ai_provider_calls_total{category="PROVIDER_4XX"}[10m])) / clamp_min(sum(rate(resume_ai_provider_calls_total[10m])), 0.001) > 0.10
+        expr: sum(rate(resume_ai_provider_calls_total{failure_category="PROVIDER_4XX"}[10m])) / clamp_min(sum(rate(resume_ai_provider_calls_total[10m])), 0.001) > 0.10
         for: 10m
         labels:
           severity: warning
@@ -17,13 +17,13 @@ groups:
           summary: AI provider client error rate is above 10%
           description: Bailian 4xx 占比过高，通常表示 API Key 失效、配额不足或请求被拒绝，请检查密钥与配额。
       - alert: AiProviderServerErrorsHigh
-        expr: sum(rate(resume_ai_provider_calls_total{category=~"PROVIDER_5XX|PROVIDER_TIMEOUT"}[10m])) / clamp_min(sum(rate(resume_ai_provider_calls_total[10m])), 0.001) > 0.05
+        expr: sum(rate(resume_ai_provider_calls_total{failure_category=~"PROVIDER_5XX|TIMEOUT|CONNECTION"}[10m])) / clamp_min(sum(rate(resume_ai_provider_calls_total[10m])), 0.001) > 0.05
         for: 10m
         labels:
           severity: critical
         annotations:
           summary: AI provider server error rate is above 5%
-          description: Bailian 5xx/超时占比过高，通常表示上游故障或网络异常，请检查百炼服务状态。
+          description: Bailian 5xx/超时/连接失败占比过高，通常表示上游故障或网络异常，请检查百炼服务状态。
       - alert: PdfExportSuccessRateLow
         expr: sum(rate(resume_pdf_export_tasks_total{outcome="success"}[10m])) / clamp_min(sum(rate(resume_pdf_export_tasks_total[10m])), 0.001) < 0.90
         for: 10m

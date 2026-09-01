@@ -215,7 +215,8 @@ public class InterviewFollowUpAiService {
         try {
             return objectMapper.convertValue(data, FollowUpResponse.class);
         } catch (Exception e) {
-            log.warn("Failed to parse interview follow-up response: {}", e.getMessage());
+            // 隐私约束：Jackson 解析错误信息可能回显模型原文片段，只记录异常类型
+            log.warn("Failed to parse interview follow-up response: exception={}", e.getClass().getSimpleName());
             throw new BusinessException(ErrorCode.AI_FAILURE, "AI 返回数据格式无效");
         }
     }
