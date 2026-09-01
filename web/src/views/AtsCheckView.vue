@@ -7,11 +7,12 @@ import {
 } from 'lucide-vue-next'
 import { getAtsCheck, retryAtsAi, runAtsCheck, type AtsCheckResponse } from '@/api/ats'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
+import { useTaskPolling, TASK_POLL_DEFAULT_INITIAL_DELAY_MS } from '@/composables/useTaskPolling'
 import { useLocale } from '@/i18n'
 import { mapAtsSection } from '@/resume/sectionRegistry'
 
-const POLL_INTERVAL_MS = 1_500
-const POLL_TIMEOUT_MS = 90_000
+const ATS_POLL_INTERVAL_MS = 1_500
+const ATS_POLL_MAX_ATTEMPTS = 200
 const resumeVersionId = ref('')
 const jobDescriptionId = ref('')
 const result = ref<AtsCheckResponse | null>(null)
@@ -20,8 +21,7 @@ const loading = ref(false)
 const checkingMode = ref<'AI' | 'RULES' | null>(null)
 const retrying = ref(false)
 const pollingTimedOut = ref(false)
-let pollTimer: ReturnType<typeof setTimeout> | null = null
-let pollGeneration = 0
+const { start: startTaskPolling, stop: stopTaskPolling } = useTaskPolling<AtsCheckResponse>()
 
 const { t } = useLocale()
 const route = useRoute()
@@ -31,9 +31,7 @@ const analyzing = computed(() => result.value?.analysisStatus === 'ANALYZING' &&
 const showReport = computed(() => Boolean(result.value) && (!analyzing.value || pollingTimedOut.value))
 
 function stopPolling() {
-  pollGeneration += 1
-  if (pollTimer) clearTimeout(pollTimer)
-  pollTimer = null
+  stopTaskPolling()
 }
 
 async function rememberResult(id: number) {
@@ -65,29 +63,30 @@ async function check(useAi: boolean) {
 
 function startPolling(id: number) {
   stopPolling()
-  const generation = pollGeneration
-  const startedAt = Date.now()
-  const poll = async () => {
-    if (generation !== pollGeneration) return
-    try {
-      const next = (await getAtsCheck(id)).data.data
-      if (generation !== pollGeneration) return
+  // 统一走 useTaskPolling：1.5s 间隔 × 200 次 ≈ 5 分钟窗口，
+  // 对齐后端 300s 推理 readTimeout；超时后保留本地规则报告并提示后台继续。
+  startTaskPolling({
+    taskId: id,
+    fetchTask: async (taskId) => (await getAtsCheck(taskId)).data.data,
+    intervalMs: ATS_POLL_INTERVAL_MS,
+    maxAttempts: ATS_POLL_MAX_ATTEMPTS,
+    initialDelayMs: TASK_POLL_DEFAULT_INITIAL_DELAY_MS,
+    onTask: (next) => {
       if (next.analysisStatus !== 'ANALYZING'
         || result.value?.analysisStatus !== 'ANALYZING'
-        || next.aiTaskId !== result.value.aiTaskId) {
+        || next.aiTaskId !== result.value?.aiTaskId) {
         result.value = next
       }
-      if (next.analysisStatus !== 'ANALYZING') return
-      if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
-        pollingTimedOut.value = true
-        return
-      }
-      pollTimer = setTimeout(poll, POLL_INTERVAL_MS)
-    } catch {
-      if (generation === pollGeneration) error.value = t('ats.restoreError')
-    }
-  }
-  pollTimer = setTimeout(poll, POLL_INTERVAL_MS)
+    },
+    shouldStop: (next) => next.analysisStatus !== 'ANALYZING',
+    onTimeout: () => {
+      pollingTimedOut.value = true
+    },
+    onError: () => {
+      stopTaskPolling()
+      error.value = t('ats.restoreError')
+    },
+  })
 }
 
 async function retryAi() {

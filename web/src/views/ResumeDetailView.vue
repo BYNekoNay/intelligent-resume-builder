@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Archive, ArrowLeft, BriefcaseBusiness, CheckCircle2, Download, FileClock, GitCompareArrows, Pencil, Plus, RotateCcw } from 'lucide-vue-next'
 import { archiveResumeVersion, getResume, listVersions, restoreResumeVersion, setCurrentVersion, unarchiveResumeVersion, updateResumeTitle, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
@@ -111,11 +111,17 @@ onMounted(async () => {
 
 async function loadRelatedAssets() {
   try {
-    relatedAssets.value = (await listInterviewAssets()).data.data
+    // 与 ResumeEditorView 对齐：选中章节时后端按 sectionKey 过滤，避免全量拉取后再前端筛选
+    relatedAssets.value = (await listInterviewAssets(relatedSectionKey.value ? { sectionKey: relatedSectionKey.value } : undefined)).data.data
   } catch {
     relatedAssets.value = []
   }
 }
+
+// 章节筛选变化时重新从后端按 sectionKey 拉取
+watch(relatedSectionKey, () => {
+  void loadRelatedAssets()
+})
 
 function compareVersion(version: ResumeVersionSummary) {
   const base = resume.value?.currentVersionId ?? version.id

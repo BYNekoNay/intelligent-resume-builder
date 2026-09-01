@@ -30,6 +30,7 @@ import {
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
+import { listVersions, type ResumeSummary } from '@/api/resume'
 
 const records = ref<ApplicationRecord[]>([])
 const stats = ref<ApplicationStats | null>(null)
@@ -130,13 +131,26 @@ async function selectResumeVersion(versionId: number) {
     selectedResumeId.value = currentResume.id
     await loadVersions()
   } else {
-    for (const resume of resumes.value) {
-      selectedResumeId.value = resume.id
+    const owningResume = await findResumeByVersionId(versionId)
+    if (owningResume) {
+      selectedResumeId.value = owningResume.id
       await loadVersions()
-      if (versions.value.some(version => version.id === versionId)) break
     }
   }
   resumeVersionId.value = String(versionId)
+}
+
+/** 并行加载所有简历的版本并定位 versionId 所属简历，避免逐个串行请求（消除循环 N+1）。 */
+async function findResumeByVersionId(versionId: number): Promise<ResumeSummary | null> {
+  const candidates = await Promise.all(resumes.value.map(async (resume) => {
+    try {
+      const list = (await listVersions(resume.id)).data.data
+      return list.some(version => version.id === versionId) ? resume : null
+    } catch {
+      return null
+    }
+  }))
+  return candidates.find(resume => resume !== null) ?? null
 }
 
 async function edit(record: ApplicationRecord) {

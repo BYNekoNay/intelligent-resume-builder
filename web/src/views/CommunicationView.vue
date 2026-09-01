@@ -24,11 +24,9 @@ import {
 } from '@/api/communication'
 import type { ApiResponse } from '@/api/client'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
+import { useTaskPolling, TASK_POLL_DEFAULT_INTERVAL_MS, TASK_POLL_DEFAULT_MAX_ATTEMPTS } from '@/composables/useTaskPolling'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
-
-const POLL_INTERVAL_MS = 2_000
-const POLL_TIMEOUT_MS = 90_000
 
 const route = useRoute()
 const router = useRouter()
@@ -47,8 +45,7 @@ const copyStatus = ref('')
 const loadingMode = ref<'AI' | 'TEMPLATE' | 'RETRY' | null>(null)
 const waitingInBackground = ref(false)
 const activeTaskId = ref<number | null>(null)
-let pollTimer: ReturnType<typeof setTimeout> | null = null
-let pollGeneration = 0
+const { start: startTaskPolling, stop: stopTaskPolling } = useTaskPolling<AiTask>()
 
 // ==================== 模板库 ====================
 const templates = ref<CommunicationTemplateSummary[]>([])
@@ -84,9 +81,7 @@ const {
 } = useResumeJobOptions()
 
 function stopPolling() {
-  pollGeneration += 1
-  if (pollTimer) clearTimeout(pollTimer)
-  pollTimer = null
+  stopTaskPolling()
 }
 
 function resetResult() {
@@ -158,33 +153,30 @@ function acceptTaskResult(task: AiTask) {
 
 function startPolling(taskId: number) {
   stopPolling()
-  const generation = pollGeneration
-  const startedAt = Date.now()
   activeTaskId.value = taskId
   waitingInBackground.value = false
-  const poll = async () => {
-    if (generation !== pollGeneration) return
-    try {
-      const task = (await getTask(taskId)).data.data
-      if (generation !== pollGeneration || acceptTaskResult(task)) {
-        loadingMode.value = null
-        return
-      }
-      if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
-        loadingMode.value = null
-        waitingInBackground.value = true
-        return
-      }
-      pollTimer = setTimeout(poll, POLL_INTERVAL_MS)
-    } catch {
-      if (generation === pollGeneration) {
-        loadingMode.value = null
-        failureKind.value = 'FAILED'
-        error.value = t('communication.restoreError')
-      }
-    }
-  }
-  pollTimer = setTimeout(poll, POLL_INTERVAL_MS)
+  // 统一走 useTaskPolling：默认 2s 间隔 × 150 次 ≈ 5 分钟窗口，
+  // 对齐后端 300s 推理 readTimeout，避免任务仍在执行时前端先显示超时。
+  startTaskPolling({
+    taskId,
+    fetchTask: async (id) => (await getTask(id)).data.data,
+    intervalMs: TASK_POLL_DEFAULT_INTERVAL_MS,
+    maxAttempts: TASK_POLL_DEFAULT_MAX_ATTEMPTS,
+    onTask: (task) => {
+      if (acceptTaskResult(task)) loadingMode.value = null
+    },
+    shouldStop: (task) => task.status === 'SUCCESS' || task.status === 'FAILED' || task.status === 'CANCELLED',
+    onTimeout: () => {
+      loadingMode.value = null
+      waitingInBackground.value = true
+    },
+    onError: () => {
+      stopTaskPolling()
+      loadingMode.value = null
+      failureKind.value = 'FAILED'
+      error.value = t('communication.restoreError')
+    },
+  })
 }
 
 async function generateAi() {

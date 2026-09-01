@@ -2,7 +2,8 @@
  * AI 任务轮询 composable。
  *
  * 统一处理 AI 任务状态轮询的公共逻辑：
- * - 每 N 秒轮询一次，达到最大尝试次数后触发超时回调（约 60 次 × 2s = 2 分钟）；
+ * - 每 N 秒轮询一次，达到最大尝试次数后触发超时回调（默认 150 次 × 2s = 5 分钟，
+ *   对齐后端 BAILIAN_READ_TIMEOUT_S=300 的推理窗口）；
  * - 轮询代数（epoch）机制：重新 start 或调用 stop 会使旧轮询立即失效，
  *   防止旧轮询污染新任务；
  * - 组件卸载时自动清理定时器，避免内存泄漏与卸载后的状态写入。
@@ -13,7 +14,7 @@
 import { onUnmounted } from 'vue'
 
 export const TASK_POLL_DEFAULT_INTERVAL_MS = 2_000
-export const TASK_POLL_DEFAULT_MAX_ATTEMPTS = 60
+export const TASK_POLL_DEFAULT_MAX_ATTEMPTS = 150
 export const TASK_POLL_DEFAULT_INITIAL_DELAY_MS = 1_500
 
 export interface TaskPollingOptions<T> {
@@ -23,7 +24,7 @@ export interface TaskPollingOptions<T> {
   fetchTask: (taskId: number) => Promise<T>
   /** 轮询间隔（毫秒），默认 2000 */
   intervalMs?: number
-  /** 最大尝试次数，默认 60（约 2 分钟） */
+  /** 最大尝试次数，默认 150（约 5 分钟，对齐后端 300s 推理窗口） */
   maxAttempts?: number
   /** 首次轮询延迟（毫秒），默认 1500 */
   initialDelayMs?: number
