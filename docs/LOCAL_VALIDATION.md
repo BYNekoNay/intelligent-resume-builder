@@ -75,6 +75,8 @@ Each run writes a redacted JSON report and a readable Markdown summary under `.l
 
 当前本地验证覆盖 M1/M2（MVP 闭环）及面试答案资产的基础操作。ATS、成果量化引导、沟通文案、AI 面试多轮对话和投递状态流转已经实现，但默认全流程尚未覆盖其全部 AI 与状态转换路径；对应模块测试和专项 E2E 是当前验证依据。验证通过不等于完整发布验收通过——发布前仍需完成本文列出的专项验证与环境检查。
 
+薄弱项练习（interview follow-up）已通过专项验证（2026-08-31 手工验证 PASS）：对已完成会话基于真实百炼 AI 生成 3~5 条候选练习题，并校验问题/聚焦点/预期信号/覆盖标签的契约与归属。
+
 ## Failure drill
 
 With the local MySQL + Bailian baseline running, the full-flow command above can perform the PDF outage/retry drill. The following commands are useful for manual troubleshooting:
