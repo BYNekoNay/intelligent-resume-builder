@@ -115,8 +115,10 @@ test('expands report rounds and saves an answer asset with an idempotent saved s
   await expect(roundCard.getByRole('button', { name: 'Save as answer asset' })).toHaveCount(0)
   expect(assetCreates).toBe(1)
 
-  // 第 2 轮未保存，仍显示保存按钮；再次展开第 1 轮不会重复创建资产
-  await expect(page.locator('.round-card').filter({ hasText: 'How do you ensure quality?' }).getByRole('button', { name: 'Save as answer asset' })).toBeVisible()
+  // 第 2 轮未保存：展开后仍显示保存按钮；再次折叠/展开第 1 轮不会重复创建资产
+  const round2Card = page.locator('.round-card').filter({ hasText: 'How do you ensure quality?' })
+  await round2Card.locator('summary').click()
+  await expect(round2Card.getByRole('button', { name: 'Save as answer asset' })).toBeVisible()
   await roundCard.locator('summary').click()
   await roundCard.locator('summary').click()
   await expect(roundCard.getByText('Saved', { exact: true })).toBeVisible()

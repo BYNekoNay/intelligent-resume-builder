@@ -49,24 +49,26 @@ async function mockApplicationsPage(page: Page, overrides: { records?: ReturnTyp
   await page.route('**/api/resumes/1/versions**', route => route.fulfill({ json: response(versions) }))
   await page.route('**/api/resumes/2/versions**', route => route.fulfill({ json: response(versions) }))
   await page.route('**/api/jobs', route => route.fulfill({ json: response(jobs) }))
+  // 注意：Playwright 按注册逆序匹配路由，宽泛的 applications** 先注册，
+  // 更具体的 /stats 后注册从而优先命中（/api/applications?followUp=ALL 也由宽泛规则覆盖）。
+  await page.route('**/api/applications**', route => route.fulfill({ json: response(records) }))
   await page.route('**/api/applications/stats', route => route.fulfill({ json: response(stats) }))
-  await page.route('**/api/applications', route => route.fulfill({ json: response(records) }))
   return records
 }
 
 /** 在浏览器上下文里模拟完整 HTML5 拖拽序列（dragstart → dragover → drop → dragend）。 */
 async function dragTicketToLane(page: Page, ticketText: string, laneClass: string) {
-  await page.evaluate(({ ticketText: text, laneClass: lane }) => {
+  await page.evaluate(({ ticketText: text, laneClass: laneSelector }) => {
     const ticket = [...document.querySelectorAll('.application-ticket')]
       .find(el => el.textContent?.includes(text))
-    const lane = document.querySelector<HTMLElement>(lane)
+    const lane = document.querySelector<HTMLElement>(`.pipeline-lane.${laneSelector}`)
     if (!ticket || !lane) throw new Error('drag target not found')
     const dt = new DataTransfer()
     ticket.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }))
     lane.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }))
     lane.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }))
     ticket.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }))
-  }, { ticketText, laneClass: `.pipeline-lane.${laneClass}` })
+  }, { ticketText, laneClass })
 }
 
 test('illegal drag migration shows a toast and never sends a status request', async ({ page }) => {

@@ -58,7 +58,7 @@ test('shows the diff summary, field-level highlights, and the changed-only filte
   await page.goto('/resumes/1/compare')
 
   await expect(page.getByRole('heading', { name: 'Compare Resume Versions' })).toBeVisible()
-  await expect(page.getByText('Backend resume', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Backend resume/)).toBeVisible()
 
   // diff 摘要：3 个有变化章节、2 个新增条目、0 删除、2 个修改
   const summary = page.locator('.diff-summary')
@@ -76,7 +76,7 @@ test('shows the diff summary, field-level highlights, and the changed-only filte
   // work 数组章节：w1 修改（position 字段高亮）、w3 新增（entry-added）
   const changedEntry = page.locator('.entry-diff.entry-changed').filter({ hasText: 'Base Systems' })
   await expect(changedEntry).toBeVisible()
-  await expect(changedEntry.locator('.entry-field.field-modified')).toContainText('Senior Engineer')
+  await expect(changedEntry.locator('.entry-field.field-modified').filter({ hasText: 'Senior Engineer' })).toBeVisible()
   await expect(page.locator('.entry-diff.entry-added').filter({ hasText: 'New Systems' })).toBeVisible()
   await expect(page.locator('.entry-diff.entry-added').filter({ hasText: 'Redis' })).toBeVisible()
 

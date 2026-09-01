@@ -519,7 +519,22 @@ test('keeps application evidence visible while tracking a pipeline stage', async
     updatedAt: now,
   }
   let statusPayload: unknown = null
-  await page.route('**/api/applications', route => route.fulfill({ json: response([application]) }))
+  // 宽泛 applications** 覆盖 /api/applications?followUp=ALL 的 query 形态；
+  // /stats 单独注册（后注册优先命中）。
+  await page.route('**/api/applications**', route => route.fulfill({ json: response([application]) }))
+  await page.route('**/api/applications/stats', route => route.fulfill({ json: response({
+    total: 1,
+    byStatus: [
+      { status: 'DRAFT', count: 0, percent: 0 },
+      { status: 'APPLIED', count: 1, percent: 100 },
+      { status: 'INTERVIEWING', count: 0, percent: 0 },
+      { status: 'OFFERED', count: 0, percent: 0 },
+      { status: 'REJECTED', count: 0, percent: 0 },
+      { status: 'WITHDRAWN', count: 0, percent: 0 },
+    ],
+    conversionRates: { appliedToInterviewing: 0, interviewingToOffered: null, appliedToOffered: 0 },
+    avgStageDurationDays: { applied: 0, interviewing: null, totalToOffer: null },
+  }) }))
   await page.route('**/api/applications/31/status', async route => {
     statusPayload = route.request().postDataJSON()
     await route.fulfill({ json: response({ ...application, status: 'INTERVIEWING', version: 3 }) })
@@ -1891,7 +1906,8 @@ test('generates an editable communication draft and carries it into an applicati
   await expect.poll(() => generationPayload).toEqual({ resumeVersionId: 11, jobDescriptionId: 20, type: 'EMAIL', outputLanguage: 'ZH_CN' })
   const editor = page.locator('article.workspace-card textarea')
   await editor.fill('Edited email body')
-  await page.locator('article.workspace-card .job-actions button').nth(1).click()
+  // 草稿卡片 job-actions 的主按钮是「用于投递」，与按钮顺序解耦（避免新增按钮导致索引漂移）
+  await page.locator('article.workspace-card .job-actions .btn-primary').click()
   await expect(page).toHaveURL(/\/applications$/)
   await expect(page.locator('textarea').nth(1)).toHaveValue('Edited email body')
 })
@@ -2002,7 +2018,8 @@ test('archives a historical version and restores it to the visible history', asy
   await page.goto('/resumes/1')
   const historicalCard = page.locator('.version-card').filter({ hasText: 'v2' })
   await expect(historicalCard).toBeVisible()
-  await historicalCard.locator('button').nth(2).click()
+  // 用可访问名称定位「归档 v2」，避免新增操作按钮（恢复/对比）导致索引漂移
+  await historicalCard.getByRole('button', { name: '归档 v2' }).click()
   await expect.poll(() => archiveCalls).toBe(1)
   await expect(historicalCard).toHaveCount(0)
 
