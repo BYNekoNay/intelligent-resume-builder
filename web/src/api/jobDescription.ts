@@ -1,15 +1,23 @@
 import { apiClient, type ApiResponse } from './client'
 
-export interface JobDescription {
+interface JobDescriptionBase {
   id: number
   title: string
   companyName: string | null
+  parsedAt: string | null
+  updatedAt: string
+}
+
+export interface JobDescriptionSummary extends JobDescriptionBase {
+  jdTextPreview: string
+}
+
+export interface JobDescriptionDetail extends JobDescriptionBase {
   jdText: string
   parsedKeywordsJson: Record<string, unknown> | null
   parsedAt: string | null
   parsedVersion: string | null
   createdAt: string
-  updatedAt: string
 }
 
 export interface JobDescriptionPayload {
@@ -19,19 +27,23 @@ export interface JobDescriptionPayload {
 }
 
 export function listJobs() {
-  return apiClient.get<ApiResponse<JobDescription[]>>('/api/jobs')
+  return apiClient.get<ApiResponse<JobDescriptionSummary[]>>('/api/jobs')
+}
+
+export function getJob(id: number) {
+  return apiClient.get<ApiResponse<JobDescriptionDetail>>(`/api/jobs/${id}`)
 }
 
 export function createJob(payload: JobDescriptionPayload) {
-  return apiClient.post<ApiResponse<JobDescription>>('/api/jobs', payload)
+  return apiClient.post<ApiResponse<JobDescriptionDetail>>('/api/jobs', payload)
 }
 
 export function updateJob(id: number, payload: JobDescriptionPayload) {
-  return apiClient.patch<ApiResponse<JobDescription>>(`/api/jobs/${id}`, payload)
+  return apiClient.patch<ApiResponse<JobDescriptionDetail>>(`/api/jobs/${id}`, payload)
 }
 
 export function parseJob(id: number) {
-  return apiClient.post<ApiResponse<JobDescription>>(`/api/jobs/${id}/parse`)
+  return apiClient.post<ApiResponse<JobDescriptionDetail>>(`/api/jobs/${id}/parse`)
 }
 
 export function deleteJob(id: number) {

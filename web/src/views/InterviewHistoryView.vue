@@ -2,14 +2,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { ArrowLeft, BarChart3, CalendarDays, FileClock, Search } from 'lucide-vue-next'
 import { getInterviewReport, listInterviewHistory, type InterviewReportResponse, type InterviewSessionSummary } from '@/api/interview'
-import { listJobs, type JobDescription } from '@/api/jobDescription'
+import { listJobs, type JobDescriptionSummary } from '@/api/jobDescription'
 import { useLocale } from '@/i18n'
 import { useRouter } from 'vue-router'
 
 const { locale, t } = useLocale()
 const router = useRouter()
 const sessions = ref<InterviewSessionSummary[]>([])
-const jobs = ref<JobDescription[]>([])
+const jobs = ref<JobDescriptionSummary[]>([])
 const jobDescriptionId = ref<number | null>(null)
 const loading = ref(false)
 const error = ref('')

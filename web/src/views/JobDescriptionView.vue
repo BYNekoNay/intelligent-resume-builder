@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { BriefcaseBusiness, CheckCircle2, Clock3, Pencil, Plus, Save, ScanSearch, Sparkles, Trash2 } from 'lucide-vue-next'
-import { createJob, deleteJob, parseJob, type JobDescription, updateJob } from '@/api/jobDescription'
+import { createJob, deleteJob, getJob, parseJob, type JobDescriptionDetail, type JobDescriptionSummary, updateJob } from '@/api/jobDescription'
 import { useJobDescriptionStore } from '@/stores/jobDescription'
 import { useLocale } from '@/i18n'
 
@@ -13,37 +13,62 @@ const companyName = ref('')
 const jdText = ref('')
 const editingId = ref<number | null>(null)
 const saving = ref(false)
-const parsedResult = ref<JobDescription | null>(null)
+const editDetailLoaded = ref(true)
+const parsedResult = ref<JobDescriptionDetail | null>(null)
 const error = ref('')
+let editRequestId = 0
 const { t } = useLocale()
 
 onMounted(async () => {
-  await store.load()
+  try {
+    await store.load()
+  } catch {
+    error.value = t('jobs.listLoadError')
+  }
 })
 
 function resetForm() {
+  editRequestId += 1
   editingId.value = null
+  editDetailLoaded.value = true
   title.value = ''
   companyName.value = ''
   jdText.value = ''
 }
 
-function edit(job: JobDescription) {
-  editingId.value = job.id
+function applyJobToForm(job: Pick<JobDescriptionDetail, 'title' | 'companyName' | 'jdText'>) {
   title.value = job.title
   companyName.value = job.companyName ?? ''
-  jdText.value = job.jdText
+  jdText.value = job.jdText ?? ''
+}
+
+async function edit(job: JobDescriptionSummary) {
+  const requestId = ++editRequestId
+  editingId.value = job.id
+  editDetailLoaded.value = false
+  applyJobToForm({ title: job.title, companyName: job.companyName, jdText: '' })
   error.value = ''
+  try {
+    const fullJob = (await getJob(job.id)).data.data
+    if (requestId !== editRequestId || editingId.value !== job.id) return
+    applyJobToForm(fullJob)
+    editDetailLoaded.value = true
+  } catch {
+    if (requestId === editRequestId) error.value = t('jobs.loadError')
+  }
 }
 
 async function save() {
+  if (editingId.value !== null && !editDetailLoaded.value) return
+  const saveEditRequestId = editRequestId
+  const saveEditingId = editingId.value
   saving.value = true
   error.value = ''
   const payload = { title: title.value, companyName: companyName.value || undefined, jdText: jdText.value }
   try {
     if (editingId.value === null) await createJob(payload)
     else await updateJob(editingId.value, payload)
-    resetForm()
+    if (editRequestId === saveEditRequestId && editingId.value === saveEditingId) resetForm()
     await store.load()
   } catch {
     error.value = t('jobs.saveError')
@@ -86,11 +111,11 @@ function generate(jobId: number) {
 
     <form class="job-composer" @submit.prevent="save">
       <header class="job-section-heading"><span><Plus v-if="editingId === null" :size="19" /><Pencil v-else :size="19" /></span><div><p>{{ editingId === null ? t('jobs.createEyebrow') : t('jobs.editEyebrow') }}</p><h2>{{ editingId === null ? t('jobs.create') : t('jobs.edit') }}</h2><small>{{ t('jobs.formDescription') }}</small></div></header>
-      <label>{{ t('jobs.roleTitle') }}<input v-model.trim="title" required maxlength="255" /></label>
-      <label>{{ t('jobs.company') }}<input v-model.trim="companyName" maxlength="255" /></label>
-      <label class="wide-field">{{ t('jobs.description') }}<textarea v-model.trim="jdText" required maxlength="5000" rows="6" /><small class="field-count">{{ jdText.length }}/5000</small></label>
+      <label>{{ t('jobs.roleTitle') }}<input v-model.trim="title" :disabled="saving || (editingId !== null && !editDetailLoaded)" required maxlength="255" /></label>
+      <label>{{ t('jobs.company') }}<input v-model.trim="companyName" :disabled="saving || (editingId !== null && !editDetailLoaded)" maxlength="255" /></label>
+      <label class="wide-field">{{ t('jobs.description') }}<textarea v-model.trim="jdText" :disabled="saving || (editingId !== null && !editDetailLoaded)" required maxlength="5000" rows="6" /><small class="field-count">{{ jdText.length }}/5000</small></label>
       <div class="job-actions">
-        <button class="btn-neon btn-primary" :disabled="saving"><Save :size="16" />{{ saving ? t('jobs.saving') : editingId === null ? t('jobs.save') : t('jobs.saveChanges') }}</button>
+        <button class="btn-neon btn-primary" :disabled="saving || (editingId !== null && !editDetailLoaded)"><Save :size="16" />{{ saving ? t('jobs.saving') : editingId === null ? t('jobs.save') : t('jobs.saveChanges') }}</button>
         <button v-if="editingId !== null" class="btn-neon btn-ghost" type="button" :disabled="saving" @click="resetForm">{{ t('jobs.cancel') }}</button>
       </div>
     </form>
@@ -104,7 +129,7 @@ function generate(jobId: number) {
       <div v-else class="job-list">
         <article v-for="job in store.items" :key="job.id" class="job-card">
           <div class="job-copy"><div class="job-status" :class="{ parsed: job.parsedAt }"><CheckCircle2 v-if="job.parsedAt" :size="13" /><Clock3 v-else :size="13" />{{ job.parsedAt ? t('jobs.parsed') : t('jobs.notParsed') }}</div><h3>{{ job.title }}</h3><p>{{ job.companyName || t('jobs.noCompany') }}</p></div>
-          <div class="job-actions"><button class="icon-job-action" type="button" :title="t('jobs.editAction')" :aria-label="t('jobs.editAction')" @click="edit(job)"><Pencil :size="15" /></button><button class="btn-neon btn-ghost" type="button" @click="parse(job.id)"><ScanSearch :size="15" />{{ t('jobs.parse') }}</button><button class="btn-neon btn-primary" type="button" @click="generate(job.id)"><Sparkles :size="15" />{{ t('jobs.generate') }}</button><button class="icon-job-action danger" type="button" :title="t('jobs.delete')" :aria-label="t('jobs.delete')" @click="remove(job.id)"><Trash2 :size="15" /></button></div>
+          <div class="job-actions"><button class="icon-job-action" type="button" :disabled="saving" :title="t('jobs.editAction')" :aria-label="t('jobs.editAction')" @click="edit(job)"><Pencil :size="15" /></button><button class="btn-neon btn-ghost" type="button" @click="parse(job.id)"><ScanSearch :size="15" />{{ t('jobs.parse') }}</button><button class="btn-neon btn-primary" type="button" @click="generate(job.id)"><Sparkles :size="15" />{{ t('jobs.generate') }}</button><button class="icon-job-action danger" type="button" :title="t('jobs.delete')" :aria-label="t('jobs.delete')" @click="remove(job.id)"><Trash2 :size="15" /></button></div>
         </article>
       </div>
     </section>

@@ -18,7 +18,7 @@ const materialSearch = (items: Array<Record<string, unknown>>, overrides: Record
 })
 const resume = { id: 1, title: 'Backend resume', currentVersionId: 11, jobDescriptionId: null, createdAt: now, updatedAt: now }
 const version = { id: 11, resumeId: 1, versionNo: 1, sourceType: 'MANUAL', resumeJson: {}, optimizationSummary: null, createdAt: now }
-const job = { id: 20, title: 'Backend Engineer', companyName: 'Example Systems', jdText: 'Java and Spring Boot', parsedKeywordsJson: null, parsedAt: null, parsedVersion: null, createdAt: now, updatedAt: now }
+const job = { id: 20, title: 'Backend Engineer', companyName: 'Example Systems', jdText: 'Java and Spring Boot', jdTextPreview: 'Java and Spring Boot', parsedKeywordsJson: null, parsedAt: null, parsedVersion: null, createdAt: now, updatedAt: now }
 const dimensionScores = {
   relevance: 20,
   evidenceSpecificity: 18,
@@ -436,6 +436,21 @@ test('takes an authenticated user from the home primary action to the latest res
   await page.locator('.home-primary-action').click()
 
   await expect(page).toHaveURL(/\/resumes\/1\/edit$/)
+})
+
+test('renders the resume editor without unresolved component warnings', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.route('**/api/resume-versions/11', route => route.fulfill({ json: response(version) }))
+  const unresolvedWarnings: string[] = []
+  page.on('console', message => {
+    if (message.type() === 'warning' && message.text().includes('Failed to resolve component: X')) {
+      unresolvedWarnings.push(message.text())
+    }
+  })
+
+  await page.goto('/resumes/1/edit')
+  await expect(page.locator('.studio-grid')).toBeVisible()
+  expect(unresolvedWarnings).toEqual([])
 })
 
 test('keeps the complete product navigation usable on mobile', async ({ page }) => {
@@ -876,9 +891,16 @@ test('loads complete material details before editing a highlight', async ({ page
   }
   const detail = {
     ...summary,
-    contentJson: { summary: 'Led a six-person platform reliability initiative.' },
+    contentJson: {
+      summary: 'Led a six-person platform reliability initiative.',
+    },
     sourceText: 'Led six engineers and reduced production incidents by 45%.',
     createdAt: now,
+  }
+  const updatedDetail = {
+    ...detail,
+    sourceText: 'Reduced production incidents by 52%.',
+    contentJson: { ...detail.contentJson, sourceText: 'Reduced production incidents by 52%.' },
   }
   let updatePayload: unknown
 
@@ -887,7 +909,7 @@ test('loads complete material details before editing a highlight', async ({ page
   await page.route('**/api/career-materials/77', async route => {
     if (route.request().method() === 'PATCH') {
       updatePayload = route.request().postDataJSON()
-      return route.fulfill({ json: response(detail) })
+      return route.fulfill({ json: response(updatedDetail) })
     }
     return route.fulfill({ json: response(detail) })
   })
@@ -901,12 +923,12 @@ test('loads complete material details before editing a highlight', async ({ page
   await expect(form.getByLabel('来源原文')).toHaveValue(detail.sourceText)
   await expect(form.getByLabel('资料 JSON')).toHaveValue(/platform reliability initiative/)
 
-  await form.getByLabel('来源原文').fill('')
+  await form.getByLabel('来源原文').fill(updatedDetail.sourceText)
   await form.getByRole('button', { name: '保存修改' }).click()
   await expect.poll(() => updatePayload).toMatchObject({
     materialType: 'HIGHLIGHT',
-    sourceText: '',
-    contentJson: detail.contentJson,
+    sourceText: updatedDetail.sourceText,
+    contentJson: updatedDetail.contentJson,
   })
 })
 
@@ -1601,6 +1623,114 @@ test('switches the complete job description workspace content with the selected 
   await expect(page.getByRole('heading', { name: '新建岗位描述' })).toBeVisible()
 })
 
+test('shows an error when the saved job list cannot load', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.route('**/api/jobs', route => route.fulfill({ status: 503, json: { code: 503, message: 'unavailable' } }))
+
+  await page.goto('/jobs')
+  await expect(page.getByRole('alert')).toHaveText('无法加载岗位列表，请稍后重试。')
+})
+
+test('loads the full job description before opening its edit form', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const summary = { id: 20, title: 'Backend Engineer', companyName: 'Example Systems', updatedAt: now }
+  const detail = {
+    ...summary,
+    jdText: 'Java and Spring Boot experience required.',
+    parsedKeywordsJson: null,
+    parsedAt: null,
+    parsedVersion: null,
+    createdAt: now,
+  }
+  let updatePayload: unknown
+  await page.route('**/api/jobs', route => route.fulfill({ json: response([summary]) }))
+  await page.route('**/api/jobs/20', async route => {
+    if (route.request().method() === 'PATCH') {
+      updatePayload = route.request().postDataJSON()
+      return route.fulfill({ json: response({ ...detail, ...updatePayload as object }) })
+    }
+    return route.fulfill({ json: response(detail) })
+  })
+
+  await page.goto('/jobs')
+  await page.getByRole('article').getByRole('button', { name: '编辑' }).click()
+
+  const form = page.locator('.job-composer')
+  await expect(form.getByLabel('岗位名称')).toHaveValue(detail.title)
+  await expect(form.getByLabel('公司')).toHaveValue(detail.companyName)
+  await expect(form.getByLabel(/岗位描述/)).toHaveValue(detail.jdText)
+
+  await form.getByLabel(/岗位描述/).fill('Java, Spring Boot, and MySQL experience required.')
+  await form.getByRole('button', { name: '保存修改' }).click()
+  await expect.poll(() => updatePayload).toMatchObject({
+    title: detail.title,
+    companyName: detail.companyName,
+    jdText: 'Java, Spring Boot, and MySQL experience required.',
+  })
+})
+
+test('prevents saving when the full job description fails to load', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const summary = { id: 20, title: 'Backend Engineer', companyName: 'Example Systems', updatedAt: now }
+  let patchRequests = 0
+  await page.route('**/api/jobs', route => route.fulfill({ json: response([summary]) }))
+  await page.route('**/api/jobs/20', async route => {
+    if (route.request().method() === 'PATCH') patchRequests += 1
+    return route.fulfill({ status: 503, json: { code: 503, message: 'unavailable' } })
+  })
+
+  await page.goto('/jobs')
+  await page.getByRole('article').getByRole('button', { name: '编辑' }).click()
+
+  const form = page.locator('.job-composer')
+  await expect(page.getByRole('alert')).toHaveText('无法加载岗位详情，请稍后重试。')
+  await expect(form.getByRole('button', { name: '保存修改' })).toBeDisabled()
+  expect(patchRequests).toBe(0)
+})
+
+test('locks job editing while details and saves are pending', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const summaries = [
+    { id: 20, title: 'Backend Engineer', companyName: 'Example Systems', updatedAt: now },
+    { id: 21, title: 'Platform Engineer', companyName: 'Example Systems', updatedAt: now },
+  ]
+  const detail = {
+    ...summaries[0], jdText: 'Java and Spring Boot experience required.',
+    parsedKeywordsJson: null, parsedAt: null, parsedVersion: null, createdAt: now,
+  }
+  let releaseDetail!: () => void
+  let releaseSave!: () => void
+  const detailGate = new Promise<void>(resolve => { releaseDetail = resolve })
+  const saveGate = new Promise<void>(resolve => { releaseSave = resolve })
+
+  await page.route('**/api/jobs', route => route.fulfill({ json: response(summaries) }))
+  await page.route('**/api/jobs/20', async route => {
+    if (route.request().method() === 'PATCH') {
+      await saveGate
+      return route.fulfill({ json: response(detail) })
+    }
+    await detailGate
+    return route.fulfill({ json: response(detail) })
+  })
+  await page.route('**/api/jobs/21', route => route.fulfill({ json: response({
+    ...summaries[1], jdText: 'Platform reliability experience required.',
+    parsedKeywordsJson: null, parsedAt: null, parsedVersion: null, createdAt: now,
+  }) }))
+
+  await page.goto('/jobs')
+  await page.locator('.job-card').first().getByRole('button', { name: '编辑' }).click()
+  const form = page.locator('.job-composer')
+  await expect(form.getByLabel('岗位名称')).toBeDisabled()
+  await expect(form.getByLabel(/岗位描述/)).toBeDisabled()
+  releaseDetail()
+  await expect(form.getByLabel(/岗位描述/)).toHaveValue(detail.jdText)
+  await form.getByLabel(/岗位描述/).fill('Updated job text')
+  await form.getByRole('button', { name: '保存修改' }).click()
+  await expect(page.locator('.job-card').nth(1).getByRole('button', { name: '编辑' })).toBeDisabled()
+  releaseSave()
+  await expect(form.getByRole('heading', { name: '新建岗位描述' })).toBeVisible()
+})
+
 test('opens the generation workbench with the selected job description', async ({ page }) => {
   await mockAuthenticatedApi(page)
 
@@ -1609,6 +1739,7 @@ test('opens the generation workbench with the selected job description', async (
 
   await expect(page).toHaveURL(/\/generate\?jdId=20$/)
   await expect(page.locator('.jd-card.selected')).toContainText('Backend Engineer')
+  await expect(page.locator('.jd-card.selected')).toContainText(job.jdTextPreview)
 })
 
 test('resumes the pending job generation after granting AI consent', async ({ page }) => {

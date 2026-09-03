@@ -94,7 +94,9 @@ class JobDescriptionControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data").isArray())
-                .andExpect(jsonPath("$.data[0].title").value("Java后端工程师"));
+                .andExpect(jsonPath("$.data[0].title").value("Java后端工程师"))
+                .andExpect(jsonPath("$.data[0].jdTextPreview").value(
+                        "负责 Spring Boot 微服务开发,熟悉 MySQL/Redis,3 年以上经验,本科及以上学历。"));
     }
 
     // ---- 3. 解析 ----
@@ -115,6 +117,10 @@ class JobDescriptionControllerIT {
                 // jd_text 原文不变
                 .andExpect(jsonPath("$.data.jdText").value(
                         "负责 Spring Boot 微服务开发,熟悉 MySQL/Redis,3 年以上经验,本科及以上学历。"));
+
+        mockMvc.perform(get("/api/jobs").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].parsedAt").isNotEmpty());
     }
 
     // ---- 4. 未登录 ----

@@ -27,6 +27,8 @@ import java.util.Map;
 @Service
 public class JobDescriptionService {
 
+    private static final int SUMMARY_PREVIEW_LENGTH = 120;
+
     private final JobDescriptionRepository repository;
     private final JdKeywordParser parser;
     private final int maxLength;
@@ -129,7 +131,16 @@ public class JobDescriptionService {
     }
 
     private JobDescriptionSummary toSummary(JobDescription jd) {
-        return new JobDescriptionSummary(jd.getId(), jd.getTitle(), jd.getCompanyName(), jd.getUpdatedAt());
+        return new JobDescriptionSummary(jd.getId(), jd.getTitle(), jd.getCompanyName(),
+                previewText(jd.getJdText()), jd.getParsedAt(), jd.getUpdatedAt());
+    }
+
+    private String previewText(String text) {
+        if (text == null) return "";
+        String normalized = text.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= SUMMARY_PREVIEW_LENGTH
+                ? normalized
+                : normalized.substring(0, SUMMARY_PREVIEW_LENGTH) + "...";
     }
 
     private JobDescriptionDetail toDetail(JobDescription jd) {

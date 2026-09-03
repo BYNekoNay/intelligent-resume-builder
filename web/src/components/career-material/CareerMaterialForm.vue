@@ -156,6 +156,9 @@ function submit() {
     contentJson = isSpecialized.value
       ? buildSpecializedContent()
       : form.contentJson.trim() ? JSON.parse(form.contentJson) as Record<string, unknown> : { title: form.title, sourceText: form.sourceText }
+    if (!isSpecialized.value) {
+      contentJson = { ...contentJson, sourceText: form.sourceText }
+    }
   } catch {
     localError.value = t('careerMaterial.invalidJson')
     return

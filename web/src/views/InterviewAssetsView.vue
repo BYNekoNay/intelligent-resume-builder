@@ -9,7 +9,7 @@ import {
   type InterviewAssetPayload,
   updateInterviewAsset,
 } from '@/api/interviewAsset'
-import { listJobs, type JobDescription } from '@/api/jobDescription'
+import { listJobs, type JobDescriptionSummary } from '@/api/jobDescription'
 import { listMaterials, type CareerMaterialSummary } from '@/api/careerMaterial'
 import { SECTION_KEYS, type SectionKey } from '@/resume/sectionRegistry'
 import { useLocale } from '@/i18n'
@@ -24,7 +24,7 @@ const editingId = ref<number | null>(null)
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
-const jobs = ref<JobDescription[]>([])
+const jobs = ref<JobDescriptionSummary[]>([])
 const materials = ref<CareerMaterialSummary[]>([])
 const jobDescriptionId = ref<number | null>(null)
 const sectionKeyFilter = ref<string>('')

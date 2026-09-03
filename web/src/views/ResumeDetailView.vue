@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Archive, ArrowLeft, BriefcaseBusiness, CheckCircle2, Download, FileClock, GitCompareArrows, Pencil, Plus, RotateCcw } from 'lucide-vue-next'
 import { archiveResumeVersion, getResume, listVersions, restoreResumeVersion, setCurrentVersion, unarchiveResumeVersion, updateResumeTitle, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
-import { listJobs, type JobDescription } from '@/api/jobDescription'
+import { listJobs, type JobDescriptionSummary } from '@/api/jobDescription'
 import { listInterviewAssets, type InterviewAsset } from '@/api/interviewAsset'
 import { SECTION_KEYS, type SectionKey } from '@/resume/sectionRegistry'
 import { scoreMatch } from '@/api/scoring'
@@ -15,7 +15,7 @@ const props = defineProps<{ id: string }>()
 const resume = ref<ResumeSummary | null>(null)
 const versions = ref<ResumeVersionSummary[]>([])
 const historyView = ref<'active' | 'archived'>('active')
-const associatedJob = ref<JobDescription | null>(null)
+const associatedJob = ref<JobDescriptionSummary | null>(null)
 const runningAction = ref<number | null>(null)
 const editingTitle = ref(false)
 const titleDraft = ref('')

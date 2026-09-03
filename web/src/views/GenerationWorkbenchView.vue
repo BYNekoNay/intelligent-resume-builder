@@ -270,7 +270,7 @@ const TYPE_LABELS = computed<Record<MaterialType, string>>(() => ({
           >
             <input type="radio" :value="jd.id" v-model="selectedJdId" class="sr-only" />
             <span class="radio-mark"><Check v-if="selectedJdId === jd.id" :size="13" /></span>
-            <span class="jd-copy"><strong>{{ jd.title }}</strong><small v-if="jd.companyName">{{ jd.companyName }}</small><p>{{ jd.jdText?.slice(0, 110) }}...</p></span>
+            <span class="jd-copy"><strong>{{ jd.title }}</strong><small v-if="jd.companyName">{{ jd.companyName }}</small><p v-if="jd.jdTextPreview">{{ jd.jdTextPreview }}</p></span>
           </label>
         </div>
       </div>
