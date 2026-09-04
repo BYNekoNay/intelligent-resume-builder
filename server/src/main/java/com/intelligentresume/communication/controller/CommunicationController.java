@@ -10,6 +10,7 @@ import com.intelligentresume.communication.dto.GenerateCommunicationRequest;
 import com.intelligentresume.communication.dto.SaveDraftRequest;
 import com.intelligentresume.communication.dto.SaveTemplateRequest;
 import com.intelligentresume.communication.dto.TemplatePreviewResponse;
+import com.intelligentresume.communication.dto.TemplateDetailResponse;
 import com.intelligentresume.communication.dto.TemplateSummaryResponse;
 import com.intelligentresume.communication.dto.UpdateTemplateRequest;
 import com.intelligentresume.communication.service.CommunicationService;
@@ -63,6 +64,11 @@ public class CommunicationController {
             HttpServletRequest httpRequest) {
         return ApiResponse.success(templateService.list(currentUserId(httpRequest), scene, type, outputLanguage),
                 traceId(httpRequest));
+    }
+
+    @GetMapping("/templates/{id}")
+    public ApiResponse<TemplateDetailResponse> getTemplate(@PathVariable Long id, HttpServletRequest httpRequest) {
+        return ApiResponse.success(templateService.detail(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
     @GetMapping("/templates/{id}/preview")

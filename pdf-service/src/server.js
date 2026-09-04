@@ -1,6 +1,6 @@
 import express from 'express'
-import puppeteer from 'puppeteer'
 import { renderResumeHtml, TEMPLATE_CODES } from './templates/classic.js'
+import { createBrowserPool } from './browserPool.js'
 
 const app = express()
 const cliPort = process.argv.find((argument) => argument.startsWith('--port='))?.slice('--port='.length)
@@ -8,6 +8,7 @@ const configuredPort = process.env.PDF_SERVICE_PORT ?? cliPort ?? '3001'
 const port = Number(configuredPort)
 const expectedServiceToken = process.env.PDF_SERVICE_TOKEN ?? 'dev-pdf-token-change-me'
 const production = process.env.NODE_ENV === 'production'
+const browserPool = createBrowserPool()
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error('PDF_SERVICE_PORT must be an integer between 1 and 65535')
@@ -57,16 +58,12 @@ app.post('/render', requireServiceToken, async (request, response) => {
   }
   try {
     assertSafePayload(payload)
-    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
-    try {
-      const page = await browser.newPage()
+    const pdf = await browserPool.withPage(async page => {
       page.setDefaultTimeout(15_000)
       await page.setContent(renderResumeHtml(templateCode, payload), { waitUntil: 'load' })
-      const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '0', right: '0', bottom: '0', left: '0' } })
-      response.type('application/pdf').send(Buffer.from(pdf))
-    } finally {
-      await browser.close()
-    }
+      return page.pdf({ format: 'A4', printBackground: true, margin: { top: '0', right: '0', bottom: '0', left: '0' } })
+    })
+    response.type('application/pdf').send(Buffer.from(pdf))
   } catch (error) {
     const status = error?.status ?? 500
     response.status(status).json({ code: status === 400 || status === 413 ? 40001 : 50003, message: error instanceof Error ? error.message : 'PDF 渲染失败' })
@@ -85,6 +82,24 @@ app.use((_request, response) => {
   response.status(404).json({ code: 40401, message: '资源不存在' })
 })
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.info(`PDF service listening on http://localhost:${port}`)
 })
+
+let shuttingDown = false
+async function shutdown(signal) {
+  if (shuttingDown) return
+  shuttingDown = true
+  console.info(`PDF service received ${signal}, closing browser pool`)
+  try {
+    await browserPool.close()
+    await new Promise(resolve => server.close(resolve))
+    process.exit(0)
+  } catch (error) {
+    console.error('PDF service shutdown failed', error)
+    process.exit(1)
+  }
+}
+
+process.once('SIGINT', () => { void shutdown('SIGINT') })
+process.once('SIGTERM', () => { void shutdown('SIGTERM') })

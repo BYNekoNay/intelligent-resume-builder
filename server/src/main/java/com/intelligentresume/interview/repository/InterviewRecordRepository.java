@@ -10,6 +10,21 @@ import java.util.Optional;
 
 public interface InterviewRecordRepository extends JpaRepository<InterviewRecord, Long> {
     List<InterviewRecord> findBySessionIdOrderByCreatedAtAsc(Long sessionId);
+
+    interface ScoreProjection {
+        Long getSessionId();
+        Integer getRoundScore();
+    }
+
+    @Query("""
+            SELECT r.sessionId AS sessionId, r.roundScore AS roundScore
+            FROM InterviewRecord r
+            WHERE r.sessionId IN :sessionIds
+            ORDER BY r.createdAt ASC
+            """)
+    List<ScoreProjection> findScoresBySessionIdInOrderByCreatedAtAsc(
+            @Param("sessionIds") Collection<Long> sessionIds);
+
     List<InterviewRecord> findBySessionIdInOrderByCreatedAtAsc(Collection<Long> sessionIds);
     long countBySessionId(Long sessionId);
     @Query("SELECT r FROM InterviewRecord r, InterviewSession s WHERE r.id = :id AND r.sessionId = s.id AND s.userId = :userId")

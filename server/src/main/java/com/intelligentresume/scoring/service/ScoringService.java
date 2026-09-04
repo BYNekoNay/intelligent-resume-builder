@@ -152,6 +152,27 @@ public class ScoringService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "评分结果不存在"));
     }
 
+    /**
+     * 查询评分结果的公开响应。GET 与 POST 必须使用同一份 DTO，避免把
+     * 持久化字段名 {@code explanationJson} 泄漏成前端无法消费的响应字段。
+     */
+    @Transactional(readOnly = true)
+    public MatchResponse getResultResponse(Long matchResultId, Long userId) {
+        MatchResult result = getResult(matchResultId, userId);
+        Map<String, Object> explanationJson = result.getExplanationJson();
+        Explanation explanation = new Explanation(
+                toStringList(explanationJson == null ? null : explanationJson.get("matched")),
+                toStringList(explanationJson == null ? null : explanationJson.get("partialMatched")),
+                toStringList(explanationJson == null ? null : explanationJson.get("missing")),
+                toStringList(explanationJson == null ? null : explanationJson.get("suggestions")),
+                explanationJson == null || explanationJson.get("disclaimer") == null
+                        ? disclaimer
+                        : String.valueOf(explanationJson.get("disclaimer"))
+        );
+        return new MatchResponse(result.getId(), result.getTotalScore(), result.getKeywordScore(),
+                result.getSkillScore(), result.getExperienceScore(), explanation, result.getRuleVersion());
+    }
+
     // ---- helpers ----
 
     private List<String> buildSuggestions(KeywordRule.RuleResult keyword,

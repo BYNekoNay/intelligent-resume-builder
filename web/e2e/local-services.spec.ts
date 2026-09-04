@@ -63,6 +63,10 @@ test.describe('@local-services local application smoke', () => {
     const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`
     const accessToken = await registerSyntheticAccount(page, 'local', suffix)
 
+    await page.reload()
+    await expect(page).toHaveURL(/\/career-materials$/)
+    await expect(page.locator('.app-shell')).toBeVisible()
+
     const cleanup = await page.request.delete(`${apiBaseUrl}/api/auth/me`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     })

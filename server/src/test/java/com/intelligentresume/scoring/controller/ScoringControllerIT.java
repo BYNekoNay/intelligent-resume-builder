@@ -139,8 +139,11 @@ class ScoringControllerIT {
                         .header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.matchResultId").value(matchResultId))
                 .andExpect(jsonPath("$.data.totalScore").isNumber())
-                .andExpect(jsonPath("$.data.ruleVersion").value("v1.0.0"));
+                .andExpect(jsonPath("$.data.ruleVersion").value("v1.0.0"))
+                .andExpect(jsonPath("$.data.explanation.matched").isArray())
+                .andExpect(jsonPath("$.data.explanationJson").doesNotExist());
     }
 
     @Test

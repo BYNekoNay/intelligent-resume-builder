@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { AlertTriangle, Clock3, Download, FileCheck2, LoaderCircle, RefreshCw } from 'lucide-vue-next'
 import { getExportTask, downloadExport, retryExport, type ExportTask } from '@/api/export'
 import { useLocale } from '@/i18n'
 
 const { t } = useLocale()
+const router = useRouter()
 const props = defineProps<{ exportTaskId: string }>()
 const task = ref<ExportTask | null>(null)
 const error = ref('')
@@ -36,7 +38,23 @@ async function load() {
       attempt += 1
       timer = window.setTimeout(load, delay)
     }
-  } catch { error.value = t('export.error') }
+  } catch {
+    task.value = null
+    error.value = t('export.error')
+  }
+}
+
+async function retryLoad() {
+  if (timer !== null) window.clearTimeout(timer)
+  timer = null
+  attempt = 0
+  task.value = null
+  error.value = ''
+  await load()
+}
+
+function backToWorkspace() {
+  void router.push('/')
 }
 
 onMounted(() => { attempt = 0; void load() })
@@ -47,8 +65,14 @@ async function download() {
     const blob = (await downloadExport(Number(props.exportTaskId))).data
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
-    link.href = url; link.download = 'resume.pdf'; link.click()
-    URL.revokeObjectURL(url)
+    link.href = url
+    link.download = 'resume.pdf'
+    document.body.appendChild(link)
+    link.click()
+    window.setTimeout(() => {
+      link.remove()
+      URL.revokeObjectURL(url)
+    }, 1000)
   } catch { error.value = t('export.downloadError') }
 }
 
@@ -68,7 +92,7 @@ async function retry() {
       <h1>{{ t('export.title') }}</h1>
       <p class="page-lead">{{ t('export.subtitle') }}</p>
     </header>
-    <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+    <p v-if="error && task" class="form-error" role="alert">{{ error }}</p>
     <div v-if="task" :class="['workspace-card', 'export-status-panel', `status-${task.status.toLowerCase()}`]">
       <div class="status-symbol">
         <FileCheck2 v-if="task.status === 'SUCCESS'" :size="28" />
@@ -92,6 +116,14 @@ async function retry() {
         <button v-if="task.status === 'FAILED'" class="btn-neon btn-secondary" @click="retry"><RefreshCw :size="15" />{{ t('export.retry') }}</button>
         <button class="btn-neon btn-primary" :disabled="task.status !== 'SUCCESS'" @click="download"><Download :size="15" />{{ t('export.download') }}</button>
       </footer>
+    </div>
+    <div v-else-if="error" class="export-error-state" role="alert">
+      <AlertTriangle :size="26" />
+      <p>{{ error }}</p>
+      <div class="job-actions">
+        <button class="btn-neon btn-secondary" type="button" @click="retryLoad"><RefreshCw :size="15" />{{ t('export.retryStatus') }}</button>
+        <button class="btn-neon btn-ghost" type="button" @click="backToWorkspace">{{ t('export.backToWorkspace') }}</button>
+      </div>
     </div>
     <div v-else class="export-loading" role="status"><LoaderCircle :size="26" /><p>{{ t('export.loading') }}</p></div>
   </section>
@@ -121,6 +153,9 @@ async function retry() {
 .export-actions > span { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: var(--text-tertiary); font-size: 9px; }
 .export-loading { display: grid; justify-items: center; gap: 10px; padding: 45px; border: 1px solid var(--border); border-radius: 7px; color: var(--info); background: var(--bg-surface); }
 .export-loading p { margin: 0; color: var(--text-secondary); font-size: 11px; }
+.export-error-state { display: grid; justify-items: center; gap: 12px; padding: 38px 24px; border: 1px solid var(--danger); border-radius: 7px; color: var(--danger); background: var(--danger-light); text-align: center; }
+.export-error-state p { margin: 0; color: var(--text-primary); font-size: 12px; }
+.export-error-state .job-actions { justify-content: center; }
 @keyframes export-spin { to { transform: rotate(360deg); } }
 @media (max-width: 560px) { .export-heading h1 { font-size: 29px; } .export-status-panel { grid-template-columns: 42px minmax(0, 1fr); padding: 20px 16px; } .status-symbol { width: 42px; height: 42px; } .export-meta { grid-template-columns: 1fr; } .export-meta div { border-right: 0; border-bottom: 1px solid var(--border-soft); } .export-meta div:last-child { border-bottom: 0; } .export-actions { align-items: stretch; flex-direction: column; } .export-actions > span { margin: 0; } .export-actions .btn-neon { width: 100%; justify-content: center; } }
 @media (prefers-reduced-motion: reduce) { .status-running .status-symbol svg, .status-pending .status-symbol svg, .export-loading svg { animation-duration: 2.4s; } }

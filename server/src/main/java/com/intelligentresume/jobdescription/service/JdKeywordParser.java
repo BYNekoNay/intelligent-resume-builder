@@ -1,7 +1,7 @@
 package com.intelligentresume.jobdescription.service;
 
 import com.intelligentresume.jobdescription.dto.ParsedKeywordsResponse;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -27,10 +27,13 @@ public class JdKeywordParser {
     private final List<String> educationKeywords;
     private final Pattern experiencePattern;
 
-    public JdKeywordParser(
-            @Value("${app.job.parser.keyword-dictionary:Java,Spring Boot,MySQL,Redis,Docker,Kubernetes}") List<String> keywordDictionary,
-            @Value("${app.job.parser.education-keywords:本科,硕士,博士,Bachelor,Master,PhD}") List<String> educationKeywords,
-            @Value("${app.job.parser.experience-pattern:(\\d+)\\s*年(以上)?(?:经验|工作)}") String experienceRegex) {
+    @Autowired
+    public JdKeywordParser(JdParserProperties properties) {
+        this(properties.getKeywordDictionary(), properties.getEducationKeywords(), properties.getExperiencePattern());
+    }
+
+    /** Constructor kept explicit for deterministic unit tests. */
+    public JdKeywordParser(List<String> keywordDictionary, List<String> educationKeywords, String experienceRegex) {
         this.keywordDictionary = keywordDictionary;
         this.educationKeywords = educationKeywords;
         this.experiencePattern = Pattern.compile(experienceRegex);

@@ -29,13 +29,18 @@ export const emptyPersonalProfile = (): PersonalProfile => ({
 })
 
 export function normalizePersonalProfile(value: Partial<PersonalProfile> | null | undefined): PersonalProfile {
-  const empty = emptyPersonalProfile()
   return {
-    ...empty,
-    ...value,
+    fullName: value?.fullName ?? '',
+    email: value?.email ?? '',
+    phone: value?.phone ?? '',
+    location: value?.location ?? '',
+    website: value?.website ?? '',
+    profileSummary: value?.profileSummary ?? '',
     targetRoleTitles: Array.isArray(value?.targetRoleTitles) ? value.targetRoleTitles : [],
+    targetSeniority: value?.targetSeniority ?? '',
     targetIndustries: Array.isArray(value?.targetIndustries) ? value.targetIndustries : [],
     targetWorkPreferences: Array.isArray(value?.targetWorkPreferences) ? value.targetWorkPreferences : [],
+    careerPositioningSummary: value?.careerPositioningSummary ?? '',
   }
 }
 

@@ -83,6 +83,19 @@ class CommunicationTemplateServiceTest {
     }
 
     @Test
+    @DisplayName("detail: 返回模板正文供编辑保留")
+    void detail_returnsBodyText() {
+        when(templateRepository.findById(TEMPLATE_ID)).thenReturn(Optional.of(template(USER_ID, false,
+                "您好，{{candidateName}} 申请 {{jobTitle}}。")));
+
+        var result = service.detail(TEMPLATE_ID, USER_ID);
+
+        assertEquals("您好，{{candidateName}} 申请 {{jobTitle}}。", result.bodyText());
+        assertEquals("模板", result.name());
+        assertEquals(CommunicationType.EMAIL, result.type());
+    }
+
+    @Test
     @DisplayName("preview: 用真实简历/JD 填充占位符")
     void preview_fillsFromRealResumeAndJob() {
         when(templateRepository.findById(TEMPLATE_ID)).thenReturn(Optional.of(template(null, true,

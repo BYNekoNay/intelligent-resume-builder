@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Archive, ArrowLeft, BriefcaseBusiness, CheckCircle2, Download, FileClock, GitCompareArrows, Pencil, Plus, RotateCcw } from 'lucide-vue-next'
 import { archiveResumeVersion, getResume, listVersions, restoreResumeVersion, setCurrentVersion, unarchiveResumeVersion, updateResumeTitle, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
-import { listJobs, type JobDescriptionSummary } from '@/api/jobDescription'
+import { getJobReference, type JobDescriptionReference } from '@/api/jobDescription'
 import { listInterviewAssets, type InterviewAsset } from '@/api/interviewAsset'
 import { SECTION_KEYS, type SectionKey } from '@/resume/sectionRegistry'
 import { scoreMatch } from '@/api/scoring'
@@ -15,7 +15,7 @@ const props = defineProps<{ id: string }>()
 const resume = ref<ResumeSummary | null>(null)
 const versions = ref<ResumeVersionSummary[]>([])
 const historyView = ref<'active' | 'archived'>('active')
-const associatedJob = ref<JobDescriptionSummary | null>(null)
+const associatedJob = ref<JobDescriptionReference | null>(null)
 const runningAction = ref<number | null>(null)
 const editingTitle = ref(false)
 const titleDraft = ref('')
@@ -84,8 +84,12 @@ async function load() {
   versions.value = versionResponse.data.data
   associatedJob.value = null
   if (resume.value.jobDescriptionId !== null) {
-    const jobs = (await listJobs()).data.data
-    associatedJob.value = jobs.find((job) => job.id === resume.value?.jobDescriptionId) ?? null
+    try {
+      associatedJob.value = (await getJobReference(resume.value.jobDescriptionId)).data.data
+    } catch {
+      // 关联岗位可能已软删除；不应阻断简历历史页的其余内容加载。
+      associatedJob.value = null
+    }
   }
 }
 

@@ -20,6 +20,12 @@ export interface JobDescriptionDetail extends JobDescriptionBase {
   createdAt: string
 }
 
+export interface JobDescriptionReference {
+  id: number
+  title: string
+  companyName: string | null
+}
+
 export interface JobDescriptionPayload {
   title: string
   companyName?: string
@@ -32,6 +38,10 @@ export function listJobs() {
 
 export function getJob(id: number) {
   return apiClient.get<ApiResponse<JobDescriptionDetail>>(`/api/jobs/${id}`)
+}
+
+export function getJobReference(id: number) {
+  return apiClient.get<ApiResponse<JobDescriptionReference>>(`/api/jobs/${id}/reference`)
 }
 
 export function createJob(payload: JobDescriptionPayload) {

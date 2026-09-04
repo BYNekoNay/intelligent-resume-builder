@@ -65,6 +65,14 @@ public class JobDescriptionService {
         return toDetail(findOwned(id, userId));
     }
 
+    @Transactional(readOnly = true)
+    public JobDescriptionReference reference(Long id, Long userId) {
+        JobDescriptionRepository.ReferenceProjection reference = repository
+                .findReferenceByIdAndUserId(id, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "JD 不存在"));
+        return new JobDescriptionReference(reference.getId(), reference.getTitle(), reference.getCompanyName());
+    }
+
     @Transactional
     public JobDescriptionDetail update(Long id, UpdateJobDescriptionRequest req, Long userId) {
         JobDescription jd = findOwned(id, userId);

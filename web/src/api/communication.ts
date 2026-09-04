@@ -36,6 +36,10 @@ export interface CommunicationTemplateSummary {
   usageCount: number
 }
 
+export interface CommunicationTemplateDetail extends CommunicationTemplateSummary {
+  bodyText: string
+}
+
 export interface TemplatePreview {
   id: number
   name: string
@@ -73,6 +77,10 @@ export function generateCommunicationWithAi(resumeVersionId: number, jobDescript
 
 export function listTemplates(params?: { scene?: TemplateScene; type?: CommunicationType; outputLanguage?: CommunicationOutputLanguage }) {
   return apiClient.get<ApiResponse<CommunicationTemplateSummary[]>>('/api/communications/templates', { params })
+}
+
+export function getTemplate(id: number) {
+  return apiClient.get<ApiResponse<CommunicationTemplateDetail>>(`/api/communications/templates/${id}`)
 }
 
 export function previewTemplate(id: number, resumeVersionId: number, jobDescriptionId: number) {

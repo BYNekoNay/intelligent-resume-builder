@@ -4,7 +4,6 @@ import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
-import com.intelligentresume.scoring.domain.MatchResult;
 import com.intelligentresume.scoring.dto.MatchRequest;
 import com.intelligentresume.scoring.dto.MatchResponse;
 import com.intelligentresume.scoring.service.ScoringService;
@@ -48,11 +47,11 @@ public class ScoringController {
      * 查询评分结果。
      */
     @GetMapping("/results/{id}")
-    public ResponseEntity<ApiResponse<MatchResult>> getResult(
+    public ResponseEntity<ApiResponse<MatchResponse>> getResult(
             @PathVariable Long id,
             HttpServletRequest httpRequest) {
         Long userId = currentUserId(httpRequest);
-        MatchResult result = scoringService.getResult(id, userId);
+        MatchResponse result = scoringService.getResultResponse(id, userId);
         return ResponseEntity.ok(ApiResponse.success(result, traceId(httpRequest)));
     }
 

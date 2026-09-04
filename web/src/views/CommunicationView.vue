@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from 'axios'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AlertTriangle, Bookmark, Clipboard, FileText, FolderOpen, Mail, Pencil, Plus, RefreshCw, Save, Send, ShieldCheck, Sparkles, Trash2, X } from 'lucide-vue-next'
 import { getTask, retryTask, type AiTask } from '@/api/ai'
@@ -9,6 +9,7 @@ import {
   deleteTemplate,
   generateCommunication,
   generateCommunicationWithAi,
+  getTemplate,
   listTemplates,
   previewTemplate,
   saveCommunicationDraft,
@@ -60,8 +61,10 @@ const showTemplateDialog = ref(false)
 const templateDialogMode = ref<'create' | 'edit'>('create')
 const templateDialogName = ref('')
 const templateDialogScene = ref<TemplateScene>('GENERAL')
+const templateDialogBody = ref('')
 const editingTemplateId = ref<number | null>(null)
 const templateSaving = ref(false)
+const templateDialogLoading = ref(false)
 
 const outputLanguage = computed<CommunicationOutputLanguage>(() => locale.value === 'en-US' ? 'EN' : 'ZH_CN')
 const typeLabel = computed(() => ({
@@ -333,15 +336,27 @@ function openSaveAsTemplate() {
   editingTemplateId.value = null
   templateDialogName.value = ''
   templateDialogScene.value = type.value === 'COVER_LETTER' ? 'GENERAL' : 'GENERAL'
+  templateDialogBody.value = previewing.value ? previewDraft.value : draft.value
   showTemplateDialog.value = true
 }
 
-function openEditTemplate(template: CommunicationTemplateSummary) {
+async function openEditTemplate(template: CommunicationTemplateSummary) {
   templateDialogMode.value = 'edit'
   editingTemplateId.value = template.id
   templateDialogName.value = template.name
   templateDialogScene.value = template.scene
+  templateDialogBody.value = ''
   showTemplateDialog.value = true
+  templateDialogLoading.value = true
+  try {
+    const detail = (await getTemplate(template.id)).data.data
+    if (editingTemplateId.value === template.id) templateDialogBody.value = detail.bodyText
+  } catch {
+    error.value = t('communication.templateLoadError')
+    showTemplateDialog.value = false
+  } finally {
+    templateDialogLoading.value = false
+  }
 }
 
 async function saveTemplateDialog() {
@@ -355,7 +370,7 @@ async function saveTemplateDialog() {
     name: templateDialogName.value.trim(),
     scene: templateDialogScene.value,
     type: type.value,
-    bodyText: previewing.value ? previewDraft.value : draft.value,
+    bodyText: templateDialogBody.value,
     outputLanguage: outputLanguage.value,
   }
   try {
@@ -382,6 +397,8 @@ async function saveTemplateDialog() {
     templateSaving.value = false
   }
 }
+
+watch(sceneFilter, () => { void loadTemplates() })
 
 async function removeTemplate(template: CommunicationTemplateSummary) {
   if (!window.confirm(t('communication.confirmDeleteTemplate'))) return
@@ -555,7 +572,9 @@ onBeforeUnmount(stopPolling)
         <header><h2>{{ templateDialogMode === 'create' ? t('communication.saveAsTemplate') : t('communication.editTemplate') }}</h2><button class="icon-button" type="button" :aria-label="t('common.cancel')" @click="showTemplateDialog = false"><X :size="17" /></button></header>
         <label>{{ t('communication.templateName') }}<input v-model="templateDialogName" maxlength="128" required /></label>
         <label>{{ t('communication.templateScene') }}<select v-model="templateDialogScene"><option v-for="(label, scene) in sceneLabels" :key="scene" :value="scene">{{ label }}</option></select></label>
-        <div class="job-actions"><button class="btn-neon btn-ghost" type="button" @click="showTemplateDialog = false">{{ t('common.cancel') }}</button><button class="btn-neon btn-primary" :disabled="templateSaving"><Save :size="15" />{{ templateSaving ? t('communication.savingDraft') : t('communication.saveTemplate') }}</button></div>
+        <label>{{ t('communication.templateBody') }}<textarea v-model="templateDialogBody" rows="8" required :disabled="templateDialogLoading" /></label>
+        <p v-if="templateDialogLoading" class="empty-state">{{ t('communication.templateDetailLoading') }}</p>
+        <div class="job-actions"><button class="btn-neon btn-ghost" type="button" @click="showTemplateDialog = false">{{ t('common.cancel') }}</button><button class="btn-neon btn-primary" :disabled="templateSaving || templateDialogLoading || !templateDialogBody.trim()"><Save :size="15" />{{ templateSaving ? t('communication.savingDraft') : t('communication.saveTemplate') }}</button></div>
       </form>
     </div>
 
@@ -657,3 +676,4 @@ onBeforeUnmount(stopPolling)
   .preview-panel { padding: 20px 16px; }
 }
 </style>
+  getTemplate,

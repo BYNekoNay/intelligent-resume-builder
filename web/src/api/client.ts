@@ -9,7 +9,9 @@ export interface ApiResponse<T> {
 }
 
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080',
+  // Keep local development same-origin so HttpOnly refresh cookies work
+  // regardless of whether the UI is opened via localhost or 127.0.0.1.
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? '/',
   timeout: 10_000,
   withCredentials: true,
 })

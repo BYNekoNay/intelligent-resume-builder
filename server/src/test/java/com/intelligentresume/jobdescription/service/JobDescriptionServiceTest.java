@@ -57,6 +57,33 @@ class JobDescriptionServiceTest {
     }
 
     @Test
+    @DisplayName("正常路径: 查询岗位轻量引用")
+    void reference_success() {
+        JobDescriptionRepository.ReferenceProjection projection = mock(JobDescriptionRepository.ReferenceProjection.class);
+        when(projection.getId()).thenReturn(1L);
+        when(projection.getTitle()).thenReturn("Java后端工程师");
+        when(projection.getCompanyName()).thenReturn("某科技公司");
+        when(repository.findReferenceByIdAndUserId(1L, 100L)).thenReturn(Optional.of(projection));
+
+        JobDescriptionReference reference = service.reference(1L, 100L);
+
+        assertEquals(1L, reference.id());
+        assertEquals("Java后端工程师", reference.title());
+        assertEquals("某科技公司", reference.companyName());
+        verify(repository, never()).findByIdAndUserId(anyLong(), anyLong());
+    }
+
+    @Test
+    @DisplayName("失败路径: 跨用户岗位轻量引用返回 NOT_FOUND")
+    void reference_crossUser_notFound() {
+        when(repository.findReferenceByIdAndUserId(1L, 999L)).thenReturn(Optional.empty());
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.reference(1L, 999L));
+
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
     @DisplayName("正常路径: 解析覆盖 parsed_keywords_json,不改 jd_text")
     void parse_overwritesKeywordsJson_keepsJdText() {
         JobDescription jd = jd(1L, 100L, "原始 JD 文本");

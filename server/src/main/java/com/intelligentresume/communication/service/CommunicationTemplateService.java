@@ -8,6 +8,7 @@ import com.intelligentresume.communication.domain.CommunicationType;
 import com.intelligentresume.communication.domain.TemplateScene;
 import com.intelligentresume.communication.dto.SaveTemplateRequest;
 import com.intelligentresume.communication.dto.TemplatePreviewResponse;
+import com.intelligentresume.communication.dto.TemplateDetailResponse;
 import com.intelligentresume.communication.dto.TemplateSummaryResponse;
 import com.intelligentresume.communication.dto.UpdateTemplateRequest;
 import com.intelligentresume.communication.repository.CommunicationTemplateRepository;
@@ -46,6 +47,14 @@ public class CommunicationTemplateService {
                                               CommunicationOutputLanguage language) {
         return templateRepository.search(userId, scene, type, language).stream()
                 .map(this::summary).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public TemplateDetailResponse detail(Long id, Long userId) {
+        CommunicationTemplate template = visible(id, userId);
+        return new TemplateDetailResponse(template.getId(), template.getScene(), template.getTemplateType(),
+                template.getOutputLanguage(), template.getName(), template.getDescription(), template.getBodyText(),
+                template.isSystem(), template.getUsageCount());
     }
 
     @Transactional(readOnly = true)

@@ -2,7 +2,6 @@ package com.intelligentresume.interview.service;
 
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
-import com.intelligentresume.interview.domain.InterviewRecord;
 import com.intelligentresume.interview.domain.InterviewSession;
 import com.intelligentresume.interview.domain.InterviewStatus;
 import com.intelligentresume.interview.dto.InterviewSessionSummaryResponse;
@@ -12,6 +11,7 @@ import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.IntSummaryStatistics;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -44,20 +44,20 @@ public class InterviewHistoryService {
         if (sessions.isEmpty()) {
             return List.of();
         }
-        // 一次批量加载所有会话的答题记录，按 sessionId 分组，避免 N 个会话 = N 次查询
-        Map<Long, List<InterviewRecord>> recordsBySession = recordRepository
-                .findBySessionIdInOrderByCreatedAtAsc(sessions.stream().map(InterviewSession::getId).toList())
+        // 摘要只需要计数和分数；投影避免加载题目、答案和反馈 JSON 等大字段。
+        Map<Long, IntSummaryStatistics> scoresBySession = recordRepository
+                .findScoresBySessionIdInOrderByCreatedAtAsc(sessions.stream().map(InterviewSession::getId).toList())
                 .stream()
-                .collect(Collectors.groupingBy(InterviewRecord::getSessionId));
+                .collect(Collectors.groupingBy(InterviewRecordRepository.ScoreProjection::getSessionId,
+                        Collectors.summarizingInt(InterviewRecordRepository.ScoreProjection::getRoundScore)));
         return sessions.stream()
-                .map(session -> summary(session, recordsBySession.getOrDefault(session.getId(), List.of())))
+                .map(session -> summary(session, scoresBySession.get(session.getId())))
                 .toList();
     }
 
-    private InterviewSessionSummaryResponse summary(InterviewSession session, List<InterviewRecord> records) {
-        int actual = records.size();
-        int totalScore = actual == 0 ? 0
-                : (int) Math.round(records.stream().mapToInt(InterviewRecord::getRoundScore).average().orElse(0));
+    private InterviewSessionSummaryResponse summary(InterviewSession session, IntSummaryStatistics scores) {
+        int actual = scores == null ? 0 : (int) scores.getCount();
+        int totalScore = scores == null ? 0 : (int) Math.round(scores.getAverage());
         return new InterviewSessionSummaryResponse(session.getId(), session.getJobDescriptionId(),
                 session.getResumeVersionId(), session.getSourceType(), session.getInterviewMode(),
                 session.getExecutionMode(), session.getCompletionReason(), session.getTargetQuestionCount(),

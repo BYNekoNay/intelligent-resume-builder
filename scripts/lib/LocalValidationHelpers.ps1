@@ -18,7 +18,10 @@ function Get-LocalEnvValues {
         $name, $value = $trimmed.Split('=', 2)
         $values[$name.Trim()] = $value.Trim()
     }
-    return $values
+    # Preserve an empty hashtable as a single pipeline item. Without the
+    # unary comma, callers running under StrictMode can receive no value and
+    # later fail while indexing the result.
+    return ,$values
 }
 
 function Test-LocalHttpEndpoint {

@@ -123,10 +123,24 @@ class JobDescriptionControllerIT {
                 .andExpect(jsonPath("$.data[0].parsedAt").isNotEmpty());
     }
 
+    @Test
+    @Order(5)
+    @DisplayName("GET /api/jobs/{id}/reference 返回轻量岗位引用")
+    void getReference_200() throws Exception {
+        mockMvc.perform(get("/api/jobs/" + jobId + "/reference")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(jobId))
+                .andExpect(jsonPath("$.data.title").value("Java后端工程师"))
+                .andExpect(jsonPath("$.data.companyName").value("某科技公司"))
+                .andExpect(jsonPath("$.data.jdText").doesNotExist());
+    }
+
     // ---- 4. 未登录 ----
 
     @Test
-    @Order(5)
+    @Order(6)
     @DisplayName("未登录访问 POST 返回 40101(安全框架统一拦截)")
     void postWithoutAuth_40101() throws Exception {
         mockMvc.perform(post("/api/jobs")

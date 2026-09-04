@@ -48,6 +48,11 @@ public class JobDescriptionController {
         return ApiResponse.success(service.get(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    @GetMapping("/{id}/reference")
+    public ApiResponse<JobDescriptionReference> reference(@PathVariable Long id, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.reference(id, currentUserId(httpRequest)), traceId(httpRequest));
+    }
+
     @PatchMapping("/{id}")
     public ApiResponse<JobDescriptionDetail> update(
             @PathVariable Long id, @Valid @RequestBody UpdateJobDescriptionRequest request,
