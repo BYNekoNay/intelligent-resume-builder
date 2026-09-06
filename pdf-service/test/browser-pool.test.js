@@ -86,3 +86,29 @@ test('clears a failed launch so the next request can retry', async () => {
   assert.equal(launches, 2)
   await pool.close()
 })
+
+test('reports renderer readiness without launching a second browser', async () => {
+  const browser = new FakeBrowser()
+  let launches = 0
+  const pool = createBrowserPool(async () => {
+    launches += 1
+    return browser
+  })
+
+  assert.equal(await pool.checkReadiness(), true)
+  assert.equal(await pool.checkReadiness(), true)
+  assert.equal(launches, 1)
+
+  browser.disconnect()
+  assert.equal(await pool.checkReadiness(), true)
+  await pool.close()
+})
+
+test('reports renderer as not ready when Chromium launch fails', async () => {
+  const pool = createBrowserPool(async () => {
+    throw new Error('launch failed')
+  })
+
+  assert.equal(await pool.checkReadiness(), false)
+  await pool.close()
+})

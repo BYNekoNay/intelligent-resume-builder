@@ -43,6 +43,15 @@ export function createBrowserPool(launch = defaultLaunch) {
     }
   }
 
+  async function checkReadiness() {
+    try {
+      const browser = await getBrowser()
+      return browser?.isConnected?.() !== false
+    } catch {
+      return false
+    }
+  }
+
   async function close() {
     const pending = browserPromise
     browserPromise = null
@@ -52,5 +61,5 @@ export function createBrowserPool(launch = defaultLaunch) {
     if (browser) await browser.close()
   }
 
-  return { withPage, close }
+  return { withPage, checkReadiness, close }
 }

@@ -27,12 +27,14 @@ function requireServiceToken(req, res, next) {
   next()
 }
 
-app.get('/health', (_request, response) => {
+app.get('/health', async (_request, response) => {
+  const rendererReady = await browserPool.checkReadiness()
   response.json({
     service: 'intelligent-resume-pdf-service',
-    status: 'UP',
+    status: rendererReady ? 'UP' : 'DEGRADED',
     version: '0.1.0',
-    capabilities: ['pdf-render', 'seven-resume-templates', 'ordered-resume-sections'],
+    capabilities: ['pdf-render', `${TEMPLATE_CODES.size}-resume-templates`, 'ordered-resume-sections'],
+    checks: [{ capability: 'pdf-renderer', status: rendererReady ? 'UP' : 'DOWN' }],
   })
 })
 

@@ -35,6 +35,7 @@ public class PdfServiceClient {
     private static final Logger log = LoggerFactory.getLogger(PdfServiceClient.class);
 
     private final RestClient restClient;
+    private final RestClient healthRestClient;
     private final String serviceToken;
     private final long maxInputBytes;
     private final AppObservability observability;
@@ -61,6 +62,14 @@ public class PdfServiceClient {
                 .requestFactory(factory)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .defaultHeader("X-Service-Token", serviceToken)
+                .build();
+
+        SimpleClientHttpRequestFactory healthFactory = new SimpleClientHttpRequestFactory();
+        healthFactory.setConnectTimeout(Duration.ofSeconds(1));
+        healthFactory.setReadTimeout(Duration.ofSeconds(1));
+        this.healthRestClient = RestClient.builder()
+                .baseUrl(baseUrl)
+                .requestFactory(healthFactory)
                 .build();
 
         log.info("PdfServiceClient initialized: baseUrl={}, timeout={}s", baseUrl, timeoutSeconds);
@@ -123,6 +132,23 @@ public class PdfServiceClient {
             log.warn("PDF service call failure: category={}, exception={}", category, e.getClass().getSimpleName());
             observability.recordPdfRender(templateCode, false, category, Duration.ofNanos(System.nanoTime() - startedAt));
             throw new BusinessException(ErrorCode.PDF_FAILURE, "PDF 渲染失败");
+        }
+    }
+
+    /**
+     * Lightweight readiness probe used by the public API health contract.
+     * A failed probe means the API remains alive but PDF capability is degraded.
+     */
+    public boolean checkHealth() {
+        try {
+            Map<?, ?> response = healthRestClient.get()
+                    .uri("/health")
+                    .retrieve()
+                    .body(Map.class);
+            return response != null && "UP".equals(response.get("status"));
+        } catch (Exception e) {
+            log.debug("PDF health probe failed: exception={}", e.getClass().getSimpleName());
+            return false;
         }
     }
 
