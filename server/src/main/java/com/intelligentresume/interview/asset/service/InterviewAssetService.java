@@ -134,9 +134,9 @@ public class InterviewAssetService {
         List<Long> materials = materialIds == null ? List.of() : materialIds.stream().distinct().toList();
         if (keys.isEmpty() && materials.isEmpty()) return;
         if (keys.isEmpty()) {
-            // 未选章节时素材挂在空章节下：保证 section_key NOT NULL 且不丢失素材关联
+            // 职业素材关联独立于简历章节；没有章节时使用 NULL，不制造虚假的章节键。
             for (Long materialId : materials) {
-                saveSection(assetId, userId, "", materialId);
+                saveSection(assetId, userId, null, materialId);
             }
             return;
         }
@@ -190,7 +190,9 @@ public class InterviewAssetService {
         LinkedHashSet<String> sectionKeys = new LinkedHashSet<>();
         LinkedHashSet<Long> materialIds = new LinkedHashSet<>();
         for (InterviewAssetSection section : sections) {
-            if (section.getSectionKey() != null) sectionKeys.add(section.getSectionKey());
+            if (section.getSectionKey() != null && !section.getSectionKey().isBlank()) {
+                sectionKeys.add(section.getSectionKey());
+            }
             if (section.getMaterialId() != null) materialIds.add(section.getMaterialId());
         }
         return new InterviewAssetResponse(asset.getId(), asset.getInterviewRecordId(), asset.getQuestionText(),

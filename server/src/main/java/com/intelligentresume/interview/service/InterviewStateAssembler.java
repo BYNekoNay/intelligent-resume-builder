@@ -58,7 +58,8 @@ public class InterviewStateAssembler {
                 (int) count, session.getTargetQuestionCount(),
                 session.getMinQuestionCount(), session.getMaxQuestionCount(),
                 lastEval, aiFailure, session.getCompletionReason(),
-                session.getSourceType(), session.getResumeVersionId(), session.getJobDescriptionId()
+                session.getSourceType(), session.getInterviewMode(), session.getOutputLanguage(),
+                session.getResumeVersionId(), session.getJobDescriptionId()
         );
     }
 

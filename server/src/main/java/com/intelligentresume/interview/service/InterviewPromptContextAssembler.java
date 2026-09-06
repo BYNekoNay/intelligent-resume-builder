@@ -106,8 +106,11 @@ public class InterviewPromptContextAssembler {
 
     public void appendResumeContext(StringBuilder ctx, InterviewSession session, Long userId) {
         ctx.append("Resume:\n");
-        if (session.getSourceType() == InterviewSourceType.PLATFORM_RESUME
-                && session.getResumeVersionId() != null) {
+        if (session.getSourceType() == InterviewSourceType.PLATFORM_RESUME) {
+            if (session.getResumeVersionId() == null) {
+                ctx.append("[empty resume]\n\n");
+                return;
+            }
             ResumeVersion version = findOwnedResumeVersion(session.getResumeVersionId(), userId);
             Map<String, Object> resumeJson = version.getResumeJson();
             if (resumeJson == null) {
@@ -116,10 +119,11 @@ public class InterviewPromptContextAssembler {
             }
             Object summary = sanitizer.sanitizePlatformResume(resumeJson).get("resumeSummary");
             ctx.append(summary != null ? summary.toString() : "[empty resume]").append("\n\n");
-        } else if (session.getExternalResumeText() != null) {
+        } else if (session.getSourceType() == InterviewSourceType.EXTERNAL_RESUME
+                && session.getExternalResumeText() != null) {
             ctx.append(sanitizer.sanitizeExternalResume(session.getExternalResumeText())).append("\n\n");
         } else {
-            ctx.append("[empty resume]\n\n");
+            ctx.append("[unsupported or empty resume source]\n\n");
         }
     }
 
@@ -127,8 +131,12 @@ public class InterviewPromptContextAssembler {
         if (request.sourceType() == InterviewSourceType.PLATFORM_RESUME) {
             if (request.resumeVersionId() == null) throw validation("平台简历来源必须选择简历版本");
             findOwnedResumeVersion(request.resumeVersionId(), userId);
-        } else if (request.externalResumeText() == null || request.externalResumeText().isBlank()) {
-            throw validation("外部简历来源必须提供简历文本");
+        } else if (request.sourceType() == InterviewSourceType.EXTERNAL_RESUME) {
+            if (request.externalResumeText() == null || request.externalResumeText().isBlank()) {
+                throw validation("外部简历来源必须提供简历文本");
+            }
+        } else {
+            throw validation("不支持的面试简历来源");
         }
         if (request.jobDescriptionId() != null) {
             jobDescriptionRepository.findByIdAndUserId(request.jobDescriptionId(), userId)

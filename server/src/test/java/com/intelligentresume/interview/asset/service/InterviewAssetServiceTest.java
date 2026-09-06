@@ -25,6 +25,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
 
 /**
  * 面试答案资产服务单元测试：幂等 create + 章节校验。
@@ -116,6 +117,37 @@ class InterviewAssetServiceTest {
 
         assertEquals(42L, result.id());
         verify(sectionRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("create: 仅关联素材时保留素材且不伪造章节")
+    void create_materialOnly_keepsMaterialWithoutSectionSentinel() {
+        when(recordRepository.findOwned(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
+        when(repository.findByUserIdAndInterviewRecordId(USER_ID, RECORD_ID)).thenReturn(Optional.empty());
+        when(materialRepository.findByIdAndUserId(21L, USER_ID)).thenReturn(Optional.of(new com.intelligentresume.careermaterial.domain.CareerMaterial()));
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> {
+            InterviewAnswerAsset saved = invocation.getArgument(0);
+            saved.setId(43L);
+            return saved;
+        });
+        when(sectionRepository.findByAssetId(43L)).thenAnswer(invocation -> {
+            var section = new com.intelligentresume.interview.asset.domain.InterviewAssetSection();
+            section.setSectionKey(null);
+            section.setMaterialId(21L);
+            return List.of(section);
+        });
+        InterviewAssetRequest request = new InterviewAssetRequest(RECORD_ID, "问题", "回答", null,
+                Map.of(), List.of(), List.of(21L));
+
+        var result = service.create(request, USER_ID);
+
+        assertEquals(List.of(), result.sectionKeys());
+        assertEquals(List.of(21L), result.materialIds());
+        ArgumentCaptor<com.intelligentresume.interview.asset.domain.InterviewAssetSection> captor =
+                ArgumentCaptor.forClass(com.intelligentresume.interview.asset.domain.InterviewAssetSection.class);
+        verify(sectionRepository).save(captor.capture());
+        assertEquals(null, captor.getValue().getSectionKey());
+        assertEquals(21L, captor.getValue().getMaterialId());
     }
 
     @Test

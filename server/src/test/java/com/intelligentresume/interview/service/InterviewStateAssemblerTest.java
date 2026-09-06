@@ -11,6 +11,8 @@ import com.intelligentresume.interview.domain.InterviewAiAttempt;
 import com.intelligentresume.interview.domain.InterviewRecord;
 import com.intelligentresume.interview.domain.InterviewSession;
 import com.intelligentresume.interview.domain.InterviewStatus;
+import com.intelligentresume.interview.domain.InterviewMode;
+import com.intelligentresume.interview.domain.InterviewOutputLanguage;
 import com.intelligentresume.interview.dto.InterviewStateResponse;
 import com.intelligentresume.interview.repository.InterviewAiAttemptRepository;
 import com.intelligentresume.interview.repository.InterviewRecordRepository;
@@ -53,6 +55,8 @@ class InterviewStateAssemblerTest {
         session.setId(id);
         session.setStatus(status);
         session.setExecutionMode(ExecutionMode.AI);
+        session.setInterviewMode(InterviewMode.BEHAVIORAL);
+        session.setOutputLanguage(InterviewOutputLanguage.EN);
         session.setCurrentQuestion("Q1");
         session.setTargetQuestionCount(target);
         session.setMinQuestionCount(3);
@@ -93,6 +97,8 @@ class InterviewStateAssemblerTest {
         assertEquals(2, response.getCompletedQuestionCount());
         assertEquals(3, response.getCurrentQuestionNo());
         assertEquals(6, response.getTargetQuestionCount());
+        assertEquals(InterviewMode.BEHAVIORAL, response.getInterviewMode());
+        assertEquals(InterviewOutputLanguage.EN, response.getOutputLanguage());
         assertEquals(12L, response.getLastEvaluation().getRecordId());
         assertEquals(2, response.getLastEvaluation().getRoundNo());
         assertEquals(80, response.getLastEvaluation().getRoundScore());

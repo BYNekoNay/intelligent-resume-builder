@@ -180,6 +180,18 @@ class InterviewPromptContextAssemblerTest {
     }
 
     @Test
+    @DisplayName("validateSource：空来源不能落入外部简历默认分支")
+    void validateSource_nullSource_isRejected() {
+        StartInterviewRequest request = new StartInterviewRequest(
+                null, null, "external text", null, InterviewMode.COMPREHENSIVE, null, null, null);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> assembler.validateSource(request, USER_ID));
+
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertEquals("不支持的面试简历来源", ex.getMessage());
+    }
+
+    @Test
     @DisplayName("validateSource：JD 不属于当前用户抛 40401")
     void validateSource_jdNotOwned() {
         when(jobDescriptionRepository.findByIdAndUserId(10L, USER_ID)).thenReturn(Optional.empty());

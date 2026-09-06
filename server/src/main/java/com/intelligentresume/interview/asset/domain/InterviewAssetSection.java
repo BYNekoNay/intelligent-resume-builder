@@ -19,7 +19,7 @@ public class InterviewAssetSection extends BaseEntity {
     @Column(name = "asset_id", nullable = false)
     private Long assetId;
 
-    @Column(name = "section_key", nullable = false, length = 32)
+    @Column(name = "section_key", length = 32)
     private String sectionKey;
 
     @Column(name = "material_id")

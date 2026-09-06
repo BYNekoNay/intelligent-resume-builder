@@ -4,6 +4,7 @@ import com.intelligentresume.interview.domain.CompletionReason;
 import com.intelligentresume.interview.domain.EvaluationSource;
 import com.intelligentresume.interview.domain.ExecutionMode;
 import com.intelligentresume.interview.domain.InterviewMode;
+import com.intelligentresume.interview.domain.InterviewOutputLanguage;
 import com.intelligentresume.interview.domain.InterviewSourceType;
 import com.intelligentresume.interview.domain.InterviewStatus;
 
@@ -25,6 +26,8 @@ public class InterviewStateResponse {
     private AiFailureInfo aiFailure;
     private CompletionReason completionReason;
     private InterviewSourceType sourceType;
+    private InterviewMode interviewMode;
+    private InterviewOutputLanguage outputLanguage;
     private Long resumeVersionId;
     private Long jobDescriptionId;
 
@@ -36,7 +39,9 @@ public class InterviewStateResponse {
                                   int minQuestionCount, int maxQuestionCount,
                                   LastEvaluation lastEvaluation, AiFailureInfo aiFailure,
                                   CompletionReason completionReason,
-                                  InterviewSourceType sourceType, Long resumeVersionId, Long jobDescriptionId) {
+                                  InterviewSourceType sourceType, InterviewMode interviewMode,
+                                  InterviewOutputLanguage outputLanguage,
+                                  Long resumeVersionId, Long jobDescriptionId) {
         this.interviewId = interviewId;
         this.status = status;
         this.executionMode = executionMode;
@@ -50,6 +55,8 @@ public class InterviewStateResponse {
         this.aiFailure = aiFailure;
         this.completionReason = completionReason;
         this.sourceType = sourceType;
+        this.interviewMode = interviewMode;
+        this.outputLanguage = outputLanguage;
         this.resumeVersionId = resumeVersionId;
         this.jobDescriptionId = jobDescriptionId;
     }
@@ -80,6 +87,10 @@ public class InterviewStateResponse {
     public void setCompletionReason(CompletionReason completionReason) { this.completionReason = completionReason; }
     public InterviewSourceType getSourceType() { return sourceType; }
     public void setSourceType(InterviewSourceType sourceType) { this.sourceType = sourceType; }
+    public InterviewMode getInterviewMode() { return interviewMode; }
+    public void setInterviewMode(InterviewMode interviewMode) { this.interviewMode = interviewMode; }
+    public InterviewOutputLanguage getOutputLanguage() { return outputLanguage; }
+    public void setOutputLanguage(InterviewOutputLanguage outputLanguage) { this.outputLanguage = outputLanguage; }
     public Long getResumeVersionId() { return resumeVersionId; }
     public void setResumeVersionId(Long resumeVersionId) { this.resumeVersionId = resumeVersionId; }
     public Long getJobDescriptionId() { return jobDescriptionId; }
