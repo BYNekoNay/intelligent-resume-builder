@@ -13,9 +13,4 @@ public record CareerMaterialSummary(
         LocalDateTime updatedAt,
         boolean evidenceReady
 ) {
-    /** Compatibility constructor for callers that do not have material content available. */
-    public CareerMaterialSummary(Long id, MaterialType materialType, String title,
-                                 UsagePreference usagePreference, LocalDateTime updatedAt) {
-        this(id, materialType, title, usagePreference, updatedAt, true);
-    }
 }
