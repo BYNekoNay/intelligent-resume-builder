@@ -32,6 +32,8 @@ import java.util.*;
 @Service
 public class ScoringService {
 
+    private record ParsedJdSnapshot(List<String> keywords, List<String> requirements) {}
+
     private final ResumeVersionRepository versionRepository;
     private final ResumeRepository resumeRepository;
     private final JobDescriptionRepository jdRepository;
@@ -79,12 +81,12 @@ public class ScoringService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位描述不存在"));
 
         // 3. 读取/解析 JD 关键词
+        ParsedJdSnapshot parsedSnapshot = readParsedJd(jd.getParsedKeywordsJson());
         List<String> jdKeywords;
         List<String> jdRequirements;
-        Map<String, Object> parsed = jd.getParsedKeywordsJson();
-        if (parsed != null && parsed.containsKey("keywords")) {
-            jdKeywords = toStringList(parsed.get("keywords"));
-            jdRequirements = toStringList(parsed.get("requirements"));
+        if (parsedSnapshot != null) {
+            jdKeywords = parsedSnapshot.keywords();
+            jdRequirements = parsedSnapshot.requirements();
         } else {
             // 自动解析
             ParsedKeywordsResponse parsedResult = jdKeywordParser.parse(jd.getJdText());
@@ -107,10 +109,11 @@ public class ScoringService {
                 ruleRegistry.experienceRule().evaluate(jdRequirements, version.getResumeJson());
 
         // 6. 加权总分
-        BigDecimal totalScore = keywordResult.score()
-                .multiply(ruleRegistry.keywordWeight())
-                .add(skillResult.score().multiply(ruleRegistry.skillWeight()))
-                .add(experienceScore.multiply(ruleRegistry.experienceWeight()))
+        Map<String, BigDecimal> ruleScores = new LinkedHashMap<>();
+        ruleScores.put(ruleRegistry.keywordRule().name(), keywordResult.score());
+        ruleScores.put(ruleRegistry.skillRule().name(), skillResult.score());
+        ruleScores.put(ruleRegistry.experienceRule().name(), experienceScore);
+        BigDecimal totalScore = ruleRegistry.weightedTotal(ruleScores)
                 .setScale(2, RoundingMode.HALF_UP);
 
         // 7. 构建解释
@@ -131,7 +134,7 @@ public class ScoringService {
         result.setKeywordScore(keywordResult.score());
         result.setSkillScore(skillResult.score());
         result.setExperienceScore(experienceScore);
-        result.setExplanationJson(buildExplanationJson(explanation));
+        result.setExplanationJson(buildExplanationJson(explanation, ruleScores));
         result.setRuleVersion(ruleVersion);
         matchResultRepository.save(result);
 
@@ -175,6 +178,22 @@ public class ScoringService {
 
     // ---- helpers ----
 
+    @SuppressWarnings("unchecked")
+    private ParsedJdSnapshot readParsedJd(Map<String, Object> parsed) {
+        if (parsed == null) {
+            return null;
+        }
+        Object data = parsed.get("data");
+        Map<String, Object> payload = data instanceof Map
+                ? (Map<String, Object>) data : parsed;
+        if (!payload.containsKey("keywords")) {
+            return null;
+        }
+        return new ParsedJdSnapshot(
+                toStringList(payload.get("keywords")),
+                toStringList(payload.get("requirements")));
+    }
+
     private List<String> buildSuggestions(KeywordRule.RuleResult keyword,
                                            KeywordRule.RuleResult skill) {
         List<String> suggestions = new ArrayList<>();
@@ -190,8 +209,10 @@ public class ScoringService {
         return suggestions;
     }
 
-    private Map<String, Object> buildExplanationJson(Explanation explanation) {
+    private Map<String, Object> buildExplanationJson(Explanation explanation,
+                                                      Map<String, BigDecimal> ruleScores) {
         Map<String, Object> json = new LinkedHashMap<>();
+        json.put("ruleScores", ruleScores);
         json.put("matched", explanation.matched());
         json.put("partialMatched", explanation.partialMatched());
         json.put("missing", explanation.missing());

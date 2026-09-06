@@ -173,6 +173,24 @@ class ScoringServiceTest {
     }
 
     @Test
+    @DisplayName("兼容路径: 正式解析接口的 data envelope 会被评分复用")
+    void score_reusesNestedParsedEnvelope() {
+        ResumeVersion version = buildVersion(Map.of(
+                "skills", List.of(Map.of("name", "Java"))));
+        JobDescription jd = buildJd("岗位文本没有词典关键词",
+                Map.of("version", "v1.0.0", "data", Map.of(
+                        "role", "后端工程师",
+                        "keywords", List.of("Java"),
+                        "requirements", List.of())));
+        setupHappyPath(version, jd);
+
+        MatchResponse response = service.score(new MatchRequest(VERSION_ID, JD_ID), USER_ID);
+
+        assertEquals(0, BigDecimal.valueOf(100).compareTo(response.keywordScore()));
+        assertTrue(response.explanation().missing().isEmpty());
+    }
+
+    @Test
     @DisplayName("边界路径: 空 JD + 完整简历,total≈100")
     void score_emptyJd_fullResume() {
         Map<String, Object> resumeJson = Map.of(
