@@ -10,6 +10,7 @@
 - [本地验证指南](./LOCAL_VALIDATION.md)：不依赖 Docker 的本地启动、测试与真实百炼 AI 验收。
 - [部署状态说明](./DEPLOYMENT_READINESS.md)：运行边界、可观测性与安全基线。
 - [根目录 README](../README.md)：项目能力、环境配置和快速开始。
+- [项目优化与错误审计（2026-09-04）](./ideation/2026-09-04-project-optimization-ideation.md)：当前分支的已闭环问题、仍存在的缺口和后续优化候选。
 
 ## 历史资料
 
