@@ -9,6 +9,7 @@ import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import com.intelligentresume.careermaterial.domain.*;
 import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
+import com.intelligentresume.careermaterial.service.CareerMaterialEvidence;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.domain.JobDescription;
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Service;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class JobGenerationService {
@@ -64,11 +66,22 @@ public class JobGenerationService {
 
     public void validateMaterialIds(Long userId, List<Long> includedIds,
                                     List<Long> preferredIds, List<Long> excludedIds) {
-        Set<Long> ownedIds = new HashSet<>();
-        materialRepository.findByUserIdOrderByUpdatedAtDesc(userId)
-                .forEach(material -> ownedIds.add(material.getId()));
+        List<CareerMaterial> ownedMaterials = materialRepository.findByUserIdOrderByUpdatedAtDesc(userId);
+        Set<Long> ownedIds = ownedMaterials.stream().map(CareerMaterial::getId).collect(Collectors.toSet());
         validateOwned(includedIds, ownedIds);
         validateOwned(preferredIds, ownedIds);
+        Set<Long> unusableIds = ownedMaterials.stream()
+                .filter(material -> !CareerMaterialEvidence.isReady(material))
+                .map(CareerMaterial::getId)
+                .collect(Collectors.toSet());
+        if (containsAny(includedIds, unusableIds) || containsAny(preferredIds, unusableIds)) {
+            throw new BusinessException(ErrorCode.VALIDATION,
+                    "选中的资料需要包含来源原文或有意义的结构化内容");
+        }
+    }
+
+    private boolean containsAny(List<Long> ids, Set<Long> candidates) {
+        return ids != null && ids.stream().anyMatch(candidates::contains);
     }
 
     private void validateOwned(List<Long> ids, Set<Long> ownedIds) {

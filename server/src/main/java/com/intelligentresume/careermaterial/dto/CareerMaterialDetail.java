@@ -14,5 +14,6 @@ public record CareerMaterialDetail(
         String sourceText,
         UsagePreference usagePreference,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        boolean evidenceReady
 ) {}

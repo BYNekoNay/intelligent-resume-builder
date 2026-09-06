@@ -19,7 +19,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.mockito.ArgumentCaptor;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -66,9 +65,52 @@ class CareerMaterialServiceTest {
     }
 
     @Test
+    @DisplayName("失败路径: 只有标题和空来源原文不能创建资料")
+    void create_titleOnlyEvidence_validationFails() {
+        CreateCareerMaterialRequest req = new CreateCareerMaterialRequest(
+                MaterialType.WORK_EXPERIENCE, "临时资料校验",
+                Map.of("title", "临时资料校验", "sourceText", ""), null, null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(req, 100L));
+
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("来源原文"));
+        verify(repository, never()).save(any(CareerMaterial.class));
+    }
+
+    @Test
+    @DisplayName("正常路径: 结构化字段可作为资料证据")
+    void create_structuredEvidenceIsAccepted() {
+        when(repository.save(any(CareerMaterial.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        CareerMaterialDetail detail = service.create(new CreateCareerMaterialRequest(
+                MaterialType.WORK_EXPERIENCE, "订单平台",
+                Map.of("company", "ACME", "role", "后端开发"), null, null), 100L);
+
+        assertEquals("订单平台", detail.title());
+        verify(repository).save(any(CareerMaterial.class));
+    }
+
+    @Test
+    @DisplayName("失败路径: 编辑仍没有证据的历史资料被拒绝")
+    void update_titleOnlyEvidence_validationFails() {
+        CareerMaterial existing = material(9L, 100L, MaterialType.WORK_EXPERIENCE, "旧标题");
+        existing.setSourceText(null);
+        existing.setContentJson(Map.of("title", "旧标题", "sourceText", ""));
+        when(repository.findByIdAndUserId(9L, 100L)).thenReturn(java.util.Optional.of(existing));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.update(9L,
+                new UpdateCareerMaterialRequest("新标题", null, null, null), 100L));
+
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        verify(repository, never()).save(any(CareerMaterial.class));
+    }
+
+    @Test
     @DisplayName("边界路径: 列出空列表")
     void list_empty() {
-        when(repository.findSummaries(100L, null)).thenReturn(List.of());
+        when(repository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of());
 
         List<CareerMaterialSummary> list = service.list(100L, null);
 
@@ -78,15 +120,16 @@ class CareerMaterialServiceTest {
     @Test
     @DisplayName("边界路径: 按 materialType 过滤")
     void list_filterByType() {
-        CareerMaterialSummary summary = new CareerMaterialSummary(
-                1L, MaterialType.SKILL, "Java", UsagePreference.NORMAL, LocalDateTime.now());
-        when(repository.findSummaries(100L, MaterialType.SKILL)).thenReturn(List.of(summary));
+        CareerMaterial skill = material(1L, 100L, MaterialType.SKILL, "Java");
+        CareerMaterial work = material(2L, 100L, MaterialType.WORK_EXPERIENCE, "平台项目");
+        when(repository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of(skill, work));
 
         List<CareerMaterialSummary> list = service.list(100L, MaterialType.SKILL);
 
         assertEquals(1, list.size());
         assertEquals(MaterialType.SKILL, list.get(0).materialType());
-        verify(repository).findSummaries(100L, MaterialType.SKILL);
+        assertTrue(list.get(0).evidenceReady());
+        verify(repository).findByUserIdOrderByUpdatedAtDesc(100L);
     }
 
     @Test

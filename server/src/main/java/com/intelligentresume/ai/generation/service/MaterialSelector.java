@@ -2,6 +2,7 @@ package com.intelligentresume.ai.generation.service;
 
 import com.intelligentresume.ai.generation.dto.JobGenerationRequest;
 import com.intelligentresume.careermaterial.domain.CareerMaterial;
+import com.intelligentresume.careermaterial.service.CareerMaterialEvidence;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import org.springframework.beans.factory.annotation.Value;
@@ -42,6 +43,16 @@ public class MaterialSelector {
         preferredIds.removeAll(excludedIds);
         preferredIds.removeAll(includedIds);
 
+        Set<Long> unusableIds = allMaterials.stream()
+                .filter(material -> !CareerMaterialEvidence.isReady(material))
+                .map(CareerMaterial::getId)
+                .collect(Collectors.toSet());
+        if (!Collections.disjoint(includedIds, unusableIds)) {
+            throw new BusinessException(ErrorCode.VALIDATION,
+                    "必须使用的资料需要包含来源原文或有意义的结构化内容");
+        }
+        preferredIds.removeAll(unusableIds);
+
         // 校验 included: 必须存在且属于当前用户
         List<CareerMaterial> fixed = new ArrayList<>();
         for (Long id : includedIds) {
@@ -72,6 +83,12 @@ public class MaterialSelector {
                 unselectedReasons.put(id, "USER_EXCLUDED");
             }
         }
+        for (CareerMaterial m : allMaterials) {
+            if (unusableIds.contains(m.getId()) && excluded.stream().noneMatch(item -> item.getId().equals(m.getId()))) {
+                excluded.add(m);
+                unselectedReasons.put(m.getId(), "INVALID_EVIDENCE");
+            }
+        }
 
         // normal: 不在任何用户指定列表中的资料
         Set<Long> specialIds = new HashSet<>();
@@ -81,6 +98,7 @@ public class MaterialSelector {
 
         List<CareerMaterial> normal = allMaterials.stream()
                 .filter(m -> !specialIds.contains(m.getId()))
+                .filter(m -> !unusableIds.contains(m.getId()))
                 .collect(Collectors.toList());
 
         // 截断至 maxSelected

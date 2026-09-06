@@ -59,6 +59,7 @@ public class CareerMaterialService {
     public CareerMaterialDetail create(CreateCareerMaterialRequest req, Long userId) {
         validateContentJsonSize(req.contentJson());
         validateTypeSpecificContent(req.materialType(), req.contentJson(), userId);
+        validateMeaningfulEvidence(req.sourceText(), req.contentJson());
 
         CareerMaterial material = new CareerMaterial();
         material.setUserId(userId);
@@ -73,7 +74,10 @@ public class CareerMaterialService {
 
     @Transactional(readOnly = true)
     public List<CareerMaterialSummary> list(Long userId, MaterialType filter) {
-        return repository.findSummaries(userId, filter);
+        return repository.findByUserIdOrderByUpdatedAtDesc(userId).stream()
+                .filter(material -> filter == null || material.getMaterialType() == filter)
+                .map(this::toSummary)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -104,6 +108,9 @@ public class CareerMaterialService {
     @Transactional
     public CareerMaterialDetail update(Long id, UpdateCareerMaterialRequest req, Long userId) {
         CareerMaterial material = findOwned(id, userId);
+        String nextSourceText = req.sourceText() != null ? req.sourceText() : material.getSourceText();
+        Map<String, Object> nextContentJson = req.contentJson() != null ? req.contentJson() : material.getContentJson();
+        validateMeaningfulEvidence(nextSourceText, nextContentJson);
         if (req.title() != null && !req.title().isBlank()) {
             material.setTitle(req.title());
         }
@@ -145,6 +152,12 @@ public class CareerMaterialService {
             }
         } catch (JsonProcessingException e) {
             throw new BusinessException(ErrorCode.VALIDATION, "contentJson 序列化失败");
+        }
+    }
+
+    private void validateMeaningfulEvidence(String sourceText, Map<String, Object> contentJson) {
+        if (!CareerMaterialEvidence.hasMeaningfulEvidence(sourceText, contentJson)) {
+            throw validation("资料必须包含来源原文或有意义的结构化内容");
         }
     }
 
@@ -265,7 +278,13 @@ public class CareerMaterialService {
     private CareerMaterialSearchItem toSearchItem(CareerMaterial material) {
         return new CareerMaterialSearchItem(
                 material.getId(), material.getMaterialType(), material.getTitle(),
-                material.getUsagePreference(), material.getUpdatedAt(), excerpt(material));
+                material.getUsagePreference(), material.getUpdatedAt(), excerpt(material),
+                CareerMaterialEvidence.isReady(material));
+    }
+
+    private CareerMaterialSummary toSummary(CareerMaterial material) {
+        return new CareerMaterialSummary(material.getId(), material.getMaterialType(), material.getTitle(),
+                material.getUsagePreference(), material.getUpdatedAt(), CareerMaterialEvidence.isReady(material));
     }
 
     private void validateSearchParameters(int page, int size, String sortValue) {
@@ -341,6 +360,6 @@ public class CareerMaterialService {
     private CareerMaterialDetail toDetail(CareerMaterial m) {
         return new CareerMaterialDetail(m.getId(), m.getMaterialType(), m.getTitle(),
                 m.getContentJson(), m.getSourceText(), m.getUsagePreference(),
-                m.getCreatedAt(), m.getUpdatedAt());
+                m.getCreatedAt(), m.getUpdatedAt(), CareerMaterialEvidence.isReady(m));
     }
 }

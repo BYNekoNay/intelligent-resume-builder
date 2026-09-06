@@ -4,7 +4,6 @@ import com.intelligentresume.careermaterial.domain.CareerMaterial;
 import com.intelligentresume.careermaterial.domain.MaterialType;
 import com.intelligentresume.careermaterial.domain.UsagePreference;
 import com.intelligentresume.careermaterial.dto.CareerMaterialTypeCount;
-import com.intelligentresume.careermaterial.dto.CareerMaterialSummary;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -19,19 +18,6 @@ public interface CareerMaterialRepository extends JpaRepository<CareerMaterial, 
     Optional<CareerMaterial> findByIdAndUserId(Long id, Long userId);
 
     List<CareerMaterial> findByUserIdOrderByUpdatedAtDesc(Long userId);
-
-    @Query("""
-            select new com.intelligentresume.careermaterial.dto.CareerMaterialSummary(
-                material.id, material.materialType, material.title,
-                material.usagePreference, material.updatedAt)
-            from CareerMaterial material
-            where material.userId = :userId
-              and (:materialType is null or material.materialType = :materialType)
-            order by material.updatedAt desc
-            """)
-    List<CareerMaterialSummary> findSummaries(
-            @Param("userId") Long userId,
-            @Param("materialType") MaterialType materialType);
 
     @Query("""
             select material from CareerMaterial material

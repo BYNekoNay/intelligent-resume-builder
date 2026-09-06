@@ -8,6 +8,7 @@ import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.careermaterial.domain.CareerMaterial;
 import com.intelligentresume.careermaterial.domain.UsagePreference;
 import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
+import com.intelligentresume.careermaterial.service.CareerMaterialEvidence;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.domain.JobDescription;
@@ -69,12 +70,23 @@ public class JobMaterialSelectionService {
         validateOwned(forced, byId);
         validateOwned(preferred, byId);
 
+        Set<Long> unusableIds = all.stream()
+                .filter(material -> !CareerMaterialEvidence.isReady(material))
+                .map(CareerMaterial::getId)
+                .collect(Collectors.toSet());
+        if (!Collections.disjoint(forced, unusableIds)) {
+            throw new BusinessException(ErrorCode.VALIDATION,
+                    "必须使用的资料需要包含来源原文或有意义的结构化内容");
+        }
+
         List<CareerMaterial> excluded = all.stream()
                 .filter(m -> manuallyExcluded.contains(m.getId())
+                        || unusableIds.contains(m.getId())
                         || (m.getUsagePreference() == UsagePreference.EXCLUDED && !forced.contains(m.getId())))
                 .toList();
         Set<String> jobTokens = tokens(job.getTitle() + " " + job.getJdText());
         List<CareerMaterial> candidates = all.stream()
+                .filter(m -> !unusableIds.contains(m.getId()))
                 .filter(m -> !manuallyExcluded.contains(m.getId()))
                 .filter(m -> m.getUsagePreference() != UsagePreference.EXCLUDED || forced.contains(m.getId()))
                 .sorted(Comparator.<CareerMaterial>comparingInt(m -> score(m, jobTokens, forced, preferred)).reversed()
@@ -136,8 +148,12 @@ public class JobMaterialSelectionService {
         result.put("missingRequirements", missing);
         result.put("excluded", excluded.stream().map(material -> {
             Map<String, Object> value = summary(material);
-            value.put("exclusionReason", manuallyExcluded.contains(material.getId()) ? "MANUAL" : "GLOBAL");
-            value.put("reason", manuallyExcluded.contains(material.getId())
+            boolean unusable = !CareerMaterialEvidence.isReady(material);
+            value.put("exclusionReason", unusable ? "INVALID_EVIDENCE"
+                    : manuallyExcluded.contains(material.getId()) ? "MANUAL" : "GLOBAL");
+            value.put("reason", unusable
+                    ? "缺少来源原文或有意义的结构化内容"
+                    : manuallyExcluded.contains(material.getId())
                     ? "Excluded for this generation" : "Excluded by global preference");
             return value;
         }).toList());

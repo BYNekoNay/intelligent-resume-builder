@@ -11,5 +11,6 @@ public record CareerMaterialSearchItem(
         String title,
         UsagePreference usagePreference,
         LocalDateTime updatedAt,
-        String excerpt
+        String excerpt,
+        boolean evidenceReady
 ) {}

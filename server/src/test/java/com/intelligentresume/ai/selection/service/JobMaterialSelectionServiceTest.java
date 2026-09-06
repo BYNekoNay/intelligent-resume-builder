@@ -71,6 +71,32 @@ class JobMaterialSelectionServiceTest {
         assertTrue(prompt.indexOf("高并发微服务") < prompt.indexOf("视觉设计"));
     }
 
+    @Test
+    void titleOnlyMaterialIsExcludedFromCandidatesWithAReason() {
+        Fixture fixture = new Fixture();
+        CareerMaterial valid = fixture.material(1L, "Java backend");
+        CareerMaterial titleOnly = fixture.material(2L, "临时资料校验");
+        titleOnly.setSourceText(null);
+        titleOnly.setContentJson(Map.of("title", "临时资料校验", "sourceText", ""));
+        when(fixture.materialRepository.findByUserIdOrderByUpdatedAtDesc(7L))
+                .thenReturn(List.of(valid, titleOnly));
+        when(fixture.provider.call(any())).thenReturn(AiCallResult.ok(Map.of(
+                "recommended", List.of(Map.of("materialId", 1, "relevanceScore", 80,
+                        "reason", "Matches Java", "matchedRequirements", List.of("Java"))),
+                "unselected", List.of(), "missingRequirements", List.of()), "req"));
+
+        Map<String, Object> result = fixture.service.executeTask(fixture.task(Map.of()));
+
+        List<?> excluded = (List<?>) result.get("excluded");
+        assertTrue(excluded.stream().map(item -> (Map<?, ?>) item)
+                .anyMatch(item -> Objects.equals(item.get("materialId"), 2L)
+                        && Objects.equals(item.get("exclusionReason"), "INVALID_EVIDENCE")
+                        && Objects.toString(item.get("reason")).contains("来源原文")));
+        ArgumentCaptor<AiCallContext> captor = ArgumentCaptor.forClass(AiCallContext.class);
+        verify(fixture.provider).call(captor.capture());
+        assertFalse(captor.getValue().input().get("_dataPrompt").toString().contains("临时资料校验"));
+    }
+
     private static final class Fixture {
         final CareerMaterialRepository materialRepository = mock(CareerMaterialRepository.class);
         final JobDescriptionRepository jobRepository = mock(JobDescriptionRepository.class);

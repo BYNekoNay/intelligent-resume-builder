@@ -298,4 +298,23 @@ class CareerMaterialControllerIT {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(40101));
     }
+
+    @Test
+    @Order(10)
+    @DisplayName("只有标题的资料被拒绝,避免无证据内容进入生成边界")
+    void postTitleOnlyMaterial_40001() throws Exception {
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "materialType": "WORK_EXPERIENCE",
+                                  "title": "临时资料校验",
+                                  "contentJson": {"title": "临时资料校验", "sourceText": ""}
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("来源原文")));
+    }
 }
