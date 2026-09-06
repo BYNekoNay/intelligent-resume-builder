@@ -42,6 +42,28 @@ class CareerMaterialAiSnapshotSanitizerTest {
         assertEquals("128000", safe.getContentJson().get("metricExactValue"));
     }
 
+    @Test
+    void ordinaryMaterialRedactsPiiFromSourceAndNestedContent() {
+        CareerMaterial material = new CareerMaterial();
+        material.setMaterialType(MaterialType.WORK_EXPERIENCE);
+        material.setTitle("Backend contact me at jane@example.com");
+        material.setSourceText("Address: 1 Example Road; phone 13800138000; https://example.com");
+        material.setContentJson(Map.of(
+                "company", "Example",
+                "email", "jane@example.com",
+                "details", Map.of("phone", "13800138000", "summary", "Contact jane@example.com"),
+                "highlights", java.util.List.of("Built services; see https://example.com/docs")));
+
+        CareerMaterial safe = sanitizer.sanitize(material);
+
+        assertEquals("Backend contact me at [EMAIL]", safe.getTitle());
+        assertEquals("[ADDRESS]; phone [PHONE]; [URL]", safe.getSourceText());
+        assertFalse(safe.getContentJson().containsKey("email"));
+        assertFalse(((Map<?, ?>) safe.getContentJson().get("details")).containsKey("phone"));
+        assertEquals("Contact [EMAIL]", ((Map<?, ?>) safe.getContentJson().get("details")).get("summary"));
+        assertEquals("Built services; see [URL]", ((java.util.List<?>) safe.getContentJson().get("highlights")).get(0));
+    }
+
     private CareerMaterial achievement(String displayMode) {
         CareerMaterial material = new CareerMaterial();
         material.setMaterialType(MaterialType.valueOf("ACHIEVEMENT"));

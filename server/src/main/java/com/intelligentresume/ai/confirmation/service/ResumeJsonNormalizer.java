@@ -29,6 +29,7 @@ import java.util.regex.Pattern;
 public class ResumeJsonNormalizer {
 
     private static final Pattern INDEX_PATTERN = Pattern.compile("(.+?)\\[(\\d+)]");
+    private static final Object REMOVED = new Object();
 
     /**
      * 标准化草稿 JSON。
@@ -40,31 +41,80 @@ public class ResumeJsonNormalizer {
     @SuppressWarnings("unchecked")
     public Map<String, Object> normalize(Map<String, Object> draft, List<ConfirmedDraftItem> items) {
         Map<String, Object> copy = (Map<String, Object>) deepCopy(draft);
-
-        // 按决策类型分组处理
-        for (ConfirmedDraftItem item : items) {
-            if (item.decision() == Decision.REJECT) {
-                removeAtPath(copy, item.outputPath());
-            }
-        }
-        for (ConfirmedDraftItem item : items) {
-            if (item.decision() == Decision.EDIT && item.editedValue() != null) {
-                setAtPath(copy, item.outputPath(), item.editedValue());
-            }
-        }
-
-        // 收集 ACCEPT 路径集合（用于 _pending 豁免）
+        Map<String, ConfirmedDraftItem> decisions = new HashMap<>();
         Set<String> acceptedPaths = new HashSet<>();
         for (ConfirmedDraftItem item : items) {
+            decisions.put(item.outputPath(), item);
             if (item.decision() == Decision.ACCEPT) {
                 acceptedPaths.add(item.outputPath());
             }
         }
 
-        // 递归剥离 _source，检查残留 _pending
-        stripMarkers(copy, "", acceptedPaths);
+        // 按原始树递归应用决策。不能先删除数组项再按原路径编辑，
+        // 否则 work[0] 被拒绝后 work[1] 会漂移为 work[0]。
+        Object normalized = normalizeNode(copy, "", decisions, acceptedPaths);
+        if (normalized == REMOVED || !(normalized instanceof Map)) {
+            throw new BusinessException(ErrorCode.VALIDATION, "草稿根节点不能被移除");
+        }
 
-        return copy;
+        return (Map<String, Object>) normalized;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object normalizeNode(Object node, String currentPath,
+                                 Map<String, ConfirmedDraftItem> decisions,
+                                 Set<String> acceptedPaths) {
+        ConfirmedDraftItem decision = decisions.get(currentPath);
+        if (decision != null) {
+            if (decision.decision() == Decision.REJECT) {
+                return REMOVED;
+            }
+            if (decision.decision() == Decision.EDIT && decision.editedValue() != null) {
+                Object edited = deepCopy(decision.editedValue());
+                stripMarkers(edited, currentPath, Set.of());
+                return edited;
+            }
+        }
+
+        if (node instanceof Map) {
+            Map<String, Object> map = (Map<String, Object>) node;
+            map.remove("_source");
+            map.remove("_sources");
+            if (map.containsKey("_pending")) {
+                if (!isPathAccepted(currentPath, acceptedPaths)) {
+                    throw new BusinessException(ErrorCode.CONFLICT,
+                            "残留 _pending 未决策: " + currentPath);
+                }
+                map.remove("_pending");
+            }
+            Iterator<Map.Entry<String, Object>> iterator = map.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<String, Object> entry = iterator.next();
+                String childPath = currentPath.isEmpty()
+                        ? entry.getKey() : currentPath + "." + entry.getKey();
+                Object child = normalizeNode(entry.getValue(), childPath, decisions, acceptedPaths);
+                if (child == REMOVED) {
+                    iterator.remove();
+                } else {
+                    entry.setValue(child);
+                }
+            }
+            return map;
+        }
+
+        if (node instanceof List) {
+            List<Object> source = (List<Object>) node;
+            List<Object> normalized = new ArrayList<>(source.size());
+            for (int i = 0; i < source.size(); i++) {
+                String childPath = currentPath + "[" + i + "]";
+                Object child = normalizeNode(source.get(i), childPath, decisions, acceptedPaths);
+                if (child != REMOVED) {
+                    normalized.add(child);
+                }
+            }
+            return normalized;
+        }
+        return node;
     }
 
     // ---- 递归剥离标记 ----
@@ -116,104 +166,6 @@ public class ResumeJsonNormalizer {
             }
         }
         return false;
-    }
-
-    // ---- 路径操作 ----
-
-    @SuppressWarnings("unchecked")
-    private void removeAtPath(Map<String, Object> root, String path) {
-        String[] segments = path.split("\\.");
-        Object current = root;
-
-        // 导航到父节点
-        for (int i = 0; i < segments.length - 1; i++) {
-            current = navigateSegment(current, segments[i]);
-            if (current == null) {
-                return; // 路径不存在，静默忽略
-            }
-        }
-
-        // 从父节点移除最后一个段
-        String lastSegment = segments[segments.length - 1];
-        Matcher m = INDEX_PATTERN.matcher(lastSegment);
-        if (m.matches()) {
-            String key = m.group(1);
-            int index = Integer.parseInt(m.group(2));
-            if (current instanceof Map) {
-                Object listObj = ((Map<String, Object>) current).get(key);
-                if (listObj instanceof List) {
-                    List<Object> list = (List<Object>) listObj;
-                    if (index < list.size()) {
-                        list.remove(index);
-                    }
-                }
-            }
-        } else {
-            if (current instanceof Map) {
-                ((Map<String, Object>) current).remove(lastSegment);
-            }
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void setAtPath(Map<String, Object> root, String path, Object value) {
-        String[] segments = path.split("\\.");
-        Object current = root;
-
-        // 导航到父节点
-        for (int i = 0; i < segments.length - 1; i++) {
-            current = navigateSegment(current, segments[i]);
-            if (current == null) {
-                return;
-            }
-        }
-
-        // 设置最后一个段
-        String lastSegment = segments[segments.length - 1];
-        Matcher m = INDEX_PATTERN.matcher(lastSegment);
-        if (m.matches()) {
-            String key = m.group(1);
-            int index = Integer.parseInt(m.group(2));
-            if (current instanceof Map) {
-                Object listObj = ((Map<String, Object>) current).get(key);
-                if (listObj instanceof List) {
-                    List<Object> list = (List<Object>) listObj;
-                    if (index < list.size()) {
-                        list.set(index, value);
-                    }
-                }
-            }
-        } else {
-            if (current instanceof Map) {
-                ((Map<String, Object>) current).put(lastSegment, value);
-            }
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private Object navigateSegment(Object current, String segment) {
-        if (current == null) {
-            return null;
-        }
-        Matcher m = INDEX_PATTERN.matcher(segment);
-        if (m.matches()) {
-            String key = m.group(1);
-            int index = Integer.parseInt(m.group(2));
-            if (!(current instanceof Map)) {
-                return null;
-            }
-            Object listObj = ((Map<String, Object>) current).get(key);
-            if (!(listObj instanceof List)) {
-                return null;
-            }
-            List<Object> list = (List<Object>) listObj;
-            return index < list.size() ? list.get(index) : null;
-        } else {
-            if (!(current instanceof Map)) {
-                return null;
-            }
-            return ((Map<String, Object>) current).get(segment);
-        }
     }
 
     // ---- 深拷贝 ----

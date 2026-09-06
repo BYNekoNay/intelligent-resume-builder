@@ -191,6 +191,36 @@ class ResumeJsonNormalizerTest {
                 "用户编辑保存的 period 原文不能被标准化过程丢弃");
     }
 
+    @Test
+    @DisplayName("数组路径稳定: 拒绝前项后编辑和接受后项仍作用于原条目")
+    void mixedArrayDecisions_keepOriginalItemIdentity() {
+        Map<String, Object> draft = new LinkedHashMap<>();
+        draft.put("work", List.of(
+                new LinkedHashMap<>(Map.of("company", "删除的公司")),
+                new LinkedHashMap<>(Map.of(
+                        "company", "保留的公司",
+                        "_pending", Map.of("reason", "需要确认")
+                )),
+                new LinkedHashMap<>(Map.of("company", "另一个公司"))
+        ));
+
+        List<ConfirmedDraftItem> items = List.of(
+                new ConfirmedDraftItem("work[0]", Decision.REJECT, null),
+                new ConfirmedDraftItem("work[1]", Decision.EDIT,
+                        Map.of("company", "用户编辑后的公司")),
+                new ConfirmedDraftItem("work[2]", Decision.ACCEPT, null)
+        );
+
+        Map<String, Object> result = normalizer.normalize(draft, items);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> work = (List<Map<String, Object>>) result.get("work");
+        assertEquals(2, work.size());
+        assertEquals("用户编辑后的公司", work.get(0).get("company"));
+        assertEquals("另一个公司", work.get(1).get("company"));
+        assertFalse(work.get(1).containsKey("_pending"));
+    }
+
     private Map<String, Object> editedEducation() {
         Map<String, Object> edited = new LinkedHashMap<>();
         edited.put("school", "示例大学");
