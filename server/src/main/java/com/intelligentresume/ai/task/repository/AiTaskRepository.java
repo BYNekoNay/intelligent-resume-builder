@@ -42,6 +42,15 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
 
     long countByUserIdAndTaskTypeAndCreatedAtAfter(Long userId, AiTaskType taskType, LocalDateTime after);
 
+    @Modifying
+    @Query("UPDATE AiTask t SET t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.CANCELLED, " +
+            "t.errorMessage = :message, t.leaseOwner = null, t.leaseExpiresAt = null, t.updatedAt = :now " +
+            "WHERE t.userId = :userId AND (t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING " +
+            "OR t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.RUNNING)")
+    int cancelActiveByUserId(@Param("userId") Long userId,
+                             @Param("message") String message,
+                             @Param("now") LocalDateTime now);
+
     @Query("SELECT COALESCE(SUM(CASE WHEN t.retryCount < 1 THEN 1 ELSE t.retryCount END), 0) FROM AiTask t " +
             "WHERE t.userId = :userId AND t.taskType = :taskType AND t.createdAt > :after")
     long countAttemptsByUserIdAndTaskTypeAndCreatedAtAfter(@Param("userId") Long userId,

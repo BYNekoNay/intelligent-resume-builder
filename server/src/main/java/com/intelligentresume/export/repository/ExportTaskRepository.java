@@ -40,6 +40,15 @@ public interface ExportTaskRepository extends JpaRepository<ExportTask, Long> {
     List<ExportTask> claimableTasks(@Param("batchSize") int batchSize);
 
     @Modifying
+    @Query("UPDATE ExportTask e SET e.status = com.intelligentresume.export.domain.ExportStatus.FAILED, " +
+            "e.errorMessage = :message, e.leaseOwner = null, e.leaseExpiresAt = null, e.updatedAt = :now " +
+            "WHERE e.userId = :userId AND (e.status = com.intelligentresume.export.domain.ExportStatus.PENDING " +
+            "OR e.status = com.intelligentresume.export.domain.ExportStatus.RUNNING)")
+    int failActiveByUserId(@Param("userId") Long userId,
+                           @Param("message") String message,
+                           @Param("now") LocalDateTime now);
+
+    @Modifying
     @Query(value = "UPDATE export_task SET status = 'RUNNING', lease_owner = :owner, lease_expires_at = :leaseUntil, retry_count = retry_count + 1, updated_at = NOW() WHERE id = :id AND (status = 'PENDING' OR (status = 'RUNNING' AND lease_expires_at < NOW()))", nativeQuery = true)
     int acquireLease(@Param("id") Long id, @Param("owner") String owner,
                      @Param("leaseUntil") java.time.LocalDateTime leaseUntil);

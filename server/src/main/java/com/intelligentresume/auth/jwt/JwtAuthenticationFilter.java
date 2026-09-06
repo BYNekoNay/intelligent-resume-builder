@@ -1,5 +1,7 @@
 package com.intelligentresume.auth.jwt;
 
+import com.intelligentresume.auth.domain.User;
+import com.intelligentresume.auth.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,9 +26,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final TokenService tokenService;
+    private final UserRepository userRepository;
 
-    public JwtAuthenticationFilter(TokenService tokenService) {
+    public JwtAuthenticationFilter(TokenService tokenService, UserRepository userRepository) {
         this.tokenService = tokenService;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -36,7 +40,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith(BEARER_PREFIX)) {
             String token = header.substring(BEARER_PREFIX.length()).trim();
             Long userId = tokenService.parseUserId(token);
-            if (userId != null) {
+            boolean active = userId != null && userRepository.findById(userId)
+                    .map(user -> user.getStatus() == User.UserStatus.ACTIVE)
+                    .orElse(false);
+            if (active) {
                 request.setAttribute(CURRENT_USER_ID_ATTRIBUTE, userId);
                 UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                         userId, null, List.of());

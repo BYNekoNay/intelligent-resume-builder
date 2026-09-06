@@ -12,8 +12,11 @@ import com.intelligentresume.auth.dto.UpdateProfileRequest;
 import com.intelligentresume.auth.repository.AuthSessionRepository;
 import com.intelligentresume.auth.repository.UserRepository;
 import com.intelligentresume.auth.jwt.TokenService;
+import com.intelligentresume.ai.consent.service.AiConsentService;
+import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.export.repository.ExportTaskRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,15 +42,24 @@ public class AuthService {
     private final AuthSessionRepository authSessionRepository;
     private final TokenService tokenService;
     private final PasswordEncoder passwordEncoder;
+    private final AiConsentService aiConsentService;
+    private final AiTaskRepository aiTaskRepository;
+    private final ExportTaskRepository exportTaskRepository;
 
     public AuthService(UserRepository userRepository,
                        AuthSessionRepository authSessionRepository,
                        TokenService tokenService,
-                       PasswordEncoder passwordEncoder) {
+                       PasswordEncoder passwordEncoder,
+                       AiConsentService aiConsentService,
+                       AiTaskRepository aiTaskRepository,
+                       ExportTaskRepository exportTaskRepository) {
         this.userRepository = userRepository;
         this.authSessionRepository = authSessionRepository;
         this.tokenService = tokenService;
         this.passwordEncoder = passwordEncoder;
+        this.aiConsentService = aiConsentService;
+        this.aiTaskRepository = aiTaskRepository;
+        this.exportTaskRepository = exportTaskRepository;
     }
 
     @Transactional
@@ -162,11 +174,15 @@ public class AuthService {
 
     @Transactional
     public void deleteAccount(Long userId) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));
         user.setStatus(User.UserStatus.DISABLED);
         user.setDeletedAt(LocalDateTime.now());
         userRepository.save(user);
+        aiConsentService.withdrawIfGranted(userId);
+        LocalDateTime now = LocalDateTime.now();
+        aiTaskRepository.cancelActiveByUserId(userId, "Account deleted", now);
+        exportTaskRepository.failActiveByUserId(userId, "Account deleted", now);
         logoutAll(userId);
     }
 

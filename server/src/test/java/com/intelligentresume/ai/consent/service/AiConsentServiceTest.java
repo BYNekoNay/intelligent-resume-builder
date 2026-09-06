@@ -138,6 +138,24 @@ class AiConsentServiceTest {
     }
 
     @Test
+    @DisplayName("删除账号场景：仅对当前 GRANTED 事件追加撤回")
+    void withdrawIfGranted_appendsOnlyForGrantedEvent() {
+        AiConsent granted = consent(1L, 100L, ConsentStatus.GRANTED);
+        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+                .thenReturn(Optional.of(granted));
+        when(repository.save(any(AiConsent.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        assertTrue(service.withdrawIfGranted(100L));
+        verify(repository).save(argThat(event -> event.getEventType() == ConsentStatus.WITHDRAWN));
+
+        AiConsent withdrawn = consent(2L, 100L, ConsentStatus.WITHDRAWN);
+        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+                .thenReturn(Optional.of(withdrawn));
+        assertFalse(service.withdrawIfGranted(100L));
+        verify(repository, times(1)).save(any(AiConsent.class));
+    }
+
+    @Test
     @DisplayName("hasValidConsent: 最新事件为 GRANTED 返回 true,WITHDRAWN 返回 false")
     void hasValidConsent_checksLatestEvent() {
         AiConsent granted = consent(1L, 100L, ConsentStatus.GRANTED);

@@ -9,8 +9,11 @@ import com.intelligentresume.auth.dto.TokenResponse;
 import com.intelligentresume.auth.jwt.TokenService;
 import com.intelligentresume.auth.repository.AuthSessionRepository;
 import com.intelligentresume.auth.repository.UserRepository;
+import com.intelligentresume.ai.consent.service.AiConsentService;
+import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.export.repository.ExportTaskRepository;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -44,6 +47,9 @@ class AuthServiceTest {
     @Mock private AuthSessionRepository authSessionRepository;
     @Mock private TokenService tokenService;
     @Mock private PasswordEncoder passwordEncoder;
+    @Mock private AiConsentService aiConsentService;
+    @Mock private AiTaskRepository aiTaskRepository;
+    @Mock private ExportTaskRepository exportTaskRepository;
 
     private AuthService authService;
 
@@ -53,7 +59,8 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         authService = new AuthService(
-                userRepository, authSessionRepository, tokenService, passwordEncoder);
+                userRepository, authSessionRepository, tokenService, passwordEncoder,
+                aiConsentService, aiTaskRepository, exportTaskRepository);
     }
 
     // ---- 注册 ----
@@ -246,6 +253,23 @@ class AuthServiceTest {
         assertEquals("logout_all", s1.getRevokeReason());
         assertEquals("logout_all", s2.getRevokeReason());
         verify(authSessionRepository).saveAll(List.of(s1, s2));
+    }
+
+    @Test
+    @DisplayName("删除账号撤回 AI 授权并终止未完成的 AI/PDF 任务")
+    void deleteAccount_revokesConsentAndCancelsAsyncWork() {
+        User user = activeUser(1L, "alice");
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user));
+        when(authSessionRepository.findByUserIdAndRevokedAtIsNull(1L)).thenReturn(List.of());
+
+        authService.deleteAccount(1L);
+
+        assertEquals(User.UserStatus.DISABLED, user.getStatus());
+        assertNotNull(user.getDeletedAt());
+        verify(aiConsentService).withdrawIfGranted(1L);
+        verify(aiTaskRepository).cancelActiveByUserId(eq(1L), anyString(), any(LocalDateTime.class));
+        verify(exportTaskRepository).failActiveByUserId(eq(1L), anyString(), any(LocalDateTime.class));
+        verify(authSessionRepository).saveAll(List.of());
     }
 
     // ---- 辅助方法 ----

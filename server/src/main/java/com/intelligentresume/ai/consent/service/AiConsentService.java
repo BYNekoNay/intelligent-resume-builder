@@ -76,8 +76,26 @@ public class AiConsentService {
         AiConsent latest = repository.findFirstByUserIdOrderByCreatedAtDesc(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "尚无同意记录,无法撤回"));
 
+        return toResponse(appendWithdrawal(latest));
+    }
+
+    /**
+     * 账号删除时撤回现有授权；没有授权或已经撤回时保持幂等。
+     */
+    @Transactional
+    public boolean withdrawIfGranted(Long userId) {
+        return repository.findFirstByUserIdOrderByCreatedAtDesc(userId)
+                .filter(c -> c.getEventType() == ConsentStatus.GRANTED)
+                .map(latest -> {
+                    appendWithdrawal(latest);
+                    return true;
+                })
+                .orElse(false);
+    }
+
+    private AiConsent appendWithdrawal(AiConsent latest) {
         AiConsent consent = new AiConsent();
-        consent.setUserId(userId);
+        consent.setUserId(latest.getUserId());
         consent.setEventType(ConsentStatus.WITHDRAWN);
         consent.setPolicyVersion(latest.getPolicyVersion());
         consent.setProviderCode(latest.getProviderCode());
@@ -86,7 +104,7 @@ public class AiConsentService {
         consent.setNoticeHash(latest.getNoticeHash());
 
         consent = repository.save(consent);
-        return toResponse(consent);
+        return consent;
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.intelligentresume.export.service;
 
+import com.intelligentresume.auth.domain.User;
+import com.intelligentresume.auth.repository.UserRepository;
 import com.intelligentresume.common.observability.AppObservability;
 import com.intelligentresume.common.observability.FailureCategoryClassifier;
 import com.intelligentresume.common.observability.PdfFailureCategory;
@@ -26,6 +28,7 @@ public class ExportTaskWorker {
     private static final Logger log = LoggerFactory.getLogger(ExportTaskWorker.class);
 
     private final ResumeVersionRepository resumeVersionRepository;
+    private final UserRepository userRepository;
     private final PdfServiceClient pdfServiceClient;
     private final ExportStorageService storageService;
     private final ExportTaskLeaseService leaseService;
@@ -34,6 +37,7 @@ public class ExportTaskWorker {
     private final FailureCategoryClassifier failureCategoryClassifier;
 
     public ExportTaskWorker(ResumeVersionRepository resumeVersionRepository,
+                            UserRepository userRepository,
                             PdfServiceClient pdfServiceClient,
                             ExportStorageService storageService,
                             ExportTaskLeaseService leaseService,
@@ -41,6 +45,7 @@ public class ExportTaskWorker {
                             AppObservability observability,
                             FailureCategoryClassifier failureCategoryClassifier) {
         this.resumeVersionRepository = resumeVersionRepository;
+        this.userRepository = userRepository;
         this.pdfServiceClient = pdfServiceClient;
         this.storageService = storageService;
         this.leaseService = leaseService;
@@ -65,6 +70,12 @@ public class ExportTaskWorker {
         long startedAt = System.nanoTime();
         try (WorkerTraceContext ignored = WorkerTraceContext.open(task.getId())) {
             try {
+                User user = userRepository.findById(task.getUserId()).orElse(null);
+                if (user == null || user.getStatus() != User.UserStatus.ACTIVE || user.getDeletedAt() != null) {
+                    markFailed(task, "Account is disabled");
+                    return;
+                }
+
                 ResumeVersion version = resumeVersionRepository.findById(task.getResumeVersionId()).orElse(null);
                 if (version == null || version.getDeletedAt() != null) {
                     markFailed(task, "Resume version is unavailable");

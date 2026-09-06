@@ -194,10 +194,33 @@ class AuthControllerIT {
                 .andExpect(jsonPath("$.data.email").value("ituser@example.com"));
     }
 
+    @Test
+    @Order(7)
+    @DisplayName("DELETE /api/auth/me 后已签发 access token 立即失效")
+    void deleteAccount_invalidatesExistingAccessToken() throws Exception {
+        MvcResult registerResult = mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"delete_me\",\"email\":\"delete_me@example.com\",\"password\":\"correcthorse\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String accessToken = objectMapper.readTree(registerResult.getResponse().getContentAsString())
+                .path("data").path("accessToken").asText();
+
+        mockMvc.perform(delete("/api/auth/me")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/api/auth/me")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
+    }
+
     // ---- 注册校验 ----
 
     @Test
-    @Order(7)
+    @Order(8)
     @DisplayName("POST /api/auth/register 密码过短返回 40001")
     void postRegister_shortPassword_returns40001() throws Exception {
         mockMvc.perform(post("/api/auth/register")
