@@ -200,12 +200,18 @@ export function collectStaticTranslationKeys(source) {
   return [...stripComments(source).matchAll(/\bt\(\s*(["'])([A-Za-z0-9_.-]+)\1/g)].map(match => match[2])
 }
 
+export function collectRegistryTranslationKeys(source) {
+  return [...source.matchAll(/(?:labelKey|descriptionKey|stepKey|titleKey|descKey):\s*['"]([A-Za-z0-9_.-]+)['"]/g)]
+    .map(match => match[1])
+}
+
 function run() {
   const auditedFiles = [
     ...collectVueFiles(join(projectRoot, 'src', 'views')),
     ...collectVueFiles(join(projectRoot, 'src', 'components')),
   ]
   const catalogSource = readFileSync(join(projectRoot, 'src', 'i18n', 'index.ts'), 'utf8')
+  const navigationSource = readFileSync(join(projectRoot, 'src', 'navigation', 'registry.ts'), 'utf8')
   const { locales, duplicates } = inspectCatalog(catalogSource)
   const requiredLocales = ['zh-CN', 'en-US']
   const failures = duplicates.map(key => `src/i18n/index.ts: duplicate catalog key ${key}`)
@@ -226,6 +232,12 @@ function run() {
       for (const locale of requiredLocales) {
         if (!locales.get(locale)?.has(key)) failures.push(`${displayPath}: missing ${locale} translation for ${key}`)
       }
+    }
+  }
+
+  for (const key of new Set(collectRegistryTranslationKeys(navigationSource))) {
+    for (const locale of requiredLocales) {
+      if (!locales.get(locale)?.has(key)) failures.push(`src/navigation/registry.ts: missing ${locale} translation for ${key}`)
     }
   }
 

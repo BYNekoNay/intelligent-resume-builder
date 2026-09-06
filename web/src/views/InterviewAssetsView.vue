@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Archive, BookmarkPlus, Pencil, Search, Trash2 } from 'lucide-vue-next'
 import {
   createInterviewAsset,
@@ -31,7 +31,7 @@ const sectionKeyFilter = ref<string>('')
 const keyword = ref('')
 const { t } = useLocale()
 
-const sectionLabels: Record<string, string> = {
+const sectionLabels = computed<Record<string, string>>(() => ({
   basics: t('resumeEditor.basicsLabel'),
   objective: t('resumeEditor.objectiveLabel'),
   links: t('resumeEditor.linksLabel'),
@@ -46,10 +46,14 @@ const sectionLabels: Record<string, string> = {
   awards: t('resumeEditor.awardsLabel'),
   languages: t('resumeEditor.languagesLabel'),
   customSections: t('resumeEditor.customSectionsLabel'),
-}
+}))
 
 function sectionLabel(key: string) {
-  return sectionLabels[key] ?? key
+  return sectionLabels.value[key] ?? key
+}
+
+function materialTitle(id: number) {
+  return materials.value.find((material) => material.id === id)?.title ?? `#${id}`
 }
 
 function resetForm() {
@@ -204,6 +208,9 @@ onMounted(async () => {
         </div>
         <div v-if="asset.sectionKeys.length" class="asset-tags">
           <span v-for="key in asset.sectionKeys" :key="key" class="asset-tag">{{ sectionLabel(key) }}</span>
+        </div>
+        <div v-if="asset.materialIds.length" class="asset-tags">
+          <span v-for="id in asset.materialIds" :key="id" class="asset-tag material-tag">{{ materialTitle(id) }}</span>
         </div>
         <h3>{{ t('assets.original') }}</h3>
         <p>{{ asset.originalAnswerText }}</p>

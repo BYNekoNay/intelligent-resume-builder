@@ -73,8 +73,10 @@ function startPolling(id: number) {
     onTask: (next) => {
       task.value = next
       if (next.status === 'SUCCESS') {
-        resultJson.value = next.resultJson
-        parseDraft(resultJson.value)
+        if (next.confirmationStatus === 'PENDING') {
+          resultJson.value = next.resultJson
+          parseDraft(resultJson.value)
+        }
         loading.value = false
       } else if (next.status === 'FAILED') {
         error.value = next.errorMessage || t('generationConfirm.aiGenerationFailed')
@@ -201,7 +203,7 @@ async function handleRetry() {
     </div>
 
     <!-- Draft confirmation -->
-    <div v-else-if="task && task.status === 'SUCCESS'" class="draft-container" @keydown.esc="mobileNavigationOpen = false">
+    <div v-else-if="task && task.status === 'SUCCESS' && task.confirmationStatus === 'PENDING'" class="draft-container" @keydown.esc="mobileNavigationOpen = false">
       <QualitySummaryCard />
       <DraftSectionReview
         :error="error"
@@ -210,6 +212,13 @@ async function handleRetry() {
         @confirm="handleConfirm"
         @reject="handleReject"
       />
+    </div>
+
+    <div v-else-if="task && task.status === 'SUCCESS'" class="status-card success">
+      <p>{{ t('generationConfirm.reviewAlreadyHandled') }}</p>
+      <button class="btn-primary" type="button" @click="router.push('/generate')">
+        {{ t('generationConfirm.returnToGeneration') }}
+      </button>
     </div>
 
     <!-- Same-JD Dialog -->

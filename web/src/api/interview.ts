@@ -59,6 +59,8 @@ export interface InterviewStateResponse {
   aiFailure: AiFailureInfo | null
   completionReason: string | null
   sourceType: 'PLATFORM_RESUME' | 'EXTERNAL_RESUME' | null
+  interviewMode: 'JD_TARGETED' | 'TECHNICAL' | 'BEHAVIORAL' | 'COMPREHENSIVE' | null
+  outputLanguage: 'ZH_CN' | 'EN' | null
   resumeVersionId: number | null
   jobDescriptionId: number | null
 }

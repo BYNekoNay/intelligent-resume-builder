@@ -59,7 +59,7 @@ const materialsByDecision = computed(() => {
   const must: CareerMaterialSummary[] = []
   const exclude: CareerMaterialSummary[] = []
   const auto: CareerMaterialSummary[] = []
-  for (const m of materialStore.items) {
+  for (const m of materialStore.items.filter(material => material.evidenceReady !== false)) {
     const d = materialDecisions.value[m.id] ?? 'default'
     if (d === 'must') must.push(m)
     else if (d === 'exclude') exclude.push(m)
@@ -67,6 +67,8 @@ const materialsByDecision = computed(() => {
   }
   return { must, exclude, auto }
 })
+
+const usableMaterials = computed(() => materialStore.items.filter(material => material.evidenceReady !== false))
 
 onMounted(async () => {
   const storeLoads = Promise.all([materialStore.load(), jdStore.load()])
@@ -89,7 +91,7 @@ function setDecision(id: number, decision: MaterialDecision) {
 }
 
 function initializeMaterialDecisions() {
-  for (const material of materialStore.items) {
+  for (const material of usableMaterials.value) {
     if (!(material.id in materialDecisions.value) && material.usagePreference === 'EXCLUDED') {
       materialDecisions.value[material.id] = 'exclude'
     }
@@ -304,26 +306,31 @@ const TYPE_LABELS = computed<Record<MaterialType, string>>(() => ({
         <div
           v-for="m in materialStore.items"
           :key="m.id"
-          :class="['material-card', materialDecisions[m.id] ?? 'default']"
+          :class="['material-card', materialDecisions[m.id] ?? 'default', { invalid: m.evidenceReady === false }]"
         >
           <div class="material-info">
             <span class="material-type">{{ TYPE_LABELS[m.materialType] ?? m.materialType }}</span>
             <strong class="material-title">{{ m.title }}</strong>
             <small v-if="m.usagePreference === 'PREFERRED'" class="preference-badge preferred">{{ t('generationWorkbench.badgePreferred') }}</small>
             <small v-else-if="m.usagePreference === 'EXCLUDED'" class="preference-badge excluded">{{ t('generationWorkbench.badgeExcluded') }}</small>
+            <small v-if="m.evidenceReady === false" class="evidence-warning">{{ t('generationWorkbench.invalidEvidence') }}</small>
           </div>
           <div class="material-actions">
             <button
               :class="['tag-btn', { active: (materialDecisions[m.id] ?? 'default') === 'must' }]"
+              :disabled="m.evidenceReady === false"
               @click="setDecision(m.id, (materialDecisions[m.id] ?? 'default') === 'must' ? 'default' : 'must')"
             >{{ t('generationWorkbench.btnMustUse') }}</button>
             <button
               :class="['tag-btn exclude', { active: (materialDecisions[m.id] ?? 'default') === 'exclude' }]"
+              :disabled="m.evidenceReady === false"
               @click="setDecision(m.id, (materialDecisions[m.id] ?? 'default') === 'exclude' ? 'default' : 'exclude')"
             >{{ t('generationWorkbench.btnExclude') }}</button>
           </div>
         </div>
       </div>
+
+      <p v-if="materialStore.items.length > 0 && usableMaterials.length === 0" class="empty-hint">{{ t('generationWorkbench.noEligibleMaterials') }}</p>
 
       <div class="selection-summary" v-if="materialStore.items.length > 0">
         <span><strong>{{ materialsByDecision.must.length }}</strong>{{ t('generationWorkbench.summaryMustPrefix') }}</span>
@@ -333,7 +340,7 @@ const TYPE_LABELS = computed<Record<MaterialType, string>>(() => ({
 
       <div class="step-actions">
         <button class="btn-neon btn-ghost" @click="step = 1"><ArrowLeft :size="16" />{{ t('generationWorkbench.prevStep') }}</button>
-        <button class="btn-neon btn-primary" @click="step = 3" :disabled="materialStore.items.length === 0">
+        <button class="btn-neon btn-primary" @click="step = 3" :disabled="usableMaterials.length === 0">
           {{ t('generationWorkbench.nextStartGeneration') }} <ArrowRight :size="16" />
         </button>
       </div>
@@ -727,16 +734,19 @@ const TYPE_LABELS = computed<Record<MaterialType, string>>(() => ({
 .material-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; min-height: 66px; padding: 12px 8px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
 .material-card.must { border-color: var(--border); background: var(--accent-light); box-shadow: inset 3px 0 0 var(--accent); }
 .material-card.exclude { border-color: var(--border); background: var(--danger-light); box-shadow: inset 3px 0 0 var(--danger); opacity: .72; }
+.material-card.invalid { border-color: var(--border); background: var(--bg-page); opacity: .68; }
 .material-info { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .material-type, .preference-badge { min-height: 21px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); background: var(--bg-page); font-size: 9px; font-weight: 700; }
 .material-title { margin-right: 3px; overflow-wrap: anywhere; color: var(--text-primary); font-size: 12px; }
 .preference-badge.preferred { border-color: color-mix(in srgb, var(--highlight) 35%, var(--border)); color: var(--highlight); background: var(--highlight-light); }
 .preference-badge.excluded { color: var(--text-tertiary); }
+.evidence-warning { padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: 4px; color: var(--danger); background: var(--danger-light); font-size: 9px; font-weight: 700; }
 .material-actions { display: flex; gap: 5px; }
 .tag-btn { min-height: 31px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); background: var(--bg-surface); font-size: 10px; font-weight: 650; cursor: pointer; }
 .tag-btn:hover { border-color: var(--accent); color: var(--accent); }
 .tag-btn.active { border-color: var(--accent); color: #fff; background: var(--accent); }
 .tag-btn.exclude.active { border-color: var(--danger); color: #fff; background: var(--danger); }
+.tag-btn:disabled { opacity: .45; cursor: not-allowed; }
 .selection-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--bg-page); color: var(--text-secondary); font-size: 10px; }
 .selection-summary span { display: flex; align-items: baseline; gap: 6px; }
 .selection-summary strong { color: var(--text-primary); font-family: var(--font-utility); font-size: 16px; }

@@ -66,6 +66,7 @@ function formatDate(value: string) {
           </span>
           <strong>{{ item.title }}</strong>
           <span v-if="item.excerpt" class="row-excerpt">{{ item.excerpt }}</span>
+          <span v-if="item.evidenceReady === false" class="row-evidence-warning">{{ t('careerMaterial.evidenceMissing') }}</span>
         </button>
         <div class="row-actions">
           <button type="button" :title="t('common.edit')" :aria-label="`${t('common.edit')} ${item.title}`" @click="emit('edit', item.id)"><Pencil :size="15" /></button>
@@ -96,6 +97,7 @@ function formatDate(value: string) {
 .usage-preferred { border-color: color-mix(in srgb, var(--highlight) 35%, var(--border)); color: var(--highlight); }
 .usage-excluded { color: var(--text-tertiary); text-decoration: line-through; }
 .row-excerpt { display: -webkit-box; overflow: hidden; color: var(--text-secondary); font-size: 11px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.row-evidence-warning { color: var(--danger); font-size: 10px; line-height: 1.45; }
 .row-actions { display: flex; gap: 4px; padding-right: 10px; }
 .row-actions button, .pagination button { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 5px; color: var(--text-secondary); background: transparent; cursor: pointer; }
 .row-actions button:hover, .pagination button:hover:not(:disabled) { border-color: var(--border); color: var(--accent); background: var(--bg-surface); }

@@ -31,8 +31,8 @@ export const useAiTaskStore = defineStore('ai-task', () => {
   }
 
   function needsRecovery(task: AiTask) {
-    return !TERMINAL_STATUSES.has(task.status)
-      || (task.status === 'SUCCESS' && task.confirmationStatus !== 'CONFIRMED' && task.confirmationStatus !== 'REJECTED')
+    if (!TERMINAL_STATUSES.has(task.status)) return true
+    return task.status === 'SUCCESS' && task.confirmationStatus === 'PENDING'
   }
 
   function isCurrentStorageKey(key: string | null) {

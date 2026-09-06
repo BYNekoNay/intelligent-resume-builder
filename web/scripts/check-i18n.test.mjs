@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { collectStaticTranslationKeys, findLocaleKeyMismatches, findRuntimeLiterals, findVisibleLiterals, inspectCatalog } from './check-i18n.mjs'
+import { collectRegistryTranslationKeys, collectStaticTranslationKeys, findLocaleKeyMismatches, findRuntimeLiterals, findVisibleLiterals, inspectCatalog } from './check-i18n.mjs'
 
 test('rejects visible Chinese inside a structural tag line', () => {
   const source = '<template><button class="primary">保存</button></template>'
@@ -63,5 +63,18 @@ test('rejects locale catalogs with different key sets', () => {
   const { locales } = inspectCatalog(source)
   assert.deepEqual(findLocaleKeyMismatches(locales, ['zh-CN', 'en-US']), [
     'zh-CN is missing catalog key common.cancel',
+  ])
+})
+
+test('collects dynamic navigation registry translation descriptors', () => {
+  assert.deepEqual(collectRegistryTranslationKeys(`
+    const item = { labelKey: 'navGroups.resume.generate', descriptionKey: 'navGroups.resume.generateDesc' }
+    const step = { stepKey: 'home.workflowResumeStep', titleKey: 'home.workflowResumeTitle', descKey: 'home.workflowResumeDesc' }
+  `), [
+    'navGroups.resume.generate',
+    'navGroups.resume.generateDesc',
+    'home.workflowResumeStep',
+    'home.workflowResumeTitle',
+    'home.workflowResumeDesc',
   ])
 })

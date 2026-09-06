@@ -10,6 +10,7 @@ import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useTaskPolling, TASK_POLL_DEFAULT_INITIAL_DELAY_MS } from '@/composables/useTaskPolling'
 import { useLocale } from '@/i18n'
 import { mapAtsSection } from '@/resume/sectionRegistry'
+import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const ATS_POLL_INTERVAL_MS = 1_500
 const ATS_POLL_MAX_ATTEMPTS = 200
@@ -165,7 +166,7 @@ onBeforeUnmount(stopPolling)
         <div><p>{{ t('ats.setupEyebrow') }}</p><h2>{{ t('ats.setupTitle') }}</h2><small>{{ t('ats.setupDescription') }}</small></div>
       </header>
       <label>{{ t('ats.resume') }}<select v-model.number="selectedResumeId" :disabled="optionsLoading || analyzing" @change="loadVersions"><option :value="null" disabled>{{ t('ats.selectResume') }}</option><option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.title }}</option></select></label>
-      <label>{{ t('ats.version') }}<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions || analyzing" required><option value="" disabled>{{ t('ats.selectVersion') }}</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ version.sourceType }}</option></select></label>
+      <label>{{ t('ats.version') }}<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions || analyzing" required><option value="" disabled>{{ t('ats.selectVersion') }}</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ t(resumeSourceLabelKey(version.sourceType)) }}</option></select></label>
       <label>{{ t('ats.job') }}<select v-model="jobDescriptionId" :disabled="optionsLoading || analyzing" required><option value="" disabled>{{ t('ats.selectJob') }}</option><option v-for="job in jobs" :key="job.id" :value="String(job.id)">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option></select></label>
       <div class="check-actions">
         <button type="button" class="btn-neon btn-ghost" :disabled="loading || optionsLoading || analyzing" @click="check(false)"><SearchCheck :size="16" />{{ checkingMode === 'RULES' ? t('ats.checkingRules') : t('ats.runRules') }}</button>

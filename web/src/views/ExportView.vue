@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlertTriangle, Clock3, Download, FileCheck2, LoaderCircle, RefreshCw } from 'lucide-vue-next'
-import { getExportTask, downloadExport, retryExport, type ExportTask } from '@/api/export'
+import { getExportTask, downloadExport, retryExport, type ExportTask, type ExportTaskStatus } from '@/api/export'
 import { useLocale } from '@/i18n'
 
 const { t } = useLocale()
@@ -13,8 +13,34 @@ const error = ref('')
 let timer: number | null = null
 let attempt = 0
 
-function statusLabel(status: ExportTask['status']) {
-  return t({ PENDING: 'export.statusPending', RUNNING: 'export.statusRunning', SUCCESS: 'export.statusSuccess', FAILED: 'export.statusFailed', EXPIRED: 'export.statusExpired' }[status])
+const STATUS_LABEL_KEYS: Record<ExportTaskStatus, string> = {
+  PENDING: 'export.statusPending',
+  RUNNING: 'export.statusRunning',
+  SUCCESS: 'export.statusSuccess',
+  FAILED: 'export.statusFailed',
+  EXPIRED: 'export.statusExpired',
+  UNKNOWN: 'export.statusUnknown',
+}
+
+function normalizeStatus(status: unknown): ExportTaskStatus {
+  return status === 'PENDING' || status === 'RUNNING' || status === 'SUCCESS'
+    || status === 'FAILED' || status === 'EXPIRED'
+    ? status
+    : 'UNKNOWN'
+}
+
+function statusLabel(status: ExportTaskStatus) {
+  return t(STATUS_LABEL_KEYS[status])
+}
+
+function isProcessingStatus(status: ExportTaskStatus) {
+  return status === 'PENDING' || status === 'RUNNING'
+}
+
+function statusDescription(status: ExportTaskStatus) {
+  return status === 'SUCCESS' ? t('export.readyDescription')
+    : isProcessingStatus(status) ? t('export.processingDescription')
+      : t('export.unknownStatusDescription')
 }
 
 function formatDate(value: string) {
@@ -32,8 +58,8 @@ function formatFileSize(bytes: number | null) {
 async function load() {
   try {
     const res = await getExportTask(Number(props.exportTaskId))
-    task.value = res.data.data
-    if (task.value.status === 'PENDING' || task.value.status === 'RUNNING') {
+    task.value = { ...res.data.data, status: normalizeStatus(res.data.data.status) }
+    if (isProcessingStatus(task.value.status)) {
       const delay = [1000, 2000, 4000, 5000][Math.min(attempt, 3)]
       attempt += 1
       timer = window.setTimeout(load, delay)
@@ -79,7 +105,8 @@ async function download() {
 async function retry() {
   try {
     error.value = ''
-    task.value = (await retryExport(Number(props.exportTaskId))).data.data
+    const retried = (await retryExport(Number(props.exportTaskId))).data.data
+    task.value = { ...retried, status: normalizeStatus(retried.status) }
     attempt = 0; await load()
   } catch { error.value = t('export.retryError') }
 }
@@ -96,7 +123,7 @@ async function retry() {
     <div v-if="task" :class="['workspace-card', 'export-status-panel', `status-${task.status.toLowerCase()}`]">
       <div class="status-symbol">
         <FileCheck2 v-if="task.status === 'SUCCESS'" :size="28" />
-        <AlertTriangle v-else-if="task.status === 'FAILED' || task.status === 'EXPIRED'" :size="28" />
+        <AlertTriangle v-else-if="task.status === 'FAILED' || task.status === 'EXPIRED' || task.status === 'UNKNOWN'" :size="28" />
         <LoaderCircle v-else :size="28" />
       </div>
       <div class="status-copy">
@@ -104,7 +131,8 @@ async function retry() {
         <h2>{{ statusLabel(task.status) }}</h2>
         <p v-if="task.status === 'FAILED'" class="status-error">{{ task.errorMessage || t('export.pdfRenderFailed') }}</p>
         <p v-else-if="task.status === 'EXPIRED'" class="status-error">{{ t('export.expired') }}</p>
-        <p v-else>{{ task.status === 'SUCCESS' ? t('export.readyDescription') : t('export.processingDescription') }}</p>
+        <p v-else-if="task.status === 'UNKNOWN'" class="status-error">{{ t('export.unknownStatusDescription') }}</p>
+        <p v-else>{{ statusDescription(task.status) }}</p>
       </div>
       <dl class="export-meta">
         <div><dt>{{ t('export.format') }}</dt><dd>PDF</dd></div>
@@ -112,7 +140,8 @@ async function retry() {
         <div v-if="task.expiresAt"><dt>{{ t('export.expiresAt') }}</dt><dd>{{ formatDate(task.expiresAt) }}</dd></div>
       </dl>
       <footer class="export-actions">
-        <span v-if="task.status === 'PENDING' || task.status === 'RUNNING'"><Clock3 :size="14" />{{ t('export.autoRefresh') }}</span>
+        <span v-if="isProcessingStatus(task.status)"><Clock3 :size="14" />{{ t('export.autoRefresh') }}</span>
+        <button v-if="task.status === 'UNKNOWN'" class="btn-neon btn-secondary" @click="retryLoad"><RefreshCw :size="15" />{{ t('export.retryStatus') }}</button>
         <button v-if="task.status === 'FAILED'" class="btn-neon btn-secondary" @click="retry"><RefreshCw :size="15" />{{ t('export.retry') }}</button>
         <button class="btn-neon btn-primary" :disabled="task.status !== 'SUCCESS'" @click="download"><Download :size="15" />{{ t('export.download') }}</button>
       </footer>

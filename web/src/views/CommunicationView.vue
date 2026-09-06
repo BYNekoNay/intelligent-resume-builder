@@ -28,6 +28,7 @@ import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useTaskPolling, TASK_POLL_DEFAULT_INTERVAL_MS, TASK_POLL_DEFAULT_MAX_ATTEMPTS } from '@/composables/useTaskPolling'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
+import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const route = useRoute()
 const router = useRouter()
@@ -72,13 +73,13 @@ const typeLabel = computed(() => ({
   EMAIL: t('communication.email'),
   OPENING_MESSAGE: t('communication.opening'),
 }[type.value]))
-const sceneLabels: Record<TemplateScene, string> = {
+const sceneLabels = computed<Record<TemplateScene, string>>(() => ({
   FOLLOW_UP: t('communication.sceneFollowUp'),
   THANK_YOU: t('communication.sceneThankYou'),
   SALARY: t('communication.sceneSalary'),
   DECLINE: t('communication.sceneDecline'),
   GENERAL: t('communication.sceneGeneral'),
-}
+}))
 const {
   resumes, jobs, versions, selectedResumeId, loading: optionsLoading, error: optionsError, hasVersions, load, loadVersions,
 } = useResumeJobOptions()
@@ -472,7 +473,7 @@ onBeforeUnmount(stopPolling)
         <label>{{ t('communication.version') }}
           <select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions" required>
             <option value="" disabled>{{ t('communication.selectVersion') }}</option>
-            <option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ version.sourceType }}</option>
+            <option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ t(resumeSourceLabelKey(version.sourceType)) }}</option>
           </select>
         </label>
         <label>{{ t('communication.job') }}

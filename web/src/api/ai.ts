@@ -75,6 +75,7 @@ export interface MaterialSelectionResult {
 }
 
 export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
+export type ConfirmationStatus = 'NOT_REQUIRED' | 'PENDING' | 'CONFIRMED' | 'REJECTED'
 
 export interface AiTask {
   id: number
@@ -82,7 +83,7 @@ export interface AiTask {
   parentTaskId?: number | null
   jobDescriptionId: number | null
   status: TaskStatus
-  confirmationStatus: 'PENDING' | 'CONFIRMED' | 'REJECTED' | null
+  confirmationStatus: ConfirmationStatus
   resultJson: Record<string, unknown> | null
   errorMessage: string | null
   retryCount: number
@@ -185,8 +186,10 @@ export function rejectTask(id: number, taskUpdatedAt: string) {
   return apiClient.post<ApiResponse<void>>(`/api/ai/tasks/${id}/reject`, { taskUpdatedAt })
 }
 
-export function inlineOptimize(payload: InlineOptimizeRequest) {
-  return apiClient.post<ApiResponse<AiTask>>('/api/ai/inline-optimize', payload)
+export function inlineOptimize(payload: InlineOptimizeRequest, idempotencyKey: string) {
+  return apiClient.post<ApiResponse<AiTask>>('/api/ai/inline-optimize', payload, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
 }
 
 export async function waitForAiTaskResult<T>(taskId: number, maxAttempts = 30): Promise<T> {
@@ -201,6 +204,8 @@ export async function waitForAiTaskResult<T>(taskId: number, maxAttempts = 30): 
   throw new Error('AI 任务执行超时，请稍后重试')
 }
 
-export function guideAchievement(payload: { resumeVersionId: number; section: string; content: string }) {
-  return apiClient.post<ApiResponse<AchievementGuidanceResponse>>('/api/ai/achievement-guidance', payload)
+export function guideAchievement(payload: { resumeVersionId: number; section: string; content: string }, idempotencyKey: string) {
+  return apiClient.post<ApiResponse<AiTask>>('/api/ai/achievement-guidance', payload, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
 }

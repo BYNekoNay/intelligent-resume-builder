@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { CheckCircle2, Lightbulb, Save, SearchCheck } from 'lucide-vue-next'
-import { guideAchievement } from '@/api/ai'
+import { guideAchievement, waitForAiTaskResult, type AchievementGuidanceResponse } from '@/api/ai'
 import { createMaterial, type MaterialType } from '@/api/careerMaterial'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useLocale } from '@/i18n'
+import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const { t } = useLocale()
 const resumeVersionId = ref('')
@@ -18,11 +19,29 @@ const saving = ref(false)
 const savedMessage = ref('')
 const error = ref('')
 const { resumes, versions, selectedResumeId, loading: optionsLoading, error: optionsError, hasVersions, load, loadVersions } = useResumeJobOptions()
+let lastGuideFingerprint = ''
+let lastGuideIdempotencyKey = ''
 
 async function guide() {
   if (!resumeVersionId.value || !content.value.trim()) { error.value = t('achievementGuidance.errorNoInput'); return }
   loading.value = true; error.value = ''; questions.value = []; answers.value = []; savedMessage.value = ''
-  try { questions.value = (await guideAchievement({ resumeVersionId: Number(resumeVersionId.value), section: section.value, content: content.value.trim() })).data.data.questions; answers.value = questions.value.map(() => ''); materialTitle.value = content.value.trim().slice(0, 80) }
+  const payload = { resumeVersionId: Number(resumeVersionId.value), section: section.value, content: content.value.trim() }
+  const fingerprint = JSON.stringify(payload)
+  if (fingerprint !== lastGuideFingerprint) {
+    lastGuideFingerprint = fingerprint
+    lastGuideIdempotencyKey = crypto.randomUUID()
+  }
+  try {
+    const task = (await guideAchievement(payload, lastGuideIdempotencyKey)).data.data
+    const result = task.status === 'SUCCESS' && task.resultJson
+      ? task.resultJson as unknown as AchievementGuidanceResponse
+      : await waitForAiTaskResult<AchievementGuidanceResponse>(task.id)
+    questions.value = result.questions
+    answers.value = questions.value.map(() => '')
+    materialTitle.value = content.value.trim().slice(0, 80)
+    lastGuideFingerprint = ''
+    lastGuideIdempotencyKey = ''
+  }
   catch { error.value = t('achievementGuidance.errorGenerate') }
   finally { loading.value = false }
 }
@@ -51,7 +70,7 @@ onMounted(() => { void load() })
     <form class="workspace-card compact-form achievement-source" @submit.prevent="guide">
       <header class="achievement-section-heading"><span><SearchCheck :size="19" /></span><div><p>{{ t('achievementGuidance.sourceEyebrow') }}</p><h2>{{ t('achievementGuidance.sourceTitle') }}</h2><small>{{ t('achievementGuidance.sourceDescription') }}</small></div></header>
       <label>{{ t('achievementGuidance.resume') }}<select v-model.number="selectedResumeId" :disabled="optionsLoading" @change="loadVersions"><option :value="null" disabled>{{ t('common.selectResume') }}</option><option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.title }}</option></select></label>
-      <label>{{ t('achievementGuidance.version') }}<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions"><option value="" disabled>{{ t('common.selectVersion') }}</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ version.sourceType }}</option></select></label>
+      <label>{{ t('achievementGuidance.version') }}<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions"><option value="" disabled>{{ t('common.selectVersion') }}</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ t(resumeSourceLabelKey(version.sourceType)) }}</option></select></label>
       <label>{{ t('achievementGuidance.typeLabel') }}<select v-model="section"><option value="work">{{ t('achievementGuidance.typeWork') }}</option><option value="project">{{ t('achievementGuidance.typeProject') }}</option><option value="skills">{{ t('achievementGuidance.typeSkills') }}</option></select></label>
       <label class="wide-field">{{ t('achievementGuidance.contentLabel') }}<textarea v-model.trim="content" rows="6" maxlength="5000" :placeholder="t('achievementGuidance.contentPlaceholder')" /></label>
       <button class="btn-neon btn-primary" :disabled="loading || optionsLoading"><SearchCheck :size="16" />{{ loading ? t('achievementGuidance.loading') : t('achievementGuidance.guideButton') }}</button>

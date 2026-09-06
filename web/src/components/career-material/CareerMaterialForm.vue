@@ -150,6 +150,20 @@ function buildSpecializedContent(): Record<string, unknown> {
   }
 }
 
+function hasMeaningfulEvidence(value: unknown): boolean {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'string') return value.trim().length > 0
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (typeof value === 'boolean') return value
+  if (Array.isArray(value)) return value.some(hasMeaningfulEvidence)
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key.toLowerCase() !== 'title')
+      .some(([, item]) => hasMeaningfulEvidence(item))
+  }
+  return true
+}
+
 function submit() {
   let contentJson: Record<string, unknown>
   try {
@@ -161,6 +175,10 @@ function submit() {
     }
   } catch {
     localError.value = t('careerMaterial.invalidJson')
+    return
+  }
+  if (!hasMeaningfulEvidence(form.sourceText) && !hasMeaningfulEvidence(contentJson)) {
+    localError.value = t('careerMaterial.missingEvidence')
     return
   }
   localError.value = ''

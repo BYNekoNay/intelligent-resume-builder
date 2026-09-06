@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowLeftRight, Clipboard, RotateCcw } from 'lucide-vue-next
 import { getResume, getResumeVersion, listVersions, restoreResumeVersion, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
 import { useLocale } from '@/i18n'
 import { diffResumeVersions, summarizeDiff, type EntryDiff, type SectionDiff } from '@/utils/resumeDiff'
+import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const { locale, t } = useLocale()
 const route = useRoute()
@@ -36,7 +37,7 @@ const visibleDiffs = computed(() => onlyChanged.value ? diffs.value.filter((d) =
 const baseVersion = computed(() => versions.value.find((v) => v.id === baseVersionId.value) ?? null)
 const compareVersion = computed(() => versions.value.find((v) => v.id === compareVersionId.value) ?? null)
 
-const sectionLabels: Record<string, string> = {
+const sectionLabels = computed<Record<string, string>>(() => ({
   basics: t('resumeEditor.basicsLabel'),
   objective: t('resumeEditor.objectiveLabel'),
   links: t('resumeEditor.linksLabel'),
@@ -51,10 +52,10 @@ const sectionLabels: Record<string, string> = {
   awards: t('resumeEditor.awardsLabel'),
   languages: t('resumeEditor.languagesLabel'),
   customSections: t('resumeEditor.customSectionsLabel'),
-}
+}))
 
 function sectionLabel(key: string) {
-  return sectionLabels[key] ?? key
+  return sectionLabels.value[key] ?? key
 }
 
 function formatDate(value: string) {
@@ -64,10 +65,7 @@ function formatDate(value: string) {
 }
 
 function sourceLabel(source: ResumeVersionSummary['sourceType']) {
-  return t({
-    MANUAL: 'resumeDetail.sourceManual', AI_OPTIMIZED: 'resumeDetail.sourceAiOptimized', JD_CUSTOMIZED: 'resumeDetail.sourceJdCustomized',
-    MATERIAL_CUSTOMIZED: 'resumeDetail.sourceMaterialCustomized', RESTORED: 'resumeDetail.sourceRestored',
-  }[source])
+  return t(resumeSourceLabelKey(source))
 }
 
 function toggleSection(key: string) {

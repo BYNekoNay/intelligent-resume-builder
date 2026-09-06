@@ -90,6 +90,7 @@ const dragTarget = ref<DragLocation | null>(null)
 const draggedContentSection = ref<SortableSection | null>(null)
 const contentSectionDropTarget = ref<{ section: SortableSection; after: boolean } | null>(null)
 type AiAssistantState = {
+  idempotencyKey: string
   scope: 'field' | 'section'
   label: string
   section: string
@@ -457,22 +458,23 @@ async function applyAtsArrival() {
 
 async function openAiAssistant(scope: 'field' | 'section', label: string, section: string, value: unknown, apply?: (value: string) => void) {
   const contentValue = Array.isArray(value) ? value.filter(Boolean).join('\n') : String(value ?? '').trim()
-  aiAssistant.value = { scope, label, section, content: contentValue, loading: false, result: null, error: '', needsConsent: false, apply }
+  const assistant = { idempotencyKey: crypto.randomUUID(), scope, label, section, content: contentValue, loading: false, result: null, error: '', needsConsent: false, apply }
+  aiAssistant.value = assistant
   if (!contentValue || !currentVersionId.value) return
   const epoch = editorContextEpoch
   aiAssistant.value.loading = true
   try {
-    const createdTask = (await inlineOptimize({ resumeVersionId: currentVersionId.value, section, content: contentValue })).data.data
+    const createdTask = (await inlineOptimize({ resumeVersionId: currentVersionId.value, section, content: contentValue }, assistant.idempotencyKey)).data.data
     const result = await waitForAiTaskResult<InlineOptimizeResponse>(createdTask.id)
-    if (epoch === editorContextEpoch && aiAssistant.value?.section === section && aiAssistant.value.content === contentValue) aiAssistant.value.result = result
+    if (epoch === editorContextEpoch && aiAssistant.value?.idempotencyKey === assistant.idempotencyKey) aiAssistant.value.result = result
   } catch (requestError: any) {
-    if (epoch === editorContextEpoch && aiAssistant.value?.section === section) {
+    if (epoch === editorContextEpoch && aiAssistant.value?.idempotencyKey === assistant.idempotencyKey) {
       aiAssistant.value.needsConsent = requestError?.response?.data?.code === 40302
       aiAssistant.value.error = aiAssistant.value.needsConsent
         ? t('resumeEditor.consentRequired')
         : t('resumeEditor.aiUnavailable')
     }
-  } finally { if (epoch === editorContextEpoch && aiAssistant.value?.section === section) aiAssistant.value.loading = false }
+  } finally { if (epoch === editorContextEpoch && aiAssistant.value?.idempotencyKey === assistant.idempotencyKey) aiAssistant.value.loading = false }
 }
 
 function applyAiCandidate(value: string) {

@@ -12,6 +12,7 @@ import {
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useLocale } from '@/i18n'
+import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const { locale, t } = useLocale()
 const route = useRoute()
@@ -354,11 +355,9 @@ async function startPractice(candidateIndex: number) {
       resumeVersionId: srcType === 'PLATFORM_RESUME' ? versionId : undefined,
       externalResumeText: srcType === 'EXTERNAL_RESUME' ? resumeText.value : undefined,
       jobDescriptionId: jobDescId,
-      interviewMode: session?.executionMode === 'RULE'
-        ? (session?.jobDescriptionId ? 'JD_TARGETED' : 'TECHNICAL')
-        : interviewMode.value,
+      interviewMode: session?.interviewMode ?? interviewMode.value,
       targetQuestionCount: session?.targetQuestionCount ?? targetQuestionCount.value,
-      outputLanguage: locale.value === 'zh-CN' ? 'ZH_CN' : 'EN',
+      outputLanguage: session?.outputLanguage ?? (locale.value === 'zh-CN' ? 'ZH_CN' : 'EN'),
       initialQuestion: question,
     }
     const result = (await startInterview(payload, `practice:${crypto.randomUUID()}`)).data.data
@@ -399,12 +398,7 @@ async function loadReport() {
 
 // ==================== 版本来源标签 ====================
 function versionSourceLabel(source: string) {
-  const labels: Record<string, string> = {
-    MANUAL: t('interview.sourceManual'), AI_OPTIMIZED: t('interview.sourceAiOptimized'),
-    JD_CUSTOMIZED: t('interview.sourceJdCustomized'), MATERIAL_CUSTOMIZED: t('interview.sourceMaterialCustomized'),
-    RESTORED: t('interview.sourceRestored'),
-  }
-  return labels[source] ?? t('interview.sourceOther')
+  return t(resumeSourceLabelKey(source))
 }
 
 // ==================== 五维评分标签 ====================

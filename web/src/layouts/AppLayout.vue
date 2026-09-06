@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, FilePenLine, FileText, LayoutDashboard, LogIn, LogOut, Menu, NotebookPen, Send, Sparkles, Target, UserRound, UserRoundPlus, X } from 'lucide-vue-next'
+import { FilePenLine, LogIn, LogOut, Menu, Sparkles, UserRound, UserRoundPlus, X } from 'lucide-vue-next'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
 import NavDropdown from '@/components/NavDropdown.vue'
 import { useLocale } from '@/i18n'
+import { navigationGroupKeys, navigationGroups, type NavigationGroupKey } from '@/navigation/registry'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -13,40 +14,12 @@ const route = useRoute()
 const { t } = useLocale()
 const mobileMenuOpen = ref(false)
 
-interface NavItem { to: string; key: string; icon: any; descriptionKey?: string }
-
-type GroupKey = 'career' | 'resume' | 'prepare' | 'applications'
-
-const groups: Record<GroupKey, NavItem[]> = {
-  career: [
-    { to: '/', key: 'home', icon: LayoutDashboard },
-    { to: '/career-materials', key: 'materials', icon: Sparkles },
-    { to: '/resume-import', key: 'imports', icon: FileText },
-  ],
-  resume: [
-    { to: '/resumes', key: 'resumes', icon: NotebookPen },
-    { to: '/generate', key: 'generate', icon: Sparkles, descriptionKey: 'generateDesc' },
-    { to: '/material-generation', key: 'materialGeneration', icon: Sparkles, descriptionKey: 'materialGenerationDesc' },
-    { to: '/achievement-guidance', key: 'achievements', icon: Target },
-  ],
-  prepare: [
-    { to: '/jobs', key: 'jobs', icon: FileText },
-    { to: '/ats', key: 'ats', icon: Activity },
-    { to: '/interviews', key: 'interviews', icon: Sparkles },
-    { to: '/interview-assets', key: 'answerAssets', icon: NotebookPen },
-  ],
-  applications: [
-    { to: '/communications', key: 'communications', icon: Send },
-    { to: '/applications', key: 'applications', icon: Send },
-  ],
-}
-
-const activeGroup = computed<GroupKey | null>(() => {
-  for (const [group, items] of Object.entries(groups)) {
-    const matches = items.some(item => item.to === '/'
+const activeGroup = computed<NavigationGroupKey | null>(() => {
+  for (const groupKey of navigationGroupKeys) {
+    const matches = navigationGroups[groupKey].items.some(item => item.to === '/'
       ? route.path === '/'
       : route.path === item.to || route.path.startsWith(`${item.to}/`))
-    if (matches) return group as GroupKey
+    if (matches) return groupKey
   }
   if (route.path.startsWith('/match/') || route.path.startsWith('/exports/')) return 'resume'
   return null
@@ -70,20 +43,20 @@ async function signOut() {
 
       <nav :aria-label="t('navigation.label')">
         <NavDropdown
-          v-for="(groupKey, idx) in (Object.keys(groups) as GroupKey[])"
+          v-for="groupKey in navigationGroupKeys"
           :key="groupKey"
-          :label="t(`navGroups.${groupKey}.label`)"
+          :label="t(navigationGroups[groupKey].labelKey)"
           :active="activeGroup === groupKey"
         >
           <RouterLink
-            v-for="item in groups[groupKey]"
+            v-for="item in navigationGroups[groupKey].items"
             :key="item.key"
             :to="item.to"
           >
             <component :is="item.icon" :size="15" />
             <span class="nav-item-copy">
-              <span>{{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}</span>
-              <small v-if="item.descriptionKey">{{ t(`navGroups.${groupKey}.${item.descriptionKey}`) }}</small>
+              <span>{{ t(item.labelKey) }}</span>
+              <small v-if="item.descriptionKey">{{ t(item.descriptionKey) }}</small>
             </span>
           </RouterLink>
         </NavDropdown>
@@ -125,13 +98,13 @@ async function signOut() {
 
     <div v-if="mobileMenuOpen" id="mobile-navigation" class="mobile-navigation-panel">
       <nav :aria-label="t('navigation.label')">
-        <section v-for="groupKey in (Object.keys(groups) as GroupKey[])" :key="groupKey">
-          <p>{{ t(`navGroups.${groupKey}.label`) }}</p>
-          <RouterLink v-for="item in groups[groupKey]" :key="item.key" :to="item.to">
+          <section v-for="groupKey in navigationGroupKeys" :key="groupKey">
+          <p>{{ t(navigationGroups[groupKey].labelKey) }}</p>
+          <RouterLink v-for="item in navigationGroups[groupKey].items" :key="item.key" :to="item.to">
             <component :is="item.icon" :size="16" />
             <span class="nav-item-copy">
-              <span>{{ t(`navGroups.${groupKey}.${item.key}`) ?? t(`navigation.${item.key}`) }}</span>
-              <small v-if="item.descriptionKey">{{ t(`navGroups.${groupKey}.${item.descriptionKey}`) }}</small>
+              <span>{{ t(item.labelKey) }}</span>
+              <small v-if="item.descriptionKey">{{ t(item.descriptionKey) }}</small>
             </span>
           </RouterLink>
         </section>

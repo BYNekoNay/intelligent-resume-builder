@@ -8,13 +8,10 @@ import {
   CircleDot,
   ClipboardList,
   ClipboardCheck,
-  FilePenLine,
   FileSearch,
   FileText,
   FolderKanban,
   Import,
-  LibraryBig,
-  Radar,
   RefreshCw,
   Sparkles,
   Target,
@@ -25,6 +22,7 @@ import { listApplications, type ApplicationRecord } from '@/api/application'
 import { listTaskContinuations, type AiTask } from '@/api/ai'
 import { useAuthStore } from '@/stores/auth'
 import { useLocale } from '@/i18n'
+import { navigationWorkflow } from '@/navigation/registry'
 
 const health = ref<SystemHealth | null>(null)
 const healthLoading = ref(true)
@@ -120,12 +118,7 @@ const primaryWorkspaceAction = computed(() => workspaceActions.value[0] ?? null)
 const secondaryWorkspaceActions = computed(() => workspaceActions.value.slice(1))
 const showEmptyStartAction = computed(() => workspaceLoaded.value && !workspaceError.value && !primaryWorkspaceAction.value)
 
-const workflow = [
-  { icon: LibraryBig, to: '/career-materials', stepKey: 'home.workflowEvidenceStep', titleKey: 'home.workflowEvidenceTitle', descKey: 'home.workflowEvidenceDesc' },
-  { icon: FilePenLine, to: '/generate', stepKey: 'home.workflowResumeStep', titleKey: 'home.workflowResumeTitle', descKey: 'home.workflowResumeDesc' },
-  { icon: Radar, to: '/ats', stepKey: 'home.workflowCheckStep', titleKey: 'home.workflowCheckTitle', descKey: 'home.workflowCheckDesc' },
-  { icon: BriefcaseBusiness, to: '/applications', stepKey: 'home.workflowApplyStep', titleKey: 'home.workflowApplyTitle', descKey: 'home.workflowApplyDesc' },
-]
+const workflow = navigationWorkflow
 
 const proofStages = [
   { icon: FolderKanban, labelKey: 'home.proofEvidence', complete: true },
@@ -317,7 +310,8 @@ onMounted(async () => {
         <span>{{ t('home.copyRight') }}</span>
       </div>
       <span v-if="healthLoading" class="service-checking">{{ t('home.serviceChecking') }}</span>
-      <span v-else-if="health" class="service-online"><CheckCircle2 :size="14" /> {{ t('home.serviceStatus') }}</span>
+      <span v-else-if="health?.status === 'UP'" class="service-online"><CheckCircle2 :size="14" /> {{ t('home.serviceStatus') }}</span>
+      <span v-else-if="health" class="service-degraded"><RefreshCw :size="14" /> {{ t('home.serviceDegraded') }}</span>
       <span v-else class="service-offline">{{ t('home.serviceOffline') }}</span>
       <a href="https://github.com/BYNekoNay/intelligent-resume-builder" target="_blank" rel="noreferrer">{{ t('home.sourceCode') }}</a>
     </footer>
@@ -862,7 +856,8 @@ onMounted(async () => {
 }
 
 .home-footer > div,
-.service-online {
+.service-online,
+.service-degraded {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -874,6 +869,10 @@ onMounted(async () => {
 
 .service-online {
   color: var(--success);
+}
+
+.service-degraded {
+  color: var(--warning);
 }
 
 .service-offline {

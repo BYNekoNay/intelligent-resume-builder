@@ -5,10 +5,12 @@ import { Archive, ArrowLeft, BriefcaseBusiness, CheckCircle2, Download, FileCloc
 import { archiveResumeVersion, getResume, listVersions, restoreResumeVersion, setCurrentVersion, unarchiveResumeVersion, updateResumeTitle, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
 import { getJobReference, type JobDescriptionReference } from '@/api/jobDescription'
 import { listInterviewAssets, type InterviewAsset } from '@/api/interviewAsset'
+import { listMaterials } from '@/api/careerMaterial'
 import { SECTION_KEYS, type SectionKey } from '@/resume/sectionRegistry'
 import { scoreMatch } from '@/api/scoring'
 import { createExport, type ResumeTemplateCode } from '@/api/export'
 import { useLocale } from '@/i18n'
+import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const { locale, t } = useLocale()
 const props = defineProps<{ id: string }>()
@@ -34,8 +36,9 @@ const templateNames: Record<ResumeTemplateCode, string> = {
 }
 
 const relatedAssets = ref<InterviewAsset[]>([])
+const materialTitles = ref<Record<number, string>>({})
 const relatedSectionKey = ref<string>('')
-const sectionLabels: Record<string, string> = {
+const sectionLabels = computed<Record<string, string>>(() => ({
   basics: t('resumeEditor.basicsLabel'),
   objective: t('resumeEditor.objectiveLabel'),
   links: t('resumeEditor.linksLabel'),
@@ -50,7 +53,7 @@ const sectionLabels: Record<string, string> = {
   awards: t('resumeEditor.awardsLabel'),
   languages: t('resumeEditor.languagesLabel'),
   customSections: t('resumeEditor.customSectionsLabel'),
-}
+}))
 
 const visibleRelatedAssets = computed(() => {
   if (!relatedSectionKey.value) return relatedAssets.value
@@ -68,10 +71,7 @@ function formatDate(value: string) {
 }
 
 function sourceLabel(source: ResumeVersionSummary['sourceType']) {
-  return t({
-    MANUAL: 'resumeDetail.sourceManual', AI_OPTIMIZED: 'resumeDetail.sourceAiOptimized', JD_CUSTOMIZED: 'resumeDetail.sourceJdCustomized',
-    MATERIAL_CUSTOMIZED: 'resumeDetail.sourceMaterialCustomized', RESTORED: 'resumeDetail.sourceRestored',
-  }[source])
+  return t(resumeSourceLabelKey(source))
 }
 
 async function load() {
@@ -116,10 +116,20 @@ onMounted(async () => {
 async function loadRelatedAssets() {
   try {
     // 与 ResumeEditorView 对齐：选中章节时后端按 sectionKey 过滤，避免全量拉取后再前端筛选
-    relatedAssets.value = (await listInterviewAssets(relatedSectionKey.value ? { sectionKey: relatedSectionKey.value } : undefined)).data.data
+    const [assetResponse, materialResponse] = await Promise.all([
+      listInterviewAssets(relatedSectionKey.value ? { sectionKey: relatedSectionKey.value } : undefined),
+      listMaterials(),
+    ])
+    relatedAssets.value = assetResponse.data.data
+    materialTitles.value = Object.fromEntries(materialResponse.data.data.map((material) => [material.id, material.title]))
   } catch {
     relatedAssets.value = []
+    materialTitles.value = {}
   }
+}
+
+function materialTitle(id: number) {
+  return materialTitles.value[id] ?? `#${id}`
 }
 
 // 章节筛选变化时重新从后端按 sectionKey 拉取
@@ -287,6 +297,9 @@ async function exportPdf(version: ResumeVersionSummary) {
           <h3>{{ asset.questionText }}</h3>
           <div v-if="asset.sectionKeys.length" class="asset-tags">
             <span v-for="key in asset.sectionKeys" :key="key" class="asset-tag">{{ sectionLabels[key] }}</span>
+          </div>
+          <div v-if="asset.materialIds.length" class="asset-tags">
+            <span v-for="id in asset.materialIds" :key="id" class="asset-tag">{{ materialTitle(id) }}</span>
           </div>
           <p>{{ asset.originalAnswerText }}</p>
         </article>

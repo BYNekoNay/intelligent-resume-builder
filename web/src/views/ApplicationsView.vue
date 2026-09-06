@@ -31,6 +31,7 @@ import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
 import { listVersions, type ResumeSummary } from '@/api/resume'
+import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const records = ref<ApplicationRecord[]>([])
 const stats = ref<ApplicationStats | null>(null)
@@ -428,7 +429,7 @@ onMounted(async () => {
         <button class="icon-button" type="button" :title="t('applications.cancel')" @click="resetForm"><X :size="17" /></button>
       </header>
       <label>{{ t('applications.resume') }}<select v-model.number="selectedResumeId" :disabled="optionsLoading" @change="loadVersions"><option :value="null" disabled>{{ t('applications.selectResume') }}</option><option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.title }}</option></select></label>
-      <label>{{ t('applications.version') }}<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions" required><option value="" disabled>{{ t('applications.selectVersion') }}</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ version.sourceType }}</option></select></label>
+      <label>{{ t('applications.version') }}<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions" required><option value="" disabled>{{ t('applications.selectVersion') }}</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ t(resumeSourceLabelKey(version.sourceType)) }}</option></select></label>
       <label>{{ t('applications.job') }}<select v-model="jobDescriptionId" :disabled="optionsLoading" required><option value="" disabled>{{ t('applications.selectJob') }}</option><option v-for="job in jobs" :key="job.id" :value="String(job.id)">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option></select></label>
       <label>{{ t('applications.cover') }}<textarea v-model="coverLetterText" rows="4" /></label>
       <label>{{ t('applications.email') }}<textarea v-model="emailBodyText" rows="4" /></label>

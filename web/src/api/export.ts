@@ -1,9 +1,11 @@
 import { apiClient, type ApiResponse } from './client'
 
+export type ExportTaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'EXPIRED' | 'UNKNOWN'
+
 export interface ExportTask {
   taskId: number
   templateCode: string
-  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'EXPIRED'
+  status: ExportTaskStatus
   fileSizeBytes: number | null
   checksumSha256: string | null
   errorMessage: string | null

@@ -8,6 +8,7 @@ import RegisterView from '@/views/RegisterView.vue'
 import RouteLoadErrorView from '@/views/RouteLoadErrorView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { lazyChunkRetryKey } from './lazyChunkRecovery'
+import { navigationTargets, validateNavigationTargets } from '@/navigation/registry'
 
 const ResumeListView = () => import('@/views/ResumeListView.vue')
 const ResumeDetailView = () => import('@/views/ResumeDetailView.vue')
@@ -91,6 +92,14 @@ const router = createRouter({
     { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView },
   ],
 })
+
+const navigationRoutePaths = new Set(router.getRoutes()
+  .filter(route => typeof route.path === 'string' && !route.path.includes(':'))
+  .map(route => route.path))
+const navigationFailures = validateNavigationTargets(navigationTargets, navigationRoutePaths)
+if (navigationFailures.length) {
+  throw new Error(`Navigation registry is inconsistent:\n${navigationFailures.join('\n')}`)
+}
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()

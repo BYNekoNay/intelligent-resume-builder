@@ -23,6 +23,7 @@ export interface CareerMaterialSummary {
   title: string
   usagePreference: UsagePreference
   updatedAt: string
+  evidenceReady: boolean
 }
 
 export interface CareerMaterialSearchItem extends CareerMaterialSummary {
