@@ -129,6 +129,7 @@ class TaskExecutionServiceTest {
         TaskLeaseService leaseService = mock(TaskLeaseService.class);
         AiConsentService consentService = mock(AiConsentService.class);
         when(provider.supports(AiTaskType.MATERIAL_IMPORT)).thenReturn(true);
+        when(provider.isAvailable()).thenReturn(true);
         when(provider.call(any())).thenReturn(AiCallResult.ok(Map.of("expandedMaterial", "reference"), "request-1"));
         when(leaseService.releaseSuccess(any(), eq("worker-1"), any())).thenAnswer(invocation -> {
             AiTask completed = invocation.getArgument(0);
@@ -148,7 +149,7 @@ class TaskExecutionServiceTest {
         task.setInputSnapshotJson(Map.of(
                 "taskType", "MATERIAL_IMPORT",
                 "input", Map.of("generationMode", "ASSOCIATIVE_EXPANSION", "rawMaterialText", "microservices")));
-        when(consentService.hasValidConsent(1L, "MATERIAL_IMPORT", List.of())).thenReturn(true);
+        when(consentService.hasValidConsent(1L, "MATERIAL_IMPORT", List.of("CAREER_MATERIAL"))).thenReturn(true);
 
         service.execute(task, "worker-1");
 
@@ -160,6 +161,43 @@ class TaskExecutionServiceTest {
     }
 
     @Test
+    void checksResumeAndNestedJobDescriptionConsentBeforeInlineOptimization() {
+        AiProvider provider = mock(AiProvider.class);
+        TaskLeaseService leaseService = mock(TaskLeaseService.class);
+        AiConsentService consentService = mock(AiConsentService.class);
+        when(provider.supports(AiTaskType.INLINE_OPTIMIZE)).thenReturn(true);
+        when(provider.isAvailable()).thenReturn(true);
+        when(provider.call(any())).thenReturn(AiCallResult.ok(Map.of("candidates", List.of()), "request-inline"));
+        when(consentService.hasValidConsent(1L, "INLINE_OPTIMIZE",
+                List.of("RESUME", "JOB_DESCRIPTION"))).thenReturn(true);
+        when(leaseService.releaseSuccess(any(), eq("worker-1"), any())).thenAnswer(invocation -> {
+            AiTask completed = invocation.getArgument(0);
+            completed.setStatus(AiTaskStatus.SUCCESS);
+            return true;
+        });
+        TaskExecutionService service = new TaskExecutionService(
+                new AiProviderRegistry(List.of(provider)), leaseService, mock(JobGenerationService.class),
+                mock(JobMaterialSelectionService.class), consentService, mock(AppObservability.class),
+                new FailureCategoryClassifier(), new InlineOptimizeResultFormatter(),
+                mock(AtsAiAnalysisService.class), mock(AtsResultStateService.class),
+                mock(CommunicationAiService.class), mock(InterviewFollowUpAiService.class), new AiTaskWorkerProperties());
+        AiTask task = new AiTask();
+        task.setId(5L);
+        task.setUserId(1L);
+        task.setTaskType(AiTaskType.INLINE_OPTIMIZE);
+        task.setInputSnapshotJson(Map.of(
+                "taskType", "INLINE_OPTIMIZE",
+                "input", Map.of("content", "work", "jobDescriptionId", 88L)));
+
+        service.execute(task, "worker-1");
+
+        verify(provider).call(any());
+        verify(consentService).hasValidConsent(1L, "INLINE_OPTIMIZE",
+                List.of("RESUME", "JOB_DESCRIPTION"));
+        service.shutdownHeartbeatExecutor();
+    }
+
+    @Test
     void renewsTheLeaseWhileAProviderCallIsStillRunning() {
         AiProvider provider = mock(AiProvider.class);
         TaskLeaseService leaseService = mock(TaskLeaseService.class);
@@ -167,6 +205,7 @@ class TaskExecutionServiceTest {
         AiTaskWorkerProperties properties = new AiTaskWorkerProperties();
         properties.setLeaseSeconds(1);
         when(provider.supports(AiTaskType.MATERIAL_IMPORT)).thenReturn(true);
+        when(provider.isAvailable()).thenReturn(true);
         when(provider.call(any())).thenAnswer(invocation -> {
             Thread.sleep(1_300);
             return AiCallResult.ok(Map.of("output", "done"), "request-2");
@@ -188,7 +227,7 @@ class TaskExecutionServiceTest {
         task.setUserId(1L);
         task.setTaskType(AiTaskType.MATERIAL_IMPORT);
         task.setInputSnapshotJson(Map.of("taskType", "MATERIAL_IMPORT", "input", Map.of("content", "test")));
-        when(consentService.hasValidConsent(1L, "MATERIAL_IMPORT", List.of())).thenReturn(true);
+        when(consentService.hasValidConsent(1L, "MATERIAL_IMPORT", List.of("CAREER_MATERIAL"))).thenReturn(true);
 
         service.execute(task, "worker-1");
 

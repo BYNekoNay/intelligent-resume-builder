@@ -5,6 +5,7 @@ import com.intelligentresume.ai.ratelimit.AiQuotaService;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
 import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.ai.task.domain.ConfirmationStatus;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
@@ -79,6 +80,21 @@ class AiTaskServiceTest {
     }
 
     @Test
+    @DisplayName("历史 null 确认状态对外归一化为 NOT_REQUIRED")
+    void toResponse_normalizesLegacyNullConfirmationStatus() {
+        AiTask task = new AiTask();
+        task.setId(7L);
+        task.setTaskType(AiTaskType.INLINE_OPTIMIZE);
+        task.setInputSnapshotJson(Map.of("taskType", AiTaskType.INLINE_OPTIMIZE.name()));
+        task.setStatus(AiTaskStatus.SUCCESS);
+        task.setConfirmationStatus(null);
+
+        AiTaskStatusResponse response = service.toResponse(task);
+
+        assertEquals(ConfirmationStatus.NOT_REQUIRED, response.confirmationStatus());
+    }
+
+    @Test
     @DisplayName("任务状态公开岗位 ID，供同 JD 简历选择使用")
     void create_exposesJobDescriptionId() {
         when(consentService.hasValidConsent(100L)).thenReturn(true);
@@ -98,6 +114,83 @@ class AiTaskServiceTest {
                 "job-id-response", 100L);
 
         assertEquals(88L, response.jobDescriptionId());
+    }
+
+    @Test
+    @DisplayName("简历优化任务按输入校验简历与可选 JD 类别")
+    void create_resumeOptimize_requiresResumeAndOptionalJobDescription() {
+        stubTaskCreation();
+
+        service.create(new CreateAiTaskRequest(
+                AiTaskType.RESUME_OPTIMIZE,
+                Map.of("content", "resume", "targetJdText", "backend engineer"),
+                null, null, null, null, null, null),
+                "resume-optimize-categories", 100L);
+
+        verify(consentService).hasValidConsent(100L, AiTaskType.RESUME_OPTIMIZE.name(),
+                List.of("RESUME", "JOB_DESCRIPTION"));
+    }
+
+    @Test
+    @DisplayName("内联优化任务识别嵌套 input 中的 JD")
+    void create_inlineOptimize_requiresResumeAndNestedJobDescription() {
+        stubTaskCreation();
+
+        service.create(new CreateAiTaskRequest(
+                AiTaskType.INLINE_OPTIMIZE,
+                Map.of("content", "work", "jobDescriptionId", 88L),
+                null, null, null, null, null, null),
+                "inline-optimize-categories", 100L);
+
+        verify(consentService).hasValidConsent(100L, AiTaskType.INLINE_OPTIMIZE.name(),
+                List.of("RESUME", "JOB_DESCRIPTION"));
+    }
+
+    @Test
+    @DisplayName("素材导入任务要求职业资料类别")
+    void create_materialImport_requiresCareerMaterial() {
+        stubTaskCreation();
+
+        service.create(new CreateAiTaskRequest(
+                AiTaskType.MATERIAL_IMPORT,
+                Map.of("rawMaterialText", "microservices"),
+                null, null, null, null, null, null),
+                "material-import-categories", 100L);
+
+        verify(consentService).hasValidConsent(100L, AiTaskType.MATERIAL_IMPORT.name(),
+                List.of("CAREER_MATERIAL"));
+    }
+
+    @Test
+    @DisplayName("素材类别未授权时在持久化前拒绝任务")
+    void create_materialImport_withoutCareerMaterialConsent_doesNotPersist() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        when(consentService.hasValidConsent(100L, AiTaskType.MATERIAL_IMPORT.name(),
+                List.of("CAREER_MATERIAL"))).thenReturn(false);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.create(
+                new CreateAiTaskRequest(AiTaskType.MATERIAL_IMPORT,
+                        Map.of("rawMaterialText", "private career material"),
+                        null, null, null, null, null, null),
+                "material-import-no-consent", 100L));
+
+        assertEquals(ErrorCode.CONSENT_REQUIRED, ex.getErrorCode());
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("面试任务按快照要求简历、回答与可选 JD 类别")
+    void create_interviewCoach_requiresInterviewCategories() {
+        stubTaskCreation();
+
+        service.create(new CreateAiTaskRequest(
+                AiTaskType.INTERVIEW_COACH,
+                Map.of("operation", "FOLLOW_UP_PRACTICE"),
+                null, 88L, null, null, null, null),
+                "interview-categories", 100L);
+
+        verify(consentService).hasValidConsent(100L, AiTaskType.INTERVIEW_COACH.name(),
+                List.of("RESUME", "INTERVIEW_ANSWER", "JOB_DESCRIPTION"));
     }
 
     @Test
@@ -208,7 +301,7 @@ class AiTaskServiceTest {
         assertEquals(AiTaskStatus.PENDING, response.status());
         assertEquals(2, response.retryCount());
         assertNull(response.errorMessage());
-        verify(consentService).hasValidConsent(100L, AiTaskType.INLINE_OPTIMIZE.name(), java.util.List.of());
+        verify(consentService).hasValidConsent(100L, AiTaskType.INLINE_OPTIMIZE.name(), List.of("RESUME"));
         verify(quotaService).check(100L, AiTaskType.INLINE_OPTIMIZE);
     }
 
@@ -240,6 +333,19 @@ class AiTaskServiceTest {
         assertEquals(List.of(9L, 7L), response.stream().map(AiTaskStatusResponse::id).toList());
         assertEquals(AiTaskType.JOB_GENERATION, response.get(0).taskType());
         verify(taskRepository).findContinuationsByUserId(100L);
+    }
+
+    private void stubTaskCreation() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                eq(100L), any(), anyString())).thenReturn(Optional.empty());
+        when(taskRepository.save(any(AiTask.class))).thenAnswer(invocation -> {
+            AiTask task = invocation.getArgument(0);
+            task.setId(1L);
+            task.setCreatedAt(LocalDateTime.now());
+            task.setUpdatedAt(LocalDateTime.now());
+            return task;
+        });
     }
 
     private AiTask task(Long id, Long userId, AiTaskType type, String fingerprint) {

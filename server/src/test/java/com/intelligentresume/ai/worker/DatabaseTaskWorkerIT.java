@@ -81,7 +81,7 @@ class DatabaseTaskWorkerIT {
                                   "policyVersion": "v1.2.0",
                                   "providerCode": "bailian",
                                   "taskScopes": ["MATERIAL_IMPORT", "RESUME_OPTIMIZE"],
-                                  "dataCategories": ["resume"],
+                                  "dataCategories": ["RESUME", "CAREER_MATERIAL"],
                                   "noticeHash": "hash"
                                 }
                                 """))

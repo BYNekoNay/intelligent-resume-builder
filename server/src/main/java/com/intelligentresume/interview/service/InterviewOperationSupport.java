@@ -3,6 +3,7 @@ package com.intelligentresume.interview.service;
 import com.intelligentresume.ai.consent.service.AiConsentService;
 import com.intelligentresume.ai.provider.AiProviderRegistry;
 import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.ai.task.service.AiTaskConsentPolicy;
 import com.intelligentresume.auth.repository.UserRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
@@ -27,7 +28,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -271,10 +271,10 @@ public class InterviewOperationSupport {
     }
 
     public boolean hasInterviewConsent(Long userId, InterviewSession session) {
-        List<String> categories = new ArrayList<>(List.of("RESUME", "INTERVIEW_ANSWER"));
-        if (session.getJobDescriptionId() != null) {
-            categories.add("JOB_DESCRIPTION");
-        }
+        Map<String, Object> snapshot = session.getJobDescriptionId() == null
+                ? Map.of()
+                : Map.of("jobDescriptionId", session.getJobDescriptionId());
+        List<String> categories = AiTaskConsentPolicy.requiredCategories(AiTaskType.INTERVIEW_COACH, snapshot);
         return consentService.hasValidConsent(userId, "INTERVIEW_COACH", categories);
     }
 

@@ -10,6 +10,7 @@ import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
+import com.intelligentresume.ai.task.service.AiTaskConsentPolicy;
 import com.intelligentresume.ai.task.service.AiTaskService;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
@@ -27,7 +28,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -126,11 +126,12 @@ public class InterviewFollowUpAiService {
             throw new BusinessException(ErrorCode.VALIDATION, "薄弱项不能为空且不超过 500 字");
         }
 
-        // 领域层同意校验（与 hasInterviewConsent 同款类别：RESUME/INTERVIEW_ANSWER/JD）
-        List<String> categories = new ArrayList<>(List.of("RESUME", "INTERVIEW_ANSWER"));
-        if (session.getJobDescriptionId() != null) {
-            categories.add("JOB_DESCRIPTION");
-        }
+        // 领域层同意校验与通用 AI task / worker 使用同一份类别策略。
+        Map<String, Object> consentSnapshot = session.getJobDescriptionId() == null
+                ? Map.of()
+                : Map.of("jobDescriptionId", session.getJobDescriptionId());
+        List<String> categories = AiTaskConsentPolicy.requiredCategories(AiTaskType.INTERVIEW_COACH,
+                consentSnapshot);
         if (!consentService.hasValidConsent(userId, "INTERVIEW_COACH", categories)) {
             throw new BusinessException(ErrorCode.CONSENT_REQUIRED, "需要 AI 面试授权，请先同意隐私政策");
         }

@@ -64,8 +64,8 @@ class AiTaskControllerIT {
                                 {
                                   "policyVersion": "v1.2.0",
                                   "providerCode": "bailian",
-                                  "taskScopes": ["JOB_GENERATION", "RESUME_OPTIMIZE"],
-                                  "dataCategories": ["resume", "career_material"],
+                                  "taskScopes": ["RESUME_OPTIMIZE"],
+                                  "dataCategories": ["RESUME"],
                                   "noticeHash": "test-hash-abc123"
                                 }
                                 """))

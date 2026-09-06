@@ -2,6 +2,7 @@ package com.intelligentresume.ai.ratelimit;
 
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
+import com.intelligentresume.ai.task.service.AiTaskCapabilityRegistry;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.common.observability.AppObservability;
@@ -55,7 +56,12 @@ public class AiQuotaService {
      */
     @Transactional(readOnly = true)
     public void check(Long userId, AiTaskType type) {
-        int limit = quotas.getOrDefault(type, 30);
+        AiTaskCapabilityRegistry.requireRegistered(type);
+        Integer limit = quotas.get(type);
+        if (limit == null) {
+            throw new BusinessException(ErrorCode.VALIDATION,
+                    "AI quota is not registered for task type: " + type.name());
+        }
         LocalDateTime startOfToday = LocalDate.now().atStartOfDay();
         long count = taskRepository.countAttemptsByUserIdAndTaskTypeAndCreatedAtAfter(userId, type, startOfToday);
         if (count >= limit) {

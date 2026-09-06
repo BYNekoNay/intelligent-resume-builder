@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.provider;
 
 import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.ai.task.service.AiTaskCapabilityRegistry;
 
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,7 @@ public final class PromptTemplates {
     }
 
     public static String systemFor(AiTaskType type, Map<String, Object> input) {
+        AiTaskCapabilityRegistry.requireRegistered(type);
         return switch (type) {
             case JOB_MATERIAL_SELECTION -> """
                     You select truthful career materials for a job application. Return valid JSON only.
@@ -77,7 +79,7 @@ public final class PromptTemplates {
                     3. Write in the SAME LANGUAGE as the input content.
                     4. Output valid JSON only, with keys: subject (subject line), body (email body).
                     """;
-            default -> """
+            case JOB_GENERATION, ATS_ANALYSIS, INTERVIEW_COACH -> """
                     You are a professional resume assistant. Complete the task based on user input.
                     Write in the SAME LANGUAGE as the input content.
                     Output valid JSON only.
@@ -87,6 +89,7 @@ public final class PromptTemplates {
 
     @SuppressWarnings("unchecked")
     public static String userPromptFor(AiTaskType type, Map<String, Object> input) {
+        AiTaskCapabilityRegistry.requireRegistered(type);
         StringBuilder sb = new StringBuilder();
 
         switch (type) {
@@ -160,7 +163,7 @@ public final class PromptTemplates {
                 appendInputContent(sb, input);
                 sb.append("\n\nOutput JSON with keys: subject, body.");
             }
-            default -> {
+            case JOB_GENERATION, ATS_ANALYSIS, INTERVIEW_COACH -> {
                 sb.append("Please process the following content:\n\n");
                 appendInputContent(sb, input);
                 sb.append("\n\nOutput valid JSON.");

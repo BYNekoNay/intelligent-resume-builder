@@ -4,6 +4,7 @@ import com.intelligentresume.ai.consent.service.AiConsentService;
 import com.intelligentresume.ai.ratelimit.AiQuotaService;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
+import com.intelligentresume.ai.task.domain.ConfirmationStatus;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
@@ -55,11 +56,14 @@ public class AiTaskService {
      */
     @Transactional
     public AiTaskStatusResponse create(CreateAiTaskRequest req, String idempotencyKey, Long userId) {
+        AiTaskCapabilityRegistry.requireRegistered(req.taskType());
+        Map<String, Object> inputSnapshot = buildInputSnapshot(req);
+
         // 1. 校验同意
         if (!consentService.hasValidConsent(userId)) {
             throw new BusinessException(ErrorCode.CONSENT_REQUIRED);
         }
-        List<String> requiredCategories = requiredCategories(req.taskType());
+        List<String> requiredCategories = AiTaskConsentPolicy.requiredCategories(req.taskType(), inputSnapshot);
         if (!consentService.hasValidConsent(userId, req.taskType().name(), requiredCategories)) {
             throw new BusinessException(ErrorCode.CONSENT_REQUIRED,
                     "AI authorization does not cover this task or its data categories");
@@ -67,7 +71,6 @@ public class AiTaskService {
 
         // 2. 校验配额
         // 3. 计算指纹
-        Map<String, Object> inputSnapshot = buildInputSnapshot(req);
         String fingerprint = idempotencyService.fingerprint(inputSnapshot);
 
         // 4. 幂等性检查
@@ -143,6 +146,7 @@ public class AiTaskService {
     }
 
     public AiTaskStatusResponse toResponse(AiTask task) {
+        AiTaskCapabilityRegistry.requireRegistered(task.getTaskType());
         return new AiTaskStatusResponse(
                 task.getId(),
                 task.getTaskType(),
@@ -151,12 +155,21 @@ public class AiTaskService {
                 task.getStatus(),
                 task.getResultJson(),
                 task.getErrorMessage(),
-                task.getConfirmationStatus(),
+                normalizeConfirmationStatus(task.getConfirmationStatus()),
                 task.getResultResumeVersionId(),
                 task.getRetryCount(),
                 task.getCreatedAt(),
                 task.getUpdatedAt()
         );
+    }
+
+    /**
+     * Historical tasks predate the explicit NOT_REQUIRED value and persist a
+     * null confirmation status. Keep that database representation readable,
+     * but expose one stable API contract to the Web client.
+     */
+    private ConfirmationStatus normalizeConfirmationStatus(ConfirmationStatus status) {
+        return status == null ? ConfirmationStatus.NOT_REQUIRED : status;
     }
 
     private Long toLong(Object value) {
@@ -177,6 +190,7 @@ public class AiTaskService {
     public AiTaskStatusResponse retry(Long taskId, Long userId) {
         AiTask task = taskRepository.findByIdAndUserId(taskId, userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "AI 任务不存在"));
+        AiTaskCapabilityRegistry.requireRegistered(task.getTaskType());
         if (!com.intelligentresume.ai.task.domain.AiTaskStatus.FAILED.equals(task.getStatus())) {
             throw new BusinessException(ErrorCode.VALIDATION, "只有失败的任务可以重试");
         }
@@ -185,7 +199,8 @@ public class AiTaskService {
             throw new BusinessException(ErrorCode.CONFLICT, "AI 任务已达到最大重试次数");
         }
         if (!consentService.hasValidConsent(userId)
-                || !consentService.hasValidConsent(userId, task.getTaskType().name(), requiredCategories(task.getTaskType()))) {
+                || !consentService.hasValidConsent(userId, task.getTaskType().name(),
+                AiTaskConsentPolicy.requiredCategories(task.getTaskType(), task.getInputSnapshotJson()))) {
             throw new BusinessException(ErrorCode.CONSENT_REQUIRED);
         }
         quotaService.check(userId, task.getTaskType());
@@ -195,13 +210,4 @@ public class AiTaskService {
         return toResponse(task);
     }
 
-    private List<String> requiredCategories(com.intelligentresume.ai.task.domain.AiTaskType type) {
-        return switch (type) {
-            case JOB_MATERIAL_SELECTION, JOB_GENERATION ->
-                    List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE");
-            case ATS_ANALYSIS -> List.of("RESUME", "JOB_DESCRIPTION");
-            case COMMUNICATION_GENERATE -> List.of("RESUME", "JOB_DESCRIPTION");
-            default -> List.of();
-        };
-    }
 }

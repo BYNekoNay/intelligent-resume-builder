@@ -11,6 +11,8 @@ import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.domain.ConfirmationStatus;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
+import com.intelligentresume.ai.task.service.AiTaskConsentPolicy;
+import com.intelligentresume.ai.task.service.AiTaskCapabilityRegistry;
 import com.intelligentresume.ats.service.AtsAiAnalysisException;
 import com.intelligentresume.ats.service.AtsAiAnalysisService;
 import com.intelligentresume.ats.service.AtsResultStateService;
@@ -29,7 +31,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import jakarta.annotation.PreDestroy;
 
-import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
 import java.time.Duration;
@@ -98,6 +99,7 @@ public class TaskExecutionService {
      * 执行单个 AI 任务。
      */
     public void execute(AiTask task, String owner) {
+        AiTaskCapabilityRegistry.Descriptor capability = AiTaskCapabilityRegistry.requireRegistered(task.getTaskType());
         long startedAt = System.nanoTime();
         ScheduledFuture<?> heartbeat = startHeartbeat(task.getId(), owner);
         try (WorkerTraceContext ignored = WorkerTraceContext.open(task.getId())) {
@@ -110,15 +112,15 @@ public class TaskExecutionService {
                     }
                     return;
                 }
-                if (task.getTaskType() == AiTaskType.JOB_MATERIAL_SELECTION) {
+                if (capability.executionMode() == AiTaskCapabilityRegistry.ExecutionMode.DOMAIN_SELECTION) {
                     executeMaterialSelection(task, owner);
-                } else if (task.getTaskType() == AiTaskType.JOB_GENERATION && hasJobDescriptionId(task)) {
+                } else if (capability.executionMode() == AiTaskCapabilityRegistry.ExecutionMode.DOMAIN_GENERATION && hasJobDescriptionId(task)) {
                     executeJobGeneration(task, owner);
-                } else if (task.getTaskType() == AiTaskType.ATS_ANALYSIS) {
+                } else if (capability.executionMode() == AiTaskCapabilityRegistry.ExecutionMode.ATS_ANALYSIS) {
                     executeAtsAnalysis(task, owner);
-                } else if (task.getTaskType() == AiTaskType.COMMUNICATION_GENERATE) {
+                } else if (capability.executionMode() == AiTaskCapabilityRegistry.ExecutionMode.COMMUNICATION) {
                     executeCommunicationGeneration(task, owner);
-                } else if (task.getTaskType() == AiTaskType.INTERVIEW_COACH && isFollowUpPractice(task)) {
+                } else if (capability.executionMode() == AiTaskCapabilityRegistry.ExecutionMode.INTERVIEW && isFollowUpPractice(task)) {
                     executeInterviewFollowUp(task, owner);
                 } else {
                     executeDefault(task, owner);
@@ -143,22 +145,8 @@ public class TaskExecutionService {
     }
 
     private boolean hasExecutionConsent(AiTask task) {
-        List<String> categories = switch (task.getTaskType()) {
-            case JOB_MATERIAL_SELECTION, JOB_GENERATION ->
-                    List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE");
-            case ATS_ANALYSIS -> List.of("RESUME", "JOB_DESCRIPTION");
-            case COMMUNICATION_GENERATE -> List.of("RESUME", "JOB_DESCRIPTION");
-            case INTERVIEW_COACH -> {
-                List<String> interviewCategories = new ArrayList<>(List.of("RESUME", "INTERVIEW_ANSWER"));
-                if (task.getInputSnapshotJson() != null
-                        && task.getInputSnapshotJson().get("jobDescriptionId") != null) {
-                    interviewCategories.add("JOB_DESCRIPTION");
-                }
-                yield interviewCategories;
-            }
-            default -> List.of();
-        };
-        return consentService.hasValidConsent(task.getUserId(), task.getTaskType().name(), categories);
+        return consentService.hasValidConsent(task.getUserId(), task.getTaskType().name(),
+                AiTaskConsentPolicy.requiredCategories(task.getTaskType(), task.getInputSnapshotJson()));
     }
 
     private boolean isFollowUpPractice(AiTask task) {

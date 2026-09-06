@@ -37,6 +37,7 @@ class InlineOptimizeControllerIT {
         MvcResult result = mockMvc.perform(post("/api/ai/inline-optimize")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload)
+                        .header("Idempotency-Key", "inline-valid")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.data.taskType").value("INLINE_OPTIMIZE"))
@@ -79,9 +80,50 @@ class InlineOptimizeControllerIT {
         mockMvc.perform(post("/api/ai/achievement-guidance")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload)
+                        .header("Idempotency-Key", "achievement-valid")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.data.taskType").value("ACHIEVEMENT_GUIDANCE"));
+    }
+
+    @Test
+    void rejectsMissingIdempotencyKey() throws Exception {
+        ensureConsent();
+        ensureOwnedResources();
+        String payload = "{\"resumeVersionId\": %d, \"section\": \"work\", \"content\": \"Led platform team\"}"
+                .formatted(resumeVersionId);
+        mockMvc.perform(post("/api/ai/inline-optimize")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001));
+    }
+
+    @Test
+    void sameIdempotencyKeyReturnsSameTask() throws Exception {
+        ensureConsent();
+        ensureOwnedResources();
+        String payload = "{\"resumeVersionId\": %d, \"section\": \"work\", \"content\": \"Idempotent request\"}"
+                .formatted(resumeVersionId);
+        MvcResult first = mockMvc.perform(post("/api/ai/inline-optimize")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload)
+                        .header("Idempotency-Key", "inline-same-request")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        long firstId = objectMapper.readTree(first.getResponse().getContentAsString()).path("data").path("id").asLong();
+
+        MvcResult second = mockMvc.perform(post("/api/ai/inline-optimize")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload)
+                        .header("Idempotency-Key", "inline-same-request")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        long secondId = objectMapper.readTree(second.getResponse().getContentAsString()).path("data").path("id").asLong();
+        assertEquals(firstId, secondId);
     }
 
     @Test
@@ -122,6 +164,7 @@ class InlineOptimizeControllerIT {
         mockMvc.perform(post("/api/ai/inline-optimize")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeVersionId\":%d,\"section\":\"work\",\"content\":\"test\"}".formatted(withdrawnVersionId))
+                        .header("Idempotency-Key", "inline-withdrawn")
                         .header("Authorization", "Bearer " + withdrawnToken))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(40302));
@@ -136,11 +179,13 @@ class InlineOptimizeControllerIT {
         mockMvc.perform(post("/api/ai/inline-optimize")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeVersionId\":%d,\"section\":\"work\",\"content\":\"test\"}".formatted(resumeVersionId))
+                        .header("Idempotency-Key", "inline-foreign")
                         .header("Authorization", "Bearer " + foreignToken))
                 .andExpect(status().isNotFound());
         mockMvc.perform(post("/api/ai/inline-optimize")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeVersionId\":%d,\"section\":\"work\",\"content\":\"test\",\"jobDescriptionId\":999999}".formatted(resumeVersionId))
+                        .header("Idempotency-Key", "inline-missing-jd")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isNotFound());
     }
@@ -202,7 +247,7 @@ class InlineOptimizeControllerIT {
                                   "policyVersion": "v1.2.0",
                                   "providerCode": "bailian",
                                   "taskScopes": ["INLINE_OPTIMIZE", "ACHIEVEMENT_GUIDANCE"],
-                                  "dataCategories": ["resume"],
+                                  "dataCategories": ["RESUME", "JOB_DESCRIPTION"],
                                   "noticeHash": "inline-optimize-test"
                                 }
                                 """))

@@ -37,28 +37,42 @@ public class InlineOptimizeController {
 
     @PostMapping("/inline-optimize")
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> optimize(
-            @Valid @RequestBody InlineOptimizeRequest request, HttpServletRequest httpRequest) {
+            @Valid @RequestBody InlineOptimizeRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            HttpServletRequest httpRequest) {
+        String key = requireIdempotencyKey(idempotencyKey);
         Long userId = currentUserId(httpRequest);
         validateOwnedResources(request, userId);
         Map<String, Object> input = toInputMap(request);
         CreateAiTaskRequest req = new CreateAiTaskRequest(
             AiTaskType.INLINE_OPTIMIZE, input, null, null, null, null, null, null);
-        AiTaskStatusResponse resp = taskService.create(req, java.util.UUID.randomUUID().toString(), userId);
+        AiTaskStatusResponse resp = taskService.create(req, key, userId);
         return ResponseEntity.status(HttpStatus.ACCEPTED)
             .body(ApiResponse.success(resp, traceId(httpRequest)));
     }
 
     @PostMapping("/achievement-guidance")
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> guide(
-            @Valid @RequestBody InlineOptimizeRequest request, HttpServletRequest httpRequest) {
+            @Valid @RequestBody InlineOptimizeRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            HttpServletRequest httpRequest) {
+        String key = requireIdempotencyKey(idempotencyKey);
         Long userId = currentUserId(httpRequest);
         validateOwnedResources(request, userId);
         Map<String, Object> input = toInputMap(request);
         CreateAiTaskRequest req = new CreateAiTaskRequest(
             AiTaskType.ACHIEVEMENT_GUIDANCE, input, null, null, null, null, null, null);
-        AiTaskStatusResponse resp = taskService.create(req, java.util.UUID.randomUUID().toString(), userId);
+        AiTaskStatusResponse resp = taskService.create(req, key, userId);
         return ResponseEntity.status(HttpStatus.ACCEPTED)
             .body(ApiResponse.success(resp, traceId(httpRequest)));
+    }
+
+    private String requireIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
+            throw new BusinessException(ErrorCode.VALIDATION,
+                    "Idempotency-Key is required and must be at most 128 characters");
+        }
+        return idempotencyKey.trim();
     }
 
     @PostMapping("/tasks/{id}/retry")

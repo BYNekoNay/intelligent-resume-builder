@@ -4,6 +4,7 @@ import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.service.AiTaskService;
+import com.intelligentresume.ai.task.service.AiTaskCapabilityRegistry;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
@@ -38,9 +39,8 @@ public class AiTaskController {
             @Valid @RequestBody CreateAiTaskRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             HttpServletRequest servletRequest) {
-        if (request.taskType() == AiTaskType.JOB_GENERATION
-                || request.taskType() == AiTaskType.JOB_MATERIAL_SELECTION
-                || request.taskType() == AiTaskType.COMMUNICATION_GENERATE) {
+        AiTaskCapabilityRegistry.Descriptor capability = AiTaskCapabilityRegistry.requireRegistered(request.taskType());
+        if (!capability.genericEndpointAllowed()) {
             throw new BusinessException(ErrorCode.VALIDATION,
                     "This AI task must start from its domain endpoint");
         }
