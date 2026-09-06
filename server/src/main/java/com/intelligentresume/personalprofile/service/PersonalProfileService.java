@@ -71,10 +71,13 @@ public class PersonalProfileService {
                 .findByIdAndResumeId(resume.getCurrentVersionId(), resume.getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历当前版本不存在"));
 
-        Object basicsValue = version.getResumeJson() == null ? null : version.getResumeJson().get("basics");
+        Map<String, Object> resumeJson = version.getResumeJson();
+        Object basicsValue = resumeJson == null ? null : resumeJson.get("basics");
         if (!(basicsValue instanceof Map<?, ?> basics)) {
             return PersonalProfileResponse.empty();
         }
+
+        Map<?, ?> objective = resumeJson.get("objective") instanceof Map<?, ?> value ? value : Map.of();
         return new PersonalProfileResponse(
                 firstText(basics, "name", "fullName"),
                 firstText(basics, "email"),
@@ -82,7 +85,11 @@ public class PersonalProfileService {
                 extractLocation(basics.get("location")),
                 extractWebsite(basics),
                 firstText(basics, "summary", "profileSummary"),
-                null, null, null, null, null
+                extractList(objective.get("targetRole")),
+                firstText(objective, "targetSeniority", "seniority"),
+                extractList(objective.get("targetIndustry")),
+                extractList(objective.get("location")),
+                firstText(objective, "summary", "objectiveSummary")
         );
     }
 
@@ -138,6 +145,21 @@ public class PersonalProfileService {
             }
         }
         return null;
+    }
+
+    private List<String> extractList(Object value) {
+        if (value instanceof Iterable<?> values) {
+            List<String> result = new ArrayList<>();
+            for (Object item : values) {
+                String normalized = normalize(item);
+                if (normalized != null && !result.contains(normalized)) {
+                    result.add(normalized);
+                }
+            }
+            return result.isEmpty() ? null : List.copyOf(result);
+        }
+        String normalized = normalize(value);
+        return normalized == null ? null : List.of(normalized);
     }
 
     private String normalize(Object value) {

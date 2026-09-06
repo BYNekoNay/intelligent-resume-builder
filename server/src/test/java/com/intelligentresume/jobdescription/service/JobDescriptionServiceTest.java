@@ -5,6 +5,8 @@ import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.domain.JobDescription;
 import com.intelligentresume.jobdescription.dto.*;
 import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ class JobDescriptionServiceTest {
 
     @Mock private JobDescriptionRepository repository;
     @Mock private JdKeywordParser parser;
+    @Mock private EntityManager entityManager;
 
     private JobDescriptionService service;
 
@@ -101,6 +104,43 @@ class JobDescriptionServiceTest {
         // 验证包装结构: {"version": "v1.0.0", "data": {...}}
         assertEquals("v1.0.0", jd.getParsedKeywordsJson().get("version"));
         assertNotNull(jd.getParsedKeywordsJson().get("data"));
+    }
+
+    @Test
+    @DisplayName("更新路径: JD 原文变化时清除旧解析结果")
+    void update_textInvalidatesParsedSnapshot() {
+        JobDescription jd = jd(1L, 100L, "旧 JD 文本");
+        jd.setParsedKeywordsJson(Map.of("version", "v1.0.0", "data", Map.of("keywords", List.of("Java"))));
+        jd.setParsedAt(java.time.LocalDateTime.now());
+        jd.setParsedVersion("v1.0.0");
+        when(repository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(jd));
+        when(repository.save(any(JobDescription.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.update(1L, new UpdateJobDescriptionRequest(null, null, "新 JD 文本"), 100L);
+
+        assertEquals("新 JD 文本", jd.getJdText());
+        assertNull(jd.getParsedKeywordsJson());
+        assertNull(jd.getParsedAt());
+        assertNull(jd.getParsedVersion());
+    }
+
+    @Test
+    @DisplayName("并发保护: 解析期间 JD 原文变化时丢弃晚到结果")
+    void parse_discardsLateResultWhenTextChanged() {
+        JobDescription jd = jd(1L, 100L, "旧 JD 文本");
+        when(repository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(jd));
+        when(parser.parse("旧 JD 文本")).thenReturn(
+                new ParsedKeywordsResponse("旧岗位", List.of("Java"), List.of()));
+        doAnswer(invocation -> {
+            jd.setJdText("新 JD 文本");
+            return null;
+        }).when(entityManager).refresh(jd, LockModeType.PESSIMISTIC_WRITE);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "entityManager", entityManager);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.parse(1L, 100L));
+
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        verify(repository, never()).save(any(JobDescription.class));
     }
 
     @Test

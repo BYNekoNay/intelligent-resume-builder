@@ -5,6 +5,9 @@ import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.domain.JobDescription;
 import com.intelligentresume.jobdescription.dto.*;
 import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * JD CRUD + 确定性关键词解析。
@@ -32,6 +36,9 @@ public class JobDescriptionService {
     private final JobDescriptionRepository repository;
     private final JdKeywordParser parser;
     private final int maxLength;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public JobDescriptionService(JobDescriptionRepository repository,
                                  JdKeywordParser parser,
@@ -84,6 +91,11 @@ public class JobDescriptionService {
         }
         if (req.jdText() != null) {
             validateJdTextLength(req.jdText());
+            if (!Objects.equals(jd.getJdText(), req.jdText())) {
+                jd.setParsedKeywordsJson(null);
+                jd.setParsedAt(null);
+                jd.setParsedVersion(null);
+            }
             jd.setJdText(req.jdText());
         }
         repository.save(jd);
@@ -104,8 +116,20 @@ public class JobDescriptionService {
     @Transactional
     public JobDescriptionDetail parse(Long id, Long userId) {
         JobDescription jd = findOwned(id, userId);
+        String sourceText = jd.getJdText();
 
-        ParsedKeywordsResponse parsed = parser.parse(jd.getJdText());
+        ParsedKeywordsResponse parsed = parser.parse(sourceText);
+
+        // Parsing is intentionally performed without holding a database lock. Reacquire
+        // the row lock before writing so an edit that completed while the parser ran is
+        // observed and the stale result is discarded instead of overwriting the edit.
+        if (entityManager != null) {
+            entityManager.refresh(jd, LockModeType.PESSIMISTIC_WRITE);
+        }
+        if (!Objects.equals(sourceText, jd.getJdText())) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                    "JD 原文已更新，解析结果已失效，请重新解析");
+        }
 
         // 写回 parsed_keywords_json: {"version": "v1.0.0", "data": {...}}
         Map<String, Object> wrapped = new LinkedHashMap<>();

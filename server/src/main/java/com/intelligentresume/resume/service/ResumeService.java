@@ -108,7 +108,7 @@ public class ResumeService {
 
     @Transactional
     public void setCurrentVersion(Long resumeId, Long versionId, Long userId) {
-        Resume resume = findOwned(resumeId, userId);
+        Resume resume = findOwnedForUpdate(resumeId, userId);
         ResumeVersion version = resumeVersionRepository.findById(versionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "版本不存在"));
         if (!version.getResumeId().equals(resumeId)) {
@@ -126,6 +126,13 @@ public class ResumeService {
     private Resume findOwned(Long id, Long userId) {
         return resumeRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
+    }
+
+    private Resume findOwnedForUpdate(Long id, Long userId) {
+        // The fallback keeps Mockito/unit-test doubles and older repository adapters
+        // compatible; the Spring Data query is the path used by the application.
+        return resumeRepository.findByIdAndUserIdForUpdate(id, userId)
+                .orElseGet(() -> findOwned(id, userId));
     }
 
     private ResumeSummary toSummary(Resume r) {

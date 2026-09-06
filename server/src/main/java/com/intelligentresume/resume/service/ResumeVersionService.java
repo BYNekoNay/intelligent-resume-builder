@@ -74,8 +74,7 @@ public class ResumeVersionService {
     @Transactional
     public ResumeVersionDetail save(Long resumeId, SaveVersionRequest req, Long userId) {
         // 校验简历归属
-        Resume resume = resumeRepository.findByIdAndUserId(resumeId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
+        Resume resume = findOwnedForUpdate(resumeId, userId);
 
         // 校验 JSON Resume 结构
         jsonResumeValidator.validate(req.resumeJson());
@@ -136,7 +135,7 @@ public class ResumeVersionService {
 
     @Transactional
     public ResumeVersionDetail restore(Long resumeId, Long versionId, Long userId) {
-        Resume resume = findOwned(resumeId, userId);
+        Resume resume = findOwnedForUpdate(resumeId, userId);
         ResumeVersion source = findVersionForResume(versionId, resumeId);
         jsonResumeValidator.validate(source.getResumeJson());
 
@@ -153,7 +152,7 @@ public class ResumeVersionService {
     @Transactional
     public ResumeVersionDetail restore(Long resumeId, Long versionId,
                                        RestoreResumeVersionRequest request, Long userId) {
-        Resume resume = findOwned(resumeId, userId);
+        Resume resume = findOwnedForUpdate(resumeId, userId);
         ResumeVersion source = findVersionForResume(versionId, resumeId);
         jsonResumeValidator.validate(source.getResumeJson());
         Map<String, Object> generationContext = request == null ? null : atsGenerationContext(request, source, userId);
@@ -170,7 +169,7 @@ public class ResumeVersionService {
 
     @Transactional
     public void archive(Long resumeId, Long versionId, Long userId) {
-        Resume resume = findOwned(resumeId, userId);
+        Resume resume = findOwnedForUpdate(resumeId, userId);
         ResumeVersion version = findVersionForResume(versionId, resumeId);
         if (versionId.equals(resume.getCurrentVersionId())) {
             throw new BusinessException(ErrorCode.CONFLICT, "当前版本不能归档");
@@ -183,7 +182,7 @@ public class ResumeVersionService {
 
     @Transactional
     public void unarchive(Long resumeId, Long versionId, Long userId) {
-        findOwned(resumeId, userId);
+        findOwnedForUpdate(resumeId, userId);
         ResumeVersion version = findVersionForResume(versionId, resumeId);
         if (version.getDeletedAt() != null) {
             version.setDeletedAt(null);
@@ -206,11 +205,11 @@ public class ResumeVersionService {
     public ResumeVersion createInTransaction(Long resumeId, ResumeSourceType sourceType,
                                               Map<String, Object> resumeJson, String summary,
                                               Map<String, Object> generationContext, Long userId) {
+        Resume resume = findOwnedForUpdate(resumeId, userId);
         ResumeVersion version = createVersion(resumeId, sourceType, resumeJson, summary, generationContext, userId);
 
         // 如果是第一个版本，自动设为当前版本
-        Resume resume = resumeRepository.findById(resumeId).orElse(null);
-        if (resume != null && resume.getCurrentVersionId() == null) {
+        if (resume.getCurrentVersionId() == null) {
             resume.setCurrentVersionId(version.getId());
             resumeRepository.save(resume);
         }
@@ -223,6 +222,11 @@ public class ResumeVersionService {
     private Resume findOwned(Long resumeId, Long userId) {
         return resumeRepository.findByIdAndUserId(resumeId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
+    }
+
+    private Resume findOwnedForUpdate(Long resumeId, Long userId) {
+        return resumeRepository.findByIdAndUserIdForUpdate(resumeId, userId)
+                .orElseGet(() -> findOwned(resumeId, userId));
     }
 
     private ResumeVersion findVersionForResume(Long versionId, Long resumeId) {

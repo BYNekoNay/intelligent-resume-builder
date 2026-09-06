@@ -81,14 +81,22 @@ class PersonalProfileServiceTest {
         ResumeVersion version = new ResumeVersion();
         version.setId(21L);
         version.setResumeId(11L);
-        version.setResumeJson(Map.of("basics", Map.of(
-                "name", "Zhang San",
-                "email", "zhang@example.com",
-                "phone", "13800000000",
-                "location", "Shanghai",
-                "url", "https://example.com",
-                "summary", "Backend engineer"
-        )));
+        version.setResumeJson(Map.of(
+                "basics", Map.of(
+                        "name", "Zhang San",
+                        "email", "zhang@example.com",
+                        "phone", "13800000000",
+                        "location", "Shanghai",
+                        "url", "https://example.com",
+                        "summary", "Backend engineer"
+                ),
+                "objective", Map.of(
+                        "targetRole", List.of("Java Engineer", "Platform Engineer"),
+                        "targetIndustry", "Internet",
+                        "location", List.of("Shanghai", "Remote"),
+                        "summary", "Build reliable platform services"
+                )
+        ));
         when(resumeRepository.findByIdAndUserId(11L, 7L)).thenReturn(Optional.of(resume));
         when(versionRepository.findByIdAndResumeId(21L, 11L)).thenReturn(Optional.of(version));
 
@@ -97,6 +105,10 @@ class PersonalProfileServiceTest {
         assertEquals("Zhang San", suggestion.fullName());
         assertEquals("https://example.com", suggestion.website());
         assertEquals("Backend engineer", suggestion.profileSummary());
+        assertEquals(List.of("Java Engineer", "Platform Engineer"), suggestion.targetRoleTitles());
+        assertEquals(List.of("Internet"), suggestion.targetIndustries());
+        assertEquals(List.of("Shanghai", "Remote"), suggestion.targetWorkPreferences());
+        assertEquals("Build reliable platform services", suggestion.careerPositioningSummary());
         verifyNoInteractions(profileRepository);
     }
 
