@@ -150,9 +150,19 @@ PDF_SERVICE_BASE_URL=http://127.0.0.1:3001
 PDF_SERVICE_TOKEN=<secrets.env 的 PDF_SERVICE_TOKEN>
 PDF_OUTPUT_DIR=/opt/intelligent-resume/app/api/pdf-output
 BAILIAN_API_KEY=<live-ai.env>
-BAILIAN_MODEL=qwen3.7-plus-2026-05-26
+BAILIAN_MODEL=qwen3.8-max
+BAILIAN_MODEL_CHAIN=qwen3.8-max,glm-5.3,qwen3.8-27b,qwen3.8-2.4t-a95b,qwen3.8-max-0902,deepseek-v4.1-flash,deepseek-v4-pro-0813,kimi-k3
 BAILIAN_READ_TIMEOUT_S=300
+AI_CHAIN_QUOTA_COOLDOWN_S=1800
+AI_CHAIN_TRANSIENT_COOLDOWN_S=60
 ```
+
+> **模型链（`BAILIAN_MODEL_CHAIN`）**：百炼的免费额度是**按模型**计量的，单模型额度耗尽会让全部 AI 功能一起失效。
+> 这里配置有序模型链，按序尝试、失败顺延；额度耗尽或模型下线的条目进入冷却期被跳过。
+> `BAILIAN_MODEL` 是链为空时的单模型回退项，建议与链首保持一致。
+>
+> ⚠ **不要复用历史已废弃的 `BAILIAN_MODELS` 变量名** —— 部署机上可能仍残留该僵尸变量（指向一批已耗尽的旧模型），
+> 复用会被静默激活成模型链。详见 [模型链设计方案](./plans/2026-09-23-002-bailian-model-chain.md)。
 
 `/opt/intelligent-resume/app/pdf-service/.env`（600）：
 
