@@ -6,6 +6,7 @@
 - [项目上下文](../PROJECT_CONTEXT.md)：产品目标、真实流程、模块职责、数据边界与协作约束；后续 AI 或新开发者的首读入口。
 
 - [部署运行手册](./DEPLOYMENT.md)：GitHub Actions 构建、阿里云 ACR、ECS 部署、验证、回滚和注销前备份。
+- [直接上传部署手册（非 Docker）](./DEPLOYMENT_DIRECT.md)：单机原生进程部署、systemd 托管、一键迭代脚本、验收结果与已知坑。
 - [GitHub CI/CD 流水线](./CI.md)：PR/主分支持续集成、手动 ACR 镜像发布、Secrets 和分支保护配置。
 - [本地验证指南](./LOCAL_VALIDATION.md)：不依赖 Docker 的本地启动、测试与真实百炼 AI 验收。
 - [部署状态说明](./DEPLOYMENT_READINESS.md)：运行边界、可观测性与安全基线。
@@ -25,6 +26,6 @@
 
 ## 维护原则
 
-- 当前运行和部署流程只更新 `README.md`、`DEPLOYMENT.md`、`LOCAL_VALIDATION.md` 与 `DEPLOYMENT_READINESS.md`。
+- 当前运行和部署流程只更新 `README.md`、`DEPLOYMENT.md`、`DEPLOYMENT_DIRECT.md`、`LOCAL_VALIDATION.md` 与 `DEPLOYMENT_READINESS.md`。
 - 历史资料只在需要保留决策背景时更新，并在文首明确其历史状态。
 - 密钥、Token、环境文件、数据库备份和 TLS 私钥不得写入文档或提交到 Git。
