@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -42,6 +43,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
             HttpMessageNotReadableException.class,
             MethodArgumentTypeMismatchException.class,
+            // 覆盖「缺少必需请求头 / 请求参数」这类**调用方**错误。
+            // 此前 MissingRequestHeaderException 未被处理，落到下面的兜底分支被报成 500 系统异常，
+            // 调用方无法区分「自己传错了」和「服务端故障」，还会产生 ERROR 级全栈日志噪音。
+            MissingRequestHeaderException.class,
             MissingServletRequestParameterException.class,
             ConstraintViolationException.class
     })
