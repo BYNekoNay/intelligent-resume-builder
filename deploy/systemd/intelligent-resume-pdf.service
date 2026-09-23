@@ -1,0 +1,34 @@
+[Unit]
+Description=Intelligent Resume PDF Renderer (Node.js + Puppeteer)
+Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/intelligent-resume/app/pdf-service
+
+# NODE_ENV=production 是必需的：src/server.js 以此决定是否强制校验 PDF_SERVICE_TOKEN，
+# 缺失时会退回开发默认 token，导致 API 侧 401。
+Environment=NODE_ENV=production
+
+# 直接调用 node，不经 npm：
+#   1) 避免依赖 npm 这个进程包装层（信号转发更干净、少一个进程）；
+#   2) 该主机的 Node 不在 /usr/bin（实测 /usr/bin/node 与 /usr/bin/npm 均不存在），
+#      Node 安装在 /usr/local/bin/node，故必须写绝对路径，否则 systemd 报 status=203/EXEC。
+#     ⚠ 部署主机若更换 Node 安装位置，需同步修改此行；要求 Node >= 20.6（依赖 --env-file）。
+# --env-file=.env 等价于 package.json 中 "start" 脚本的行为，Token 与端口由此注入。
+# Chromium 以 root 运行时必须禁用沙箱，已由 src/browserPool.js 的 --no-sandbox 处理。
+ExecStart=/usr/local/bin/node --env-file=.env src/server.js
+
+Restart=on-failure
+RestartSec=10
+SuccessExitStatus=143
+
+# 日志走 journald（自带轮转）：journalctl -u intelligent-resume-pdf -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=intelligent-resume-pdf
+
+[Install]
+WantedBy=multi-user.target

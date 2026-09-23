@@ -1,0 +1,44 @@
+[Unit]
+Description=Intelligent Resume API (Spring Boot 3.3 / Java 17)
+Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
+After=network-online.target mysql.service intelligent-resume-pdf.service
+Wants=network-online.target
+Requires=mysql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/intelligent-resume/app/api
+
+# API 自身配置全部读 WorkingDirectory 下的 .env
+# （application.yml 声明 spring.config.import=optional:file:../.env[.properties],optional:file:.env[.properties]）
+Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+# 刻意不启用 prod profile。
+# 原因：ProductionConfigurationValidator 标注了 @Profile("prod")，只要 prod 生效就强制
+# 要求 app.jwt.refresh-cookie.secure=true；而带 Secure 属性的 Cookie 在明文 HTTP 下
+# 不会被浏览器保存，会导致刷新会话静默失效。二者在设计上互斥，应用会直接拒绝启动
+# （IllegalStateException: COOKIE_SECURE must be true when the prod profile is active）。
+# 本测试环境为 HTTP 明文，因此使用默认 profile：actuator 暴露与 health 探针本就配置在
+# application.yml 基础段，连接串 / 密钥 / CORS / PDF 与百炼配置全部由 .env 显式提供，
+# 不依赖任何开发兜底值。若后续切换到 HTTPS，应改回 prod profile 并把 COOKIE_SECURE 设为 true。
+
+# 内存封顶：宿主 7.5G 且另有 MySQL(512M buffer pool) 与 Chromium，堆不得超过 1G
+ExecStart=/usr/bin/java \
+  -Xms256m -Xmx1024m -XX:MaxMetaspaceSize=256m \
+  -XX:+ExitOnOutOfMemoryError \
+  -Dfile.encoding=UTF-8 \
+  -Duser.timezone=Asia/Shanghai \
+  -jar /opt/intelligent-resume/app/api/intelligent-resume-server-0.1.0-SNAPSHOT.jar
+
+Restart=on-failure
+RestartSec=10
+SuccessExitStatus=143
+LimitNOFILE=65535
+
+# 日志走 journald（自带轮转）：journalctl -u intelligent-resume-api -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=intelligent-resume-api
+
+[Install]
+WantedBy=multi-user.target
