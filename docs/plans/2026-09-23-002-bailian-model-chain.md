@@ -210,7 +210,48 @@ BailianFailureClassifierTest.rateLimitAndServerError
 
 已补回归测试 `throttlingCodeContainingQuotaIsNotTreatedAsExhausted`。
 
-## 8. 变更记录
+## 8. 上线后实测发现并修复的缺陷（2026-09-23）
+
+模型链部署到 `8.160.165.227` 后，用真实业务链路（JD 选材 → 生成 → 确认）实测，发现并修复两个缺陷：
+
+### 8.1 `resume_ai_model_chain_available` 指标读数为 NaN
+
+线上 `/actuator/prometheus` 抓到的值是 `NaN`。
+
+**根因**：Micrometer 的 `Gauge` 对传入的 state 对象**只持弱引用**。`AppObservability`
+把它作为方法参数接收后就交给 `Gauge.builder(...)` 注册，方法返回后除了 gauge 的弱引用
+再无强引用，对象被 GC，gauge 读数退化为 `NaN`。
+
+**修复**：在 `AppObservability` 内用一个 `CopyOnWriteArrayList<IntSupplier>` 强引用住所有
+注册过的 supplier。数量与提供者同级，不会增长。
+
+> 这是 Micrometer 的经典陷阱。选在 `AppObservability` 修而不是在调用方修，
+> 是为了让后续任何新调用方都不必再知道这个约束。
+
+### 8.2 模型链总耗时无上界，会长时间占住 worker 线程
+
+实测：`JOB_GENERATION` 在链首 `qwen3.8-max` 上读超时 **整整 300s**（`20:12:38` 发起、
+`20:17:38` 超时，分秒不差），随后顺延到 `glm-5.3` 又跑了 163s 才产出草稿。
+
+单次读超时（300s）× 链长度（8）= **最坏 40 分钟**。而 worker 处理单条任务期间会一直
+占住线程，意味着这 40 分钟内**后续所有 AI 任务都在排队**（head-of-line blocking）。
+
+**修复**：新增 `app.ai.bailian.chain-total-budget-seconds`（env `AI_CHAIN_TOTAL_BUDGET_S`，
+默认 **600s**）。每开始一次新的顺延前检查已耗时，超出预算即停止并快速失败（`retryable=true`），
+交由 worker 的既有重试机制稍后再跑。
+
+- 默认 600s 的取值依据：允许「一次读超时（300s）+ 一次成功重试」仍能走完
+  （实测场景 300s + 163s = 463s 仍可通过），同时把最坏阻塞从 2400s 压到约 600s。
+- 下限由构造器保证：`max(配置值, readTimeout)`，避免配得比单次读超时还小。
+
+### 8.3 附带澄清：租约不会被长时间调用拖垮
+
+一度担心「读超时 300s > 租约 180s」会导致另一个 worker 抢占同一任务、造成重复计费。
+核实后**不成立**：`TaskExecutionService.startHeartbeat()` 每 `leaseSeconds/3`（60s）
+在独立调度线程上续租，即使 worker 线程正阻塞在 provider 调用中也能续租。
+实测 `lease_expires_at` 被续到 `created + 601s`，与心跳行为一致。
+
+## 9. 变更记录
 
 | 日期 | 变更 | 原因 |
 | --- | --- | --- |

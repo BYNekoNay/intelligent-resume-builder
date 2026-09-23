@@ -155,7 +155,12 @@ BAILIAN_MODEL_CHAIN=qwen3.8-max,glm-5.3,qwen3.8-27b,qwen3.8-2.4t-a95b,qwen3.8-ma
 BAILIAN_READ_TIMEOUT_S=300
 AI_CHAIN_QUOTA_COOLDOWN_S=1800
 AI_CHAIN_TRANSIENT_COOLDOWN_S=60
+AI_CHAIN_TOTAL_BUDGET_S=600
 ```
+
+> **链总预算（`AI_CHAIN_TOTAL_BUDGET_S`）**：单个模型的读超时（默认 300s）乘以链长度会放大成数十分钟，
+> 而 worker 处理单条任务期间会一直占住线程，后续 AI 任务会排队阻塞。超出总预算即停止顺延并快速失败，
+> 由 worker 的重试机制稍后再跑。取值应大于单次读超时、小于可接受的最坏排队时长。
 
 > **模型链（`BAILIAN_MODEL_CHAIN`）**：百炼的免费额度是**按模型**计量的，单模型额度耗尽会让全部 AI 功能一起失效。
 > 这里配置有序模型链，按序尝试、失败顺延；额度耗尽或模型下线的条目进入冷却期被跳过。
