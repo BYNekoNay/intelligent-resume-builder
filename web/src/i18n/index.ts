@@ -419,6 +419,7 @@ const messages: Record<Locale, MessageTree> = {
     },
     generationConfirm: {
       eyebrow: '人工审核', reviewStep: '逐项确认',
+      runningInBackground: '任务仍在后台执行', runningInBackgroundHint: '生成仍在进行，无需留在本页。可前往工作台继续办理，或稍后回到本页刷新查看。', goToWorkspace: '前往工作台继续',
       missingTaskId: '缺少任务 ID', aiGenerationFailed: 'AI 生成失败', loadTaskFailed: '加载任务失败',
       qualityReadyLabel: '资料依据完整', qualityReadyHint: '草稿内容均有已确认资料依据，可继续逐项审核。',
       qualityReviewLabel: '建议补充后审核', qualityReviewHint: '草稿可继续审核，但仍有 JD 要求或简历栏目尚未覆盖。',
@@ -431,7 +432,7 @@ const messages: Record<Locale, MessageTree> = {
       confirmFailed: '确认失败', rejectConfirm: '确定拒绝此草稿？拒绝后不会创建简历。',
       operationFailed: '操作失败', retryFailed: '重试失败',
       pageTitle: '确认 AI 草稿', pageSubtitle: '逐项审核生成内容，确认后将创建岗位简历',
-      generating: 'AI 正在生成你的岗位简历...', generatingHint: '通常需要 10-30 秒',
+      generating: 'AI 正在生成你的岗位简历...', generatingHint: '通常需要 1-3 分钟；简历较大时会更久，可离开本页稍后回来查看。',
       retryGenerate: '重试生成', qualitySummaryAriaLabel: '草稿质量摘要',
       reviewedCount: '项已处理', toggleQualityDetails: '展开或收起质量详情',
       sectionNavigator: '审核轨道', sectionNavigationAria: '草稿章节', attentionOnly: '只看待处理',
@@ -887,6 +888,7 @@ const messages: Record<Locale, MessageTree> = {
     },
     generationConfirm: {
       eyebrow: 'Human review', reviewStep: 'Item review',
+      runningInBackground: 'Still running in the background', runningInBackgroundHint: 'Generation is still in progress, so you can leave this page. Continue from your workspace, or come back and refresh later.', goToWorkspace: 'Continue in workspace',
       sectionWork: 'Work experience', sectionEducation: 'Education',
       sectionSkills: 'Skills', sectionProjects: 'Projects', sectionCertificates: 'Certificates',
       qualitySummaryTitle: 'Draft quality summary', hasSource: 'Sourced',
@@ -915,7 +917,7 @@ const messages: Record<Locale, MessageTree> = {
       pendingItemsError: '{count} items still require a decision.', confirmFailed: 'Confirmation failed',
       rejectConfirm: 'Reject this draft? No resume will be created.', operationFailed: 'Operation failed', retryFailed: 'Retry failed',
       pageTitle: 'Review AI draft', pageSubtitle: 'Review every generated item before creating the tailored resume.',
-      generating: 'AI is generating your resume...', generatingHint: 'Usually takes 10-30 seconds',
+      generating: 'AI is generating your resume...', generatingHint: 'Usually takes 1-3 minutes, longer for large resumes. You can leave this page and come back later.',
       reviewedCount: 'items reviewed', toggleQualityDetails: 'Expand or collapse quality details',
       sectionNavigator: 'Review track', sectionNavigationAria: 'Draft sections', attentionOnly: 'Needs attention only',
       noAttentionItems: 'No sections currently need attention', currentSection: 'Current section', itemUnit: 'items',

@@ -2,8 +2,7 @@
  * AI 任务轮询 composable。
  *
  * 统一处理 AI 任务状态轮询的公共逻辑：
- * - 每 N 秒轮询一次，达到最大尝试次数后触发超时回调（默认 150 次 × 2s = 5 分钟，
- *   对齐后端 BAILIAN_READ_TIMEOUT_S=300 的推理窗口）；
+ * - 每 N 秒轮询一次，达到最大尝试次数后触发超时回调（默认 300 次 × 2s = 10 分钟）；
  * - 轮询代数（epoch）机制：重新 start 或调用 stop 会使旧轮询立即失效，
  *   防止旧轮询污染新任务；
  * - 组件卸载时自动清理定时器，避免内存泄漏与卸载后的状态写入。
@@ -14,7 +13,20 @@
 import { onUnmounted } from 'vue'
 
 export const TASK_POLL_DEFAULT_INTERVAL_MS = 2_000
-export const TASK_POLL_DEFAULT_MAX_ATTEMPTS = 150
+
+/**
+ * 默认最大尝试次数（300 × 2s = 10 分钟）。
+ *
+ * **窗口取值依据**（2026-09-23 修订）：旧值 150（5 分钟）是按「单模型时代的
+ * `BAILIAN_READ_TIMEOUT_S=300`」对齐的。模型链上线后任务耗时结构变为
+ * 「链首读超时 + 顺延后续模型」，实测 `JOB_GENERATION` 需 477s（链首超时 300s +
+ * 顺延 glm-5.3 约 177s），5 分钟窗口会在任务仍在正常执行时提前耗尽。
+ *
+ * 新窗口对齐后端 `AI_CHAIN_TOTAL_BUDGET_S`（默认 600s），并预留排队余量 ——
+ * AI worker 按 id 串行执行，长任务后面的任务还需等待。窗口短于实际耗时会让用户
+ * 看到"仍在后台执行"却拿不到结果。
+ */
+export const TASK_POLL_DEFAULT_MAX_ATTEMPTS = 300
 export const TASK_POLL_DEFAULT_INITIAL_DELAY_MS = 1_500
 
 export interface TaskPollingOptions<T> {
@@ -24,7 +36,7 @@ export interface TaskPollingOptions<T> {
   fetchTask: (taskId: number) => Promise<T>
   /** 轮询间隔（毫秒），默认 2000 */
   intervalMs?: number
-  /** 最大尝试次数，默认 150（约 5 分钟，对齐后端 300s 推理窗口） */
+  /** 最大尝试次数，默认 300（约 10 分钟，对齐 AI_CHAIN_TOTAL_BUDGET_S 与串行排队余量） */
   maxAttempts?: number
   /** 首次轮询延迟（毫秒），默认 1500 */
   initialDelayMs?: number

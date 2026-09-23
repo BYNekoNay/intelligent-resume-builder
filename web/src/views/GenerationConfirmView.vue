@@ -53,14 +53,23 @@ async function loadTask(id: number) {
     if (task.value.status === 'SUCCESS' && task.value.confirmationStatus === 'PENDING') {
       resultJson.value = task.value.resultJson
       parseDraft(resultJson.value)
-    } else if (task.value.status === 'PENDING' || task.value.status === 'RUNNING') {
+      loading.value = false
+      return
+    }
+    if (task.value.status === 'PENDING' || task.value.status === 'RUNNING') {
+      // 任务仍在后台执行：**保持加载态**，由轮询驱动后续渲染。
+      // 原实现用 finally 统一把 loading 置回 false，导致 RUNNING/PENDING 时模板所有分支
+      // 都不匹配 → 内容区空白，直到任务完成为止（直接打开或刷新运行中的任务即触发）。
+      // 正确范式见 MaterialSelectionConfirmView#loadTask：逐分支显式结束加载态。
       startPolling(id)
-    } else if (task.value.status === 'FAILED') {
+      return
+    }
+    if (task.value.status === 'FAILED') {
       error.value = task.value.errorMessage || t('generationConfirm.aiGenerationFailed')
     }
+    loading.value = false
   } catch (e: any) {
     error.value = e.response?.data?.message || t('generationConfirm.loadTaskFailed')
-  } finally {
     loading.value = false
   }
 }
@@ -88,8 +97,10 @@ function startPolling(id: number) {
     },
     shouldStop: (next) => next.status === 'SUCCESS' || next.status === 'FAILED' || next.status === 'CANCELLED',
     onTimeout: () => {
+      // 窗口耗尽 ≠ 任务失败。后端很可能仍在正常执行（实测生成任务需 477s，
+      // 链首读超时 300s + 顺延后续模型）。此处置为"仍在后台执行"的软状态，
+      // 不写 error，避免渲染成失败卡片并诱导用户对运行中的任务重试（服务端会返回 400）。
       pollingTimedOut.value = true
-      error.value = t('common.taskTimeout')
       loading.value = false
     },
   })
@@ -196,8 +207,19 @@ async function handleRetry() {
       <p class="hint">{{ t('generationConfirm.generatingHint') }}</p>
     </div>
 
+    <!-- Still running in background: polling window elapsed but the task is not failed.
+         独立于失败分支渲染，且不提供「重新生成」—— 对运行中的任务重试会被服务端拒绝
+         （只有 FAILED 的任务可重试），提供必然失败的按钮会把用户带进死路。 -->
+    <div v-else-if="pollingTimedOut" class="status-card">
+      <div class="spinner-lg"></div>
+      <Sparkles :size="20" />
+      <p>{{ t('generationConfirm.runningInBackground') }}</p>
+      <p class="hint">{{ t('generationConfirm.runningInBackgroundHint') }}</p>
+      <RouterLink class="btn-primary" to="/">{{ t('generationConfirm.goToWorkspace') }}</RouterLink>
+    </div>
+
     <!-- Error / Failed -->
-    <div v-else-if="error && (pollingTimedOut || !task || task.status === 'FAILED' || task.status === 'CANCELLED')" class="status-card error">
+    <div v-else-if="error && (!task || task.status === 'FAILED' || task.status === 'CANCELLED')" class="status-card error">
       <p class="error-text">{{ error }}</p>
       <button class="btn-primary" @click="handleRetry">{{ t('generationConfirm.retryGenerate') }}</button>
     </div>

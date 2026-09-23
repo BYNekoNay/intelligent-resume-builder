@@ -117,6 +117,9 @@ function startPolling(initialize: boolean) {
     },
     shouldStop: (next) => next.status === 'SUCCESS' || next.status === 'FAILED' || next.status === 'CANCELLED',
     onTimeout: () => {
+      // 窗口耗尽 ≠ 任务失败。此处保留 error 文案（其内容本就是
+      // 「任务仍在后台执行，可刷新页面查看结果」，用于驱动错误面板渲染），
+      // 但不再让 `pollingTimedOut` 触发「重新选材」按钮 —— 见模板注释。
       pollingTimedOut.value = true
       error.value = t('common.taskTimeout')
       loading.value = false
@@ -209,7 +212,9 @@ function typeLabel(type: string) {
     <section v-else-if="error && (!task || task.status !== 'SUCCESS')" class="status-panel error-panel">
       <AlertTriangle :size="24" />
       <p>{{ error }}</p>
-      <button v-if="task?.status === 'FAILED' || pollingTimedOut" class="btn-primary" @click="retry"><RefreshCw :size="15" />{{ t('materialSelection.retrySelection') }}</button>
+      <!-- 窗口耗尽时**不**展示「重新选材」：任务仍在后端运行，对运行中任务重试会被服务端
+           拒绝（只有 FAILED 可重试）。让它落到下方 v-else 的「返回生成工作台」，给用户出路。 -->
+      <button v-if="task?.status === 'FAILED'" class="btn-primary" @click="retry"><RefreshCw :size="15" />{{ t('materialSelection.retrySelection') }}</button>
       <router-link v-else class="btn-secondary" to="/generate">{{ t('materialSelection.backToWorkspace') }}</router-link>
     </section>
 

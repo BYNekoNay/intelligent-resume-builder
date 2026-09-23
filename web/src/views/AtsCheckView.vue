@@ -13,7 +13,9 @@ import { mapAtsSection } from '@/resume/sectionRegistry'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const ATS_POLL_INTERVAL_MS = 1_500
-const ATS_POLL_MAX_ATTEMPTS = 200
+// 窗口 400 × 1.5s ≈ 10 分钟，与 useTaskPolling 默认窗口对齐（后端 AI_CHAIN_TOTAL_BUDGET_S=600s
+// 加串行排队余量）。旧值 200（300s）短于实测耗时 —— ATS 的 AI 分析实测需 338s（因排在生成任务之后）。
+const ATS_POLL_MAX_ATTEMPTS = 400
 const resumeVersionId = ref('')
 const jobDescriptionId = ref('')
 const result = ref<AtsCheckResponse | null>(null)
