@@ -15,7 +15,9 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.IntSupplier;
 
 /**
@@ -30,6 +32,8 @@ public class AppObservability {
     private final AiTaskRepository aiTaskRepository;
     private final ExportTaskRepository exportTaskRepository;
     private final Map<AiTaskType, Integer> quotaLimits = new EnumMap<>(AiTaskType.class);
+    /** Micrometer Gauge 对 state 只持弱引用，此处强引用住 supplier 防止指标读数退化为 NaN。 */
+    private final List<IntSupplier> gaugeStrongReferences = new CopyOnWriteArrayList<>();
 
     public AppObservability(MeterRegistry registry,
                             AiTaskRepository aiTaskRepository,
@@ -72,8 +76,13 @@ public class AppObservability {
      *
      * <p>由提供者在构造时调用一次；读数是惰性的，不给请求路径增加开销。
      * 该指标为 0 意味着 AI 能力实际不可用（所有模型额度耗尽或持续故障），应触发告警。
+     *
+     * <p><b>必须强引用住 supplier</b>：Micrometer 的 {@code Gauge} 对 state 对象只持**弱引用**，
+     * 若调用方传入的是临时 lambda / 方法引用，注册后该对象即可被 GC，指标读数会变成 {@code NaN}
+     * （线上实测踩到过）。这里显式持有强引用。supplier 数量与提供者数量同级，不会增长。
      */
     public void registerModelChainAvailabilityGauge(IntSupplier availableModels) {
+        gaugeStrongReferences.add(availableModels);
         Gauge.builder("resume_ai_model_chain_available", availableModels, IntSupplier::getAsInt)
                 .description("Number of AI model chain entries currently outside their cooldown window")
                 .register(registry);

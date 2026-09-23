@@ -143,6 +143,10 @@ app:
       chain-quota-cooldown-seconds: ${AI_CHAIN_QUOTA_COOLDOWN_S:1800}
       # 瞬时故障（超时、连接失败、5xx、限流、空响应）的冷却时长
       chain-transient-cooldown-seconds: ${AI_CHAIN_TRANSIENT_COOLDOWN_S:60}
+      # 整条链的总时间预算。单个模型的读超时（默认 300s）乘以链长度会放大成数十分钟，
+      # 而 worker 处理单条任务期间会一直占住线程，导致后续 AI 任务排队阻塞。
+      # 超出预算即停止顺延并快速失败，交 worker 重试机制稍后再跑。
+      chain-total-budget-seconds: ${AI_CHAIN_TOTAL_BUDGET_S:600}
       connect-timeout-seconds: ${BAILIAN_CONNECT_TIMEOUT_S:10}
       read-timeout-seconds: ${BAILIAN_READ_TIMEOUT_S:300}
     worker:

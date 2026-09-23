@@ -22,6 +22,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.function.LongSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -64,9 +65,15 @@ public class BailianAiProvider implements AiProvider {
     private final RestClient restClient;
     private final String apiKey;
     private final ModelChainState chain;
+    private final Duration chainTotalBudget;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final AppObservability observability;
     private final FailureCategoryClassifier failureCategoryClassifier;
+
+    /**
+     * 单调时钟，用于链总预算判定。抽成字段便于单测注入，避免测试里真的等待。
+     */
+    private LongSupplier nanoTime = System::nanoTime;
 
     public BailianAiProvider(
             @Value("${app.ai.bailian.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String baseUrl,
@@ -77,6 +84,7 @@ public class BailianAiProvider implements AiProvider {
             @Value("${app.ai.bailian.read-timeout-seconds:60}") int readTimeout,
             @Value("${app.ai.bailian.chain-quota-cooldown-seconds:1800}") long quotaCooldownSeconds,
             @Value("${app.ai.bailian.chain-transient-cooldown-seconds:60}") long transientCooldownSeconds,
+            @Value("${app.ai.bailian.chain-total-budget-seconds:600}") long chainTotalBudgetSeconds,
             com.fasterxml.jackson.databind.ObjectMapper objectMapper,
             AppObservability observability,
             FailureCategoryClassifier failureCategoryClassifier) {
@@ -89,6 +97,7 @@ public class BailianAiProvider implements AiProvider {
                 Duration.ofSeconds(quotaCooldownSeconds),
                 Duration.ofSeconds(transientCooldownSeconds),
                 Clock.systemUTC());
+        this.chainTotalBudget = Duration.ofSeconds(Math.max(chainTotalBudgetSeconds, readTimeout));
 
         // 使用 JDK HttpClient 请求工厂：HttpURLConnection 默认强制 Accept-Encoding: gzip，
         // 百炼对 gzip 响应会以 application/octet-stream 返回导致 RestClient 无法反序列化；
@@ -110,8 +119,9 @@ public class BailianAiProvider implements AiProvider {
         }
 
         log.info("BailianAiProvider initialized: baseUrl={}, modelChain={}, connectTimeout={}s, readTimeout={}s, "
-                        + "quotaCooldown={}s, transientCooldown={}s",
-                baseUrl, chain.models(), connectTimeout, readTimeout, quotaCooldownSeconds, transientCooldownSeconds);
+                        + "quotaCooldown={}s, transientCooldown={}s, chainTotalBudget={}s",
+                baseUrl, chain.models(), connectTimeout, readTimeout, quotaCooldownSeconds, transientCooldownSeconds,
+                chainTotalBudget.toSeconds());
     }
 
     /**
@@ -158,6 +168,11 @@ public class BailianAiProvider implements AiProvider {
     /** 供健康检查与排障读取模型链快照，不含任何敏感信息。 */
     public List<String> modelChain() {
         return chain.models();
+    }
+
+    /** 测试用：替换单调时钟，用于验证链总预算而无需在测试里真实等待。 */
+    void useNanoTimeSupplier(LongSupplier supplier) {
+        this.nanoTime = Objects.requireNonNull(supplier);
     }
 
     @Override
@@ -216,10 +231,24 @@ public class BailianAiProvider implements AiProvider {
         AiFailureCategory lastCategory = AiFailureCategory.NONE;
         String lastMessage = null;
         boolean sawQuotaExhausted = false;
+        boolean budgetExhausted = false;
+        int attempted = 0;
+        long chainStartedAt = nanoTime.getAsLong();
 
         for (int index = 0; index < candidates.size(); index++) {
+            // 链总预算：单个模型的读超时（默认 300s）乘以链长度会放大成数十分钟，
+            // 而 worker 单条任务会一直占住线程，导致后续 AI 任务排队阻塞。
+            // 超出预算即停止顺延并快速失败，交由 worker 的既有重试机制后续再跑。
+            if (index > 0 && elapsedSecondsSince(chainStartedAt) >= chainTotalBudget.toSeconds()) {
+                budgetExhausted = true;
+                log.warn("Model chain total budget exhausted, stopping fallback: taskType={}, attempted={}, "
+                        + "budget={}s", ctx.type(), attempted, chainTotalBudget.toSeconds());
+                break;
+            }
+
             String model = candidates.get(index);
             ModelOutcome outcome = invoker.invoke(model);
+            attempted++;
 
             if (outcome.result().success()) {
                 if (index > 0) {
@@ -260,9 +289,22 @@ public class BailianAiProvider implements AiProvider {
 
         AiFailureCategory aggregateCategory = sawQuotaExhausted
                 ? AiFailureCategory.QUOTA_EXHAUSTED : lastCategory;
-        log.warn("Model chain exhausted: taskType={}, attempted={}, aggregateCategory={}, availableAfter={}",
-                ctx.type(), candidates.size(), aggregateCategory, chain.availableCount());
-        return AiCallResult.fail(buildAggregateMessage(candidates.size(), lastMessage), true, requestId);
+        log.warn("Model chain exhausted: taskType={}, attempted={}, budgetExhausted={}, aggregateCategory={}, "
+                        + "availableAfter={}",
+                ctx.type(), attempted, budgetExhausted, aggregateCategory, chain.availableCount());
+        String message = budgetExhausted
+                ? "百炼模型链已达总时间预算（已尝试 " + attempted + " 个模型，预算 "
+                        + chainTotalBudget.toSeconds() + "s）；" + describeLastMessage(lastMessage)
+                : buildAggregateMessage(attempted, lastMessage);
+        return AiCallResult.fail(message, true, requestId);
+    }
+
+    private long elapsedSecondsSince(long startedAtNanos) {
+        return Duration.ofNanos(nanoTime.getAsLong() - startedAtNanos).toSeconds();
+    }
+
+    private String describeLastMessage(String lastMessage) {
+        return lastMessage == null || lastMessage.isBlank() ? "无末次错误信息" : "末次失败：" + lastMessage;
     }
 
     private String buildAggregateMessage(int attempted, String lastMessage) {

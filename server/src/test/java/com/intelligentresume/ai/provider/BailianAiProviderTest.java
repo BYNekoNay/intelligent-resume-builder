@@ -36,6 +36,7 @@ class BailianAiProviderTest {
                 60,
                 1800,
                 60,
+                600,
                 objectMapper, observability, failureCategoryClassifier
         );
     }
@@ -62,7 +63,7 @@ class BailianAiProviderTest {
                 "",
                 "qwen-plus",
                 "",
-                10, 60, 1800, 60, objectMapper, observability, failureCategoryClassifier
+                10, 60, 1800, 60, 600, objectMapper, observability, failureCategoryClassifier
         );
         AiCallContext ctx = new AiCallContext(AiTaskType.RESUME_OPTIMIZE, Map.of());
         AiCallResult result = noKeyProvider.call(ctx);

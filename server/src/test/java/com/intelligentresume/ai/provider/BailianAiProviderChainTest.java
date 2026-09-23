@@ -9,9 +9,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -52,7 +54,7 @@ class BailianAiProviderChainTest {
                 "test-api-key",
                 "fallback-model",
                 chain,
-                10, 60, 1800, 60,
+                10, 60, 1800, 60, 600,
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
     }
 
@@ -62,7 +64,17 @@ class BailianAiProviderChainTest {
                 "test-api-key",
                 "fallback-model",
                 chain,
-                10, 60, quotaCooldownSeconds, 0,
+                10, 60, quotaCooldownSeconds, 0, 600,
+                new ObjectMapper(), observability, new FailureCategoryClassifier());
+    }
+
+    private BailianAiProvider providerWithBudget(String chain, long budgetSeconds) {
+        return new BailianAiProvider(
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "test-api-key",
+                "fallback-model",
+                chain,
+                10, 60, 1800, 60, budgetSeconds,
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
     }
 
@@ -223,6 +235,40 @@ class BailianAiProviderChainTest {
     }
 
     @Test
+    @DisplayName("链总预算耗尽后停止顺延：避免单条请求长时间占用 worker 线程")
+    void stopsFallingBackWhenTotalBudgetExhausted() {
+        BailianAiProvider provider = providerWithBudget("m1,m2,m3", 60);
+        // 每读一次时钟前进 61s，模拟第一次尝试已耗掉全部预算
+        AtomicLong fakeClock = new AtomicLong(0);
+        provider.useNanoTimeSupplier(() -> fakeClock.getAndAdd(Duration.ofSeconds(61).toNanos()));
+
+        AiCallResult result = provider.callChain(CTX, "req-1", model -> {
+            invoked.add(model);
+            return quotaExhausted();
+        });
+
+        assertEquals(List.of("m1"), invoked, "预算耗尽后不应继续尝试 m2 / m3");
+        assertFalse(result.success());
+        assertTrue(result.retryable(), "应可重试，交由 worker 稍后再跑");
+        assertTrue(result.errorMessage().contains("预算"),
+                "错误信息应说明是预算耗尽而非模型全部失败: " + result.errorMessage());
+    }
+
+    @Test
+    @DisplayName("预算充足时不影响正常的失败顺延")
+    void budgetDoesNotBlockFastFallback() {
+        BailianAiProvider provider = providerWithBudget("m1,m2", 600);
+
+        AiCallResult result = provider.callChain(CTX, "req-1", model -> {
+            invoked.add(model);
+            return "m1".equals(model) ? quotaExhausted() : succeeded();
+        });
+
+        assertTrue(result.success(), "额度耗尽属于快速失败，预算不应阻止顺延");
+        assertEquals(List.of("m1", "m2"), invoked);
+    }
+
+    @Test
     @DisplayName("模型链为空时退化为单模型，行为与改造前一致")
     void emptyChainFallsBackToSingleModel() {
         BailianAiProvider provider = providerWithChain("");
@@ -268,7 +314,7 @@ class BailianAiProviderChainTest {
         BailianAiProvider provider = new BailianAiProvider(
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "", "m1", "m1,m2",
-                10, 60, 1800, 60,
+                10, 60, 1800, 60, 600,
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
 
         assertFalse(provider.isAvailable());
@@ -281,7 +327,7 @@ class BailianAiProviderChainTest {
         BailianAiProvider provider = new BailianAiProvider(
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "", "m1", "m1,m2",
-                10, 60, 1800, 60,
+                10, 60, 1800, 60, 600,
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
 
         AiCallResult result = provider.call(CTX);
