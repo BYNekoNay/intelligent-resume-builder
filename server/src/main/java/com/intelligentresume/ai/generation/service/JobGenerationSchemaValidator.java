@@ -19,8 +19,9 @@ import java.util.HashSet;
  * <p>规则:
  * <ol>
  *   <li>顶层键必须是支持的简历内容模块</li>
+ *   <li>要求溯源的节点必须包含 _source/_sources 与 _pending 中的**恰好一个**；
+ *       basics / objective 由个人档案派生，不作此要求</li>
  *   <li>数组元素必须包含 _source 或 _pending 之一(互斥)</li>
- *   <li>Map 类型值若含 _source 和 _pending 则互斥校验</li>
  *   <li>序列化字节数 ≤ max-output-bytes</li>
  *   <li>schemaVersion 不匹配抛 VALIDATION</li>
  * </ol>
@@ -81,7 +82,17 @@ public class JobGenerationSchemaValidator {
             Map<String, Object> map = (Map<String, Object>) value;
             boolean hasSource = map.containsKey("_source") || map.containsKey("_sources");
             boolean hasPending = map.containsKey("_pending");
-            if (hasSource && hasPending) {
+            // 互斥只对「要求溯源」的节点生效。
+            //
+            // basics / objective 由已确认的个人档案派生，本就**不要求**携带溯源信息
+            //（见 validate 中对这两个键的 requiresProvenance=false，以及 existing test
+            // basicsMayUseConfirmedPersonalProfileWithoutMaterialProvenance）。
+            // 模型偶尔在同一对象上既写 _sources 又写 _pending 时，对这类节点并不构成契约破坏；
+            // 此前无条件互斥会把整份草稿判为失败，导致岗位简历生成整体不可用（线上实测踩到）。
+            //
+            // 严格性不变：要求溯源的节点下方 `requiresProvenance && hasSource == hasPending`
+            // 分支同样会拦住「两个都写」（此时 hasSource == hasPending 成立）。
+            if (requiresProvenance && hasSource && hasPending) {
                 throw new BusinessException(ErrorCode.VALIDATION,
                         path + ": _source 与 _pending 不能同时存在");
             }

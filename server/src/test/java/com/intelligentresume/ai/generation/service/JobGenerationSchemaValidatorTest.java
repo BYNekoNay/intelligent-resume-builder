@@ -137,4 +137,65 @@ class JobGenerationSchemaValidatorTest {
         assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
         assertTrue(ex.getMessage().contains("字节"));
     }
+
+    @Test
+    @DisplayName("basics 同时携带 _sources 与 _pending 时不再整体判失败")
+    void basicsWithBothSourceAndPendingIsAccepted() {
+        // 回归测试：basics 由个人档案派生，本就不要求溯源。模型偶尔两者都写曾导致
+        // 整份草稿被拒、岗位简历生成整体不可用。
+        Map<String, Object> draft = Map.of(
+                "basics", Map.of(
+                        "_sources", List.of(Map.of("materialId", 1L)),
+                        "_pending", Map.of("reason", "摘要缺少可引用材料"),
+                        "name", "测试用户", "summary", "后端工程师"),
+                "work", List.of(Map.of("_sources", List.of(Map.of("materialId", 1L)), "company", "测试公司"))
+        );
+
+        assertDoesNotThrow(() -> validator.validate(draft, "v1.0.0", Set.of(1L)));
+    }
+
+    @Test
+    @DisplayName("objective 同时携带 _sources 与 _pending 时同样不再判失败")
+    void objectiveWithBothSourceAndPendingIsAccepted() {
+        Map<String, Object> draft = Map.of(
+                "basics", Map.of("name", "测试用户"),
+                "objective", Map.of(
+                        "_sources", List.of(Map.of("materialId", 1L)),
+                        "_pending", Map.of("reason", "定位摘要待核实"),
+                        "summary", "目标岗位摘要"),
+                "work", List.of(Map.of("_sources", List.of(Map.of("materialId", 1L)), "company", "测试公司"))
+        );
+
+        assertDoesNotThrow(() -> validator.validate(draft, "v1.0.0", Set.of(1L)));
+    }
+
+    @Test
+    @DisplayName("要求溯源的节点同时携带 _sources 与 _pending 仍必须拒绝（严格性不变）")
+    void provenanceNodeWithBothSourceAndPendingIsStillRejected() {
+        Map<String, Object> draft = Map.of(
+                "basics", Map.of("name", "测试用户"),
+                "work", List.of(Map.of(
+                        "_sources", List.of(Map.of("materialId", 1L)),
+                        "_pending", Map.of("reason", "同时给了两个"),
+                        "company", "测试公司"))
+        );
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> validator.validate(draft, "v1.0.0", Set.of(1L)));
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("_source"), "错误信息应指向溯源标记冲突: " + ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("要求溯源的节点两个标记都没有仍必须拒绝")
+    void provenanceNodeWithoutAnyMarkerIsStillRejected() {
+        Map<String, Object> draft = Map.of(
+                "basics", Map.of("name", "测试用户"),
+                "work", List.of(Map.of("company", "测试公司"))
+        );
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> validator.validate(draft, "v1.0.0", Set.of(1L)));
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+    }
 }

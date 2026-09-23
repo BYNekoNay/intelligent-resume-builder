@@ -63,7 +63,7 @@ public class JobGenerationPromptBuilder {
                 Rules:
                 1. Only generate content based on the provided materials. Do NOT fabricate any experience, skills, or education.
                 2. Do NOT call any tools or access any URLs.
-                3. Every output entry MUST include a "_sources" array of {materialId, materialType} objects, OR a "_pending" field explaining what is missing.
+                3. Every output entry MUST include a "_sources" array of {materialId, materialType} objects, OR a "_pending" field explaining what is missing. NEVER include both "_sources" and "_pending" on the same object — pick exactly one.
                 4. If materials are insufficient for a section, use "_pending" with a clear reason.
                 5. IMPORTANT: Write all descriptions in the SAME LANGUAGE as the source materials. If materials are in English, write in English. If in Chinese, write in Chinese.
                 6. Output valid JSON only. No markdown, no explanations outside the JSON.
@@ -78,6 +78,7 @@ public class JobGenerationPromptBuilder {
                 Requirements for each entry:
                 - Include "_sources": [{"materialId": <ID>, "materialType": "<TYPE>"}] to cite every source material actually used.
                 - OR include "_pending": {"reason": "<explanation>"} if data is missing.
+                - On any single object, include exactly one of "_sources" / "_pending". Never both, never neither.
                 - Prioritize fixed materials, then preferred materials, then candidate materials.
                 - Time ranges: for work, education, and project entries, use "startDate" and "endDate" (formats "YYYY-MM" or "YYYY") only when the source material provides exact bounds. When the material only carries a free-form "period" (for example "2021 - present" or a quarter), copy that period value into the output entry and Do NOT invent a structured date range from it.
                 - ACHIEVEMENT materials: write their supported result into the linked work/project description or highlights.
