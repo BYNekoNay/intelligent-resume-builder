@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.function.IntSupplier;
 
 /**
  * Centralizes operational metrics and deliberately restricts every tag to a
@@ -51,6 +52,31 @@ public class AppObservability {
                 .tags("task_type", taskType.name(), "provider", provider, "model", model, "outcome", outcome)
                 .register(registry)
                 .record(duration);
+    }
+
+    /**
+     * 记录一次模型链内的降级：某个模型失败后顺延到下一个候选。
+     *
+     * <p>标签只含模型名与任务类型，不含任何业务输入或用户标识。
+     */
+    public void recordModelChainFallback(AiTaskType taskType, String fromModel, String toModel) {
+        Counter.builder("resume_ai_model_chain_fallbacks")
+                .description("Number of times the AI model chain fell back from one model to the next")
+                .tags("task_type", taskType.name(), "from_model", fromModel, "to_model", toModel)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 注册「模型链当前可用模型数」gauge。
+     *
+     * <p>由提供者在构造时调用一次；读数是惰性的，不给请求路径增加开销。
+     * 该指标为 0 意味着 AI 能力实际不可用（所有模型额度耗尽或持续故障），应触发告警。
+     */
+    public void registerModelChainAvailabilityGauge(IntSupplier availableModels) {
+        Gauge.builder("resume_ai_model_chain_available", availableModels, IntSupplier::getAsInt)
+                .description("Number of AI model chain entries currently outside their cooldown window")
+                .register(registry);
     }
 
     public void recordAiTaskAttempt(AiTaskType taskType, String outcome,

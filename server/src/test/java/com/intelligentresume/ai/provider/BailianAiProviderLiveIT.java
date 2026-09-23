@@ -41,7 +41,7 @@ class BailianAiProviderLiveIT {
         String model = environmentOrDefault("BAILIAN_MODEL", "qwen-plus");
         ObjectMapper objectMapper = new ObjectMapper();
         BailianAiProvider provider = new BailianAiProvider(
-                baseUrl, apiKey, model, 10, 60, objectMapper,
+                baseUrl, apiKey, model, "", 10, 60, 1800, 60, objectMapper,
                 mock(AppObservability.class), new FailureCategoryClassifier());
         CommunicationDraftRepository repository = mock(CommunicationDraftRepository.class);
         when(repository.findFirstByUserIdAndResumeVersionIdAndJobDescriptionIdAndTypeAndDraftText(
@@ -91,7 +91,10 @@ class BailianAiProviderLiveIT {
                 baseUrl,
                 apiKey,
                 model,
+                "",
                 10,
+                60,
+                1800,
                 60,
                 objectMapper,
                 mock(AppObservability.class),

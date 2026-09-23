@@ -41,4 +41,15 @@ public class AiProviderRegistry {
     public boolean hasAvailableProvider() {
         return providers.stream().anyMatch(AiProvider::isAvailable);
     }
+
+    /**
+     * 全部提供者当前可调度的模型/端点总数，供系统健康检查使用。
+     *
+     * <p>与 {@link #hasAvailableProvider()} 的区别：后者只回答「配没配密钥」，
+     * 本方法回答「现在真的能不能调」。百炼模型链在全部模型额度耗尽时会返回 0，
+     * 此时 AI 能力实际不可用，健康检查应据此报 DEGRADED。
+     */
+    public int availableModelCount() {
+        return providers.stream().mapToInt(AiProvider::availableModelCount).sum();
+    }
 }

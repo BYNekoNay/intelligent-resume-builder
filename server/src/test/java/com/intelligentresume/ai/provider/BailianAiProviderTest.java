@@ -31,7 +31,10 @@ class BailianAiProviderTest {
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "test-api-key",
                 "qwen-plus",
+                "",
                 10,
+                60,
+                1800,
                 60,
                 objectMapper, observability, failureCategoryClassifier
         );
@@ -58,7 +61,8 @@ class BailianAiProviderTest {
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "",
                 "qwen-plus",
-                10, 60, objectMapper, observability, failureCategoryClassifier
+                "",
+                10, 60, 1800, 60, objectMapper, observability, failureCategoryClassifier
         );
         AiCallContext ctx = new AiCallContext(AiTaskType.RESUME_OPTIMIZE, Map.of());
         AiCallResult result = noKeyProvider.call(ctx);
@@ -145,11 +149,10 @@ class BailianAiProviderTest {
     }
 
     @Test
-    @DisplayName("JOB_GENERATION 使用上游传入的三段式 prompt")
+    @DisplayName("JOB_GENERATION 使用上游传入的三段式 prompt（不发起网络调用）")
     void jobGenerationUsesUpstreamPrompt() {
-        // 验证 buildMessages 逻辑:当 input 包含 _systemPrompt 时使用上游 prompt
-        // 由于 buildMessages 是 private,通过 call() 的行为间接验证
-        // 这里我们验证当 API key 有效但网络不通时的错误处理
+        // 直接断言 prompt 组装结果。改造前这里靠调用 call() 间接验证并会真实联网，
+        // 造成单测依赖外网；改为对包级可见的 buildMessages 做确定性断言。
         Map<String, Object> input = new HashMap<>();
         input.put("_systemPrompt", "你是简历助手");
         input.put("_taskPrompt", "生成简历");
@@ -157,10 +160,15 @@ class BailianAiProviderTest {
         input.put("jobDescriptionId", 1L);
 
         AiCallContext ctx = new AiCallContext(AiTaskType.JOB_GENERATION, input);
-        // 由于无法连接 API,会返回网络错误(但证明代码路径不抛异常)
-        AiCallResult result = provider.call(ctx);
-        // 可能成功(如果网络通)或失败(网络不通),但不应抛未捕获异常
-        assertNotNull(result);
-        assertNotNull(result.providerRequestId());
+        List<Map<String, String>> messages = provider.buildMessages(ctx);
+
+        assertEquals(2, messages.size());
+        assertEquals("system", messages.get(0).get("role"));
+        assertEquals("你是简历助手", messages.get(0).get("content"));
+        assertEquals("user", messages.get(1).get("role"));
+        String userContent = messages.get(1).get("content");
+        assertTrue(userContent.contains("生成简历"), "应包含任务 prompt");
+        assertTrue(userContent.contains("===DATA==="), "应包含数据 prompt 分隔符");
+        assertTrue(userContent.contains("测试数据"), "应包含数据内容");
     }
 }

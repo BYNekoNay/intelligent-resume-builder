@@ -133,8 +133,16 @@ app:
     bailian:
       base-url: ${BAILIAN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
       api-key: ${BAILIAN_API_KEY:}
-      # 已真实验证的推理模型：qwen3.7-plus-2026-05-26（通过 BAILIAN_MODEL 配置）
+      # 单模型候选；当 model-chain 为空时退化为单模型行为（向后兼容）。
       model: ${BAILIAN_MODEL:qwen-plus}
+      # 模型链：有序、逗号分隔。按序尝试，失败顺延；额度耗尽/模型下线的条目进入冷却期被跳过。
+      # 百炼免费额度按模型计量，单模型耗尽会导致全部 AI 功能一起失效，故默认用链。
+      # ⚠ 不要复用历史已废弃的 BAILIAN_MODELS —— 部分 .env 中仍残留该僵尸变量，复用会被静默激活。
+      model-chain: ${BAILIAN_MODEL_CHAIN:}
+      # 额度类失效（额度耗尽、模型下线）的冷却时长；额度不会短期恢复，故取较长值
+      chain-quota-cooldown-seconds: ${AI_CHAIN_QUOTA_COOLDOWN_S:1800}
+      # 瞬时故障（超时、连接失败、5xx、限流、空响应）的冷却时长
+      chain-transient-cooldown-seconds: ${AI_CHAIN_TRANSIENT_COOLDOWN_S:60}
       connect-timeout-seconds: ${BAILIAN_CONNECT_TIMEOUT_S:10}
       read-timeout-seconds: ${BAILIAN_READ_TIMEOUT_S:300}
     worker:
