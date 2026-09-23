@@ -66,7 +66,10 @@ step "2/5 上传源码包与远端执行器"
 ssh "${SSH_OPTS[@]}" "$REMOTE" \
   "mkdir -p $REMOTE_ROOT/src $REMOTE_ROOT/app $REMOTE_ROOT/logs $REMOTE_ROOT/backups"
 scp "${SSH_OPTS[@]}" "$TARBALL" "$REMOTE:$REMOTE_ROOT/resume-src.tar.gz"
-scp "${SSH_OPTS[@]}" "$REPO_ROOT/scripts/deploy-direct.remote.sh" "$REMOTE:$REMOTE_ROOT/deploy-direct.remote.sh"
+# 上传前剥离 CR：即使本机 git 把工作区文件转成了 CRLF，Linux 端 bash 也不会
+# 因 `$'\r': command not found` 而执行失败（.gitattributes 已声明 *.sh eol=lf，此处是二次保险）
+sed 's/\r$//' "$REPO_ROOT/scripts/deploy-direct.remote.sh" > "$TMP_BASE/deploy-direct.remote.sh"
+scp "${SSH_OPTS[@]}" "$TMP_BASE/deploy-direct.remote.sh" "$REMOTE:$REMOTE_ROOT/deploy-direct.remote.sh"
 echo "上传完成"
 
 step "3/5 解压源码"

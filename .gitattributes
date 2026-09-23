@@ -1,0 +1,34 @@
+# 统一换行符策略。
+#
+# 背景：仓库运行在 Windows 上开发、Linux 上部署。若依赖 core.autocrlf=true，
+# 每次 checkout 都会把 .sh / .service / nginx 配置在工作区转成 CRLF，导致：
+#   - shell 脚本在 Linux 上执行报 `$'\r': command not found`；
+#   - systemd 单元与 nginx 配置出现不可见字符。
+# 因此对这些必须保持 LF 的文件显式声明，不再依赖本机 git 配置。
+
+*.sh            text eol=lf
+*.service       text eol=lf
+*.conf          text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+# Windows 批处理与 PowerShell 保持 CRLF
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# Dockerfile 必须 LF
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+
+# 二进制文件不做换行符转换
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.pdf           binary
+*.jar           binary
+*.zip           binary
+*.woff          binary
+*.woff2         binary
