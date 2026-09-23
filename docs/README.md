@@ -57,6 +57,7 @@
 | [2026-07-29-communication-ai-generation-report](./reviews/2026-07-29-communication-ai-generation-report.md) | 岗位沟通文案 AI 生成 |
 | [2026-08-11-business-flow-audit](./reviews/2026-08-11-business-flow-audit.md) | 业务流程与代码审查 |
 | [2026-08-11-code-review](./reviews/2026-08-11-code-review.md) | 代码评审结果 |
+| [2026-09-23-remote-ai-smoke-report](./reviews/2026-09-23-remote-ai-smoke-report.md) | 远程 AI 全链路冒烟：7 类 AI 任务实测结果、模型链线上降级证据、发现的缺陷与待决策项 |
 | [agent-frontend-regression-review](./reviews/agent-frontend-regression-review.md) | 前端回归审查 |
 | [agent-testing-evidence-review](./reviews/agent-testing-evidence-review.md) | 测试与证据回归审查 |
 
