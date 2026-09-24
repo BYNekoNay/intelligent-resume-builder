@@ -6,6 +6,7 @@
 > | --- | --- |
 > | `docs/` 根 | **当前生效**的操作手册，随代码同步更新 |
 > | `docs/{plans,reviews,research,ideation,diagrams}/` | 按产出类型归类的项目档案（不可变为主，只附录） |
+> | `docs/decisions/` | **决策登记册**：ADR（不可变，纠正靠追加新 ADR）+ 悬而未决登记册（只追加 + 就地关闭） |
 > | `docs/archive/` | 从当前手册中析出的历史日志 |
 > | `docs/01-13/`、`docs/agent-tasks/` | 早期 MVP 历史资料，**只作追溯**，不是当前实现契约 |
 
@@ -42,6 +43,8 @@
 | [2026-09-01-001-optimization-diagnosis](./plans/2026-09-01-001-optimization-diagnosis.md) | 优化诊断报告 |
 | [2026-09-06-001-review](./plans/2026-09-06-001-review.md) | 102 项改动提交前逐文件架构审查 |
 | [2026-09-23-001-direct-upload-deployment](./plans/2026-09-23-001-direct-upload-deployment.md) | 直接上传部署方案与已确认决策 |
+| [2026-09-23-002-bailian-model-chain](./plans/2026-09-23-002-bailian-model-chain.md) | 百炼模型链方案：8 模型实测、链式调度设计、已确认决策与上线后发现的缺陷 |
+| [2026-09-23-003-known-issues-remediation](./plans/2026-09-23-003-known-issues-remediation.md) | 已知问题系统梳理：复现证据、根因与影响范围、修改方案、S1~S6 实施计划 |
 
 ### 2.2 reviews/ —— 审计、评审与实施报告
 
@@ -61,7 +64,18 @@
 | [agent-frontend-regression-review](./reviews/agent-frontend-regression-review.md) | 前端回归审查 |
 | [agent-testing-evidence-review](./reviews/agent-testing-evidence-review.md) | 测试与证据回归审查 |
 
-### 2.3 research/ —— 调研与对标
+### 2.3 decisions/ —— 决策登记册（ADR 与悬而未决项）
+
+| 文档 | 内容 |
+| --- | --- |
+| [README](./decisions/README.md) | 目录约定：ADR 不可变、登记册只追加 + 就地关闭 |
+| [OPEN-DECISIONS](./decisions/OPEN-DECISIONS.md) | 悬而未决登记册（I2 领取策略 / I3 生成耗时 / I4 告警阈值等） |
+| [ADR-001](./decisions/ADR-001-bailian-quota-is-per-model.md) | 百炼免费额度按**模型**维度独立计量 |
+| [ADR-002](./decisions/ADR-002-model-chain-fallback-with-total-budget.md) | 模型链采用严格降级 + 总时间预算 |
+| [ADR-003](./decisions/ADR-003-provenance-marker-exclusivity-scope.md) | 溯源标记互斥只适用于要求溯源的节点 |
+| [ADR-004](./decisions/ADR-004-ai-poll-window-aligned-with-chain-budget.md) | 前端 AI 轮询窗口对齐链路总预算 |
+
+### 2.4 research/ —— 调研与对标
 
 | 文档 | 内容 |
 | --- | --- |
@@ -70,20 +84,20 @@
 | [2026-07-27-ats-friendly-resume-templates](./research/2026-07-27-ats-friendly-resume-templates.md) | ATS 友好简历模板调研 |
 | [2026-07-28-job-application-product-benchmark](./research/2026-07-28-job-application-product-benchmark.md) | 求职工作流竞品研究与采用记录 |
 
-### 2.4 ideation/ —— 优化构想与错误审计
+### 2.5 ideation/ —— 优化构想与错误审计
 
 | 文档 | 内容 |
 | --- | --- |
 | [2026-09-04-project-optimization-ideation](./ideation/2026-09-04-project-optimization-ideation.md) | 已闭环缺陷清单、仍存在的缺口与后续优化候选（当前唯一一份） |
 
-### 2.5 diagrams/ —— 图表源文件
+### 2.6 diagrams/ —— 图表源文件
 
 | 文件 | 内容 |
 | --- | --- |
 | [class-diagram.mermaid](./diagrams/class-diagram.mermaid) | 领域类图 |
 | [sequence-diagram.mermaid](./diagrams/sequence-diagram.mermaid) | 关键流程时序图 |
 
-### 2.6 archive/ —— 历史归档
+### 2.7 archive/ —— 历史归档
 
 | 文档 | 内容 |
 | --- | --- |
@@ -142,6 +156,7 @@
 
 1. **当前操作流程只更新第 1 节列出的文档**，不要写进历史资料。
 2. `plans/`、`reviews/`、`research/`、`ideation/` 以**附录式追加**为主；结论变化时新开一份并交叉引用，不要覆盖原结论。
+3. `decisions/` 下 ADR **正文不可改写**：纠正必须追加新 ADR 并给旧 ADR 标 `Superseded by`；悬而未决登记册**只追加 + 就地关闭**，RESOLVED 时补 `Resolution` 字段，不删原条目。
 3. 追加式的逐轮审计日志**不要写进当前手册**，放进 `archive/`，并保持单一时间线。
 4. 历史资料如需更新，仅用于保留决策背景，并在文首明确其历史状态。
 5. 所有文档统一 **UTF-8 + LF**（见根目录 `.gitattributes`）。
