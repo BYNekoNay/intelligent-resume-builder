@@ -24,6 +24,22 @@ groups:
         annotations:
           summary: AI provider server error rate is above 5%
           description: Bailian 5xx/超时/连接失败占比过高，通常表示上游故障或网络异常，请检查百炼服务状态。
+      - alert: AiModelChainExhausted
+        expr: resume_ai_model_chain_available <= 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: AI model chain has no schedulable model
+          description: 模型链上所有模型都处于冷却期（额度耗尽或持续故障），AI 能力实际不可用。此时健康检查的 ai-model-chain 项会变为 DOWN、整体状态 DEGRADED。请检查百炼各模型配额，并确认是否需要在 BAILIAN_MODEL_CHAIN 中补充可用模型。注意模型级免费额度是独立计量的，单个模型耗尽不会影响其余模型。
+      - alert: AiModelChainDegraded
+        expr: resume_ai_model_chain_available <= 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: AI model chain is running low on schedulable models
+          description: 可用模型数已降到 2 个及以下（默认链长 8）。额度类冷却长达 30 分钟，这是"全链失效"的先行信号，建议在链路彻底耗尽前补充模型或调整配额。
       - alert: PdfExportSuccessRateLow
         expr: sum(rate(resume_pdf_export_tasks_total{outcome="success"}[10m])) / clamp_min(sum(rate(resume_pdf_export_tasks_total[10m])), 0.001) < 0.90
         for: 10m
