@@ -74,6 +74,7 @@
 | [ADR-002](./decisions/ADR-002-model-chain-fallback-with-total-budget.md) | 模型链采用严格降级 + 总时间预算 |
 | [ADR-003](./decisions/ADR-003-provenance-marker-exclusivity-scope.md) | 溯源标记互斥只适用于要求溯源的节点 |
 | [ADR-004](./decisions/ADR-004-ai-poll-window-aligned-with-chain-budget.md) | 前端 AI 轮询窗口对齐链路总预算 |
+| [ADR-005](./decisions/ADR-005-disable-model-reasoning-for-generation.md) | 对生成类任务关闭模型推理（477s → 7s） |
 
 ### 2.4 research/ —— 调研与对标
 
