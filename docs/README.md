@@ -45,6 +45,7 @@
 | [2026-09-23-001-direct-upload-deployment](./plans/2026-09-23-001-direct-upload-deployment.md) | 直接上传部署方案与已确认决策 |
 | [2026-09-23-002-bailian-model-chain](./plans/2026-09-23-002-bailian-model-chain.md) | 百炼模型链方案：8 模型实测、链式调度设计、已确认决策与上线后发现的缺陷 |
 | [2026-09-23-003-known-issues-remediation](./plans/2026-09-23-003-known-issues-remediation.md) | 已知问题系统梳理：复现证据、根因与影响范围、修改方案、S1~S6 实施计划 |
+| [2026-09-24-001-browser-e2e-test-plan](./plans/2026-09-24-001-browser-e2e-test-plan.md) | **浏览器端端到端测试计划**（供具备视觉与操作能力的 AI 执行）：种子数据包、8 组用例、已知缺陷清单、严格回报格式 |
 
 ### 2.2 reviews/ —— 审计、评审与实施报告
 
