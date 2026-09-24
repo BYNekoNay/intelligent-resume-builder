@@ -113,10 +113,20 @@ final class BailianFailureClassifier {
     /**
      * 依据 HTTP 状态与错误码判定链式调度动作。
      *
-     * <p>保守取值说明：{@code InvalidParameter} 类错误一律 {@link Disposition#ABORT}。
-     * 因为它既可能是模型名非法（顺延有意义），也可能是我们构造的请求体非法
-     * （顺延会把同一个坏请求在 8 个模型上各发一遍）。后者代价更大，故取保守解。
-     * 模型下线/改名由 404 与 {@code Model.NotFound} 覆盖。
+     * <p><b>400 类为何顺延而非终止</b>（2026-09-24 依实测修正）：
+     * 曾把 400 归为 {@link Disposition#ABORT}，理由是"可能是我们构造的请求体非法，
+     * 顺延会把同一个坏请求在 8 个模型上各发一遍"。实测证明这个取舍是错的 ——
+     * 400 往往**是模型特有的**：
+     * <ul>
+     *   <li>{@code glm-5.3} 与 {@code qwen3.8-2.4t-a95b} 拒绝 {@code enable_thinking} 参数；</li>
+     *   <li>{@code kimi-k3} 干脆拒绝 {@code temperature} 参数（本应用的每次请求都带它）。</li>
+     * </ul>
+     * 若对 400 直接终止，链上任意一个模型的能力不匹配都会让**整条链死掉**，
+     * 而正确行为是跳过它、用下一个模型。代价也支持这个选择：400 在 1s 内返回，
+     * 即便真是我们的请求体有问题，走完 8 个模型也只需约 10s，远低于超时类失败。
+     *
+     * <p>仍保留 {@link Disposition#ABORT} 的只有**凭据类**失败：那是账号级问题，
+     * 对每个模型都会同样失败，顺延纯属浪费。
      */
     static Disposition dispositionFor(int status, String errorCode) {
         if (isCredentialFailure(errorCode)) {
@@ -139,7 +149,8 @@ final class BailianFailureClassifier {
             return Disposition.NEXT_MODEL_SHORT_COOLDOWN;
         }
         if (status >= 400) {
-            return Disposition.ABORT;
+            // 含 400 InvalidParameter：快速失败，跳过该模型继续尝试
+            return Disposition.NEXT_MODEL_SHORT_COOLDOWN;
         }
         return Disposition.NEXT_MODEL_SHORT_COOLDOWN;
     }

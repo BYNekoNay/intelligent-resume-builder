@@ -54,7 +54,7 @@ class BailianAiProviderChainTest {
                 "test-api-key",
                 "fallback-model",
                 chain,
-                10, 60, 1800, 60, 600,
+                10, 60, 1800, 60, 600, "JOB_GENERATION",
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
     }
 
@@ -64,7 +64,7 @@ class BailianAiProviderChainTest {
                 "test-api-key",
                 "fallback-model",
                 chain,
-                10, 60, quotaCooldownSeconds, 0, 600,
+                10, 60, quotaCooldownSeconds, 0, 600, "JOB_GENERATION",
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
     }
 
@@ -74,7 +74,7 @@ class BailianAiProviderChainTest {
                 "test-api-key",
                 "fallback-model",
                 chain,
-                10, 60, 1800, 60, budgetSeconds,
+                10, 60, 1800, 60, budgetSeconds, "JOB_GENERATION",
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
     }
 
@@ -314,7 +314,7 @@ class BailianAiProviderChainTest {
         BailianAiProvider provider = new BailianAiProvider(
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "", "m1", "m1,m2",
-                10, 60, 1800, 60, 600,
+                10, 60, 1800, 60, 600, "JOB_GENERATION",
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
 
         assertFalse(provider.isAvailable());
@@ -327,7 +327,7 @@ class BailianAiProviderChainTest {
         BailianAiProvider provider = new BailianAiProvider(
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "", "m1", "m1,m2",
-                10, 60, 1800, 60, 600,
+                10, 60, 1800, 60, 600, "JOB_GENERATION",
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
 
         AiCallResult result = provider.call(CTX);

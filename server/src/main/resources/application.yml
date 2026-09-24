@@ -147,6 +147,14 @@ app:
       # 而 worker 处理单条任务期间会一直占住线程，导致后续 AI 任务排队阻塞。
       # 超出预算即停止顺延并快速失败，交 worker 重试机制稍后再跑。
       chain-total-budget-seconds: ${AI_CHAIN_TOTAL_BUDGET_S:600}
+      # 对哪些任务类型关闭模型推理（逗号分隔）。
+      # 链上的模型是推理型模型，会把绝大部分输出预算花在【不可见的 reasoning token】上：
+      # 实测 JOB_GENERATION 的 completion_tokens=8575 中 reasoning_tokens=7539（88%），
+      # 单次耗时 477s（含链首 300s 超时）；关闭推理后 11~12s 完成，且 11 个章节齐全、
+      # 溯源契约校验通过 —— 提速约 40 倍。
+      # ⚠ 该参数并非所有模型都接受：实测 glm-5.3 / qwen3.8-2.4t-a95b / kimi-k3 会返回 400，
+      #   由「400 顺延」机制跳过它们（见 BailianFailureClassifier#dispositionFor）。
+      disable-thinking-task-types: ${AI_DISABLE_THINKING_TASK_TYPES:JOB_GENERATION}
       connect-timeout-seconds: ${BAILIAN_CONNECT_TIMEOUT_S:10}
       read-timeout-seconds: ${BAILIAN_READ_TIMEOUT_S:300}
     worker:

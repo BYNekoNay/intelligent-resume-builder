@@ -66,6 +66,7 @@ public class BailianAiProvider implements AiProvider {
     private final String apiKey;
     private final ModelChainState chain;
     private final Duration chainTotalBudget;
+    private final Set<AiTaskType> thinkingDisabledTaskTypes;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final AppObservability observability;
     private final FailureCategoryClassifier failureCategoryClassifier;
@@ -85,6 +86,7 @@ public class BailianAiProvider implements AiProvider {
             @Value("${app.ai.bailian.chain-quota-cooldown-seconds:1800}") long quotaCooldownSeconds,
             @Value("${app.ai.bailian.chain-transient-cooldown-seconds:60}") long transientCooldownSeconds,
             @Value("${app.ai.bailian.chain-total-budget-seconds:600}") long chainTotalBudgetSeconds,
+            @Value("${app.ai.bailian.disable-thinking-task-types:JOB_GENERATION}") String disableThinkingTaskTypes,
             com.fasterxml.jackson.databind.ObjectMapper objectMapper,
             AppObservability observability,
             FailureCategoryClassifier failureCategoryClassifier) {
@@ -92,6 +94,7 @@ public class BailianAiProvider implements AiProvider {
         this.objectMapper = objectMapper;
         this.observability = observability;
         this.failureCategoryClassifier = failureCategoryClassifier;
+        this.thinkingDisabledTaskTypes = parseTaskTypes(disableThinkingTaskTypes);
         this.chain = new ModelChainState(
                 parseChain(modelChain, model),
                 Duration.ofSeconds(quotaCooldownSeconds),
@@ -119,9 +122,9 @@ public class BailianAiProvider implements AiProvider {
         }
 
         log.info("BailianAiProvider initialized: baseUrl={}, modelChain={}, connectTimeout={}s, readTimeout={}s, "
-                        + "quotaCooldown={}s, transientCooldown={}s, chainTotalBudget={}s",
+                        + "quotaCooldown={}s, transientCooldown={}s, chainTotalBudget={}s, thinkingDisabledFor={}",
                 baseUrl, chain.models(), connectTimeout, readTimeout, quotaCooldownSeconds, transientCooldownSeconds,
-                chainTotalBudget.toSeconds());
+                chainTotalBudget.toSeconds(), thinkingDisabledTaskTypes);
     }
 
     /**
@@ -139,6 +142,30 @@ public class BailianAiProvider implements AiProvider {
         }
         if (parsed.isEmpty() && fallbackModel != null && !fallbackModel.isBlank()) {
             parsed.add(fallbackModel.trim());
+        }
+        return parsed;
+    }
+
+    /**
+     * 解析「关闭推理」的任务类型列表（逗号分隔）。
+     *
+     * <p>未知取值只告警并忽略，不阻断启动 —— 配置写错不应让服务起不来。
+     */
+    private static Set<AiTaskType> parseTaskTypes(String csv) {
+        Set<AiTaskType> parsed = EnumSet.noneOf(AiTaskType.class);
+        if (csv == null || csv.isBlank()) {
+            return parsed;
+        }
+        for (String name : csv.split(",")) {
+            String trimmed = name.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            try {
+                parsed.add(AiTaskType.valueOf(trimmed));
+            } catch (IllegalArgumentException e) {
+                log.warn("Ignoring unknown task type in app.ai.bailian.disable-thinking-task-types: {}", trimmed);
+            }
         }
         return parsed;
     }
@@ -168,6 +195,40 @@ public class BailianAiProvider implements AiProvider {
     /** 供健康检查与排障读取模型链快照，不含任何敏感信息。 */
     public List<String> modelChain() {
         return chain.models();
+    }
+
+    /** 对哪些任务类型关闭模型推理（可配置）。 */
+    Set<AiTaskType> thinkingDisabledTaskTypes() {
+        return thinkingDisabledTaskTypes;
+    }
+
+    /**
+     * 构建单次请求体。
+     *
+     * <p>包级可见以便单测断言请求体内容，无需发起真实网络调用。
+     *
+     * <p><b>关于 {@code enable_thinking=false}</b>（2026-09-24 实测引入）：
+     * 链上的模型是推理型模型，会把绝大部分输出预算花在**不可见的 reasoning token** 上。
+     * 实测 {@code JOB_GENERATION}：{@code completion_tokens=8575} 其中
+     * {@code reasoning_tokens=7539}（88%），耗时 477s；关闭推理后 **11~12s** 完成，
+     * 且 11 个章节齐全、溯源契约校验通过。
+     *
+     * <p>注意该参数**并非所有模型都接受**：实测 {@code glm-5.3}、{@code qwen3.8-2.4t-a95b}、
+     * {@code kimi-k3} 会返回 400。因此依赖"400 顺延"而非 ABORT 来跳过它们
+     * （见 {@link BailianFailureClassifier#dispositionFor}）。
+     */
+    Map<String, Object> buildRequestBody(String model, AiCallContext ctx,
+                                         List<Map<String, String>> messages) {
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("messages", messages);
+        requestBody.put("temperature",
+                ctx.type() == AiTaskType.INTERVIEW_COACH || ctx.type() == AiTaskType.ATS_ANALYSIS ? 0.1 : 0.7);
+        requestBody.put("response_format", Map.of("type", "json_object"));
+        if (thinkingDisabledTaskTypes.contains(ctx.type())) {
+            requestBody.put("enable_thinking", false);
+        }
+        return requestBody;
     }
 
     /** 测试用：替换单调时钟，用于验证链总预算而无需在测试里真实等待。 */
@@ -329,13 +390,7 @@ public class BailianAiProvider implements AiProvider {
 
         try {
             List<Map<String, String>> messages = buildMessages(ctx);
-
-            Map<String, Object> requestBody = new LinkedHashMap<>();
-            requestBody.put("model", model);
-            requestBody.put("messages", messages);
-            requestBody.put("temperature",
-                    ctx.type() == AiTaskType.INTERVIEW_COACH || ctx.type() == AiTaskType.ATS_ANALYSIS ? 0.1 : 0.7);
-            requestBody.put("response_format", Map.of("type", "json_object"));
+            Map<String, Object> requestBody = buildRequestBody(model, ctx, messages);
 
             Map<String, Object> response = restClient.post()
                     .uri("/chat/completions")

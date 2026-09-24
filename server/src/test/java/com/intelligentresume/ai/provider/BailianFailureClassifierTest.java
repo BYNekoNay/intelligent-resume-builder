@@ -116,12 +116,25 @@ class BailianFailureClassifierTest {
     }
 
     @Test
-    @DisplayName("其它 4xx 立即终止：很可能是我们自己的请求体有问题，顺延只会重复消耗额度")
-    void otherClientErrorsAbort() {
-        assertEquals(BailianFailureClassifier.Disposition.ABORT,
+    @DisplayName("其它 4xx 改为顺延：400 往往是模型特有的能力不匹配，终止会让整条链死掉")
+    void otherClientErrorsFallThrough() {
+        // 2026-09-24 依实测修正。原判为 ABORT，理由是"可能是我们的请求体非法"。
+        // 实测证明 400 常常是模型特有的：glm-5.3 / qwen3.8-2.4t-a95b 拒绝 enable_thinking，
+        // kimi-k3 干脆拒绝 temperature。若对 400 终止，任一模型能力不匹配都会让整条链失败。
+        // 代价也支持顺延：400 在 1s 内返回，走完 8 个模型约 10s。
+        assertEquals(BailianFailureClassifier.Disposition.NEXT_MODEL_SHORT_COOLDOWN,
                 BailianFailureClassifier.dispositionFor(400, "InvalidParameter"));
-        assertEquals(BailianFailureClassifier.Disposition.ABORT,
+        assertEquals(BailianFailureClassifier.Disposition.NEXT_MODEL_SHORT_COOLDOWN,
                 BailianFailureClassifier.dispositionFor(422, null));
+    }
+
+    @Test
+    @DisplayName("凭据类失败仍立即终止：账号级问题换模型也一样失败")
+    void credentialFailuresStillAbort() {
+        assertEquals(BailianFailureClassifier.Disposition.ABORT,
+                BailianFailureClassifier.dispositionFor(400, "InvalidApiKey"));
+        assertEquals(BailianFailureClassifier.Disposition.ABORT,
+                BailianFailureClassifier.dispositionFor(401, "Authentication"));
     }
 
     @Test

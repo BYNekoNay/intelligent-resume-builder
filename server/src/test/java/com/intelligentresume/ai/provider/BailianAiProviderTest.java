@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 
@@ -37,6 +38,7 @@ class BailianAiProviderTest {
                 1800,
                 60,
                 600,
+                "JOB_GENERATION",
                 objectMapper, observability, failureCategoryClassifier
         );
     }
@@ -63,7 +65,7 @@ class BailianAiProviderTest {
                 "",
                 "qwen-plus",
                 "",
-                10, 60, 1800, 60, 600, objectMapper, observability, failureCategoryClassifier
+                10, 60, 1800, 60, 600, "JOB_GENERATION", objectMapper, observability, failureCategoryClassifier
         );
         AiCallContext ctx = new AiCallContext(AiTaskType.RESUME_OPTIMIZE, Map.of());
         AiCallResult result = noKeyProvider.call(ctx);
@@ -171,5 +173,38 @@ class BailianAiProviderTest {
         assertTrue(userContent.contains("生成简历"), "应包含任务 prompt");
         assertTrue(userContent.contains("===DATA==="), "应包含数据 prompt 分隔符");
         assertTrue(userContent.contains("测试数据"), "应包含数据内容");
+    }
+
+    @Test
+    @DisplayName("生成类任务关闭模型推理：实测把该任务从 477s 降到约 12s")
+    void generationRequestsDisableThinking() {
+        // 链上是推理型模型，会把 88% 的输出预算花在不可见的 reasoning token 上
+        // （实测 JOB_GENERATION：completion=8575 中 reasoning=7539）。
+        Map<String, Object> body = provider.buildRequestBody(
+                "qwen3.8-max", new AiCallContext(AiTaskType.JOB_GENERATION, Map.of()), List.of());
+
+        assertEquals(Boolean.FALSE, body.get("enable_thinking"));
+        assertEquals(0.7, ((Number) body.get("temperature")).doubleValue(), "生成任务沿用 0.7");
+    }
+
+    @Test
+    @DisplayName("未列入关闭清单的任务类型不带推理开关")
+    void otherTasksKeepThinking() {
+        Map<String, Object> body = provider.buildRequestBody(
+                "qwen3.8-max", new AiCallContext(AiTaskType.ATS_ANALYSIS, Map.of()), List.of());
+
+        assertFalse(body.containsKey("enable_thinking"));
+        assertEquals(0.1, ((Number) body.get("temperature")).doubleValue(), "ATS 仍用低温度");
+    }
+
+    @Test
+    @DisplayName("关闭推理的任务类型可配置，未知取值只忽略不阻断")
+    void thinkingDisableListIsConfigurable() {
+        BailianAiProvider custom = new BailianAiProvider(
+                "https://dashscope.aliyuncs.com/compatible-mode/v1", "test-api-key", "m", "",
+                10, 60, 1800, 60, 600, "ATS_ANALYSIS,NOT_A_REAL_TYPE",
+                objectMapper, observability, failureCategoryClassifier);
+
+        assertEquals(Set.of(AiTaskType.ATS_ANALYSIS), custom.thinkingDisabledTaskTypes());
     }
 }

@@ -49,7 +49,7 @@ class BailianModelChainLiveIT {
                 apiKey,
                 workingModel,
                 exhaustedModel + "," + workingModel,
-                10, 120, 1800, 60, 600,
+                10, 120, 1800, 60, 600, "JOB_GENERATION",
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
 
         assertEquals(2, provider.availableModelCount(), "初始应有两个候选");
@@ -80,7 +80,7 @@ class BailianModelChainLiveIT {
                 apiKey,
                 workingModel,
                 workingModel + ",glm-5.3",
-                10, 120, 1800, 60, 600,
+                10, 120, 1800, 60, 600, "JOB_GENERATION",
                 new ObjectMapper(), observability, new FailureCategoryClassifier());
 
         AiCallResult result = provider.call(new AiCallContext(AiTaskType.RESUME_OPTIMIZE, Map.of(
