@@ -27,6 +27,25 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
   description: 'draftFields.description', highlights: 'draftFields.highlights',
   keywords: 'draftFields.keywords', level: 'draftFields.level',
   credentialId: 'draftFields.credentialId', url: 'draftFields.url',
+  // 以下为草稿 schema 中确实存在、但此前漏配中文标签的字段。
+  // 漏配会让界面直接显示内部英文键（实测：skills 的 category/items、customSections 的 entries）。
+  label: 'draftFields.label',
+  category: 'draftFields.category', items: 'draftFields.items', entries: 'draftFields.entries',
+  proficiency: 'draftFields.proficiency', organization: 'draftFields.organization',
+  provider: 'draftFields.provider', publisher: 'draftFields.publisher', duration: 'draftFields.duration',
+}
+
+/**
+ * 枚举值的展示映射。
+ *
+ * 模型的 `proficiency` / `level` 会输出英文枚举（实测出现过裸 `EXPERT`），
+ * 而 `displayValue` 此前只处理 boolean，其余一律 `String(value)`，于是枚举原样上屏。
+ */
+const VALUE_LABEL_KEYS: Record<string, string> = {
+  EXPERT: 'draftFields.valueExpert',
+  ADVANCED: 'draftFields.valueAdvanced',
+  INTERMEDIATE: 'draftFields.valueIntermediate',
+  BEGINNER: 'draftFields.valueBeginner',
 }
 
 const TEXTAREA_FIELDS = new Set(['summary', 'description'])
@@ -48,6 +67,13 @@ function isNested(value: unknown) {
   return Array.isArray(value) || isRecord(value)
 }
 
+/**
+ * 未映射键的兜底：把驼峰拆词后展示。
+ *
+ * 刻意保留"展示原始键"而非隐藏 —— 若 schema 新增字段而此处漏配，
+ * 显示一个略丑的英文标签远好于静默丢内容。防漏由回归测试保证
+ * （见 `web/e2e/draft-fields.spec.ts`：断言页面不出现未映射的英文键）。
+ */
 function fieldLabel(key: string) {
   const i18nKey = FIELD_LABEL_KEYS[key]
   if (i18nKey) return t(i18nKey)
@@ -56,7 +82,9 @@ function fieldLabel(key: string) {
 
 function displayValue(value: unknown) {
   if (typeof value === 'boolean') return value ? t('draftFields.yes') : t('draftFields.no')
-  return value === null || value === undefined || value === '' ? t('draftFields.notFilled') : String(value)
+  if (value === null || value === undefined || value === '') return t('draftFields.notFilled')
+  const valueKey = VALUE_LABEL_KEYS[String(value)]
+  return valueKey ? t(valueKey) : String(value)
 }
 
 function shouldUseTextarea(key: string, value: unknown) {
