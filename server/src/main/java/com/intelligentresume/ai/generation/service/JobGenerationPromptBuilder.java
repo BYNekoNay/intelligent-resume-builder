@@ -65,7 +65,7 @@ public class JobGenerationPromptBuilder {
                 2. Do NOT call any tools or access any URLs.
                 3. Every output entry MUST include a "_sources" array of {materialId, materialType} objects, OR a "_pending" field explaining what is missing. NEVER include both "_sources" and "_pending" on the same object — pick exactly one.
                 4. If materials are insufficient for a section, use "_pending" with a clear reason.
-                5. IMPORTANT: Write all descriptions in the SAME LANGUAGE as the source materials. If materials are in English, write in English. If in Chinese, write in Chinese.
+                5. IMPORTANT: Write all descriptions in the SAME LANGUAGE as the source materials. If materials are in English, write in English. If in Chinese, write in Chinese. This applies to EVERY user-visible string you emit — including "_pending.reason" and any note, label, or explanation you add. Never mix languages within one draft.
                 6. Output valid JSON only. No markdown, no explanations outside the JSON.
                 7. Time ranges: for work, education, and project entries, set "startDate" and "endDate" (formats "YYYY-MM" or "YYYY") ONLY when the cited source material contains explicit start and end bounds. Otherwise keep the source-backed free-form "period" text exactly as written in the material. NEVER split, guess, translate, or invent a structured date range from a free-form period.
                 """;
