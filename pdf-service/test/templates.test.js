@@ -146,3 +146,53 @@ test('escapes HTML-like text in the period fallback path', () => {
   assert.match(html, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; &amp; more/)
   assert.doesNotMatch(html, /<script>alert/)
 })
+
+// ---- skills 字段消费：items 是规范字段 ----
+// 历史实现只渲染 item.name，导致技能数组项在导出 PDF 里被整批丢弃
+// （例：{name:"Java", items:["Java","Spring Boot"]} 只输出 "Java"）。
+
+const skillsWithItems = {
+  basics: { name: 'Skills Candidate' },
+  skills: [{ name: 'Java', category: '后端', items: ['Java', 'Spring Boot'], level: '熟练' }],
+}
+
+test('renders skills items (canonical field) in every supported template', () => {
+  for (const code of TEMPLATE_CODES) {
+    const html = renderResumeHtml(code, { resumeJson: skillsWithItems })
+    assert.match(html, /Spring Boot/, `${code} 应渲染 skills[*].items`)
+  }
+})
+
+test('renders skills keywords and keyword aliases', () => {
+  const html = renderResumeHtml('classic', {
+    resumeJson: { skills: [{ name: 'Group', keywords: ['Redis'], keyword: 'MySQL' }] },
+  })
+  assert.match(html, /Redis/)
+  assert.match(html, /MySQL/)
+})
+
+test('renders plain string skills entries', () => {
+  const html = renderResumeHtml('classic', { resumeJson: { skills: ['Java', 'Spring Boot'] } })
+  assert.match(html, /Spring Boot/)
+})
+
+test('deduplicates a skill present in both name and items', () => {
+  const html = renderResumeHtml('classic', {
+    resumeJson: { skills: [{ name: 'Java', items: ['Java', 'Kafka'] }] },
+  })
+  assert.match(html, /Kafka/)
+  assert.equal((html.match(/>Java</g) || []).length, 1, 'name 与 items 重复时不应渲染两次')
+})
+
+test('still renders name-only skills entries', () => {
+  const html = renderResumeHtml('classic', { resumeJson: { skills: [{ name: 'Java' }] } })
+  assert.match(html, />Java</)
+})
+
+test('escapes HTML-like text inside skills items', () => {
+  const html = renderResumeHtml('classic', {
+    resumeJson: { skills: [{ items: ['<script>alert(1)</script>'] }] },
+  })
+  assert.match(html, /&lt;script&gt;/)
+  assert.doesNotMatch(html, /<script>alert/)
+})

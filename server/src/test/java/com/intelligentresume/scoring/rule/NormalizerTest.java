@@ -49,4 +49,47 @@ class NormalizerTest {
         assertEquals("spring", normalizer.normalize("  Spring   Boot  "));
         assertEquals("java", normalizer.normalize("  java  "));
     }
+
+    @Test
+    @DisplayName("有序分词: 保留出现顺序（分两趟扫描会丢失顺序）")
+    void tokenizeOrdered_keepsOrder() {
+        assertEquals(List.of("熟悉", "Java", "与", "Spring", "Boot"),
+                normalizer.tokenizeOrdered("熟悉 Java 与 Spring Boot"));
+    }
+
+    @Test
+    @DisplayName("词组: 连续英文词产出词组，且不跨中文组词")
+    void tokenizeWithPhrases_contiguousLatinWordsOnly() {
+        List<String> tokens = normalizer.tokenizeWithPhrases(
+                "精通 Spring Boot 与 Redis", Normalizer.MAX_PHRASE_WORDS);
+
+        // 注意：本方法**保留原始大小写**，大小写折叠由调用方（ResumeKeywordExtractor.addText）负责，
+        // 与既有 tokenize() 的约定一致。故断言用大小写不敏感比较。
+        assertTrue(tokens.stream().anyMatch(t -> t.equalsIgnoreCase("spring boot")),
+                "应产出连续词组 'Spring Boot'，实际=" + tokens);
+        assertFalse(tokens.stream().anyMatch(t -> t.equalsIgnoreCase("boot redis")),
+                "跨中文不应产出伪词组，实际=" + tokens);
+        assertTrue(tokens.stream().anyMatch(t -> t.equalsIgnoreCase("spring")));
+        assertTrue(tokens.stream().anyMatch(t -> t.equalsIgnoreCase("redis")));
+    }
+
+    @Test
+    @DisplayName("词组: 受 maxWords 限制")
+    void tokenizeWithPhrases_respectsMaxWords() {
+        List<String> tokens = normalizer.tokenizeWithPhrases("aa bb cc dd", 2);
+
+        assertTrue(tokens.contains("aa bb"));
+        assertFalse(tokens.contains("aa bb cc"), "maxWords=2 时不应产出三词词组");
+    }
+
+    @Test
+    @DisplayName("词组: 中文序列本身即完整 token，不参与组词")
+    void tokenizeWithPhrases_chineseNotPhrased() {
+        List<String> tokens = normalizer.tokenizeWithPhrases("熟悉 高并发 场景", Normalizer.MAX_PHRASE_WORDS);
+
+        assertTrue(tokens.contains("熟悉"));
+        assertTrue(tokens.contains("高并发"));
+        assertTrue(tokens.contains("场景"));
+        assertFalse(tokens.contains("熟悉 高并发"), "中文不应被空格拼接成词组");
+    }
 }

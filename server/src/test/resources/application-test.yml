@@ -114,6 +114,8 @@ app:
       keyword: 0.4
       skill: 0.4
       experience: 0.2
+    # 同义词词典：canonical → [同义词...]。绑定方式与生产一致（见 application.yml 的说明），
+    # 由 ScoringDictionaryBindingIT 断言它确实被绑定（非空）—— 这条测试专门防"配置在但没生效"。
     synonym-dictionary:
       java: ["java", "jdk", "openjdk"]
       spring: ["spring", "spring boot", "spring cloud"]

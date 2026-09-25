@@ -64,6 +64,7 @@
 | [2026-09-24-browser-e2e-report-triage](./reviews/2026-09-24-browser-e2e-report-triage.md) | 浏览器端测试报告的独立核实与处置（含 2 处判定修正） |
 | [2026-09-25-documentation-audit](./reviews/2026-09-25-documentation-audit.md) | **文档体系审计**：87 个文件全量盘点、三类时效性缺陷、归档/删除/更新分类与执行结果 |
 | [2026-09-25-cloud-functional-test](./reviews/2026-09-25-cloud-functional-test.md) | **云服务器功能测试**：AI + 非 AI 双链路 58 项断言全通过、性能实测、确认 1 个 P1 缺陷（ATS 关键词覆盖度被低估） |
+| [2026-09-25-ats-keyword-coverage-fix](./reviews/2026-09-25-ats-keyword-coverage-fix.md) | **ATS 关键词覆盖度修复**：3 处同源缺陷（词典绑定失效 / 技能字段读错 / PDF 丢弃技能项）、回归测试与真实环境验证（20.0 → 40.0） |
 | [ats-reasoning-eval/](./reviews/2026-09-24-ats-reasoning-eval/E5-final-report.md) | **ATS 推理开关对比实验**：预注册非劣性检验、E1 rubric、判定表定稿、最终报告（结局 ③ 证据不足） |
 | ├ [E1-rubric](./reviews/2026-09-24-ats-reasoning-eval/E1-rubric.md) | 评分量表 v1.4（含 5 处裁定与 V2a/V2b 拆分） |
 | ├ [E2-preegistration](./reviews/2026-09-24-ats-reasoning-eval/E2-preegistration.md) | 预注册 v11：判据、护栏、三种互斥结局 |
@@ -87,6 +88,7 @@
 | [ADR-005](./decisions/ADR-005-disable-model-reasoning-for-generation.md) | 对生成类任务关闭模型推理（477s → 7s） |
 | [ADR-006](./decisions/ADR-006-keep-reasoning-for-ats-analysis.md) | 保留 ATS_ANALYSIS 推理（本轮实验未能回答该问题） |
 | [ADR-007](./decisions/ADR-007-shared-host-independent-port-and-database.md) | 测试环境迁入与另一项目共用的主机（独立端口 8088 + 独立 MySQL） |
+| [ADR-008](./decisions/ADR-008-configuration-binding-via-configuration-properties.md) | 配置绑定一律用 `@ConfigurationProperties`，禁止 `@Value` + SpEL map 字面量 |
 
 ### 2.4 research/ —— 调研与对标
 

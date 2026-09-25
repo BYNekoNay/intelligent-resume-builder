@@ -203,6 +203,13 @@ app:
       keyword: 0.4
       skill: 0.4
       experience: 0.2
+    # 同义词词典：canonical → [同义词...]。
+    # ⚠ 必须写成嵌套 map，并通过 @ConfigurationProperties（ScoringProperties）绑定。
+    #   历史上这里用 @Value("#{${app.scoring.synonym-dictionary:{}}}") 注入 —— 该写法对嵌套 YAML
+    #   无效（YAML 会被展平成 ...java[0] 索引键，不存在同名单键），占位符走默认值 {}，
+    #   词典在运行时**静默为空**，导致含空格的多词关键词（如 "Spring Boot"）即使与简历
+    #   逐字相同也判缺失、keywordCoverage 被系统性低估。**不要改回那种写法**。
+    #   回归测试：ScoringDictionaryBindingIT / KeywordCoveragePhraseTest
     synonym-dictionary:
       java: ["java", "jdk", "openjdk"]
       spring: ["spring", "spring boot", "spring cloud"]

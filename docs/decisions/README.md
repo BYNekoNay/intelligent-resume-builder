@@ -38,3 +38,4 @@ plans/reviews 面向"某次工作怎么做、结果如何"，本目录面向**�
 | [ADR-005](./ADR-005-disable-model-reasoning-for-generation.md) | 对生成类任务关闭模型推理（477s → 7s） | Accepted |
 | [ADR-006](./ADR-006-keep-reasoning-for-ats-analysis.md) | 保留 ATS_ANALYSIS 推理（本轮实验未能回答该问题） | Accepted |
 | [ADR-007](./ADR-007-shared-host-independent-port-and-database.md) | 测试环境迁入与另一项目共用的主机（独立端口 8088 + 独立 MySQL） | Accepted |
+| [ADR-008](./ADR-008-configuration-binding-via-configuration-properties.md) | 配置绑定一律用 `@ConfigurationProperties`，禁止 `@Value` + SpEL map 字面量 | Accepted |

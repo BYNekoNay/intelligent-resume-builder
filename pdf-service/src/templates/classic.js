@@ -134,7 +134,29 @@ export function renderResumeHtml(templateCode, payload) {
   const linksHtml = list(links, (item) => entry(item, item.label || item.name, item.url || '', ''))
   const workHtml = list(work, (item) => entry(item, item.company || item.name || '公司名称', item.position || item.role))
   const volunteeringHtml = list(volunteering, (item) => entry(item, item.organization || item.name, item.role || item.position))
-  const skillsHtml = list(skills, (item) => `<span>${text(item?.name ?? item?.keyword ?? item)}</span>`)
+  // 技能项的展示标签。
+  // skills 的**规范字段是 items**（见后端 JobGenerationPromptBuilder 的示例结构
+  // {"name": "...", "category": "...", "items": [...], "level": "..."}）；
+  // keyword / keywords 为历史别名，一并兼容。
+  // 历史实现只渲染 item.name，导致**技能数组项在导出 PDF 里被整批丢弃**
+  // （例：{name:"Java", items:["Java","Spring Boot"]} 只输出 "Java"）。
+  const skillLabels = (item) => {
+    if (typeof item === 'string') return item.trim() ? [item.trim()] : []
+    if (!item || typeof item !== 'object') return []
+    const labels = []
+    const push = (value) => {
+      if (typeof value === 'string' && value.trim()) labels.push(value.trim())
+      else if (Array.isArray(value)) value.forEach(push)
+    }
+    push(item.name)
+    push(item.keyword)
+    push(item.items)
+    push(item.keywords)
+    // 去重（保持首次出现顺序）：AI 常把同一技能同时写进 name 与 items
+    return [...new Set(labels)]
+  }
+  const skillsHtml = list(skills, (item) =>
+    skillLabels(item).map((label) => `<span>${text(label)}</span>`).join(''))
   const projectsHtml = list(projects, (item) => entry(item, item.name || '项目名称', item.role || item.position))
   const educationHtml = list(education, (item) => entry(item, item.school || item.name, [item.degree, item.major || item.area].filter(Boolean).join(' · ')))
   const coursesHtml = list(courses, (item) => entry(item, item.name, item.provider || '', text(item.date)))

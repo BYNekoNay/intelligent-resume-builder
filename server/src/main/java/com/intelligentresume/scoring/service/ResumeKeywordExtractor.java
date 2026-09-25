@@ -12,11 +12,14 @@ import java.util.*;
  * <p>抽取来源（只取一级数组的可见字段）：
  * <ul>
  *   <li>basics.label, basics.summary</li>
- *   <li>work[*].position, work[*].highlights[*]</li>
+ *   <li>work[*].position, work[*].company, work[*].highlights[*]</li>
  *   <li>projects[*].name, projects[*].description, projects[*].highlights[*]</li>
- *   <li>skills[*].name, skills[*].keywords[*]</li>
+ *   <li>skills[*].name, skills[*].items, skills[*].keywords（items 为规范字段）</li>
  *   <li>certificates[*].name</li>
  * </ul>
+ *
+ * <p>每个文本字段同时产出**单词**与**连续词组**（见 {@link Normalizer#tokenizeWithPhrases}），
+ * 以支持 {@code Spring Boot} 这类含空格的多词 JD 关键词。
  */
 @Service
 public class ResumeKeywordExtractor {
@@ -137,23 +140,36 @@ public class ResumeKeywordExtractor {
         Object skills = json.get("skills");
         if (skills instanceof List) {
             for (Object item : (List<Object>) skills) {
+                // 兼容 skills: ["Java", "Spring Boot"] 这类纯字符串项
+                addText(item, raw);
                 if (item instanceof Map) {
                     Map<String, Object> s = (Map<String, Object>) item;
                     addText(s.get("name"), raw);
-                    Object keywords = s.get("keywords");
-                    if (keywords instanceof List) {
-                        for (Object kw : (List<Object>) keywords) {
-                            addText(kw, raw);
-                        }
-                    }
+                    // skills 的**规范字段是 items**（见 JobGenerationPromptBuilder 的示例结构
+                    // {"name": "...", "category": "...", "items": [...]}）；keywords 为历史/别名写法。
+                    // 历史上这里只读 keywords，导致技能项**永远抽不出来** →
+                    // skillCoverage 恒低，并给出"建议在技能部分补充 X"这种与简历矛盾的误导建议。
+                    addText(s.get("items"), raw);
+                    addText(s.get("keywords"), raw);
                 }
             }
         }
     }
 
     private void addText(Object value, Set<String> raw) {
+        // 支持数组（如 skills[*].items / keywords），统一走同一套清洗规则
+        if (value instanceof List) {
+            for (Object item : (List<?>) value) {
+                addText(item, raw);
+            }
+            return;
+        }
         if (value instanceof String s && !s.isBlank()) {
-            for (String token : normalizer.tokenize(s)) {
+            // 同时收录**单词**与**连续词组**：
+            // JD 关键词来自配置词典，可能是含空格的多词短语（如 "Spring Boot"）；
+            // 若只收录单词，"spring boot" 永远不可能等于任何 token →
+            // 多词关键词即使与简历逐字相同也必然判缺失（详见 Normalizer#tokenizeWithPhrases）。
+            for (String token : normalizer.tokenizeWithPhrases(s, Normalizer.MAX_PHRASE_WORDS)) {
                 String cleaned = token.toLowerCase()
                         .replaceAll("[^\\p{L}\\p{N}\\s\\-]", "")
                         .replaceAll("\\s+", " ").trim();
