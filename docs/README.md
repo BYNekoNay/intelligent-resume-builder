@@ -62,7 +62,8 @@
 | [2026-08-11-business-flow-audit](./reviews/2026-08-11-business-flow-audit.md) | 业务流程与代码审查 |
 | [2026-08-11-code-review](./reviews/2026-08-11-code-review.md) | 代码评审结果 |
 | [2026-09-24-browser-e2e-report-triage](./reviews/2026-09-24-browser-e2e-report-triage.md) | 浏览器端测试报告的独立核实与处置（含 2 处判定修正） |
-| [2026-09-25-documentation-audit](./reviews/2026-09-25-documentation-audit.md) | **文档体系审计**：86 个文件全量盘点、三类时效性缺陷、归档/删除/更新分类与执行结果 |
+| [2026-09-25-documentation-audit](./reviews/2026-09-25-documentation-audit.md) | **文档体系审计**：87 个文件全量盘点、三类时效性缺陷、归档/删除/更新分类与执行结果 |
+| [2026-09-25-cloud-functional-test](./reviews/2026-09-25-cloud-functional-test.md) | **云服务器功能测试**：AI + 非 AI 双链路 58 项断言全通过、性能实测、确认 1 个 P1 缺陷（ATS 关键词覆盖度被低估） |
 | [ats-reasoning-eval/](./reviews/2026-09-24-ats-reasoning-eval/E5-final-report.md) | **ATS 推理开关对比实验**：预注册非劣性检验、E1 rubric、判定表定稿、最终报告（结局 ③ 证据不足） |
 | ├ [E1-rubric](./reviews/2026-09-24-ats-reasoning-eval/E1-rubric.md) | 评分量表 v1.4（含 5 处裁定与 V2a/V2b 拆分） |
 | ├ [E2-preegistration](./reviews/2026-09-24-ats-reasoning-eval/E2-preegistration.md) | 预注册 v11：判据、护栏、三种互斥结局 |
