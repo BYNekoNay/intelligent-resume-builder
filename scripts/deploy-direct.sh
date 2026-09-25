@@ -54,10 +54,15 @@ esac
 TARBALL="$TMP_BASE/resume-src.tar.gz"
 rm -f "$TARBALL" 2>/dev/null || true
 cd "$REPO_ROOT"
+# test-fixtures 属于测试资产而非运行资产，但仍随包上传：
+#   pdf-service/test/templates.test.js 与 web/e2e/workflow.spec.ts 都用
+#   `new URL('../../test-fixtures/resume-all-sections.json', import.meta.url)` 解析它，
+#   而该路径相对于「仓库根」——不随包上传时，服务器侧这两套测试会直接 ENOENT 跑不了。
+#   落位在 $REMOTE_ROOT/src/test-fixtures，即源码树内，供"在服务器上跑测试"使用。
 tar czf "$TARBALL" \
   --exclude='*/node_modules' --exclude='*/target' --exclude='*/dist' \
   --exclude='*/.env' --exclude='*.env.local' --exclude='*.env.live-ai' \
-  server web pdf-service
+  server web pdf-service test-fixtures
 echo "源码包：$TARBALL（$(du -h "$TARBALL" | cut -f1)）"
 
 # 安全检查：确认没有把依赖或环境文件打进去
@@ -80,7 +85,7 @@ echo "上传完成"
 
 step "3/5 解压源码"
 ssh "${SSH_OPTS[@]}" "$REMOTE" \
-  "cd $REMOTE_ROOT/src && rm -rf server web pdf-service && tar xzf ../resume-src.tar.gz \
+  "cd $REMOTE_ROOT/src && rm -rf server web pdf-service test-fixtures && tar xzf ../resume-src.tar.gz \
    && chmod +x $REMOTE_ROOT/deploy-direct.remote.sh && du -sh ."
 echo "解压完成"
 

@@ -148,11 +148,19 @@ PDF 服务 **24 tests / 24 pass**。
 
 **结论：产品行为正确，失败源于本机沙箱无法 `spawnSync`。** 已在报告中标注，避免后人误当成回归。
 
-> 附带发现（**部署链路的一个小缺口**）：`templates.test.js` 依赖**仓库根目录**的
-> `test-fixtures/resume-all-sections.json`，而部署包只上传 `server/`、`web/`、`pdf-service/`，
-> 因此该文件在服务器上**从来跑不了**（`ENOENT`）。本次验证是手工把 fixture 复制到
-> `app/test-fixtures/` 后才取得 24/24 的基线。若希望服务器侧能独立跑全量前端/PDF 测试，
-> 需把 `test-fixtures/` 纳入上传内容（属可选改进，未擅自改动）。
+> 附带发现（**部署链路的一个小缺口，已于同日修复**）：`templates.test.js` 依赖**仓库根目录**的
+> `test-fixtures/resume-all-sections.json`，而部署包原先只上传 `server/`、`web/`、`pdf-service/`，
+> 因此该文件在服务器上**从来跑不了**（`ENOENT`；表现为 `templates.test.js` 文件级失败、
+> `npm test` 只跑出 8 个用例）。本次首次取得 24/24 基线是手工复制 fixture 后才做到的。
+>
+> **修复**：`scripts/deploy-direct.sh` 的打包与解压两处加入 `test-fixtures`，
+> 落位 `/opt/intelligent-resume/src/test-fixtures/`（**源码树内**，供"在服务器上跑测试"使用；
+> `app/` 下按设计不放测试资产）。远程脚本末尾增加用法提示，
+> `docs/DEPLOYMENT_DIRECT.md` §5.1 记录完整说明。
+>
+> **验证**：先手工删除两侧 fixture 复现 `ENOENT`（`# tests 1, pass 0`）→ 重新部署 →
+> `/opt/intelligent-resume/src/test-fixtures/` 出现该文件 → 服务器侧
+> `cd src/pdf-service && PUPPETEER_SKIP_DOWNLOAD=true npm test` → **24/24 通过**（此前 8 个）。
 
 ---
 

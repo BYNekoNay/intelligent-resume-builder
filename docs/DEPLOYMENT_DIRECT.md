@@ -350,6 +350,30 @@ draft-fields 两道静态门禁）→ **PDF 依赖 `PUPPETEER_SKIP_DOWNLOAD=true
 > Chromium 自检失败会**中止部署**（而非留一个能跑但导出必失败的 PDF 服务）—— 这是刻意的：
 > 该失败在旧环境上只会以「导出 PDF 报 Could not find Chrome」的形式在运行期暴露，很难定位。
 
+### 5.1 测试资产随包上传（2026-09-25 新增）
+
+`test-fixtures/`（仓库根目录，当前只有 1 个合成简历 JSON）属**测试资产而非运行资产**，
+但它**必须随包上传** —— 因为 `pdf-service/test/templates.test.js` 与 `web/e2e/workflow.spec.ts`
+都以 `new URL('../../test-fixtures/resume-all-sections.json', import.meta.url)` 解析它，
+而该路径**相对于仓库根**。不上传时服务器侧这两套测试会直接 `ENOENT` 跑不起来
+（此前的实际表现：`templates.test.js` 整个文件级失败，`npm test` 只跑出 8 个用例）。
+
+落位在 **`/opt/intelligent-resume/src/test-fixtures/`**，即源码树内。
+
+> ⚠ **因此服务器侧跑测试必须从源码树 `src/` 运行，而不是 `app/`**：
+>
+> ```bash
+> cd /opt/intelligent-resume/src/pdf-service && PUPPETEER_SKIP_DOWNLOAD=true npm test
+> ```
+>
+> 部署包会把 `pdf-service/`（含 `test/`）同步到 `app/pdf-service/`，但**不会**把
+> `test-fixtures/` 放进 `app/`，所以从 `app/pdf-service/` 跑测试仍会 ENOENT。
+>
+> 其他两套测试在服务器上的可行性：
+> - **web E2E**（`npx playwright test`）：另需 Playwright 浏览器依赖，服务器未预装，当前不可跑；
+> - **后端 `mvn test`**：在 3.6 GiB 内存的宿主机上与另一个项目共存时有 OOM 风险，
+>   建议仍在本机执行（本机实测 652 测试约 1 分 40 秒）。
+
 > 服务器侧逻辑在 `scripts/deploy-direct.remote.sh`，可单独在服务器上执行：
 > `bash /opt/intelligent-resume/deploy-direct.remote.sh`
 

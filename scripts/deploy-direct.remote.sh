@@ -146,3 +146,8 @@ printf '%-28s ' "nginx:${PUBLIC_PORT} -> API:"; curl -fsS "http://127.0.0.1:${PU
 
 echo
 echo "部署完成。"
+echo
+echo "服务器侧跑测试（可选）。注意测试资产随包落在源码树，故必须从 \$SRC 而非 app/ 运行："
+echo "  cd $SRC/pdf-service && PUPPETEER_SKIP_DOWNLOAD=true npm test"
+echo "  （web E2E 另需 Playwright 浏览器依赖，本机未预装；"
+echo "    后端 mvn test 在 3.6G 内存的宿主机上有 OOM 风险，建议仍在本机执行）"
