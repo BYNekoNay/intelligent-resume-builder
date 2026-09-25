@@ -62,7 +62,13 @@
 | [2026-08-11-business-flow-audit](./reviews/2026-08-11-business-flow-audit.md) | 业务流程与代码审查 |
 | [2026-08-11-code-review](./reviews/2026-08-11-code-review.md) | 代码评审结果 |
 | [2026-09-24-browser-e2e-report-triage](./reviews/2026-09-24-browser-e2e-report-triage.md) | 浏览器端测试报告的独立核实与处置（含 2 处判定修正） |
+| [2026-09-25-documentation-audit](./reviews/2026-09-25-documentation-audit.md) | **文档体系审计**：86 个文件全量盘点、三类时效性缺陷、归档/删除/更新分类与执行结果 |
 | [ats-reasoning-eval/](./reviews/2026-09-24-ats-reasoning-eval/E5-final-report.md) | **ATS 推理开关对比实验**：预注册非劣性检验、E1 rubric、判定表定稿、最终报告（结局 ③ 证据不足） |
+| ├ [E1-rubric](./reviews/2026-09-24-ats-reasoning-eval/E1-rubric.md) | 评分量表 v1.4（含 5 处裁定与 V2a/V2b 拆分） |
+| ├ [E2-preegistration](./reviews/2026-09-24-ats-reasoning-eval/E2-preegistration.md) | 预注册 v11：判据、护栏、三种互斥结局 |
+| ├ [E2-judgment-table-v2](./reviews/2026-09-24-ats-reasoning-eval/E2-judgment-table-v2.md) | 判定表定稿 |
+| ├ [E2-judgment-table](./reviews/2026-09-24-ats-reasoning-eval/E2-judgment-table.md) | 判定表 v1.2 预演痕迹（保留） |
+| └ [E5-final-report](./reviews/2026-09-24-ats-reasoning-eval/E5-final-report.md) | 最终报告：结局 ③ 证据不足、4 项副产品、第二轮三件必要条件 |
 | [2026-09-23-remote-ai-smoke-report](./reviews/2026-09-23-remote-ai-smoke-report.md) | 远程 AI 全链路冒烟：7 类 AI 任务实测结果、模型链线上降级证据、发现的缺陷与待决策项 |
 | [agent-frontend-regression-review](./reviews/agent-frontend-regression-review.md) | 前端回归审查 |
 | [agent-testing-evidence-review](./reviews/agent-testing-evidence-review.md) | 测试与证据回归审查 |
@@ -79,6 +85,7 @@
 | [ADR-004](./decisions/ADR-004-ai-poll-window-aligned-with-chain-budget.md) | 前端 AI 轮询窗口对齐链路总预算 |
 | [ADR-005](./decisions/ADR-005-disable-model-reasoning-for-generation.md) | 对生成类任务关闭模型推理（477s → 7s） |
 | [ADR-006](./decisions/ADR-006-keep-reasoning-for-ats-analysis.md) | 保留 ATS_ANALYSIS 推理（本轮实验未能回答该问题） |
+| [ADR-007](./decisions/ADR-007-shared-host-independent-port-and-database.md) | 测试环境迁入与另一项目共用的主机（独立端口 8088 + 独立 MySQL） |
 
 ### 2.4 research/ —— 调研与对标
 
@@ -162,9 +169,16 @@
 1. **当前操作流程只更新第 1 节列出的文档**，不要写进历史资料。
 2. `plans/`、`reviews/`、`research/`、`ideation/` 以**附录式追加**为主；结论变化时新开一份并交叉引用，不要覆盖原结论。
 3. `decisions/` 下 ADR **正文不可改写**：纠正必须追加新 ADR 并给旧 ADR 标 `Superseded by`；悬而未决登记册**只追加 + 就地关闭**，RESOLVED 时补 `Resolution` 字段，不删原条目。
-3. 追加式的逐轮审计日志**不要写进当前手册**，放进 `archive/`，并保持单一时间线。
-4. 历史资料如需更新，仅用于保留决策背景，并在文首明确其历史状态。
-5. 所有文档统一 **UTF-8 + LF**（见根目录 `.gitattributes`）。
-6. 密钥、Token、环境文件、数据库备份与 TLS 私钥不得写入文档或提交到 Git。
+4. 追加式的逐轮审计日志**不要写进当前手册**，放进 `archive/`，并保持单一时间线。
+5. 历史资料如需更新，仅用于保留决策背景，并在文首明确其历史状态。
+6. 所有文档统一 **UTF-8 + LF**（见根目录 `.gitattributes`）。
+7. 密钥、Token、环境文件、数据库备份与 TLS 私钥不得写入文档或提交到 Git。
+8. **点状审计类文档必须在文首声明时效性**（2026-09-25 新增）。凡"某一天的快照"型文档（`ideation/`、诊断报告、评审等），
+   文首必须写清：①审计时间与基线；②各章节的性质（**快照** 还是 **后续修复记录**）；③**已知已被后续修复的条目编号**；
+   ④单一权威来源指向何处。原因见[文档体系审计](./reviews/2026-09-25-documentation-audit.md)：
+   同一文档内"顶部标仍存在 / 底部标已修复"的**直接冲突曾有 3 条（#10/#34/#35）**，
+   读者只读顶部就会去修一个已经不存在的问题。
+9. **引用任何"现存问题清单"前必须逐条核实当前状态**，不得直接引用 —— 缺口清单会随修复而失效。
+10. 环境迁移或方案被取代时，**不删除旧文档**，改为在文首加"已被取代"声明并列出失效项，同时指向当前有效依据。
 
 > 本地个人文档（如 `docs/实习面试项目应对手册.md`）已被 `.gitignore` 排除，不参与版本控制，因此不在本索引中建立链接。
