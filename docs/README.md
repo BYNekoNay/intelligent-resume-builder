@@ -20,7 +20,7 @@
 | [根目录 README](../README.md) | 项目能力、环境配置与快速开始 |
 | [本地验证指南](./LOCAL_VALIDATION.md) | 不依赖 Docker 的本地启动、测试与真实百炼 AI 验收 |
 | [部署运行手册](./DEPLOYMENT.md) | Docker 路线：GitHub Actions 构建、阿里云 ACR、ECS 部署、验证、回滚与注销前备份 |
-| [直接上传部署手册（非 Docker）](./DEPLOYMENT_DIRECT.md) | systemd 原生进程部署、一键迭代脚本、抓取到的已知坑与验收结果 |
+| [直接上传部署手册（非 Docker）](./DEPLOYMENT_DIRECT.md) | **当前测试环境**（`101.35.239.218:8088`）的直接上传部署：环境安装、与同机另一项目共存的约束、Chromium 预置、验收清单与已知坑 |
 | [GitHub CI/CD 流水线](./CI.md) | PR/主分支持续集成、手动 ACR 镜像发布、Secrets 与分支保护配置 |
 | [部署状态说明](./DEPLOYMENT_READINESS.md) | 运行边界、可观测性与安全基线 |
 | [云端镜像发布（迁移入口）](./CLOUD_IMAGE_RELEASE.md) | 旧发布方式的跳转占位 |

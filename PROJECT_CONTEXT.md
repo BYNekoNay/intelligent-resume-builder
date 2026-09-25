@@ -162,7 +162,12 @@ Set-Location ..\web; npm run build
 Set-Location ..\pdf-service; npm run check; npm test
 ```
 
-更完整的说明见 `docs/LOCAL_VALIDATION.md`。部署、镜像、回滚和 ECS 注销前备份见 `docs/DEPLOYMENT.md`。
+更完整的说明见 `docs/LOCAL_VALIDATION.md`。
+
+**测试环境**：当前落在 `http://101.35.239.218:8088/`（腾讯云 · 直连部署非 Docker · 与另一个项目
+`educational-administration` 共用主机，故使用 8088 而非 80）。该环境为**可随时重置的测试环境**，
+库内数据无长期保留价值。操作细节、与另一项目共存的约束、以及迁移中踩过的坑见
+[`docs/DEPLOYMENT_DIRECT.md`](docs/DEPLOYMENT_DIRECT.md)；Docker + ACR 镜像路线见 `docs/DEPLOYMENT.md`。
 
 ## 6. 修改项目时的工作约束
 
@@ -171,14 +176,20 @@ Set-Location ..\pdf-service; npm run check; npm test
 3. 不要重新引入“选择一份已有简历作为 JD 生成目标”的旧入口；岗位简历默认由资料库加 JD 生成。
 4. 不要把 AI 输出直接写入简历；生成、内联润色和资料补全都需要人工确认。
 5. API 异步任务必须处理轮询、失败、重试和授权撤销；不要只判断 HTTP 202。
-6. 现有工作区可能包含未提交的用户改动。只修改与任务直接相关的文件，绝不回退未知改动。
-7. 密钥、密码、JWT、Cookie、数据库备份、真实用户简历和模型输入输出都不能提交或展示。
+6. **新增配置项时，`.env` 里的键必须在 `application.yml` 中有对应的 `${NAME}` 占位符**。
+   本项目的配置读取模式是「application.yml 声明占位符 + `.env`/环境变量提供值」；
+   只写进 `.env` 而没有占位符消费的项会**被静默忽略且无任何提示**（曾因此让 `SERVER_ADDRESS`
+   失效、API 监听 `*:8080` 并暴露到公网）。改完配置要用真实请求或 `ss -lntp` 核对生效状态。
+7. 现有工作区可能包含未提交的用户改动。只修改与任务直接相关的文件，绝不回退未知改动。
+8. 密钥、密码、JWT、Cookie、数据库备份、真实用户简历和模型输入输出都不能提交或展示。
 
 ## 7. 当前文档优先级
 
 1. 本文件：产品边界、当前架构和协作规则。
 2. `README.md`：能力概览、快速启动和安全配置。
 3. `docs/LOCAL_VALIDATION.md`：本地真实 AI 与 PDF 验证。
-4. `docs/DEPLOYMENT.md`：构建、部署、回滚与服务器操作。
-5. `docs/DEPLOYMENT_READINESS.md`：生产边界、观测和安全基线。
-6. `docs/01-13`、`docs/agent-tasks/`：历史背景，不是当前实现契约。
+4. `docs/DEPLOYMENT_DIRECT.md`：**当前线上测试环境**的直接上传部署、验收清单与已知坑。
+5. `docs/DEPLOYMENT.md`：Docker 路线（构建、部署、回滚与服务器操作）。
+6. `docs/DEPLOYMENT_READINESS.md`：生产边界、观测和安全基线。
+7. `docs/decisions/`：ADR 与悬而未决登记册（含环境迁移决策 ADR-007）。
+8. `docs/01-13`、`docs/agent-tasks/`：历史背景，不是当前实现契约。

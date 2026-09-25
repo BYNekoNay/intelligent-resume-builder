@@ -14,12 +14,15 @@ Environment=NODE_ENV=production
 
 # 直接调用 node，不经 npm：
 #   1) 避免依赖 npm 这个进程包装层（信号转发更干净、少一个进程）；
-#   2) 该主机的 Node 不在 /usr/bin（实测 /usr/bin/node 与 /usr/bin/npm 均不存在），
-#      Node 安装在 /usr/local/bin/node，故必须写绝对路径，否则 systemd 报 status=203/EXEC。
-#     ⚠ 部署主机若更换 Node 安装位置，需同步修改此行；要求 Node >= 20.6（依赖 --env-file）。
+#   2) 必须写绝对路径，否则 systemd 报 status=203/EXEC。
 # --env-file=.env 等价于 package.json 中 "start" 脚本的行为，Token 与端口由此注入。
 # Chromium 以 root 运行时必须禁用沙箱，已由 src/browserPool.js 的 --no-sandbox 处理。
-ExecStart=/usr/local/bin/node --env-file=.env src/server.js
+#
+# ⚠ 该路径随部署主机变化，当前值对应 101.35.239.218：
+#   - 旧环境（8.160.165.227）的 Node 来自另一项目的工具链，位于 /usr/local/bin/node；
+#   - 新环境改用发行版包（ubuntu 的 nodejs 22.22.1），落在 /usr/bin/node。
+#   要求 Node >= 20.6（依赖 --env-file）。更换 Node 安装方式时必须同步改这一行。
+ExecStart=/usr/bin/node --env-file=.env src/server.js
 
 Restart=on-failure
 RestartSec=10

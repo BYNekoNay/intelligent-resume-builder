@@ -13,6 +13,15 @@ WorkingDirectory=/opt/intelligent-resume/app/api
 # （application.yml 声明 spring.config.import=optional:file:../.env[.properties],optional:file:.env[.properties]）
 Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 
+# ⚠ 必须在这里（作为真实环境变量）声明监听地址，**不能只写在 app/api/.env 里**。
+# 实测结论：导入进来的 .env 键只对 application.yml 中显式写了 `${NAME}` 占位符的项生效
+# （例：`url: ${SPRING_DATASOURCE_URL:...}`）。而 application.yml **没有** `server.address` 这一项，
+# 于是 .env 里的 `SERVER_ADDRESS=127.0.0.1` 没有任何消费方 → 被静默忽略 →
+# java 实际监听 `*:8080`，内网与公网都能访问（实测 10.0.4.17:8080 与公网 IP:8080 均返回 200/401）。
+# 以 Environment= 注入则走 SystemEnvironmentPropertySource，绑定确定生效（实测变为仅回环）。
+# 修此问题后 `ss -lntp` 应显示 `127.0.0.1:8080` 而不是 `*:8080`。
+Environment=SERVER_ADDRESS=127.0.0.1
+
 # 刻意不启用 prod profile。
 # 原因：ProductionConfigurationValidator 标注了 @Profile("prod")，只要 prod 生效就强制
 # 要求 app.jwt.refresh-cookie.secure=true；而带 Secure 属性的 Cookie 在明文 HTTP 下
@@ -22,9 +31,13 @@ Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 # application.yml 基础段，连接串 / 密钥 / CORS / PDF 与百炼配置全部由 .env 显式提供，
 # 不依赖任何开发兜底值。若后续切换到 HTTPS，应改回 prod profile 并把 COOKIE_SECURE 设为 true。
 
-# 内存封顶：宿主 7.5G 且另有 MySQL(512M buffer pool) 与 Chromium，堆不得超过 1G
+# 内存封顶：宿主机仅 3.6G 总内存，且同机还跑着另一个项目的 Docker 栈
+# （4 容器约 935MiB）与本项目的 MySQL(192M buffer pool) + Chromium。
+# 三者的内存需求之和已接近物理上限，因此堆从 1024m 下调到 768m。
+# 依据：本应用在旧环境（7.5G）实测堆占用远低于 768m；若出现 OOM 或
+# 频繁 Full GC，优先排查是否应把另一项目迁走，而不是继续压这里的堆。
 ExecStart=/usr/bin/java \
-  -Xms256m -Xmx1024m -XX:MaxMetaspaceSize=256m \
+  -Xms128m -Xmx768m -XX:MaxMetaspaceSize=224m \
   -XX:+ExitOnOutOfMemoryError \
   -Dfile.encoding=UTF-8 \
   -Duser.timezone=Asia/Shanghai \

@@ -9,7 +9,11 @@
 #
 # 用法：
 #   bash scripts/deploy-direct.sh
-#   SERVER=1.2.3.4 SSH_KEY=~/.ssh/other bash scripts/deploy-direct.sh
+#   SERVER=1.2.3.4 SSH_USER=root SSH_KEY=~/.ssh/other bash scripts/deploy-direct.sh
+#
+# 默认值对应当前落地的测试环境（101.35.239.218）。注意该主机的登录用户是 ubuntu 而非 root，
+# 且 80/443 被同机另一个项目（educational-administration，Docker + Caddy）占用，
+# 因此智历的公网入口是 8088 端口。详见 docs/DEPLOYMENT_DIRECT.md。
 #
 # 服务器目录约定：
 #   /opt/intelligent-resume/
@@ -17,15 +21,17 @@
 #     app/api/          jar + .env + pdf-output/
 #     app/web/          nginx 静态根（保留 web.bak 供回滚）
 #     app/pdf-service/  源码 + node_modules + .env
+#     chromium-cache/   puppeteer 的 Chromium（与登录用户无关，见 remote.sh 注释）
 #     secrets.env       JWT_SECRET / PDF_SERVICE_TOKEN / MYSQL_PASSWORD（600）
 #     live-ai.env       BAILIAN_*（600，仅首次需要）
 
 set -euo pipefail
 
-SERVER="${SERVER:-8.160.165.227}"
-SSH_USER="${SSH_USER:-root}"
+SERVER="${SERVER:-101.35.239.218}"
+SSH_USER="${SSH_USER:-ubuntu}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 REMOTE_ROOT="${REMOTE_ROOT:-/opt/intelligent-resume}"
+PUBLIC_PORT="${PUBLIC_PORT:-8088}"
 REMOTE="$SSH_USER@$SERVER"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -82,10 +88,12 @@ step "4/5 服务器侧构建与发布（首次约 3-5 分钟，含 Chromium 下�
 ssh "${SSH_OPTS[@]}" "$REMOTE" "bash $REMOTE_ROOT/deploy-direct.remote.sh"
 
 step "5/5 公网入口自检"
+# ⚠ 必须带端口：本机 80/443 属于同机另一个项目（Docker + Caddy），
+# 打 127.0.0.1:80 会打到对方站点并返回 200，形成"部署成功"的假阳性。
 ssh "${SSH_OPTS[@]}" "$REMOTE" \
-  "curl -s -o /dev/null -w 'localhost HTTP -> %{http_code}\n' http://127.0.0.1/ ; \
+  "curl -s -o /dev/null -w 'nginx(127.0.0.1:$PUBLIC_PORT) HTTP -> %{http_code}\n' http://127.0.0.1:$PUBLIC_PORT/ ; \
    systemctl is-active nginx mysql intelligent-resume-api intelligent-resume-pdf"
 
 printf '\n部署流程已结束。\n'
-printf '浏览器访问：http://%s/\n' "$SERVER"
+printf '浏览器访问：http://%s:%s/\n' "$SERVER" "$PUBLIC_PORT"
 printf '查看日志：ssh %s "journalctl -u intelligent-resume-api -f"\n' "$REMOTE"

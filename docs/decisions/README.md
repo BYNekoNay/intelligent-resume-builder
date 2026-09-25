@@ -36,3 +36,5 @@ plans/reviews 面向"某次工作怎么做、结果如何"，本目录面向**�
 | [ADR-003](./ADR-003-provenance-marker-exclusivity-scope.md) | 溯源标记互斥只适用于要求溯源的节点 | Accepted |
 | [ADR-004](./ADR-004-ai-poll-window-aligned-with-chain-budget.md) | 前端 AI 轮询窗口对齐链路总预算 | Accepted |
 | [ADR-005](./ADR-005-disable-model-reasoning-for-generation.md) | 对生成类任务关闭模型推理（477s → 7s） | Accepted |
+| [ADR-006](./ADR-006-keep-reasoning-for-ats-analysis.md) | 保留 ATS_ANALYSIS 推理（本轮实验未能回答该问题） | Accepted |
+| [ADR-007](./ADR-007-shared-host-independent-port-and-database.md) | 测试环境迁入与另一项目共用的主机（独立端口 8088 + 独立 MySQL） | Accepted |
