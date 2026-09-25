@@ -61,6 +61,8 @@
 | [2026-07-29-communication-ai-generation-report](./reviews/2026-07-29-communication-ai-generation-report.md) | 岗位沟通文案 AI 生成 |
 | [2026-08-11-business-flow-audit](./reviews/2026-08-11-business-flow-audit.md) | 业务流程与代码审查 |
 | [2026-08-11-code-review](./reviews/2026-08-11-code-review.md) | 代码评审结果 |
+| [2026-09-24-browser-e2e-report-triage](./reviews/2026-09-24-browser-e2e-report-triage.md) | 浏览器端测试报告的独立核实与处置（含 2 处判定修正） |
+| [ats-reasoning-eval/](./reviews/2026-09-24-ats-reasoning-eval/E5-final-report.md) | **ATS 推理开关对比实验**：预注册非劣性检验、E1 rubric、判定表定稿、最终报告（结局 ③ 证据不足） |
 | [2026-09-23-remote-ai-smoke-report](./reviews/2026-09-23-remote-ai-smoke-report.md) | 远程 AI 全链路冒烟：7 类 AI 任务实测结果、模型链线上降级证据、发现的缺陷与待决策项 |
 | [agent-frontend-regression-review](./reviews/agent-frontend-regression-review.md) | 前端回归审查 |
 | [agent-testing-evidence-review](./reviews/agent-testing-evidence-review.md) | 测试与证据回归审查 |
@@ -76,6 +78,7 @@
 | [ADR-003](./decisions/ADR-003-provenance-marker-exclusivity-scope.md) | 溯源标记互斥只适用于要求溯源的节点 |
 | [ADR-004](./decisions/ADR-004-ai-poll-window-aligned-with-chain-budget.md) | 前端 AI 轮询窗口对齐链路总预算 |
 | [ADR-005](./decisions/ADR-005-disable-model-reasoning-for-generation.md) | 对生成类任务关闭模型推理（477s → 7s） |
+| [ADR-006](./decisions/ADR-006-keep-reasoning-for-ats-analysis.md) | 保留 ATS_ANALYSIS 推理（本轮实验未能回答该问题） |
 
 ### 2.4 research/ —— 调研与对标
 
