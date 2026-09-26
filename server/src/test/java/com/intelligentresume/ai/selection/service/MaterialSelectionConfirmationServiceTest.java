@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.selection.service;
 
 import com.intelligentresume.ai.consent.service.AiConsentService;
+import com.intelligentresume.ai.ratelimit.AiQuotaService;
 import com.intelligentresume.ai.selection.dto.ConfirmMaterialsRequest;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
@@ -32,6 +33,7 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -44,13 +46,14 @@ class MaterialSelectionConfirmationServiceTest {
     private final JobDescriptionRepository jobRepository = mock(JobDescriptionRepository.class);
     private final PersonalProfileRepository profileRepository = mock(PersonalProfileRepository.class);
     private final AiConsentService consentService = mock(AiConsentService.class);
+    private final AiQuotaService quotaService = mock(AiQuotaService.class);
     private MaterialSelectionConfirmationService service;
     private AiTask selection;
 
     @BeforeEach
     void setUp() {
         service = new MaterialSelectionConfirmationService(taskRepository, materialRepository,
-                jobRepository, profileRepository, new IdempotencyService(), consentService);
+                jobRepository, profileRepository, new IdempotencyService(), consentService, quotaService);
         LocalDateTime updatedAt = LocalDateTime.of(2026, 7, 26, 10, 0);
         selection = new AiTask();
         selection.setId(10L);
@@ -126,6 +129,27 @@ class MaterialSelectionConfirmationServiceTest {
 
         assertEquals(List.of("Kafka production experience"),
                 generation.getInputSnapshotJson().get("missingRequirements"));
+        // 配额闸门必须以与直接创建任务一致的形态被调用（P1-2 回归）
+        verify(quotaService).check(7L, AiTaskType.JOB_GENERATION);
+    }
+
+    @Test
+    void quotaExhaustedRejectsConfirmationWithoutCreatingChildOrConfirming() {
+        // 配额耗尽构造方式与 AiTaskServiceTest.create_quotaExceeded_throwsRateLimited 一致：
+        // AiQuotaService.check 超限时抛 RATE_LIMITED，确认选材必须原样传播该异常。
+        doThrow(new BusinessException(ErrorCode.RATE_LIMITED, "AI 任务配额已用完"))
+                .when(quotaService).check(7L, AiTaskType.JOB_GENERATION);
+        ConfirmMaterialsRequest request = new ConfirmMaterialsRequest(
+                selection.getUpdatedAt(), List.of(1L), List.of(), "岗位简历");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.confirm(10L, request, "confirm-quota", 7L));
+
+        assertEquals(ErrorCode.RATE_LIMITED, ex.getErrorCode());
+        // 不能创建子任务
+        verify(taskRepository, never()).save(any());
+        // 不能把 selection 置为 CONFIRMED，否则用户卡死：选材已确认但无法生成
+        assertEquals(ConfirmationStatus.PENDING, selection.getConfirmationStatus());
     }
 
     private CareerMaterial material(Long id, UsagePreference preference) {

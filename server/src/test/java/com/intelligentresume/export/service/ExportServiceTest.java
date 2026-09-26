@@ -203,4 +203,72 @@ class ExportServiceTest {
                 () -> service.create(req, 100L));
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
     }
+
+    @Test
+    @DisplayName("失败路径: 非 FAILED 状态(SUCCESS/PENDING)重试返回 CONFLICT 且不落库")
+    void retry_nonFailedTask_conflict() {
+        // SUCCESS 任务
+        ExportTask successTask = new ExportTask();
+        successTask.setId(1L);
+        successTask.setUserId(100L);
+        successTask.setStatus(ExportStatus.SUCCESS);
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(successTask));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.retry(1L, 100L));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals("只有失败的任务可以重试", ex.getMessage());
+        verify(exportTaskRepository, never()).save(any());
+
+        // PENDING 任务
+        ExportTask pendingTask = new ExportTask();
+        pendingTask.setId(2L);
+        pendingTask.setUserId(100L);
+        pendingTask.setStatus(ExportStatus.PENDING);
+        when(exportTaskRepository.findByIdAndUserId(2L, 100L)).thenReturn(Optional.of(pendingTask));
+
+        BusinessException ex2 = assertThrows(BusinessException.class,
+                () -> service.retry(2L, 100L));
+        assertEquals(ErrorCode.CONFLICT, ex2.getErrorCode());
+        assertEquals("只有失败的任务可以重试", ex2.getMessage());
+        verify(exportTaskRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("正常路径: FAILED 任务重试重置为 PENDING、retryCount+1、清空错误、刷新过期时间")
+    void retry_failedTask_resetsToPending() {
+        LocalDateTime originalExpiresAt = LocalDateTime.now().minusDays(1);
+        ExportTask task = new ExportTask();
+        task.setId(1L);
+        task.setUserId(100L);
+        task.setStatus(ExportStatus.FAILED);
+        task.setErrorMessage("PDF render failed");
+        task.setRetryCount(2);
+        task.setExpiresAt(originalExpiresAt);
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(task));
+
+        ExportTaskStatusResponse resp = service.retry(1L, 100L);
+
+        assertEquals("PENDING", resp.status());
+        assertNull(resp.errorMessage());
+        assertNull(task.getErrorMessage());
+        assertEquals(ExportStatus.PENDING, task.getStatus());
+        assertEquals(3, task.getRetryCount()); // 原值 2 → +1
+        assertNull(resp.downloadUrl()); // PENDING 无下载链接
+        assertNotNull(task.getExpiresAt());
+        assertTrue(task.getExpiresAt().isAfter(originalExpiresAt)); // 过期时间被刷新
+        verify(exportTaskRepository).save(task);
+    }
+
+    @Test
+    @DisplayName("失败路径: 跨用户 retry 返回 NOT_FOUND")
+    void retry_crossUser_notFound() {
+        when(exportTaskRepository.findByIdAndUserId(1L, 200L)).thenReturn(Optional.empty());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.retry(1L, 200L));
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+        verifyNoInteractions(expiryService, storageService);
+        verify(exportTaskRepository, never()).save(any());
+    }
 }

@@ -50,6 +50,7 @@ class AuthServiceTest {
     @Mock private AiConsentService aiConsentService;
     @Mock private AiTaskRepository aiTaskRepository;
     @Mock private ExportTaskRepository exportTaskRepository;
+    @Mock private AuthSessionRevocationService authSessionRevocationService;
 
     private AuthService authService;
 
@@ -60,7 +61,8 @@ class AuthServiceTest {
     void setUp() {
         authService = new AuthService(
                 userRepository, authSessionRepository, tokenService, passwordEncoder,
-                aiConsentService, aiTaskRepository, exportTaskRepository);
+                aiConsentService, aiTaskRepository, exportTaskRepository,
+                authSessionRevocationService);
     }
 
     // ---- 注册 ----
@@ -195,30 +197,45 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("失败路径: 旧 refresh token 复用撤销整个 token family")
+    @DisplayName("失败路径: 旧 refresh token 复用委托撤销服务撤销整族(独立事务)")
     void refresh_reuseRevokesFamily() {
         // 已撤销的 session（旧 token 被复用）
         AuthSession revokedSession = activeSession(10L, 1L, "family-1", "old-hash");
         revokedSession.setRevokedAt(LocalDateTime.now().minusMinutes(5));
         revokedSession.setRevokeReason("rotated");
 
-        AuthSession activeSession = activeSession(11L, 1L, "family-1", "current-hash");
-
         when(tokenService.hashToken("stolen-token")).thenReturn("old-hash");
         when(authSessionRepository.findByRefreshTokenHash("old-hash"))
                 .thenReturn(Optional.of(revokedSession));
-        when(authSessionRepository.findByTokenFamilyId("family-1"))
-                .thenReturn(List.of(revokedSession, activeSession));
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> authService.refresh("stolen-token", "TestAgent", "127.0.0.1"));
         assertEquals(ErrorCode.UNAUTHENTICATED, ex.getErrorCode());
 
-        // 整族被撤销
-        assertNotNull(revokedSession.getRevokedAt());
-        assertNotNull(activeSession.getRevokedAt());
-        assertEquals("refresh_reuse_detected", activeSession.getRevokeReason());
-        verify(authSessionRepository).saveAll(anyList());
+        // 族撤销委托给 AuthSessionRevocationService（REQUIRES_NEW 独立事务,
+        // 防止 refresh 事务回滚吞掉撤销标记）
+        verify(authSessionRevocationService).revokeFamily("family-1", "refresh_reuse_detected");
+    }
+
+    @Test
+    @DisplayName("失败路径: 过期 refresh 委托撤销服务标记会话过期(独立事务)")
+    void refresh_expiredRevokesSession() {
+        // 已过期的 session
+        AuthSession expiredSession = activeSession(10L, 1L, "family-1", "old-hash");
+        expiredSession.setExpiresAt(LocalDateTime.now().minusMinutes(5));
+
+        when(tokenService.hashToken("expired-token")).thenReturn("old-hash");
+        when(authSessionRepository.findByRefreshTokenHash("old-hash"))
+                .thenReturn(Optional.of(expiredSession));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refresh("expired-token", "TestAgent", "127.0.0.1"));
+        assertEquals(ErrorCode.UNAUTHENTICATED, ex.getErrorCode());
+
+        // 过期标记委托给 AuthSessionRevocationService（REQUIRES_NEW 独立事务,
+        // 防止 refresh 事务回滚吞掉标记导致每次重试重复标记）
+        verify(authSessionRevocationService).revokeSession(10L, "expired");
+        verify(authSessionRepository, never()).save(any());
     }
 
     // ---- 退出 ----

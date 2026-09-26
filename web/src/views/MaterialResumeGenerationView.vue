@@ -4,6 +4,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight, Check, FileInput, Lightbulb, ShieldCheck, Sparkles } from 'lucide-vue-next'
 import { generateMaterialAssociation, generateResumeFromAssociation, generateResumeFromMaterial, type MaterialAssociationResponse, type MaterialGenerationResponse } from '@/api/materialGeneration'
+import { AiTaskTimeoutError } from '@/api/ai'
 import { createResume } from '@/api/resume'
 import { useLocale } from '@/i18n'
 
@@ -11,11 +12,27 @@ const { t } = useLocale()
 const raw = ref(''); const result = ref<MaterialGenerationResponse | null>(null); const association = ref<MaterialAssociationResponse | null>(null); const error = ref(''); const consentRequired = ref(false); const loading = ref(false); const associating = ref(false); const title = ref('From raw materials'); const saving = ref(false)
 const router = useRouter()
 
+// 幂等键生命周期：动作发起时按 payload 指纹生成/复用，整次逻辑提交期间（含超时重试）沿用同一键，成功后清除。
+// 超时后任务仍在后端执行，此时再次点击会以同一幂等键命中后端去重，不会重复计费。
+const pendingIdempotency = new Map<string, { fingerprint: string; idempotencyKey: string }>()
+
+function idempotencyKeyFor(action: string, payload: unknown) {
+  const fingerprint = JSON.stringify(payload)
+  const pending = pendingIdempotency.get(action)
+  if (pending && pending.fingerprint === fingerprint) return pending.idempotencyKey
+  const idempotencyKey = crypto.randomUUID()
+  pendingIdempotency.set(action, { fingerprint, idempotencyKey })
+  return idempotencyKey
+}
+
+function clearIdempotencyKey(action: string) { pendingIdempotency.delete(action) }
+
 async function generate() {
   error.value = ''; consentRequired.value = false; result.value = null
   if (!raw.value.trim()) { error.value = t('materialGeneration.errorEmpty'); return }
   loading.value = true
-  try { result.value = (await generateResumeFromMaterial(raw.value)).data.data }
+  const idempotencyKey = idempotencyKeyFor('generate', { text: raw.value })
+  try { result.value = (await generateResumeFromMaterial(raw.value, undefined, undefined, idempotencyKey)).data.data; clearIdempotencyKey('generate') }
   catch (cause) { showGenerationError(cause, 'errorGenerate') }
   finally { loading.value = false }
 }
@@ -24,7 +41,8 @@ async function associate() {
   error.value = ''; consentRequired.value = false; association.value = null
   if (!raw.value.trim()) { error.value = t('materialGeneration.errorEmpty'); return }
   associating.value = true
-  try { association.value = (await generateMaterialAssociation(raw.value)).data.data }
+  const idempotencyKey = idempotencyKeyFor('associate', { text: raw.value })
+  try { association.value = (await generateMaterialAssociation(raw.value, idempotencyKey)).data.data; clearIdempotencyKey('associate') }
   catch (cause) { showGenerationError(cause, 'errorAssociation') }
   finally { associating.value = false }
 }
@@ -32,7 +50,8 @@ async function associate() {
 async function generateFromAssociation() {
   if (!association.value?.expandedMaterial.trim()) return
   error.value = ''; consentRequired.value = false; result.value = null; loading.value = true
-  try { result.value = (await generateResumeFromAssociation(raw.value, association.value.expandedMaterial)).data.data }
+  const idempotencyKey = idempotencyKeyFor('generate-from-association', { text: raw.value, association: association.value.expandedMaterial })
+  try { result.value = (await generateResumeFromAssociation(raw.value, association.value.expandedMaterial, idempotencyKey)).data.data; clearIdempotencyKey('generate-from-association') }
   catch (cause) { showGenerationError(cause, 'errorGenerate') }
   finally { loading.value = false }
 }
@@ -54,6 +73,10 @@ function generationError(cause: unknown, fallbackKey: 'errorGenerate' | 'errorAs
 
 function showGenerationError(cause: unknown, fallbackKey: 'errorGenerate' | 'errorAssociation') {
   consentRequired.value = isAxiosError(cause) && cause.response?.data?.code === 40302
+  if (cause instanceof AiTaskTimeoutError) {
+    error.value = t('common.taskStillProcessing', { taskId: cause.taskId })
+    return
+  }
   error.value = consentRequired.value ? t('materialGeneration.errorConsent') : generationError(cause, fallbackKey)
 }
 

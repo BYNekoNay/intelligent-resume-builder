@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.selection.service;
 
 import com.intelligentresume.ai.consent.service.AiConsentService;
+import com.intelligentresume.ai.ratelimit.AiQuotaService;
 import com.intelligentresume.ai.selection.dto.ConfirmMaterialsRequest;
 import com.intelligentresume.ai.task.domain.*;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
@@ -29,19 +30,22 @@ public class MaterialSelectionConfirmationService {
     private final PersonalProfileRepository profileRepository;
     private final IdempotencyService idempotencyService;
     private final AiConsentService consentService;
+    private final AiQuotaService quotaService;
 
     public MaterialSelectionConfirmationService(AiTaskRepository taskRepository,
                                                 CareerMaterialRepository materialRepository,
                                                 JobDescriptionRepository jobRepository,
                                                 PersonalProfileRepository profileRepository,
                                                 IdempotencyService idempotencyService,
-                                                AiConsentService consentService) {
+                                                AiConsentService consentService,
+                                                AiQuotaService quotaService) {
         this.taskRepository = taskRepository;
         this.materialRepository = materialRepository;
         this.jobRepository = jobRepository;
         this.profileRepository = profileRepository;
         this.idempotencyService = idempotencyService;
         this.consentService = consentService;
+        this.quotaService = quotaService;
     }
 
     @Transactional
@@ -109,6 +113,14 @@ public class MaterialSelectionConfirmationService {
             resumeTitle = originalTitle == null ? null : originalTitle.toString();
         }
         if (resumeTitle != null && !resumeTitle.isBlank()) childSnapshot.put("resumeTitle", resumeTitle);
+
+        // 配额闸门（模块核实报告 P1-2）：确认选材会隐式创建 JOB_GENERATION 子任务，
+        // 必须与 AiTaskService.create 走同一配额检查，否则"确认选材"路径会绕过每日配额限制。
+        // 该检查必须在创建子任务之前、且在把 selection 置为 CONFIRMED 之前执行：
+        // 配额不足时直接抛出 RATE_LIMITED，selection 的 confirmationStatus 保持 PENDING，
+        // 用户不会陷入"选材已确认但无法生成"的死锁状态。
+        // 与 AiTaskService.create 一致：幂等重放（上方 existing 命中提前返回）不重复消耗配额。
+        quotaService.check(userId, AiTaskType.JOB_GENERATION);
 
         AiTask child = new AiTask();
         child.setUserId(userId);

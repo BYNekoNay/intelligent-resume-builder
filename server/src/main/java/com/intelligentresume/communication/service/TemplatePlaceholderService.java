@@ -27,6 +27,7 @@ public class TemplatePlaceholderService {
     public static final Set<String> PLACEHOLDER_WHITELIST = Set.of(
             "candidateName", "jobTitle", "companyName", "topSkill", "location", "email", "phone");
 
+    // 唯一占位符 Pattern：提取、missing 判定、替换必须全部走它（见 fill 的口径约定）
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{\\{\\s*([a-zA-Z0-9_]+)\\s*}}");
 
     /**
@@ -73,6 +74,14 @@ public class TemplatePlaceholderService {
      * 用真实简历 JSON + JD 填充白名单占位符。
      *
      * <p>缺失值占位符原样保留，并列入返回的 missingPlaceholders。
+     *
+     * <p>口径约定（修复模块核实报告 P1-3）：提取（{@link #extractPlaceholders}）、
+     * missing 判定与替换三条路径共用同一个 {@link #PLACEHOLDER_PATTERN}。
+     * 替换必须通过 Matcher 按捕获组匹配，而不是字符串精确匹配
+     * {@code replace("{{" + name + "}}", value)}——原实现中提取用的 Pattern
+     * 容忍空白（{@code {{ name }}} 被判为合法占位符），而 replace 精确匹配
+     * 不容忍空白，导致 {@code {{ name }}} 提取成功、missing 判为有值、
+     * 却永远替换不掉且不报任何缺失。
      */
     public FillResult fill(String bodyText, Map<String, Object> resumeJson, JobDescription job) {
         Map<String, String> values = buildValues(resumeJson, job);
@@ -83,12 +92,22 @@ public class TemplatePlaceholderService {
                 if (!missing.contains(placeholder)) missing.add(placeholder);
             }
         }
-        String filled = bodyText;
-        for (Map.Entry<String, String> entry : values.entrySet()) {
-            if (entry.getValue() == null || entry.getValue().isBlank()) continue;
-            filled = filled.replace("{{" + entry.getKey() + "}}", entry.getValue());
+        // 与提取/missing 使用同一 Pattern，保证三者口径一致（P1-3 修复）
+        Matcher matcher = PLACEHOLDER_PATTERN.matcher(bodyText);
+        StringBuilder filled = new StringBuilder();
+        while (matcher.find()) {
+            String name = matcher.group(1);
+            String value = values.get(name);
+            if (value == null || value.isBlank()) {
+                // 无值占位符原样保留，由 missing 机制负责提示
+                matcher.appendReplacement(filled, Matcher.quoteReplacement(matcher.group()));
+            } else {
+                // quoteReplacement 防止值中的 $ / \ 被当作正则替换组引用
+                matcher.appendReplacement(filled, Matcher.quoteReplacement(value));
+            }
         }
-        return new FillResult(filled, missing);
+        matcher.appendTail(filled);
+        return new FillResult(filled.toString(), missing);
     }
 
     private Map<String, String> buildValues(Map<String, Object> resumeJson, JobDescription job) {

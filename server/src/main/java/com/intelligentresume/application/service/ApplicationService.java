@@ -69,6 +69,8 @@ public class ApplicationService {
         record.setJobDescriptionId(request.jobDescriptionId());
         record.setResumeVersionId(request.resumeVersionId());
         record.setStatus(initialStatus);
+        // 修复 P1-4：创建即进入 DRAFT，记录初始状态进入时刻
+        record.setStageEnteredAt(LocalDateTime.now());
         record.setCoverLetterText(request.coverLetterText());
         record.setEmailBodyText(request.emailBodyText());
         record.setOpeningMessageText(request.openingMessageText());
@@ -83,6 +85,8 @@ public class ApplicationService {
         if (request.status() != null && request.status() != record.getStatus()) {
             throw new BusinessException(ErrorCode.CONFLICT, "请通过状态接口更新投递状态");
         }
+        // 修复 P1-4：本方法不会改变 status（与当前值不一致时已在上方抛出），
+        // 因此严禁刷新 stageEnteredAt —— 正是原缺陷中 updatedAt 被任意编辑重置的反面。
         validateReferences(request.jobDescriptionId(), request.resumeVersionId(), userId);
         record.setJobDescriptionId(request.jobDescriptionId());
         record.setResumeVersionId(request.resumeVersionId());
@@ -102,6 +106,11 @@ public class ApplicationService {
         }
         if (request.status() == ApplicationStatus.APPLIED && record.getAppliedAt() == null) {
             record.setAppliedAt(LocalDateTime.now());
+        }
+        if (request.status() != record.getStatus()) {
+            // 修复 P1-4：仅当状态实际发生迁移时刷新进入时刻；
+            // 状态未变化（如 DRAFT→DRAFT、补 feedback）不得刷新，否则停留时长被重置。
+            record.setStageEnteredAt(LocalDateTime.now());
         }
         record.setStatus(request.status());
         record.setFeedbackText(request.feedbackText());
@@ -178,8 +187,15 @@ public class ApplicationService {
     private Double avgInterviewingDuration(List<ApplicationRecordRepository.StatsProjection> records, LocalDateTime now) {
         List<Double> days = records.stream()
                 .filter(record -> record.getStatus() == ApplicationStatus.INTERVIEWING)
-                .map(record -> record.getUpdatedAt() == null ? null
-                        : ChronoUnit.MINUTES.between(record.getUpdatedAt(), now) / 1440.0)
+                .map(record -> {
+                    // 修复 P1-4（模块核实报告）：进入面试时刻改用 stageEnteredAt
+                    // （状态迁移时写入），不再用 updatedAt（任何字段更新都会刷新它，
+                    // 导致停留时长被静默重置）。stageEnteredAt 为 NULL 的历史行
+                    // （V26 回填未覆盖的极端情况）回退 updatedAt 近似。
+                    LocalDateTime base = record.getStageEnteredAt() != null
+                            ? record.getStageEnteredAt() : record.getUpdatedAt();
+                    return base == null ? null : ChronoUnit.MINUTES.between(base, now) / 1440.0;
+                })
                 .filter(java.util.Objects::nonNull)
                 .toList();
         return days.isEmpty() ? null : Math.round(days.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10.0) / 10.0;

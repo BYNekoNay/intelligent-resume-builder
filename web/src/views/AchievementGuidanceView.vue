@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { CheckCircle2, Lightbulb, Save, SearchCheck } from 'lucide-vue-next'
-import { guideAchievement, waitForAiTaskResult, type AchievementGuidanceResponse } from '@/api/ai'
+import { AiTaskTimeoutError, guideAchievement, waitForAiTaskResult, type AchievementGuidanceResponse } from '@/api/ai'
 import { createMaterial, type MaterialType } from '@/api/careerMaterial'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useLocale } from '@/i18n'
@@ -42,7 +42,12 @@ async function guide() {
     lastGuideFingerprint = ''
     lastGuideIdempotencyKey = ''
   }
-  catch { error.value = t('achievementGuidance.errorGenerate') }
+  catch (cause) {
+    // 超时不是失败：任务仍在后端执行。上次幂等键未清除，重新点击同一内容会命中后端去重，继续取回同一任务结果。
+    error.value = cause instanceof AiTaskTimeoutError
+      ? t('common.taskStillProcessing', { taskId: cause.taskId })
+      : t('achievementGuidance.errorGenerate')
+  }
   finally { loading.value = false }
 }
 

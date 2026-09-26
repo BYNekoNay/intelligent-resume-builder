@@ -22,12 +22,14 @@ public interface ApplicationRecordRepository extends JpaRepository<ApplicationRe
     interface StatsProjection {
         ApplicationStatus getStatus();
         LocalDateTime getAppliedAt();
+        LocalDateTime getStageEnteredAt();
         LocalDateTime getCreatedAt();
         LocalDateTime getUpdatedAt();
     }
 
     @Query("""
-            SELECT a.status AS status, a.appliedAt AS appliedAt, a.createdAt AS createdAt, a.updatedAt AS updatedAt
+            SELECT a.status AS status, a.appliedAt AS appliedAt, a.stageEnteredAt AS stageEnteredAt,
+                   a.createdAt AS createdAt, a.updatedAt AS updatedAt
             FROM ApplicationRecord a
             WHERE a.userId = :userId
             ORDER BY a.updatedAt DESC

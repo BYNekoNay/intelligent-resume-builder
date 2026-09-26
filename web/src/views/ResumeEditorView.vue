@@ -6,7 +6,7 @@ import type { AxiosError } from 'axios'
 import { createManualVersion, getResume, getResumeVersion, listVersions, restoreResumeVersion, type ResumeVersion } from '@/api/resume'
 import { getAtsCheck, type AtsCheckResponse } from '@/api/ats'
 import { getMaterial, listMaterials, type CareerMaterial, type CareerMaterialSummary, type MaterialType } from '@/api/careerMaterial'
-import { inlineOptimize, waitForAiTaskResult, type InlineOptimizeResponse } from '@/api/ai'
+import { AiTaskTimeoutError, inlineOptimize, waitForAiTaskResult, type InlineOptimizeResponse } from '@/api/ai'
 import { useLocale } from '@/i18n'
 import { useAuthStore } from '@/stores/auth'
 import sampleResume from '@/data/sampleResume'
@@ -472,7 +472,9 @@ async function openAiAssistant(scope: 'field' | 'section', label: string, sectio
       aiAssistant.value.needsConsent = requestError?.response?.data?.code === 40302
       aiAssistant.value.error = aiAssistant.value.needsConsent
         ? t('resumeEditor.consentRequired')
-        : t('resumeEditor.aiUnavailable')
+        : requestError instanceof AiTaskTimeoutError
+          ? t('common.taskStillProcessing', { taskId: requestError.taskId })
+          : t('resumeEditor.aiUnavailable')
     }
   } finally { if (epoch === editorContextEpoch && aiAssistant.value?.idempotencyKey === assistant.idempotencyKey) aiAssistant.value.loading = false }
 }

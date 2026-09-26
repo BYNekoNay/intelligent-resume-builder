@@ -29,6 +29,16 @@ public class ApplicationRecord extends BaseEntity {
     private LocalDateTime appliedAt;
     @Column(name = "next_follow_up_at")
     private LocalDateTime nextFollowUpAt;
+    /**
+     * 当前状态进入时刻（仅在状态实际发生迁移时刷新，见 ApplicationService）。
+     *
+     * <p>修复模块核实报告 P1-4：投递看板 avgStageDurationDays.interviewing 原用
+     * updatedAt 充当"进入面试时间"，但 updatedAt 在任何字段更新（改 follow-up、
+     * 补 feedback、PUT 编辑）都会刷新，导致面试停留时长被静默重置。改用本字段，
+     * status 未变化的更新不得刷新。
+     */
+    @Column(name = "stage_entered_at")
+    private LocalDateTime stageEnteredAt;
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
@@ -53,5 +63,7 @@ public class ApplicationRecord extends BaseEntity {
     public void setAppliedAt(LocalDateTime appliedAt) { this.appliedAt = appliedAt; }
     public LocalDateTime getNextFollowUpAt() { return nextFollowUpAt; }
     public void setNextFollowUpAt(LocalDateTime nextFollowUpAt) { this.nextFollowUpAt = nextFollowUpAt; }
+    public LocalDateTime getStageEnteredAt() { return stageEnteredAt; }
+    public void setStageEnteredAt(LocalDateTime stageEnteredAt) { this.stageEnteredAt = stageEnteredAt; }
     public Long getVersion() { return version; }
 }

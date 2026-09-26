@@ -77,11 +77,19 @@ class ApplicationServiceTest {
 
     /** stats 仓库方法只返回精简投影，单测用匿名实现模拟。 */
     private ApplicationRecordRepository.StatsProjection projection(ApplicationStatus status) {
+        return projection(status, null, null, null);
+    }
+
+    private ApplicationRecordRepository.StatsProjection projection(ApplicationStatus status,
+                                                                  LocalDateTime appliedAt,
+                                                                  LocalDateTime stageEnteredAt,
+                                                                  LocalDateTime updatedAt) {
         return new ApplicationRecordRepository.StatsProjection() {
             @Override public ApplicationStatus getStatus() { return status; }
-            @Override public LocalDateTime getAppliedAt() { return null; }
+            @Override public LocalDateTime getAppliedAt() { return appliedAt; }
+            @Override public LocalDateTime getStageEnteredAt() { return stageEnteredAt; }
             @Override public LocalDateTime getCreatedAt() { return null; }
-            @Override public LocalDateTime getUpdatedAt() { return null; }
+            @Override public LocalDateTime getUpdatedAt() { return updatedAt; }
         };
     }
 
@@ -156,7 +164,7 @@ class ApplicationServiceTest {
     }
 
     @Test
-    @DisplayName("updateStatus: DRAFT→APPLIED 合法并写入 appliedAt 与 feedback")
+    @DisplayName("updateStatus: DRAFT→APPLIED 合法并写入 appliedAt、feedback 与 stageEnteredAt")
     void updateStatus_draftToApplied_setsAppliedAtAndFeedback() {
         stubOwnedRecord(ApplicationStatus.DRAFT, 1L);
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -170,6 +178,66 @@ class ApplicationServiceTest {
         assertEquals(ApplicationStatus.APPLIED, saved.getStatus());
         assertEquals("已投递，等待回复", saved.getFeedbackText());
         assertNotNull(saved.getAppliedAt());
+        // 状态迁移必须刷新状态进入时刻（P1-4）
+        assertNotNull(saved.getStageEnteredAt());
+    }
+
+    @Test
+    @DisplayName("updateStatus: 状态实际迁移时刷新 stageEnteredAt")
+    void updateStatus_statusMigration_refreshesStageEnteredAt() {
+        stubOwnedRecord(ApplicationStatus.APPLIED, 3L);
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        LocalDateTime enteredFiveDaysAgo = LocalDateTime.now().minusDays(5);
+        ApplicationRecord existing = record(RECORD_ID, USER_ID, ApplicationStatus.APPLIED, 3L);
+        existing.setStageEnteredAt(enteredFiveDaysAgo);
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(existing));
+        UpdateApplicationStatusRequest request = new UpdateApplicationStatusRequest(ApplicationStatus.INTERVIEWING, 3L, null);
+
+        service.updateStatus(RECORD_ID, request, USER_ID);
+
+        ArgumentCaptor<ApplicationRecord> captor = ArgumentCaptor.forClass(ApplicationRecord.class);
+        verify(repository).saveAndFlush(captor.capture());
+        LocalDateTime refreshed = captor.getValue().getStageEnteredAt();
+        assertNotNull(refreshed);
+        // 刷新为"现在"，而非保留 5 天前的旧时刻
+        assertTrue(refreshed.isAfter(enteredFiveDaysAgo));
+    }
+
+    @Test
+    @DisplayName("updateStatus: 状态未变化（DRAFT→DRAFT）不得刷新 stageEnteredAt（P1-4 反面）")
+    void updateStatus_sameStatus_doesNotRefreshStageEnteredAt() {
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        LocalDateTime enteredThreeDaysAgo = LocalDateTime.now().minusDays(3);
+        ApplicationRecord existing = record(RECORD_ID, USER_ID, ApplicationStatus.DRAFT, 1L);
+        existing.setStageEnteredAt(enteredThreeDaysAgo);
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(existing));
+        UpdateApplicationStatusRequest request = new UpdateApplicationStatusRequest(ApplicationStatus.DRAFT, 1L, "补充说明");
+
+        service.updateStatus(RECORD_ID, request, USER_ID);
+
+        ArgumentCaptor<ApplicationRecord> captor = ArgumentCaptor.forClass(ApplicationRecord.class);
+        verify(repository).saveAndFlush(captor.capture());
+        assertEquals(enteredThreeDaysAgo, captor.getValue().getStageEnteredAt());
+    }
+
+    @Test
+    @DisplayName("update: 非状态类字段更新（coverLetterText）不改变 stageEnteredAt（P1-4 核心回归断言）")
+    void update_nonStatusFields_keepStageEnteredAt() {
+        stubValidReferences();
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        LocalDateTime enteredTenDaysAgo = LocalDateTime.now().minusDays(10);
+        ApplicationRecord existing = record(RECORD_ID, USER_ID, ApplicationStatus.INTERVIEWING, 1L);
+        existing.setStageEnteredAt(enteredTenDaysAgo);
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(existing));
+        UpdateApplicationRequest request = new UpdateApplicationRequest(JOB_ID, VERSION_ID, null, "新的求职信", null, null, 1L, null);
+
+        service.update(RECORD_ID, request, USER_ID);
+
+        ArgumentCaptor<ApplicationRecord> captor = ArgumentCaptor.forClass(ApplicationRecord.class);
+        verify(repository).saveAndFlush(captor.capture());
+        assertEquals("新的求职信", captor.getValue().getCoverLetterText());
+        // 核心断言：coverLetter 变了，但进入面试时刻原样保留，未被重置
+        assertEquals(enteredTenDaysAgo, captor.getValue().getStageEnteredAt());
     }
 
     @Test
@@ -373,5 +441,19 @@ class ApplicationServiceTest {
         assertNull(stats.avgStageDurationDays().applied());
         assertNull(stats.avgStageDurationDays().interviewing());
         assertNull(stats.avgStageDurationDays().totalToOffer());
+    }
+
+    @Test
+    @DisplayName("stats: interviewing 停留时长用 stageEnteredAt 计算，NULL 回退 updatedAt（P1-4）")
+    void stats_interviewingDuration_usesStageEnteredAtWithFallback() {
+        // 行1：进入面试 3 天前 → 3.0 天；行2：历史行无 stageEnteredAt，回退 updatedAt（1 天前）→ 1.0 天
+        when(repository.findStatsByUserId(USER_ID)).thenReturn(List.of(
+                projection(ApplicationStatus.INTERVIEWING, null, LocalDateTime.now().minusDays(3), LocalDateTime.now().minusMinutes(30)),
+                projection(ApplicationStatus.INTERVIEWING, null, null, LocalDateTime.now().minusDays(1))));
+
+        var stats = service.stats(USER_ID);
+
+        // 平均 = (3.0 + 1.0) / 2 = 2.0 天；若错误地仍用 updatedAt（30 分钟前）会得到远小于 2 的值
+        assertEquals(2.0, stats.avgStageDurationDays().interviewing(), 0.05);
     }
 }

@@ -192,16 +192,31 @@ export function inlineOptimize(payload: InlineOptimizeRequest, idempotencyKey: s
   })
 }
 
-export async function waitForAiTaskResult<T>(taskId: number, maxAttempts = 30): Promise<T> {
+/** 轮询超时：任务仍在后端执行，并未失败。携带 taskId 供视图引导用户恢复 */
+export class AiTaskTimeoutError extends Error {
+  readonly taskId: number
+
+  constructor(taskId: number) {
+    super(`AI 任务仍在处理中（任务号 ${taskId}），请稍后刷新页面查看结果`)
+    this.name = 'AiTaskTimeoutError'
+    this.taskId = taskId
+  }
+}
+
+/** 默认 300 次 × 2s ≈ 10 分钟，与 useTaskPolling 的轮询窗口及后端链路预算（600s）对齐 */
+export const AI_TASK_POLL_ATTEMPTS = 300
+const AI_TASK_POLL_INTERVAL_MS = 2000
+
+export async function waitForAiTaskResult<T>(taskId: number, maxAttempts: number = AI_TASK_POLL_ATTEMPTS): Promise<T> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await new Promise((resolve) => window.setTimeout(resolve, 1000))
+    await new Promise((resolve) => window.setTimeout(resolve, AI_TASK_POLL_INTERVAL_MS))
     const task = (await getTask(taskId)).data.data
     if (task.status === 'SUCCESS' && task.resultJson) return task.resultJson as unknown as T
     if (task.status === 'FAILED' || task.status === 'CANCELLED') {
       throw new Error(task.errorMessage || 'AI 任务执行失败')
     }
   }
-  throw new Error('AI 任务执行超时，请稍后重试')
+  throw new AiTaskTimeoutError(taskId)
 }
 
 export function guideAchievement(payload: { resumeVersionId: number; section: string; content: string }, idempotencyKey: string) {

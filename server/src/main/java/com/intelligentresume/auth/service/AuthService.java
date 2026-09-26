@@ -31,7 +31,9 @@ import java.util.Optional;
  * <p>关键约定:
  * <ul>
  *     <li>refresh token 原文不落库,仅保存 SHA-256 摘要。</li>
- *     <li>每个用户一次刷新会生成新的 token family;任何旧 token 复用都会撤销整族。</li>
+ *     <li>每个用户一次刷新会生成新的 token family;任何旧 token 复用都会撤销整族。
+ *     撤销经由 {@link AuthSessionRevocationService} 以独立事务(REQUIRES_NEW)持久化,
+ *     避免随 refresh 自身的事务回滚而丢失。</li>
  *     <li>密码使用 {@link PasswordEncoder}(BCrypt) 散列。</li>
  * </ul>
  */
@@ -45,6 +47,7 @@ public class AuthService {
     private final AiConsentService aiConsentService;
     private final AiTaskRepository aiTaskRepository;
     private final ExportTaskRepository exportTaskRepository;
+    private final AuthSessionRevocationService authSessionRevocationService;
 
     public AuthService(UserRepository userRepository,
                        AuthSessionRepository authSessionRepository,
@@ -52,7 +55,8 @@ public class AuthService {
                        PasswordEncoder passwordEncoder,
                        AiConsentService aiConsentService,
                        AiTaskRepository aiTaskRepository,
-                       ExportTaskRepository exportTaskRepository) {
+                       ExportTaskRepository exportTaskRepository,
+                       AuthSessionRevocationService authSessionRevocationService) {
         this.userRepository = userRepository;
         this.authSessionRepository = authSessionRepository;
         this.tokenService = tokenService;
@@ -60,6 +64,7 @@ public class AuthService {
         this.aiConsentService = aiConsentService;
         this.aiTaskRepository = aiTaskRepository;
         this.exportTaskRepository = exportTaskRepository;
+        this.authSessionRevocationService = authSessionRevocationService;
     }
 
     @Transactional
@@ -111,16 +116,18 @@ public class AuthService {
         AuthSession session = authSessionRepository.findByRefreshTokenHash(presentedHash)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED, "刷新令牌不存在"));
 
-        // 旧令牌被复用 → 撤销整族
+        // 旧令牌被复用 → 撤销整族。
+        // 撤销必须走独立事务(REQUIRES_NEW):本方法事务随后会因下方异常回滚,
+        // 若撤销在同一事务内执行,回滚会把撤销一并吞掉,族内最新会话依然可用。
         if (session.getRevokedAt() != null) {
-            revokeFamily(session.getTokenFamilyId(), "refresh_reuse_detected");
+            authSessionRevocationService.revokeFamily(session.getTokenFamilyId(), "refresh_reuse_detected");
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "刷新令牌已失效,请重新登录");
         }
 
         if (session.getExpiresAt().isBefore(LocalDateTime.now())) {
-            session.setRevokedAt(LocalDateTime.now());
-            session.setRevokeReason("expired");
-            authSessionRepository.save(session);
+            // 过期标记同样必须在独立事务中持久化:标记之后立即抛异常,
+            // 共用事务会导致标记被回滚,每次过期重试都会重复走此分支。
+            authSessionRevocationService.revokeSession(session.getId(), "expired");
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "刷新令牌已过期");
         }
 
@@ -260,18 +267,6 @@ public class AuthService {
     private TokenResponse tokensFor(User user, String refresh) {
         String access = tokenService.issueAccessToken(user.getId(), user.getUsername());
         return new TokenResponse(access, tokenService.getAccessTokenTtlSeconds(), refresh);
-    }
-
-    private void revokeFamily(String familyId, String reason) {
-        List<AuthSession> family = authSessionRepository.findByTokenFamilyId(familyId);
-        LocalDateTime now = LocalDateTime.now();
-        for (AuthSession session : family) {
-            if (session.getRevokedAt() == null) {
-                session.setRevokedAt(now);
-                session.setRevokeReason(reason);
-            }
-        }
-        authSessionRepository.saveAll(family);
     }
 
     /** 提供无参重载,避免 controller 在没有 userId 时绕过 SecurityContext。 */
