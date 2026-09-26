@@ -118,14 +118,14 @@ def main():
     check("A4 新 access token 可用", code == 200, f"HTTP {code}")
 
     if ck3:
-    code, raw, _ = call("POST", "/api/auth/refresh", {}, cookie=ck2)
-    check("A5 旧 refresh token 复用被拒（401，重放检测）", code == 401,
-          f"HTTP {code} {raw.decode('utf-8', 'replace')[:110]}")
-    # 2026-09-26 修复 P1-1 后：重放触发**整族撤销**并持久化（此前 revokeFamily 与 throw 同处
-    # @Transactional，撤销被回滚 —— 探针实测同族最新 token 仍可用）。故同族最新的 S3 也必须被拒。
-    code2, raw2, _ = call("POST", "/api/auth/refresh", {}, cookie=ck3)
-    check("A6 整族撤销生效：同族最新 refresh token 也被拒（401，P1-1 回归）", code2 == 401,
-          f"HTTP {code2} {raw2.decode('utf-8', 'replace')[:110]}")
+        code, raw, _ = call("POST", "/api/auth/refresh", {}, cookie=ck2)
+        check("A5 旧 refresh token 复用被拒（401，重放检测）", code == 401,
+              f"HTTP {code} {raw.decode('utf-8', 'replace')[:110]}")
+        # 2026-09-26 修复 P1-1 后：重放触发**整族撤销**并持久化（此前 revokeFamily 与 throw 同处
+        # @Transactional，撤销被回滚 —— 探针实测同族最新 token 仍可用）。故同族最新的 S3 也必须被拒。
+        code2, raw2, _ = call("POST", "/api/auth/refresh", {}, cookie=ck3)
+        check("A6 整族撤销生效：同族最新 refresh token 也被拒（401，P1-1 回归）", code2 == 401,
+              f"HTTP {code2} {raw2.decode('utf-8', 'replace')[:110]}")
 
     # ---------- B. 删除简历 / JD 与引用一致性 ----------
     sec("B. DELETE /resumes/{id} 与 DELETE /jobs/{id}")
