@@ -378,7 +378,7 @@ def main():
               f"HTTP {code} interviewId={sid} status={iv.get('status')} executionMode={iv.get('executionMode')}")
         # CI 环境无模型密钥时，首题生成会确定性失败（aiFailure.messageCode 非 None）。
         # 此时面试全流程无法继续 → **显式 SKIP 并如实标注**，不得计为失败、也不得视为已验证
-        # （qa3 裁决 B1：跳过必须在结果中显式呈现）。
+        # （QA 纪律：跳过必须在结果中显式呈现，不得视为通过）。
         ai_unavailable = iv.get("status") == "AI_ACTION_REQUIRED" and bool(iv.get("aiFailure"))
         if ai_unavailable:
             message_code = (iv.get("aiFailure") or {}).get("messageCode")

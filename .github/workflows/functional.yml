@@ -4,7 +4,7 @@ name: Functional Regression
 # 目的：让 2026-09-25 全功能验证的 184 条断言进入版本库与 CI，防止回归再次逃逸
 # （QA 复核认定的头号结构性盲区）。
 #
-# AI 路径的处理（qa3 裁决 B1）：无密钥环境跑不了真实 AI，套件默认跳过 AI 全链路，
+# AI 路径的处理（QA 纪律：跳过必须显式呈现，不得让"绿"掩盖"没测"）：无密钥环境跑不了真实 AI，套件默认跳过 AI 全链路，
 # 但**跳过必须在 job 摘要中显式呈现**（执行/失败/跳过三类），不得让"绿"掩盖"没测"。
 # 需要验证 AI 路径时用 workflow_dispatch 勾选 run_ai_live，由 ai-live job 在带密钥环境执行。
 
@@ -99,7 +99,7 @@ jobs:
           JAR=$(ls server/target/intelligent-resume-server-*.jar | head -1)
           nohup java -jar "$JAR" --spring.profiles.active=ci \
             > "$GITHUB_WORKSPACE/api.log" 2>&1 &
-          # 就绪探测：2s 间隔、最多 120s（qa3 裁决 B2 —— 超时定义必须显式）
+          # 就绪探测：2s 间隔、最多 120s —— 超时定义必须显式，不可凭感觉
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8080/actuator/health/readiness > /dev/null 2>&1; then
               echo "API ready (第 $i 次探测)"; exit 0
