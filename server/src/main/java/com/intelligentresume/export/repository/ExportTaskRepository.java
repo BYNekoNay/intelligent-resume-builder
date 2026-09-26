@@ -36,6 +36,11 @@ public interface ExportTaskRepository extends JpaRepository<ExportTask, Long> {
 
     List<ExportTask> findByStatus(ExportStatus status);
 
+    /**
+     * 查询可领取的导出任务:PENDING 或租约过期的 RUNNING。
+     * FOR UPDATE 串行领取;多实例下会锁等待而非跳过,见 OPEN-DECISIONS ①。
+     * 防止重复领取实际由 acquireLease 的条件更新保证。
+     */
     @Query(value = "SELECT * FROM export_task WHERE status = 'PENDING' OR (status = 'RUNNING' AND lease_expires_at < NOW()) ORDER BY id ASC LIMIT :batchSize FOR UPDATE", nativeQuery = true)
     List<ExportTask> claimableTasks(@Param("batchSize") int batchSize);
 

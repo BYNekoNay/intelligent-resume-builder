@@ -317,4 +317,135 @@ class CareerMaterialControllerIT {
                 .andExpect(jsonPath("$.code").value(40001))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("来源原文")));
     }
+
+    @Test
+    @Order(11)
+    @DisplayName("跨用户 PATCH/DELETE 返回 404(反枚举),所有者不受影响")
+    void crossUserPatchAndDelete_notFound() throws Exception {
+        // 账号 A(token)创建一条资料
+        MvcResult createResult = mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "materialType": "EDUCATION",
+                                  "title": "跨用户防护资料",
+                                  "contentJson": {"school": "示例大学"}
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn();
+        long materialId = objectMapper.readTree(createResult.getResponse().getContentAsString())
+                .get("data").get("id").asLong();
+
+        // 账号 B 尝试 PATCH / DELETE,均应 NOT_FOUND(不泄露资源存在性)
+        String otherToken = registerAndGetToken("cm_attacker", "cm_attacker@example.com", "correcthorse");
+        mockMvc.perform(patch("/api/career-materials/" + materialId)
+                        .header("Authorization", "Bearer " + otherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title": "被越权改写", "contentJson": {"school": "篡改"}}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(40401));
+
+        mockMvc.perform(delete("/api/career-materials/" + materialId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(40401));
+
+        // 账号 A 仍可正常读,且内容未被 B 篡改
+        mockMvc.perform(get("/api/career-materials/" + materialId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(materialId))
+                .andExpect(jsonPath("$.data.title").value("跨用户防护资料"))
+                .andExpect(jsonPath("$.data.contentJson.school").value("示例大学"));
+
+        // 清理:A 正常删除自己的资料,验证所有者操作不受 B 的越权尝试影响
+        mockMvc.perform(delete("/api/career-materials/" + materialId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+    }
+
+    @Test
+    @Order(12)
+    @DisplayName("契约锚定: 独立用户下 list?type= 只返回精确匹配类型")
+    void getList_typeFilterExactMatch_freshUser() throws Exception {
+        String listToken = registerAndGetToken("cm_listfilter", "cm_listfilter@example.com", "correcthorse");
+
+        long[] skillIds = new long[2];
+        for (int i = 0; i < 2; i++) {
+            MvcResult result = mockMvc.perform(post("/api/career-materials")
+                            .header("Authorization", "Bearer " + listToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "materialType": "SKILL",
+                                      "title": "技能 %d",
+                                      "contentJson": {"name": "Java %d"}
+                                    }
+                                    """.formatted(i, i)))
+                    .andExpect(status().isCreated())
+                    .andReturn();
+            skillIds[i] = objectMapper.readTree(result.getResponse().getContentAsString())
+                    .get("data").get("id").asLong();
+        }
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + listToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "materialType": "EDUCATION",
+                                  "title": "教育经历",
+                                  "contentJson": {"school": "示例大学"}
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        // type=SKILL 只返回 2 条 SKILL,不混入其他类型
+        mockMvc.perform(get("/api/career-materials")
+                        .param("type", "SKILL")
+                        .header("Authorization", "Bearer " + listToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].materialType").value("SKILL"))
+                .andExpect(jsonPath("$.data[1].materialType").value("SKILL"));
+
+        // 无 type 时返回全部 3 条
+        mockMvc.perform(get("/api/career-materials")
+                        .header("Authorization", "Bearer " + listToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(3));
+    }
+
+    @Test
+    @Order(13)
+    @DisplayName("契约锚定: contentJson 上限按配置 65536 字节生效")
+    void postContentJsonSizeLimit_boundaryBehavior() throws Exception {
+        // 超过 64KB(65536)→ 400 40001
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "materialType", "COURSE",
+                                "title", "超限课程",
+                                "contentJson", java.util.Map.of("data", "x".repeat(70000))))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001))
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("超过大小限制")));
+
+        // 接近上限(60KB < 65536)→ 201,锚定配置值不低于 60KB
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "materialType", "COURSE",
+                                "title", "临界限额课程",
+                                "contentJson", java.util.Map.of("data", "x".repeat(60000))))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.materialType").value("COURSE"));
+    }
 }

@@ -320,7 +320,7 @@ const messages: Record<Locale, MessageTree> = {
       weaknessPractice: '薄弱项练习', weaknessHint: '针对报告中的薄弱项生成针对性练习题（AI 仅生成候选，确认后才会进入练习）。', noWeakness: '本次面试没有明显薄弱项。',
       generatePractice: '生成针对性练习', practiceGenerating: '正在生成…', practiceCaption: '以下是 AI 生成的候选练习题（可编辑），选择一条开始练习：',
       aiCandidate: 'AI 候选', useThisPractice: '用这道题练习', roundsTitle: '逐轮问答明细', suggestedAnswer: '建议答案', copyAnswer: '复制建议答案',
-      practiceTimeout: '练习生成超时，请稍后重试。', practiceError: '练习生成失败，请稍后重试。', consentRequired: '需要 AI 面试授权，请先同意隐私政策。', quotaExceeded: '今日 AI 面试配额已用完。',
+      practiceTimeout: '练习生成超时，请稍后重试。', practiceError: '练习生成失败，请稍后重试。', consentRequired: '需要 AI 面试授权，请先同意隐私政策。', quotaExceeded: '今日 AI 面试配额已用完。', pollTimeout: 'AI 处理超时，请刷新页面或稍后重试。',
       externalResumeRequired: '外部简历来源需要先提供简历文本，请返回设置阶段填写。',
     },
     history: {
@@ -798,7 +798,7 @@ const messages: Record<Locale, MessageTree> = {
       weaknessPractice: 'Weakness practice', weaknessHint: 'Generate targeted practice questions for the weaknesses in this report (AI only drafts candidates; practice starts after you confirm).', noWeakness: 'No notable weaknesses in this interview.',
       generatePractice: 'Generate practice', practiceGenerating: 'Generating…', practiceCaption: 'AI-drafted practice questions below (editable). Pick one to start practicing:',
       aiCandidate: 'AI draft', useThisPractice: 'Practice with this', roundsTitle: 'Round details', suggestedAnswer: 'Suggested answer', copyAnswer: 'Copy answer',
-      practiceTimeout: 'Practice generation timed out. Try again later.', practiceError: 'Practice generation failed. Try again later.', consentRequired: 'AI interview consent is required. Review the privacy policy first.', quotaExceeded: 'Daily AI interview quota reached.',
+      practiceTimeout: 'Practice generation timed out. Try again later.', practiceError: 'Practice generation failed. Try again later.', consentRequired: 'AI interview consent is required. Review the privacy policy first.', quotaExceeded: 'Daily AI interview quota reached.', pollTimeout: 'AI processing timed out. Refresh the page or try again later.',
       externalResumeRequired: 'External resume source needs resume text. Return to the setup step and provide it first.',
     },
     history: {

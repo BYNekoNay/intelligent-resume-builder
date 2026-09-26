@@ -53,6 +53,8 @@ const pendingStart = ref<PendingRequest<Parameters<typeof startInterview>[0]> | 
 const pendingAnswer = ref<PendingRequest<{ interviewId: number; answer: string }> | null>(null)
 let statePollTimer: ReturnType<typeof setTimeout> | null = null
 let statePollAttempt = 0
+// 轮询上限：防止后台标签被节流后无声永久轮询；超限后停止并提示用户
+const STATE_POLL_MAX_ATTEMPTS = 120
 
 // ==================== 薄弱项练习 ====================
 const practiceWeakness = ref('')
@@ -120,6 +122,11 @@ async function pollInterviewState() {
   statePollTimer = null
   const id = interviewId.value
   if (id === null || !isAiLoading.value) return
+  if (statePollAttempt >= STATE_POLL_MAX_ATTEMPTS) {
+    stopStatePoll()
+    error.value = t('interview.pollTimeout')
+    return
+  }
   try {
     const result = (await getInterviewState(id)).data.data
     if (interviewId.value !== id) return

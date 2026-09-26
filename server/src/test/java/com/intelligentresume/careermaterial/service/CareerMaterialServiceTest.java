@@ -12,6 +12,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -351,6 +353,77 @@ class CareerMaterialServiceTest {
                 "collaborationTargets", "Platform and product", "teamSize", "6 engineers",
                 "crossFunctionalRelationship", "Product and operations", "keyDecision", "Introduced weekly risk reviews",
                 "result", "Completed migration"), null, null), 100L));
+    }
+
+    // ---- 契约锚定测试 ----
+
+    /**
+     * 契约锚定:default 放行契约。
+     *
+     * <p>CareerMaterialService.validateTypeSpecificContent 的 switch 只对
+     * ACHIEVEMENT / LEADERSHIP_EXPERIENCE / SKILL_EVIDENCE 三类做结构校验,
+     * 其余类型走 default 分支(注释 "backward compatible")——内部字段任意,
+     * 仅受 64KB 上限与"有意义的证据"两条通用规则约束。
+     *
+     * <p>此测试锚定 default 放行契约;若未来收紧 schema,此测试应被有意修改,
+     * 而不是让契约无人知晓地变化。
+     */
+    @ParameterizedTest(name = "default 类型 {0} 接受任意 contentJson")
+    @EnumSource(value = MaterialType.class, names = {
+            "WORK_EXPERIENCE", "PROJECT_EXPERIENCE", "SKILL", "EDUCATION", "CERTIFICATE",
+            "HIGHLIGHT", "AWARD", "VOLUNTEER_EXPERIENCE", "COURSE", "PUBLICATION"})
+    void create_defaultTypesAcceptArbitraryContentJson(MaterialType type) {
+        when(repository.save(any(CareerMaterial.class))).thenAnswer(inv -> {
+            CareerMaterial m = inv.getArgument(0);
+            m.setId(1L);
+            return m;
+        });
+
+        // 任意内部字段——default 类型不做结构校验,应原样放行
+        Map<String, Object> arbitraryJson = Map.of(
+                "arbitraryField", "any-value",
+                "count", 42,
+                "nested", Map.of("anything", true));
+
+        CareerMaterialDetail detail = service.create(
+                new CreateCareerMaterialRequest(type, "任意结构资料", arbitraryJson, null, null), 100L);
+
+        assertEquals(type, detail.materialType());
+        assertEquals(arbitraryJson, detail.contentJson());
+        ArgumentCaptor<CareerMaterial> captor = ArgumentCaptor.forClass(CareerMaterial.class);
+        verify(repository).save(captor.capture());
+        assertEquals(100L, captor.getValue().getUserId());
+    }
+
+    @Test
+    @DisplayName("契约锚定: contentJson 大小上限来自注入的配置值而非硬编码")
+    void create_contentSizeLimitComesFromInjectedConfiguration() {
+        // 用一个极小的上限构造 service,证明限制值来源于构造器注入的
+        // @Value("${app.career-material.content-json.max-bytes:65536}") 配置,
+        // 而非代码中硬编码的 65536。
+        CareerMaterialService configured = new CareerMaterialService(repository, new ObjectMapper(), 16);
+        Map<String, Object> json = Map.of("data", "more-than-sixteen-bytes");
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> configured.create(
+                new CreateCareerMaterialRequest(MaterialType.COURSE, "小上限资料", json, null, null), 100L));
+
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("16 bytes"),
+                "错误消息应包含注入的配置上限值,实际: " + ex.getMessage());
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("契约锚定: list 类型过滤按枚举精确匹配,SKILL 不混入 SKILL_EVIDENCE")
+    void list_skillFilterDoesNotMatchSimilarNamedTypes() {
+        CareerMaterial skill = material(1L, 100L, MaterialType.SKILL, "Java");
+        CareerMaterial skillEvidence = material(2L, 100L, MaterialType.SKILL_EVIDENCE, "Java 证据");
+        when(repository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of(skill, skillEvidence));
+
+        List<CareerMaterialSummary> list = service.list(100L, MaterialType.SKILL);
+
+        assertEquals(1, list.size());
+        assertEquals(MaterialType.SKILL, list.get(0).materialType());
     }
 
     private CreateCareerMaterialRequest achievement(long relatedId, String mode, String displayValue) {

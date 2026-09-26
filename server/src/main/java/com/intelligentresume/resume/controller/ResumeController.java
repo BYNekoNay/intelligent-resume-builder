@@ -13,7 +13,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/resumes")
@@ -70,13 +69,9 @@ public class ResumeController {
 
     @PatchMapping("/{id}/current-version")
     public ApiResponse<Void> setCurrentVersion(
-            @PathVariable Long id, @RequestBody Map<String, Long> body,
+            @PathVariable Long id, @Valid @RequestBody SetCurrentVersionRequest request,
             HttpServletRequest httpRequest) {
-        Long versionId = body.get("versionId");
-        if (versionId == null) {
-            throw new BusinessException(ErrorCode.VALIDATION, "缺少 versionId");
-        }
-        resumeService.setCurrentVersion(id, versionId, currentUserId(httpRequest));
+        resumeService.setCurrentVersion(id, request.versionId(), currentUserId(httpRequest));
         return ApiResponse.success(null, traceId(httpRequest));
     }
 

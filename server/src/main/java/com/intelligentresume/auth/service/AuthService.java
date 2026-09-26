@@ -69,11 +69,10 @@ public class AuthService {
 
     @Transactional
     public TokenResponse register(RegisterRequest request) {
-        if (userRepository.existsByUsername(request.username())) {
-            throw new BusinessException(ErrorCode.CONFLICT, "用户名已被占用");
-        }
-        if (userRepository.existsByEmail(request.email())) {
-            throw new BusinessException(ErrorCode.CONFLICT, "邮箱已被占用");
+        // 统一冲突消息,避免区分"用户名/邮箱"导致账号枚举
+        if (userRepository.existsByUsername(request.username())
+                || userRepository.existsByEmail(request.email())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "注册信息已被占用:用户名或邮箱不可用");
         }
 
         User user = new User();
@@ -162,9 +161,12 @@ public class AuthService {
         String hash = tokenService.hashToken(presentedRefreshToken);
         Optional<AuthSession> maybe = authSessionRepository.findByRefreshTokenHash(hash);
         maybe.ifPresent(session -> {
-            session.setRevokedAt(LocalDateTime.now());
-            session.setRevokeReason("logout");
-            authSessionRepository.save(session);
+            // 已撤销的会话保留原 revokeReason(如 refresh_reuse_detected),不覆盖取证信息
+            if (session.getRevokedAt() == null) {
+                session.setRevokedAt(LocalDateTime.now());
+                session.setRevokeReason("logout");
+                authSessionRepository.save(session);
+            }
         });
     }
 

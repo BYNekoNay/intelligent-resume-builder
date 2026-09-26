@@ -31,7 +31,7 @@ public class TaskLeaseService {
 
     /**
      * 批量领取可执行的任务。
-     * 先查询可领取任务(FOR UPDATE SKIP LOCKED),再逐个尝试获取租约。
+     * 先查询可领取任务(FOR UPDATE),再逐个尝试获取租约。
      */
     @Transactional
     public List<AiTask> claimBatch(String owner, int batchSize) {

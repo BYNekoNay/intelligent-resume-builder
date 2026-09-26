@@ -216,6 +216,8 @@ async function score(version: ResumeVersionSummary) {
 }
 
 async function exportPdf(version: ResumeVersionSummary) {
+  // 同帧双击防线：disabled 由 Vue 异步渲染生效，此处同步拦截重复提交
+  if (runningAction.value !== null) return
   runningAction.value = version.id; error.value = ''
   try {
     const response = await createExport(version.id, versionTemplate(version))

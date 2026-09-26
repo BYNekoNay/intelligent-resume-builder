@@ -161,12 +161,14 @@ class ResumeVersionServiceTest {
             return saved;
         });
 
-        ResumeVersionDetail restored = versionService.restore(1L, 10L, 100L);
+        // 3 参 restore 重载已删除（仅测试使用的死代码）；无 ATS 溯源时 request 传 null
+        ResumeVersionDetail restored = versionService.restore(1L, 10L, null, 100L);
 
         assertEquals(8, restored.versionNo());
         assertEquals(ResumeSourceType.RESTORED, restored.sourceType());
         assertEquals(source.getResumeJson(), restored.resumeJson());
         assertEquals(10L, restored.restoredFromVersionId());
+        assertEquals("恢复自 v3", restored.optimizationSummary(), "恢复摘要文案（中英文已统一）");
         assertEquals(20L, resume.getCurrentVersionId());
         verify(resumeRepository).save(resume);
     }
@@ -332,7 +334,7 @@ class ResumeVersionServiceTest {
         when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
         when(versionRepository.findByIdAndResumeId(10L, 1L)).thenReturn(Optional.empty());
 
-        assertThrows(BusinessException.class, () -> versionService.restore(1L, 10L, 100L));
+        assertThrows(BusinessException.class, () -> versionService.restore(1L, 10L, null, 100L));
         assertThrows(BusinessException.class, () -> versionService.archive(1L, 10L, 100L));
     }
 

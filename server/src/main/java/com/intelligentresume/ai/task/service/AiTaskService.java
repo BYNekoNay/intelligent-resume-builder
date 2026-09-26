@@ -192,8 +192,10 @@ public class AiTaskService {
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "AI 任务不存在"));
         AiTaskCapabilityRegistry.requireRegistered(task.getTaskType());
         if (!com.intelligentresume.ai.task.domain.AiTaskStatus.FAILED.equals(task.getStatus())) {
-            throw new BusinessException(ErrorCode.VALIDATION, "只有失败的任务可以重试");
+            throw new BusinessException(ErrorCode.CONFLICT, "只有失败的任务可以重试");
         }
+        // ATS_ANALYSIS 豁免 maxRetries 上限:其失败多因模型超时等瞬时故障,允许用户手动多次重试。
+        // 实际消耗仍受 app.ai.quota.ATS_ANALYSIS 日配额间接封顶,不会无限重试。
         if (task.getRetryCount() >= workerProperties.getMaxRetries()
                 && task.getTaskType() != com.intelligentresume.ai.task.domain.AiTaskType.ATS_ANALYSIS) {
             throw new BusinessException(ErrorCode.CONFLICT, "AI 任务已达到最大重试次数");

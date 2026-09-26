@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -123,6 +124,87 @@ class KeywordCoveragePhraseTest {
         assertTrue(result.missing().contains("Kubernetes"));
         assertTrue(result.missing().contains("微服务"));
         assertFalse(result.missing().contains("Java"));
+    }
+
+    // ---- 健壮性回归：畸形输入必须静默忽略，不得抛异常 ----
+    // 预期行为依据 ResumeKeywordExtractor 的 instanceof 防御：
+    // 非 Map 的数组元素 / 非 List 的 skills / null 文本字段一律跳过。
+
+    @Test
+    @DisplayName("健壮性: skills 数组元素含 null 与数字时静默忽略，不抛异常")
+    void skillsElementsWithNullAndNumberAreSilentlyIgnored() {
+        Map<String, Object> skill = new LinkedHashMap<>();
+        skill.put("name", "Java");
+        List<Object> skills = new ArrayList<>();
+        skills.add(null);
+        skills.add(42);
+        skills.add("Spring Boot");
+        skills.add(skill);
+
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("skills", skills);
+        ResumeVersion version = new ResumeVersion();
+        version.setResumeJson(json);
+
+        Set<String> tokens = assertDoesNotThrow(() -> extractor.extract(version),
+                "null/数字元素不得导致抽取抛异常");
+        // "Spring Boot" 元素产出 spring 与 boot 两个单词 token；null 与 42 被静默忽略
+        assertEquals(Set.of("spring", "boot", "java"), tokens,
+                "合法项应被抽取，null 与数字元素应被静默忽略。tokens=" + tokens);
+    }
+
+    @Test
+    @DisplayName("健壮性: skills 为字符串而非数组时整体静默忽略，产出空 token 集")
+    void skillsAsStringIsSilentlyIgnored() {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("skills", "Java, Spring Boot");
+        ResumeVersion version = new ResumeVersion();
+        version.setResumeJson(json);
+
+        Set<String> tokens = assertDoesNotThrow(() -> extractor.extract(version),
+                "skills 非数组不得抛异常");
+        assertTrue(tokens.isEmpty(),
+                "skills 为字符串时应整体静默忽略（与既有 instanceof 防御一致），产出空结果。tokens=" + tokens);
+    }
+
+    @Test
+    @DisplayName("健壮性: basics 字段为 null、work 数组元素为 null 时静默忽略")
+    void basicsAndWorkWithNullsAreSilentlyIgnored() {
+        Map<String, Object> basics = new LinkedHashMap<>();
+        basics.put("label", null);
+        basics.put("summary", "Java 开发");
+
+        Map<String, Object> workItem = new LinkedHashMap<>();
+        workItem.put("position", "Backend Engineer");
+        workItem.put("company", null);
+
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("basics", basics);
+        json.put("work", Arrays.asList(null, workItem));
+        ResumeVersion version = new ResumeVersion();
+        version.setResumeJson(json);
+
+        Set<String> tokens = assertDoesNotThrow(() -> extractor.extract(version),
+                "null 字段/null 数组元素不得抛异常");
+        assertTrue(tokens.contains("java"), "basics.summary 的 'Java' 应被抽取。tokens=" + tokens);
+        assertTrue(tokens.contains("backend"), "work[1].position 的 'Backend' 应被抽取。tokens=" + tokens);
+        assertTrue(tokens.contains("engineer"), "work[1].position 的 'Engineer' 应被抽取。tokens=" + tokens);
+    }
+
+    @Test
+    @DisplayName("健壮性: 极端长单词（约 256KB 简历上限内的 20 万字符 token）不抛异常且完整产出")
+    void extremelyLongTokenIsHandled() {
+        // 20 万字符 < JsonResumeValidator 的 262144 字节上限，属于合法简历可容纳的极端 token
+        String longWord = "a".repeat(200_000);
+        ResumeVersion version = resumeWith(longWord);
+
+        Set<String> tokens = assertDoesNotThrow(() -> extractor.extract(version),
+                "超长 token 不得导致抽取抛异常");
+        assertEquals(Set.of(longWord), tokens,
+                "长单词经小写化与去标点后应原样保留。tokens.size=" + tokens.size());
+
+        Set<String> raw = assertDoesNotThrow(() -> extractor.extractRaw(version));
+        assertEquals(Set.of(longWord), raw, "原始 token 集合同样应完整产出");
     }
 
     private ResumeVersion resumeWithSkills(List<Map<String, Object>> skills) {

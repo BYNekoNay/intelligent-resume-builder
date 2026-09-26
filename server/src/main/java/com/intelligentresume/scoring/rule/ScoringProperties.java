@@ -28,6 +28,16 @@ import java.util.Map;
  *
  * <p>回归测试：{@code ScoringDictionaryBindingIT}（断言词典非空且分词结果正确）。
  * 历史背景见 {@code docs/reviews/2026-09-25-cloud-functional-test.md} §6。
+ *
+ * <p><b>空词典的静默降级契约（已知且接受，勿当缺陷上报）</b>：
+ * 当 {@code synonymDictionary} 为空（未配置 {@code app.scoring.synonym-dictionary}，
+ * 或配置为空 map）时，{@link Normalizer} 的同义词归一退化为<b>恒等映射</b>——
+ * {@link com.intelligentresume.scoring.rule.KeywordRule} 评估结果中
+ * {@code partialMatched} 恒为空列表，所有命中都记为 direct（进入 {@code matched}）。
+ * 由于 {@code matched} 与 {@code partialMatched} 在分数中同权重，
+ * <b>分数不受影响</b>，仅匹配明细的分类失去区分度；调用方（评分报告的消费端）
+ * 因此<b>无法区分</b>「词典未配置」与「恰好全部关键词直接逐字命中」这两种情况。
+ * 该降级不抛错、不打日志、不改变分数计算——这是有意为之的静默契约。
  */
 @Component
 @ConfigurationProperties(prefix = "app.scoring")

@@ -107,6 +107,8 @@ class AuthServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> authService.register(req));
         assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        // 统一冲突消息,防止账号枚举
+        assertEquals("注册信息已被占用:用户名或邮箱不可用", ex.getMessage());
         verify(userRepository, never()).save(any());
     }
 
@@ -120,6 +122,8 @@ class AuthServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> authService.register(req));
         assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        // 与重复用户名场景使用同一消息,防止账号枚举
+        assertEquals("注册信息已被占用:用户名或邮箱不可用", ex.getMessage());
         verify(userRepository, never()).save(any());
     }
 
@@ -253,6 +257,25 @@ class AuthServiceTest {
         assertNotNull(session.getRevokedAt());
         assertEquals("logout", session.getRevokeReason());
         verify(authSessionRepository).save(session);
+    }
+
+    @Test
+    @DisplayName("边界路径: 退出已撤销 session 保留原 revokeReason 不覆盖")
+    void logout_alreadyRevoked_preservesForensicReason() {
+        AuthSession session = activeSession(10L, 1L, "family-1", "hash-1");
+        session.setRevokedAt(LocalDateTime.now().minusMinutes(5));
+        session.setRevokeReason("refresh_reuse_detected");
+        LocalDateTime revokedAtBefore = session.getRevokedAt();
+        when(tokenService.hashToken("my-refresh")).thenReturn("hash-1");
+        when(authSessionRepository.findByRefreshTokenHash("hash-1"))
+                .thenReturn(Optional.of(session));
+
+        authService.logout("my-refresh");
+
+        // 取证原因不被 "logout" 覆盖,撤销标记保持原值,且不再重复写库
+        assertEquals("refresh_reuse_detected", session.getRevokeReason());
+        assertEquals(revokedAtBefore, session.getRevokedAt());
+        verify(authSessionRepository, never()).save(any());
     }
 
     @Test

@@ -65,6 +65,10 @@ app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
 
+  # 简历导入(上传解析)——单文件大小上限,与 spring.servlet.multipart.max-file-size(5MB)保持一致
+  resume-import:
+    max-bytes: ${RESUME_IMPORT_MAX_BYTES:5242880}
+
   # T03 简历 JSON 校验
   resume:
     json-schema:

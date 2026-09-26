@@ -3,6 +3,7 @@ package com.intelligentresume.auth.ratelimit;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
+import com.intelligentresume.common.error.ErrorCode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -98,14 +99,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private void writeTooManyRequests(HttpServletResponse response, HttpServletRequest request) throws IOException {
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
-        ApiResponse<Void> body = ApiResponse.failure(42901, "请求频率超限,请稍后再试", traceId);
+        ApiResponse<Void> body = ApiResponse.failure(ErrorCode.RATE_LIMITED.code(), "请求频率超限,请稍后再试", traceId);
         response.setStatus(429);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
         response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 
-    /** 简单滑动分钟桶:每分钟清零一次。 */
+    /** 固定窗口计数:每个自然分钟清零一次,窗口边界处突发流量可能达到 2 倍阈值。 */
     private static final class Bucket {
         private volatile long minute = -1L;
         private final AtomicInteger counter = new AtomicInteger(0);

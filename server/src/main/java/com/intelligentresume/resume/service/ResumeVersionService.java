@@ -134,22 +134,6 @@ public class ResumeVersionService {
     }
 
     @Transactional
-    public ResumeVersionDetail restore(Long resumeId, Long versionId, Long userId) {
-        Resume resume = findOwnedForUpdate(resumeId, userId);
-        ResumeVersion source = findVersionForResume(versionId, resumeId);
-        jsonResumeValidator.validate(source.getResumeJson());
-
-        ResumeVersion restored = createVersion(resumeId, ResumeSourceType.RESTORED,
-                source.getResumeJson(), "恢复自 v" + source.getVersionNo(), null, userId);
-        restored.setRestoredFromVersionId(source.getId());
-        versionRepository.save(restored);
-
-        resume.setCurrentVersionId(restored.getId());
-        resumeRepository.save(resume);
-        return toDetail(restored);
-    }
-
-    @Transactional
     public ResumeVersionDetail restore(Long resumeId, Long versionId,
                                        RestoreResumeVersionRequest request, Long userId) {
         Resume resume = findOwnedForUpdate(resumeId, userId);
@@ -158,7 +142,7 @@ public class ResumeVersionService {
         Map<String, Object> generationContext = request == null ? null : atsGenerationContext(request, source, userId);
 
         ResumeVersion restored = createVersion(resumeId, ResumeSourceType.RESTORED,
-                source.getResumeJson(), "Restored from v" + source.getVersionNo(), generationContext, userId);
+                source.getResumeJson(), "恢复自 v" + source.getVersionNo(), generationContext, userId);
         restored.setRestoredFromVersionId(source.getId());
         versionRepository.save(restored);
 

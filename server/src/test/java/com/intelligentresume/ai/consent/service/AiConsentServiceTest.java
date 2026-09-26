@@ -186,6 +186,11 @@ class AiConsentServiceTest {
                 List.of("JOB_DESCRIPTION")));
         assertFalse(service.hasValidConsent(100L, "JOB_GENERATION",
                 List.of("UNKNOWN_CATEGORY")));
+        // 精确匹配(非子串): 前缀/扩展名相似的 scope 不得放行
+        assertFalse(service.hasValidConsent(100L, "JOB",
+                List.of("JOB_DESCRIPTION")));
+        assertFalse(service.hasValidConsent(100L, "JOB_GENERATION_V2",
+                List.of("JOB_DESCRIPTION")));
     }
 
     private AiConsent consent(Long id, Long userId, ConsentStatus status) {

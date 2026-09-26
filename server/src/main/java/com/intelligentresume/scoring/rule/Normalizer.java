@@ -75,6 +75,11 @@ public class Normalizer {
 
     /**
      * 归一化单个 token：小写 → 去标点 → 折叠空格 → 同义词归一。
+     *
+     * <p><b>空词典契约</b>：词典为空（未配置）时本方法的同义词归一步骤退化为恒等映射
+     * （返回去标点小写后的原文），上游 KeywordRule 的 {@code partialMatched} 恒为空、
+     * 全部命中记 direct，调用方无法区分「未配置」与「全直接命中」——
+     * 这是已知且接受的静默降级，完整说明见 {@link ScoringProperties} 类注释。
      */
     public String normalize(String token) {
         if (token == null || token.isBlank()) {
