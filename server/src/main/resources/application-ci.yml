@@ -1,0 +1,55 @@
+# CI 功能回归专用 profile（由 .github/workflows/functional.yml 使用）。
+#
+# 为什么不能用 application-test.yml：它在 src/test/resources，**不会打进 bootJar**，
+# 而本 job 需要以 `java -jar` 启动完整应用来跑黑盒 HTTP 断言（后端复核 backend3 的阻塞点①）。
+#
+# 设计要点：
+# - 数据源指向 CI 的 MySQL service container，走**真实 Flyway 迁移**（与生产同路径）；
+# - 限流必须放开：黑盒套件每轮注册 20+ 账号，默认 register-per-minute=5 会直接 429
+#   （backend3 的阻塞点②）；
+# - BAILIAN_API_KEY 留空（沿用 application.yml 默认）→ AI 路径确定性失败，
+#   这正是"无密钥降级路径"断言的前提；AI 全链路仅在 FUNCTIONAL_AI_LIVE/BAILIAN_LIVE_TEST
+#   门控下于带密钥环境运行。
+spring:
+  datasource:
+    url: ${CI_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/intelligent_resume?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8}
+    username: ${CI_DATASOURCE_USERNAME:root}
+    password: ${CI_DATASOURCE_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: 8080
+  address: 127.0.0.1
+
+app:
+  cors:
+    allowed-origins: http://localhost:5173
+  jwt:
+    # 仅 CI 容器内使用；非生产 secret（生产由 @Profile("prod") 校验器强制非默认值）
+    secret: ci-functional-only-secret-ci-functional-only-32b
+    issuer: intelligent-resume-builder-ci
+  security:
+    rate-limit:
+      login-per-minute: 1000
+      register-per-minute: 1000
+      refresh-per-minute: 1000
+  ai:
+    worker:
+      poll-interval-ms: 200
+      lease-seconds: 180
+      max-retries: 1
+      batch-size: 1
+  pdf:
+    service-base-url: ${PDF_SERVICE_BASE_URL:http://127.0.0.1:3001}
+    service-token: ${PDF_SERVICE_TOKEN:ci-pdf-token-0123456789abcdef0123456789abcdef}
+    render-timeout-seconds: 30
+    max-input-bytes: 65536
+    max-output-bytes: 1048576
+    file-ttl-hours: 1
+    output-dir: ./build/ci-pdf-output

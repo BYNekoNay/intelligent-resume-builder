@@ -1,0 +1,231 @@
+name: Functional Regression
+
+# 黑盒 HTTP 功能回归门禁（functional-tests/）。
+# 目的：让 2026-09-25 全功能验证的 184 条断言进入版本库与 CI，防止回归再次逃逸
+# （QA 复核认定的头号结构性盲区）。
+#
+# AI 路径的处理（qa3 裁决 B1）：无密钥环境跑不了真实 AI，套件默认跳过 AI 全链路，
+# 但**跳过必须在 job 摘要中显式呈现**（执行/失败/跳过三类），不得让"绿"掩盖"没测"。
+# 需要验证 AI 路径时用 workflow_dispatch 勾选 run_ai_live，由 ai-live job 在带密钥环境执行。
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_ai_live:
+        description: "同时运行 AI 全链路套件（需要已配置 BAILIAN_API_KEY secret）"
+        type: boolean
+        default: false
+  push:
+    branches: [master]
+    paths:
+      - "server/**"
+      - "pdf-service/**"
+      - "functional-tests/**"
+      - ".github/workflows/functional.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "server/**"
+      - "pdf-service/**"
+      - "functional-tests/**"
+      - ".github/workflows/functional.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: functional-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  functional:
+    name: 功能回归（黑盒 HTTP · AI 路径未验证）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: intelligent_resume
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PDF_SERVICE_TOKEN: ci-pdf-token-0123456789abcdef0123456789abcdef
+      PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.puppeteer-cache
+      FUNCTIONAL_SUMMARY_FILE: ${{ github.workspace }}/functional-summary.md
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Package server (skip tests — covered by the `server` job)
+        run: mvn --batch-mode --no-transfer-progress -pl server -am package -DskipTests
+
+      - name: Install pdf-service dependencies and Chromium
+        run: |
+          npm ci --prefix pdf-service
+          npx --prefix pdf-service puppeteer browsers install chrome
+
+      - name: Start pdf-service
+        run: |
+          cd pdf-service
+          nohup node src/server.js --port=3001 > "$GITHUB_WORKSPACE/pdf-service.log" 2>&1 &
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3001/health > /dev/null 2>&1; then
+              echo "pdf-service ready (第 $i 次探测)"; exit 0
+            fi
+            sleep 2
+          done
+          echo "pdf-service 未就绪"; tail -50 "$GITHUB_WORKSPACE/pdf-service.log"; exit 1
+
+      - name: Start API (profile ci — MySQL service + real Flyway migrations)
+        run: |
+          JAR=$(ls server/target/intelligent-resume-server-*.jar | head -1)
+          nohup java -jar "$JAR" --spring.profiles.active=ci \
+            > "$GITHUB_WORKSPACE/api.log" 2>&1 &
+          # 就绪探测：2s 间隔、最多 120s（qa3 裁决 B2 —— 超时定义必须显式）
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/actuator/health/readiness > /dev/null 2>&1; then
+              echo "API ready (第 $i 次探测)"; exit 0
+            fi
+            sleep 2
+          done
+          echo "API 未就绪"; tail -80 "$GITHUB_WORKSPACE/api.log"; exit 1
+
+      - name: Run functional regression suites
+        run: python3 functional-tests/run_all.py http://127.0.0.1:8080
+
+      - name: Write job summary (执行 / 失败 / 跳过 必须显式呈现)
+        if: always()
+        run: |
+          {
+            echo "## 功能回归结果"
+            echo
+            echo "**AI 全链路套件本轮未运行**（无模型密钥；需要时用 workflow_dispatch 勾选 run_ai_live）。"
+            echo "跳过的路径本轮**未验证**，不得视为通过。最近一次 AI 路径真实验证记录见 functional-tests/README.md。"
+            echo
+            cat "$FUNCTIONAL_SUMMARY_FILE" 2>/dev/null || echo "（无汇总输出）"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional-logs
+          path: |
+            api.log
+            pdf-service.log
+
+      - name: Stop background services
+        if: always()
+        run: |
+          pkill -f 'intelligent-resume-server' || true
+          pkill -f 'pdf-service/src/server.js' || true
+
+  ai-live:
+    name: AI 全链路（仅 dispatch 且勾选时运行；失败必须红）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: functional
+    if: ${{ inputs.run_ai_live == true }}
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: intelligent_resume
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PDF_SERVICE_TOKEN: ci-pdf-token-0123456789abcdef0123456789abcdef
+      PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.puppeteer-cache
+      BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Fail fast when the model key is not configured
+        run: |
+          if [ -z "$BAILIAN_API_KEY" ]; then
+            echo "::error::BAILIAN_API_KEY secret 未配置 —— 无法验证 AI 路径。请在仓库 Settings → Secrets 添加，或不要勾选 run_ai_live。"
+            exit 1
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Package server
+        run: mvn --batch-mode --no-transfer-progress -pl server -am package -DskipTests
+
+      - name: Install pdf-service dependencies and Chromium
+        run: |
+          npm ci --prefix pdf-service
+          npx --prefix pdf-service puppeteer browsers install chrome
+
+      - name: Start pdf-service
+        run: |
+          cd pdf-service
+          nohup node src/server.js --port=3001 > "$GITHUB_WORKSPACE/pdf-service.log" 2>&1 &
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3001/health > /dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          echo "pdf-service 未就绪"; tail -50 "$GITHUB_WORKSPACE/pdf-service.log"; exit 1
+
+      - name: Start API (profile ci + real model key)
+        run: |
+          JAR=$(ls server/target/intelligent-resume-server-*.jar | head -1)
+          nohup java -jar "$JAR" --spring.profiles.active=ci \
+            > "$GITHUB_WORKSPACE/api.log" 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/actuator/health/readiness > /dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          echo "API 未就绪"; tail -80 "$GITHUB_WORKSPACE/api.log"; exit 1
+
+      - name: Run AI full-chain suite
+        run: python3 functional-tests/suites/suite_ai_full.py http://127.0.0.1:8080
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-live-logs
+          path: |
+            api.log
+            pdf-service.log
+
+      - name: Stop background services
+        if: always()
+        run: |
+          pkill -f 'intelligent-resume-server' || true
+          pkill -f 'pdf-service/src/server.js' || true

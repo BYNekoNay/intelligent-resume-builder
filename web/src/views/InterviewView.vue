@@ -488,7 +488,7 @@ onBeforeUnmount(() => {
         <div class="ai-loading-indicator">
           <Loader2 :size="28" class="spin" />
           <p class="section-kicker">{{ aiLoadingLabel }}</p>
-          <p class="ai-loading-hint">{{ t('interview.aiLoadingHint') }}</p>
+          <p class="ai-loading-hint">{{ isGeneratingQuestion ? t('interview.aiGeneratingHint') : t('interview.aiEvaluatingHint') }}</p>
         </div>
       </section>
 
