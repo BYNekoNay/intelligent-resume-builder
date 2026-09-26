@@ -438,7 +438,7 @@ class InterviewControllerIT {
         long sid = startSession();
         var attempt = attemptRepository.findAllBySessionId(sid).get(0);
         jdbcTemplate.update("update interview_ai_attempt set status = 'PROCESSING', updated_at = ? where id = ?",
-                Timestamp.valueOf(LocalDateTime.now().minusSeconds(80)), attempt.getId());
+                Timestamp.valueOf(LocalDateTime.now().minusSeconds(601)), attempt.getId());
         jdbcTemplate.update("update interview_session set status = 'GENERATING_QUESTION' where id = ?", sid);
 
         mockMvc.perform(get("/api/interviews/" + sid)

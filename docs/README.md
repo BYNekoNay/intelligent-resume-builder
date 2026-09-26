@@ -67,6 +67,7 @@
 | [2026-09-25-ats-keyword-coverage-fix](./reviews/2026-09-25-ats-keyword-coverage-fix.md) | **ATS 关键词覆盖度修复**：3 处同源缺陷（词典绑定失效 / 技能字段读错 / PDF 丢弃技能项）、回归测试与真实环境验证（20.0 → 40.0） |
 | [2026-09-25-project-completeness-assessment](./reviews/2026-09-25-project-completeness-assessment.md) | **项目完善度评估**：专家团六角色并行审查（一致判定 C）、10 项共识风险、维度评级、P0/P1/P2 行动清单与未验证面 |
 | [2026-09-25-full-functional-verification](./reviews/2026-09-25-full-functional-verification.md) | **全功能可用性验证**：4 套脚本 184 条断言、91 端点覆盖矩阵、确认 1 个 P1 缺陷（面试回答超时错配）并排除 3 个疑似缺陷 |
+| [2026-09-26-interview-answer-async-fix](./reviews/2026-09-26-interview-answer-async-fix.md) | **面试回答接口异步化修复**：`/answer` 由同步等待 108.7s 改为秒回 + 轮询（前端零改动）；连带修正陈旧接管阈值 75s→600s；657 测试全绿 + 真实环境 4 轮全通过 |
 | [ats-reasoning-eval/](./reviews/2026-09-24-ats-reasoning-eval/E5-final-report.md) | **ATS 推理开关对比实验**：预注册非劣性检验、E1 rubric、判定表定稿、最终报告（结局 ③ 证据不足） |
 | ├ [E1-rubric](./reviews/2026-09-24-ats-reasoning-eval/E1-rubric.md) | 评分量表 v1.4（含 5 处裁定与 V2a/V2b 拆分） |
 | ├ [E2-preegistration](./reviews/2026-09-24-ats-reasoning-eval/E2-preegistration.md) | 预注册 v11：判据、护栏、三种互斥结局 |

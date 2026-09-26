@@ -119,13 +119,16 @@ class InterviewOperationSupportTest {
     // ---- stale / retry ----
 
     @Test
-    @DisplayName("isStale：超时 75 秒判定")
+    @DisplayName("isStale：超过接管阈值（600s，与 AI 链总预算对齐）判定为陈旧")
     void isStale_timeoutWindow() {
         InterviewAiAttempt attempt = new InterviewAiAttempt();
-        attempt.setUpdatedAt(LocalDateTime.now().minusSeconds(100));
+        // 阈值为 PROCESSING_TAKEOVER_SECONDS = 600（评估已后台化，合法耗时实测 76–146s，
+        // 其自身受 AI 链总预算 600s 约束 —— 故 600s 以上才算挂死，详见该常量的注释）
+        attempt.setUpdatedAt(LocalDateTime.now().minusSeconds(601));
         assertTrue(support.isStale(attempt, LocalDateTime.now()));
 
-        attempt.setUpdatedAt(LocalDateTime.now().minusSeconds(10));
+        // 599s 不接管：合法的后台评估可以运行数百秒
+        attempt.setUpdatedAt(LocalDateTime.now().minusSeconds(599));
         assertFalse(support.isStale(attempt, LocalDateTime.now()));
 
         attempt.setUpdatedAt(null);

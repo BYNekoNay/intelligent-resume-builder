@@ -44,7 +44,20 @@ import java.util.Objects;
 @Component
 public class InterviewOperationSupport {
 
-    private static final long PROCESSING_TAKEOVER_SECONDS = 75;
+    /**
+     * 陈旧接管阈值（秒）：超过它仍未完成的 PROCESSING attempt 才被视为挂死、允许被接管。
+     *
+     * <p><b>为什么是 600 而不是原来的 75</b>：评估已改为**后台执行**（见
+     * {@link InterviewEvaluationConfig}），合法耗时实测 76–146s（4 轮）；
+     * 评估自身受 AI 链总预算约束（`app.ai.chain-total-budget=600s`，单模型读超时 300s），
+     * 即它**不可能合法地超过 600s** —— 超过必是挂死，接管才是正确的。
+     *
+     * <p>原值 75 是为旧的同步请求世界设定的：当时 attempt 处于 PROCESSING 期间客户端早已断开，
+     * 75s 接管影响不大。异步化后若仍用 75s，轮询中的 `GET /interviews/{id}` 会在评估
+     * 正常运行时把它标记为 `PROCESSING_TIMEOUT`，随后后台 TX2 发现状态已变而丢弃结果
+     * （实测复现：error_code=CONFLICT「会话状态已变更」）。
+     */
+    private static final long PROCESSING_TAKEOVER_SECONDS = 600;
 
     private final InterviewSessionRepository sessionRepository;
     private final InterviewAiAttemptRepository attemptRepository;
