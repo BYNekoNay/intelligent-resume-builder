@@ -29,9 +29,21 @@ public final class AiTaskCapabilityRegistry {
         PROVIDER
     }
 
+    /**
+     * 工作器领取分组。分钟级长任务与秒级短任务分属不同分组，各自持有独立
+     * 执行线程池与并发额度，避免长任务把短任务饿死。
+     */
+    public enum Group {
+        /** 分钟级长任务：单条会长时间占用额度。 */
+        HEAVY,
+        /** 秒级短任务：必须保证不被长任务阻塞。 */
+        LIGHT
+    }
+
     public record Descriptor(
             AiTaskType type,
             ExecutionMode executionMode,
+            Group group,
             boolean genericEndpointAllowed,
             List<String> baseConsentCategories,
             boolean addJobDescriptionWhenPresent
@@ -83,29 +95,44 @@ public final class AiTaskCapabilityRegistry {
         return descriptor;
     }
 
+    /** 任务类型所属的领取分组。 */
+    public static Group groupOf(AiTaskType type) {
+        return requireRegistered(type).group();
+    }
+
+    /**
+     * 某个分组下的全部任务类型，按枚举声明顺序返回，供工作器构造领取过滤条件。
+     */
+    public static List<AiTaskType> typesIn(Group group) {
+        return DESCRIPTORS.values().stream()
+                .filter(descriptor -> descriptor.group() == group)
+                .map(Descriptor::type)
+                .toList();
+    }
+
     public static Map<AiTaskType, Descriptor> descriptorsForTests() {
         return Map.copyOf(DESCRIPTORS);
     }
 
     private static Map<AiTaskType, Descriptor> descriptors() {
         EnumMap<AiTaskType, Descriptor> descriptors = new EnumMap<>(AiTaskType.class);
-        put(descriptors, AiTaskType.JOB_MATERIAL_SELECTION, ExecutionMode.DOMAIN_SELECTION,
+        put(descriptors, AiTaskType.JOB_MATERIAL_SELECTION, ExecutionMode.DOMAIN_SELECTION, Group.HEAVY,
                 false, List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE"), false);
-        put(descriptors, AiTaskType.JOB_GENERATION, ExecutionMode.DOMAIN_GENERATION,
+        put(descriptors, AiTaskType.JOB_GENERATION, ExecutionMode.DOMAIN_GENERATION, Group.HEAVY,
                 false, List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE"), false);
-        put(descriptors, AiTaskType.RESUME_OPTIMIZE, ExecutionMode.PROVIDER,
+        put(descriptors, AiTaskType.RESUME_OPTIMIZE, ExecutionMode.PROVIDER, Group.LIGHT,
                 true, List.of("RESUME"), true);
-        put(descriptors, AiTaskType.INLINE_OPTIMIZE, ExecutionMode.PROVIDER,
+        put(descriptors, AiTaskType.INLINE_OPTIMIZE, ExecutionMode.PROVIDER, Group.LIGHT,
                 true, List.of("RESUME"), true);
-        put(descriptors, AiTaskType.MATERIAL_IMPORT, ExecutionMode.PROVIDER,
+        put(descriptors, AiTaskType.MATERIAL_IMPORT, ExecutionMode.PROVIDER, Group.LIGHT,
                 true, List.of("CAREER_MATERIAL"), false);
-        put(descriptors, AiTaskType.ACHIEVEMENT_GUIDANCE, ExecutionMode.PROVIDER,
+        put(descriptors, AiTaskType.ACHIEVEMENT_GUIDANCE, ExecutionMode.PROVIDER, Group.LIGHT,
                 true, List.of("RESUME"), true);
-        put(descriptors, AiTaskType.COMMUNICATION_GENERATE, ExecutionMode.COMMUNICATION,
+        put(descriptors, AiTaskType.COMMUNICATION_GENERATE, ExecutionMode.COMMUNICATION, Group.HEAVY,
                 false, List.of("RESUME", "JOB_DESCRIPTION"), false);
-        put(descriptors, AiTaskType.INTERVIEW_COACH, ExecutionMode.INTERVIEW,
+        put(descriptors, AiTaskType.INTERVIEW_COACH, ExecutionMode.INTERVIEW, Group.LIGHT,
                 true, List.of("RESUME", "INTERVIEW_ANSWER"), true);
-        put(descriptors, AiTaskType.ATS_ANALYSIS, ExecutionMode.ATS_ANALYSIS,
+        put(descriptors, AiTaskType.ATS_ANALYSIS, ExecutionMode.ATS_ANALYSIS, Group.HEAVY,
                 true, List.of("RESUME", "JOB_DESCRIPTION"), false);
 
         EnumSet<AiTaskType> missing = EnumSet.allOf(AiTaskType.class);
@@ -119,10 +146,11 @@ public final class AiTaskCapabilityRegistry {
     private static void put(Map<AiTaskType, Descriptor> descriptors,
                             AiTaskType type,
                             ExecutionMode executionMode,
+                            Group group,
                             boolean genericEndpointAllowed,
                             List<String> baseConsentCategories,
                             boolean addJobDescriptionWhenPresent) {
-        if (descriptors.put(type, new Descriptor(type, executionMode, genericEndpointAllowed,
+        if (descriptors.put(type, new Descriptor(type, executionMode, group, genericEndpointAllowed,
                 List.copyOf(baseConsentCategories), addJobDescriptionWhenPresent)) != null) {
             throw new IllegalStateException("Duplicate AI task capability: " + type);
         }

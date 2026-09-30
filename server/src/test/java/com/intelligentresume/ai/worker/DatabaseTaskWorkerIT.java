@@ -25,6 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 覆盖:领取并执行、过期租约恢复，以及未配置密钥时的失败状态。
  *
  * <p>测试环境关闭自动调度,通过直接调用 {@code worker.poll()} 手动触发。
+ * {@code poll()} 现在把执行派发到分组线程池(异步),因此断言前需等待任务到达终态。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -94,10 +95,10 @@ class DatabaseTaskWorkerIT {
     void workerPoll_claimsAndExecutesToFailedWithoutApiKey() throws Exception {
         Long taskId = createTask("MATERIAL_IMPORT");
 
-        // 手动触发工作器轮询
+        // 手动触发工作器轮询（异步派发），等待任务到达终态
         worker.poll();
 
-        AiTask task = taskRepository.findById(taskId).orElseThrow();
+        AiTask task = awaitTerminal(taskId);
         assertEquals(AiTaskStatus.FAILED, task.getStatus());
         assertTrue(task.getErrorMessage().contains("API Key"));
         assertNull(task.getLeaseOwner(), "成功后应清除租约");
@@ -120,12 +121,30 @@ class DatabaseTaskWorkerIT {
         task.setRetryCount(1);
         taskRepository.saveAndFlush(task);
 
-        // 工作器应能重新领取过期任务
+        // 工作器应能重新领取过期任务（异步派发），等待任务到达终态
         worker.poll();
 
-        AiTask updated = taskRepository.findById(taskId).orElseThrow();
+        AiTask updated = awaitTerminal(taskId);
         assertEquals(AiTaskStatus.FAILED, updated.getStatus());
         assertTrue(updated.getErrorMessage().contains("API Key"));
         assertNull(updated.getLeaseOwner());
+    }
+
+    /**
+     * 等待任务到达终态(SUCCESS/FAILED)。未配置密钥时 AI 调用会立即失败,
+     * 因此这里通常一两次轮询即可返回;超时仅作为兜底,避免测试挂死。
+     */
+    private AiTask awaitTerminal(Long taskId) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 10_000;
+        AiTask task = taskRepository.findById(taskId).orElseThrow();
+        while (!isTerminal(task.getStatus()) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25);
+            task = taskRepository.findById(taskId).orElseThrow();
+        }
+        return task;
+    }
+
+    private static boolean isTerminal(AiTaskStatus status) {
+        return status == AiTaskStatus.SUCCESS || status == AiTaskStatus.FAILED;
     }
 }

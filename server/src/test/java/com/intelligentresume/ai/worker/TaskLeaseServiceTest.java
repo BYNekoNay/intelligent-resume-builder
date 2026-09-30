@@ -41,10 +41,10 @@ class TaskLeaseServiceTest {
     void claimBatch_acquiresPendingTask() {
         when(properties.getLeaseSeconds()).thenReturn(60);
         AiTask task = task(1L, AiTaskStatus.PENDING, 0);
-        when(taskRepository.claimableTasks(5)).thenReturn(List.of(task));
+        when(taskRepository.claimableTasksByTypes(anyList(), eq(5))).thenReturn(List.of(task));
         when(taskRepository.acquireLease(eq(1L), anyString(), any())).thenReturn(1);
 
-        List<AiTask> claimed = service.claimBatch("worker-1", 5);
+        List<AiTask> claimed = service.claimBatch("worker-1", 5, List.of(AiTaskType.JOB_GENERATION));
 
         assertEquals(1, claimed.size());
         assertEquals(AiTaskStatus.RUNNING, claimed.get(0).getStatus());
@@ -57,12 +57,20 @@ class TaskLeaseServiceTest {
     void claimBatch_leaseAcquisitionFails_skipsTask() {
         when(properties.getLeaseSeconds()).thenReturn(60);
         AiTask task = task(1L, AiTaskStatus.PENDING, 0);
-        when(taskRepository.claimableTasks(5)).thenReturn(List.of(task));
+        when(taskRepository.claimableTasksByTypes(anyList(), eq(5))).thenReturn(List.of(task));
         when(taskRepository.acquireLease(eq(1L), anyString(), any())).thenReturn(0);
 
-        List<AiTask> claimed = service.claimBatch("worker-1", 5);
+        List<AiTask> claimed = service.claimBatch("worker-1", 5, List.of(AiTaskType.JOB_GENERATION));
 
         assertTrue(claimed.isEmpty());
+    }
+
+    @Test
+    @DisplayName("任务类型集合为空 → 不查询、不领取")
+    void claimBatch_emptyTaskTypes_returnsEmptyWithoutQuery() {
+        assertTrue(service.claimBatch("worker-1", 5, List.of()).isEmpty());
+
+        verifyNoInteractions(taskRepository);
     }
 
     @Test

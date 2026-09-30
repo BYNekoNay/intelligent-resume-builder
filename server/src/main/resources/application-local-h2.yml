@@ -36,6 +36,8 @@ app:
       lease-seconds: 180
       max-retries: 1
       batch-size: 1
+      heavy-concurrency: 1
+      light-concurrency: 1
   pdf:
     service-base-url: http://localhost:3010
     service-token: dev-pdf-token-change-me

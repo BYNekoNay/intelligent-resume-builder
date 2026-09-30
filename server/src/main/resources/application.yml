@@ -170,6 +170,9 @@ app:
       lease-seconds: ${AI_WORKER_LEASE_S:180}
       max-retries: ${AI_WORKER_MAX_RETRIES:3}
       batch-size: ${AI_WORKER_BATCH:5}
+      # 分组并发额度:重任务(分钟级)与轻任务(秒级)各自独立,防止长任务饿死短任务
+      heavy-concurrency: ${AI_WORKER_HEAVY_CONCURRENCY:2}
+      light-concurrency: ${AI_WORKER_LIGHT_CONCURRENCY:2}
     consent:
       policy-version: "v1.2.0"
     quota:

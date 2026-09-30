@@ -2,6 +2,7 @@ package com.intelligentresume.ai.worker;
 
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
+import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,12 +31,18 @@ public class TaskLeaseService {
     }
 
     /**
-     * 批量领取可执行的任务。
+     * 领取指定任务类型集合中可执行的任务。
      * 先查询可领取任务(FOR UPDATE),再逐个尝试获取租约。
+     *
+     * @param taskTypes 允许领取的任务类型;为空时不做任何领取
      */
     @Transactional
-    public List<AiTask> claimBatch(String owner, int batchSize) {
-        List<AiTask> claimable = taskRepository.claimableTasks(batchSize);
+    public List<AiTask> claimBatch(String owner, int batchSize, List<AiTaskType> taskTypes) {
+        if (taskTypes == null || taskTypes.isEmpty()) {
+            return List.of();
+        }
+        List<String> typeNames = taskTypes.stream().map(Enum::name).toList();
+        List<AiTask> claimable = taskRepository.claimableTasksByTypes(typeNames, batchSize);
         List<AiTask> acquired = new ArrayList<>();
         LocalDateTime leaseUntil = LocalDateTime.now().plusSeconds(properties.getLeaseSeconds());
 

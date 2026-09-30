@@ -48,6 +48,8 @@ app:
       lease-seconds: 180
       max-retries: 1
       batch-size: 1
+      heavy-concurrency: 1
+      light-concurrency: 1
   pdf:
     service-base-url: ${PDF_SERVICE_BASE_URL:http://127.0.0.1:3001}
     service-token: ${PDF_SERVICE_TOKEN:ci-pdf-token-0123456789abcdef0123456789abcdef}

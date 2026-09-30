@@ -65,12 +65,16 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
     LocalDateTime findOldestPendingCreatedAt();
 
     /**
-     * 查询可领取的任务:PENDING 或租约过期的 RUNNING。
-     * FOR UPDATE 串行领取;多实例下会锁等待而非跳过,见 OPEN-DECISIONS ①。
-     * 防止重复领取实际由 acquireLease 的条件更新保证。
+     * 查询指定任务类型集合中可领取的任务:PENDING 或租约过期的 RUNNING。
+     *
+     * <p>{@code FOR UPDATE} 仅用于多实例之间的互斥;进程内的领取始终在单个调度
+     * 线程上串行发生,不并发调用。重复领取的实际防线是 {@link #acquireLease}
+     * 的条件更新,因此这里不需要 {@code SKIP LOCKED}(H2 测试库也不支持该语法)。</p>
      */
-    @Query(value = "SELECT * FROM ai_task WHERE status = 'PENDING' OR (status = 'RUNNING' AND lease_expires_at < NOW()) ORDER BY id ASC LIMIT :batchSize FOR UPDATE", nativeQuery = true)
-    List<AiTask> claimableTasks(@Param("batchSize") int batchSize);
+    @Query(value = "SELECT * FROM ai_task WHERE (status = 'PENDING' OR (status = 'RUNNING' AND lease_expires_at < NOW())) "
+            + "AND task_type IN (:taskTypes) ORDER BY id ASC LIMIT :batchSize FOR UPDATE", nativeQuery = true)
+    List<AiTask> claimableTasksByTypes(@Param("taskTypes") List<String> taskTypes,
+                                       @Param("batchSize") int batchSize);
 
     /**
      * 原子性获取租约:仅当任务仍为 PENDING 或租约过期的 RUNNING 时更新。
