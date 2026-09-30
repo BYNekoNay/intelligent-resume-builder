@@ -8,7 +8,22 @@ const configuredPort = process.env.PDF_SERVICE_PORT ?? cliPort ?? '3001'
 const port = Number(configuredPort)
 const expectedServiceToken = process.env.PDF_SERVICE_TOKEN ?? 'dev-pdf-token-change-me'
 const production = process.env.NODE_ENV === 'production'
-const browserPool = createBrowserPool()
+
+function positiveInteger(envName, fallback, minimum) {
+  const raw = process.env[envName]
+  if (raw === undefined || raw === '') return fallback
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < minimum) {
+    console.error(`${envName} must be an integer >= ${minimum}`)
+    process.exit(1)
+  }
+  return value
+}
+
+const maxConcurrentPages = positiveInteger('PDF_SERVICE_MAX_CONCURRENT_PAGES', 4, 1)
+const maxQueueSize = positiveInteger('PDF_SERVICE_MAX_QUEUE_SIZE', 16, 0)
+const drainTimeoutMs = positiveInteger('PDF_SERVICE_DRAIN_TIMEOUT_MS', 10_000, 1)
+const browserPool = createBrowserPool(undefined, { maxConcurrentPages, maxQueueSize })
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error('PDF_SERVICE_PORT must be an integer between 1 and 65535')
@@ -29,12 +44,18 @@ function requireServiceToken(req, res, next) {
 
 app.get('/health', async (_request, response) => {
   const rendererReady = await browserPool.checkReadiness()
+  const capacity = browserPool.stats()
   response.json({
     service: 'intelligent-resume-pdf-service',
-    status: rendererReady ? 'UP' : 'DEGRADED',
+    status: rendererReady && !capacity.draining ? 'UP' : 'DEGRADED',
     version: '0.1.0',
     capabilities: ['pdf-render', `${TEMPLATE_CODES.size}-resume-templates`, 'ordered-resume-sections'],
-    checks: [{ capability: 'pdf-renderer', status: rendererReady ? 'UP' : 'DOWN' }],
+    checks: [
+      { capability: 'pdf-renderer', status: rendererReady ? 'UP' : 'DOWN' },
+      // 容量只上报不参与整体 status：饱和是瞬态，避免健康探针抖动（按 queued/maxQueueSize 告警）
+      { capability: 'render-capacity', status: capacity.activePages >= capacity.maxConcurrentPages && capacity.queued >= capacity.maxQueueSize ? 'SATURATED' : 'UP' },
+    ],
+    capacity,
   })
 })
 
@@ -67,6 +88,11 @@ app.post('/render', requireServiceToken, async (request, response) => {
     })
     response.type('application/pdf').send(Buffer.from(pdf))
   } catch (error) {
+    // 容量/drain 拒绝：显式可重试语义（503 + Retry-After），与 API 侧「失败可重试」一致
+    if (error?.status === 503) {
+      response.set('Retry-After', '2')
+      return response.status(503).json({ code: 50301, message: error.message, retryable: true })
+    }
     const status = error?.status ?? 500
     response.status(status).json({ code: status === 400 || status === 413 ? 40001 : 50003, message: error instanceof Error ? error.message : 'PDF 渲染失败' })
   }
@@ -92,7 +118,17 @@ let shuttingDown = false
 async function shutdown(signal) {
   if (shuttingDown) return
   shuttingDown = true
-  console.info(`PDF service received ${signal}, closing browser pool`)
+  console.info(`PDF service received ${signal}, draining in-flight renders`)
+  browserPool.beginDrain()
+  const idle = await Promise.race([
+    browserPool.waitForIdle().then(() => true),
+    new Promise(resolve => {
+      setTimeout(() => resolve(false), drainTimeoutMs).unref()
+    }),
+  ])
+  if (!idle) {
+    console.warn(`PDF service drain timed out after ${drainTimeoutMs}ms, closing with in-flight renders`)
+  }
   try {
     await browserPool.close()
     await new Promise(resolve => server.close(resolve))

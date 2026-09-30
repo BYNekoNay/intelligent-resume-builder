@@ -51,6 +51,7 @@ public class FailureCategoryClassifier {
             HttpStatusCode status = response.getStatusCode();
             if (status.value() == 401 || status.value() == 403) return PdfFailureCategory.AUTH;
             if (status.value() == 413) return PdfFailureCategory.INPUT_TOO_LARGE;
+            if (status.value() == 503) return PdfFailureCategory.OVERLOADED;
             return PdfFailureCategory.RENDER;
         }
         return pdfMessage(error == null ? null : error.getMessage());
@@ -60,6 +61,8 @@ public class FailureCategoryClassifier {
         if (contains(message, "storage", "store")) return PdfFailureCategory.STORAGE;
         if (contains(message, "input", "too large", "413")) return PdfFailureCategory.INPUT_TOO_LARGE;
         if (contains(message, "auth", "401", "403")) return PdfFailureCategory.AUTH;
+        // 容量/drain 拒绝（pdf-service 503 的可读文案，中文或英文）
+        if (contains(message, "容量", "繁忙", "busy", "capacity", "503")) return PdfFailureCategory.OVERLOADED;
         if (contains(message, "timeout", "timed out", "read timed")) return PdfFailureCategory.TIMEOUT;
         if (contains(message, "connection", "connect", "network")) return PdfFailureCategory.CONNECTION;
         return PdfFailureCategory.RENDER;

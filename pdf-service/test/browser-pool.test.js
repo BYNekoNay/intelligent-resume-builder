@@ -112,3 +112,91 @@ test('reports renderer as not ready when Chromium launch fails', async () => {
   assert.equal(await pool.checkReadiness(), false)
   await pool.close()
 })
+
+/** 可手动放行的渲染回调，用于制造「in-flight」窗口。 */
+function gate() {
+  let release
+  const promise = new Promise(resolve => { release = resolve })
+  return { promise, release }
+}
+
+test('caps concurrent pages and queues the excess in FIFO order', async () => {
+  const browser = new FakeBrowser()
+  const pool = createBrowserPool(async () => browser, { maxConcurrentPages: 1, maxQueueSize: 2 })
+  const first = gate()
+  const second = gate()
+  const order = []
+
+  const running = pool.withPage(async () => {
+    order.push('first')
+    await first.promise
+  })
+  const queued = pool.withPage(async () => {
+    order.push('second')
+    await second.promise
+  })
+
+  // 名额同步占用/入队，但渲染回调在微任务里才开始
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(pool.stats(), { activePages: 1, queued: 1, maxConcurrentPages: 1, maxQueueSize: 2, draining: false })
+  assert.deepEqual(order, ['first'], '等待队列中的请求不得提前打开页面')
+
+  first.release()
+  await running
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(order, ['first', 'second'], '队首请求应在名额释放后被唤醒')
+  assert.equal(browser.pages.length, 2)
+
+  second.release()
+  await queued
+  assert.equal(pool.stats().activePages, 0)
+  await pool.close()
+})
+
+test('rejects with a retryable 503 once the wait queue is full', async () => {
+  const browser = new FakeBrowser()
+  const pool = createBrowserPool(async () => browser, { maxConcurrentPages: 1, maxQueueSize: 0 })
+  const running = gate()
+
+  const first = pool.withPage(async () => { await running.promise })
+  await assert.rejects(
+    pool.withPage(async () => undefined),
+    error => error.status === 503 && error.retryable === true && /容量已满/.test(error.message),
+  )
+  running.release()
+  await first
+  await pool.close()
+})
+
+test('drain rejects new work, lets in-flight renders finish, then reports idle', async () => {
+  const browser = new FakeBrowser()
+  const pool = createBrowserPool(async () => browser, { maxConcurrentPages: 1, maxQueueSize: 2 })
+  const inFlight = gate()
+  const running = pool.withPage(async () => { await inFlight.promise })
+  const queued = pool.withPage(async () => undefined)
+  queued.catch(() => {})
+  assert.equal(pool.stats().queued, 1, '第二个请求应进入等待队列')
+
+  pool.beginDrain()
+  assert.equal(pool.stats().draining, true)
+  assert.equal(pool.stats().queued, 0, 'drain 应清空等待队列')
+
+  await assert.rejects(
+    pool.withPage(async () => undefined),
+    error => error.status === 503 && /正在关闭/.test(error.message),
+  )
+  await assert.rejects(queued, error => error.status === 503)
+
+  let idle = false
+  const idlePromise = pool.waitForIdle().then(() => { idle = true })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(idle, false, 'in-flight 未结束前不得报告 idle')
+
+  inFlight.release()
+  await running
+  await idlePromise
+  assert.equal(idle, true)
+
+  await pool.close()
+  assert.equal(browser.closeCount, 1)
+})

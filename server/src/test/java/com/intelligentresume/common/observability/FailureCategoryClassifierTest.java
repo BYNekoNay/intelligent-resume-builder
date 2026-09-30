@@ -5,6 +5,7 @@ import com.intelligentresume.common.error.ErrorCode;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -34,5 +35,10 @@ class FailureCategoryClassifierTest {
         assertEquals(PdfFailureCategory.AUTH, classifier.pdfMessage("PDF service auth failed"));
         assertEquals(PdfFailureCategory.INPUT_TOO_LARGE, classifier.pdfMessage("input too large"));
         assertEquals(PdfFailureCategory.STORAGE, classifier.pdfMessage("storage write failed"));
+        // 容量/drain 拒绝（pdf-service 503 → 可重试类别）
+        assertEquals(PdfFailureCategory.OVERLOADED,
+                classifier.pdf(new HttpServerErrorException(HttpStatus.SERVICE_UNAVAILABLE)));
+        assertEquals(PdfFailureCategory.OVERLOADED, classifier.pdfMessage("PDF 渲染容量已满，请稍后重试"));
+        assertEquals(PdfFailureCategory.OVERLOADED, classifier.pdfMessage("pdf service busy"));
     }
 }

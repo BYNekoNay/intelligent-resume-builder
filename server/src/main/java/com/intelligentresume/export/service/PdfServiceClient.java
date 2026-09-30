@@ -126,7 +126,9 @@ public class PdfServiceClient {
             PdfFailureCategory category = failureCategoryClassifier.pdf(e);
             log.warn("PDF service response failure: category={}, status={}", category, e.getStatusCode().value());
             observability.recordPdfRender(templateCode, false, category, Duration.ofNanos(System.nanoTime() - startedAt));
-            throw new BusinessException(ErrorCode.PDF_FAILURE, "PDF 渲染失败");
+            // 503＝pdf-service 容量/drain 拒绝（可重试）：给用户可读、可重试的文案，而非泛化「渲染失败」
+            throw new BusinessException(ErrorCode.PDF_FAILURE,
+                    e.getStatusCode().value() == 503 ? "PDF 服务繁忙，请稍后重试" : "PDF 渲染失败");
         } catch (Exception e) {
             PdfFailureCategory category = failureCategoryClassifier.pdf(e);
             log.warn("PDF service call failure: category={}, exception={}", category, e.getClass().getSimpleName());

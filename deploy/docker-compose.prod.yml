@@ -54,6 +54,9 @@ services:
       context: ../pdf-service
       dockerfile: Dockerfile
     restart: unless-stopped
+    # 收到 SIGTERM 后拒绝新渲染、等待 in-flight 结束（PDF_SERVICE_DRAIN_TIMEOUT_MS 默认 10s）；
+    # 宽限期必须大于该值，否则 docker 会在渲染中途 SIGKILL
+    stop_grace_period: 30s
     env_file: ${DEPLOY_ENV_FILE:-production.env}
     environment:
       NODE_ENV: production
