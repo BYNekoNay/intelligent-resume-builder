@@ -292,6 +292,17 @@
 
 修复动作：`BailianAiProvider` 读超时兜底 60 → 300；`RateLimitFilter.writeTooManyRequests` 增加 `Retry-After`（新增 `secondsUntilNextWindow()`，取值 1~60）；新增静态门禁 `ConfigFallbackContractTest`（含自检：扫描到的兜底数与可比对数不得低于阈值，防止解析失效后门禁静默空转）。`docs/05` §1.3 补 429 退避契约（并注明 AI 日配额超限不带该头，因其按天重置、无等价短窗口值）。验证：门禁首跑 **1 条漂移**（修复后全绿）；单测断言 `Retry-After` 存在且落在 1~60、IT 断言响应头存在；真实 HTTP 探针（本机 H2，登录限流 2/分钟）实测第 3 次请求 `HTTP/1.1 429` + `Retry-After: 25` + 统一信封。
 
+### 2.24 匿名健康探针的放大面（2026-10-01 第三十一批扫描，已随本批修复）
+
+方法：核对「匿名开放端点是否含重活」——把公开白名单端点与其调用链逐层展开，检查是否有出站调用、DB 重读或 CPU 放大（与 #44/#17 的「未认证放大器」同族）。
+
+| 项 | 取证 | 结论 |
+| --- | --- | --- |
+| 匿名健康探针每次请求都外呼 pdf-service | `GET /api/system/health` 在 `SecurityConfig` 中 `permitAll`（匿名），其响应由 `checks()` 计算，而 `checks()` 调用 `PdfServiceClient.checkHealth()` —— 一次真实出站 HTTP GET（连接/读超时各 1s）。故「1 个公开请求 = 1 次出站探测」：外部可把公开探针放大成对 pdf-service 的持续探测；pdf-service 不可达时每个请求阻塞 ~1s，持续打即占满 API 请求线程（Tomcat 默认 200 线程下约百 req/s 即饱和），且该端点不在限流清单内 | **存在缺陷 → 修复**：`checkHealth()` 增加 TTL 缓存（`app.pdf.health-cache-ttl-ms` 默认 5s，正负结果同样缓存，锁内刷新避免惊群），把入站请求速率与出站探测速率解耦 |
+| 运维语义是否受损 | 容器健康检查用的是 `/actuator/health/readiness`（20s 间隔），前端与监控调用本端点的频率远低于 5s；TTL 内复用只让「探测新鲜度 ≤ 5s」 | 语义保持（并在 `docs/05` §14 写明 TTL 口径） |
+
+修复动作：`PdfServiceClient.checkHealth()` 改为「TTL 内复用 + 锁内单次刷新」；新增 `app.pdf.health-cache-ttl-ms`（yml + `@Value` 兜底 5000，受 `ConfigFallbackContractTest` 守护）；`docs/05` §14 补缓存口径。验证：新增 `PdfServiceClientHealthCacheTest` —— 用 JDK `HttpServer` 作桩**直接统计出站探测次数**（走完整 RestClient 调用链）：TTL 内 20 次检查只探测 **1** 次、TTL 过后重新探测、5xx 的负结果同样被缓存（10 次检查只探测 1 次）；端到端真实 HTTP 实测（慢桩 pdf-service 固定延迟 1s）：冷启动请求 **1.64s**、随后 4 次匿名请求各约 **4~5ms**（命中缓存，无出站调用）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）

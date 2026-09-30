@@ -38,18 +38,26 @@ public class PdfServiceClient {
     private final RestClient healthRestClient;
     private final String serviceToken;
     private final long maxInputBytes;
+    private final long healthCacheTtlMs;
     private final AppObservability observability;
     private final FailureCategoryClassifier failureCategoryClassifier;
+
+    /** 健康探测缓存（TTL 内直接复用）：见 {@link #checkHealth()} 的放大面说明。 */
+    private final Object healthLock = new Object();
+    private volatile long healthCachedAtMs = Long.MIN_VALUE;
+    private volatile boolean healthCachedResult;
 
     public PdfServiceClient(
             @Value("${app.pdf.service-base-url:http://127.0.0.1:3001}") String baseUrl,
             @Value("${app.pdf.service-token:dev-pdf-token-change-me}") String serviceToken,
             @Value("${app.pdf.render-timeout-seconds:50}") int timeoutSeconds,
             @Value("${app.pdf.max-input-bytes:524288}") long maxInputBytes,
+            @Value("${app.pdf.health-cache-ttl-ms:5000}") long healthCacheTtlMs,
             AppObservability observability,
             FailureCategoryClassifier failureCategoryClassifier) {
         this.serviceToken = serviceToken;
         this.maxInputBytes = maxInputBytes;
+        this.healthCacheTtlMs = healthCacheTtlMs;
         this.observability = observability;
         this.failureCategoryClassifier = failureCategoryClassifier;
 
@@ -140,8 +148,37 @@ public class PdfServiceClient {
     /**
      * Lightweight readiness probe used by the public API health contract.
      * A failed probe means the API remains alive but PDF capability is degraded.
+     *
+     * <p><b>为何带 TTL 缓存</b>：本探测是真实出站 HTTP 调用，而消费方
+     * {@code GET /api/system/health} 是**匿名开放**端点（{@code SecurityConfig} permitAll）。
+     * 无缓存时「一个公开请求 = 一次出站调用」：外部可放大成对 pdf-service 的持续探测；
+     * pdf-service 不可达时每个请求还要阻塞到连接/读超时（各 1s），持续打即占满 API 请求线程。
+     * 缓存把「入站请求速率」与「出站探测速率」解耦（默认 5s 内至多一次探测），
+     * 同时保持运维语义（探测新鲜度 ≤ TTL，远小于容器健康检查的 20s 间隔）。
+     * 负结果同样缓存：下游故障期间不因重试放大。
      */
     public boolean checkHealth() {
+        Boolean fresh = freshHealth();
+        if (fresh != null) return fresh;
+        // 冷启动/过期后的首个请求执行探测，其余并发请求在锁内复用其结果（避免惊群放大）
+        synchronized (healthLock) {
+            fresh = freshHealth();
+            if (fresh != null) return fresh;
+            boolean result = probeHealth();
+            healthCachedResult = result;
+            healthCachedAtMs = System.currentTimeMillis();
+            return result;
+        }
+    }
+
+    /** TTL 内的缓存值；无缓存或已过期返回 null。先读时间戳再读结果，保证读到的是同一批次。 */
+    private Boolean freshHealth() {
+        long cachedAt = healthCachedAtMs;
+        if (cachedAt == Long.MIN_VALUE) return null;
+        return System.currentTimeMillis() - cachedAt < healthCacheTtlMs ? healthCachedResult : null;
+    }
+
+    private boolean probeHealth() {
         try {
             Map<?, ?> response = healthRestClient.get()
                     .uri("/health")

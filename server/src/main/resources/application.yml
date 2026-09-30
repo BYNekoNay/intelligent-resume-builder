@@ -306,6 +306,10 @@ app:
     # （16~45s，服务端自身预算内）」被客户端先断开——渲染被浪费、任务被误判失败。
     render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:50}
     max-input-bytes: ${PDF_MAX_INPUT_BYTES:524288}
+    # 健康探测缓存 TTL：GET /api/system/health 为匿名开放端点，其 pdf-renderer 检查是真实
+    # 出站调用。缓存把入站请求速率与出站探测速率解耦（TTL 内至多一次探测），避免外部把
+    # 公开探针放大成对 pdf-service 的持续探测（下游不可达时还会阻塞 API 请求线程）。
+    health-cache-ttl-ms: ${PDF_HEALTH_CACHE_TTL_MS:5000}
     max-output-bytes: ${PDF_MAX_OUTPUT_BYTES:10485760}
     file-ttl-hours: ${PDF_FILE_TTL_HOURS:24}
     cleanup-interval-ms: ${PDF_CLEANUP_INTERVAL_MS:60000}
