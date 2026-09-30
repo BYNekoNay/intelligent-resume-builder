@@ -80,13 +80,14 @@ export function createBrowserPool(launch = defaultLaunch, options = {}) {
     }
     return new Promise((resolve, reject) => {
       const entry = { resolve, reject, timer: null }
-      // 排队超时：从队列移除并以可重试 503 拒绝（服务端总耗时上界 = 排队上限 + 渲染预算）
+      // 排队超时：从队列移除并以可重试 503 拒绝（服务端总耗时上界 = 排队上限 + 渲染预算）。
+      // 刻意不 unref：排队请求本身就是待处理工作，计时器应保持事件循环存活；
+      // 获得名额（releaseSlot）与 drain（beginDrain）都会 clearTimeout。
       entry.timer = setTimeout(() => {
         const index = waiters.indexOf(entry)
         if (index >= 0) waiters.splice(index, 1)
         reject(capacityError('PDF 渲染排队超时，请稍后重试'))
       }, queueTimeoutMs)
-      entry.timer.unref?.()
       waiters.push(entry)
     })
   }
