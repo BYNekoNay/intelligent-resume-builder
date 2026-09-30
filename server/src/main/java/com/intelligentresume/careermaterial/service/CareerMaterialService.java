@@ -9,6 +9,8 @@ import com.intelligentresume.careermaterial.dto.*;
 import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -35,6 +37,8 @@ import java.util.Set;
  */
 @Service
 public class CareerMaterialService {
+
+    private static final Logger log = LoggerFactory.getLogger(CareerMaterialService.class);
 
     private static final int MAX_SEARCH_PAGE_SIZE = 100;
     private static final int EXCERPT_MAX_LENGTH = 180;
@@ -165,6 +169,12 @@ public class CareerMaterialService {
      * Validates the structured fields introduced for reusable career assets.
      * Related material IDs are resolved through the current user to prevent
      * cross-user links as well as links to unrelated material categories.
+     *
+     * <p>Only ACHIEVEMENT / LEADERSHIP_EXPERIENCE / SKILL_EVIDENCE have hard
+     * validation today. The remaining types pass through a soft schema check
+     * that warns (without rejecting) on half-filled structured content; see
+     * {@link CareerMaterialSchema} and the three-step migration plan in
+     * {@code docs/plans/2026-09-30-001-career-material-schema-soft-validation.md}.
      */
     private void validateTypeSpecificContent(MaterialType type, Map<String, Object> content, Long userId) {
         if (content == null) {
@@ -174,9 +184,19 @@ public class CareerMaterialService {
             case ACHIEVEMENT -> validateAchievement(content, userId);
             case LEADERSHIP_EXPERIENCE -> validateLeadership(content, userId);
             case SKILL_EVIDENCE -> validateSkillEvidence(content, userId);
-            default -> {
-                // Existing material types remain backward compatible.
-            }
+            default -> warnOnHalfFilledContent(type, content);
+        }
+    }
+
+    /**
+     * 软校验（只告警不拒绝）：content 出现了类型 schema 的已知键但缺全部主体键时，
+     * 记录结构化告警供观察期统计。自由 JSON 与历史形态（未出现任何 schema 键）
+     * 不告警——它们仍是合法形态，待观察期数据后再决定是否升级硬校验。
+     */
+    private void warnOnHalfFilledContent(MaterialType type, Map<String, Object> content) {
+        if (CareerMaterialSchema.isHalfFilled(type, content)) {
+            log.warn("Career material contentJson soft-schema warning: materialType={}, presentKnownKeys={}",
+                    type, CareerMaterialSchema.presentKnownKeys(type, content));
         }
     }
 

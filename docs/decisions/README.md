@@ -39,3 +39,5 @@ plans/reviews 面向"某次工作怎么做、结果如何"，本目录面向**�
 | [ADR-006](./ADR-006-keep-reasoning-for-ats-analysis.md) | 保留 ATS_ANALYSIS 推理（本轮实验未能回答该问题） | Accepted |
 | [ADR-007](./ADR-007-shared-host-independent-port-and-database.md) | 测试环境迁入与另一项目共用的主机（独立端口 8088 + 独立 MySQL） | Accepted |
 | [ADR-008](./ADR-008-configuration-binding-via-configuration-properties.md) | 配置绑定一律用 `@ConfigurationProperties`，禁止 `@Value` + SpEL map 字面量 | Accepted |
+| [ADR-009](./ADR-009-ai-task-idempotency-state-machine.md) | ai_task 幂等状态机（幂等键 + 内容指纹 + 租约） | Accepted |
+| [ADR-010](./ADR-010-interview-attempt-lifecycle.md) | interview_ai_attempt 生命周期（双层唯一约束 + 短事务 + 陈旧丢弃） | Accepted |

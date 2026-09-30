@@ -362,11 +362,15 @@ class CareerMaterialServiceTest {
      *
      * <p>CareerMaterialService.validateTypeSpecificContent 的 switch 只对
      * ACHIEVEMENT / LEADERSHIP_EXPERIENCE / SKILL_EVIDENCE 三类做结构校验,
-     * 其余类型走 default 分支(注释 "backward compatible")——内部字段任意,
+     * 其余类型走 default 分支——内部字段任意,
      * 仅受 64KB 上限与"有意义的证据"两条通用规则约束。
      *
      * <p>此测试锚定 default 放行契约;若未来收紧 schema,此测试应被有意修改,
      * 而不是让契约无人知晓地变化。
+     *
+     * <p>2026-09-30 更新:default 分支除放行外,新增软 schema 告警
+     * （CareerMaterialSchema.isHalfFilled,只记日志不拒绝），本测试的放行
+     * 断言保持不变;判定契约由 CareerMaterialSchemaTest 覆盖。
      */
     @ParameterizedTest(name = "default 类型 {0} 接受任意 contentJson")
     @EnumSource(value = MaterialType.class, names = {
@@ -393,6 +397,26 @@ class CareerMaterialServiceTest {
         ArgumentCaptor<CareerMaterial> captor = ArgumentCaptor.forClass(CareerMaterial.class);
         verify(repository).save(captor.capture());
         assertEquals(100L, captor.getValue().getUserId());
+    }
+
+    @Test
+    @DisplayName("契约锚定: 半填 schema 形态触发软校验告警但仍被接受（不拒绝）")
+    void create_halfFilledSchemaContent_isAcceptedWithSoftWarning() {
+        when(repository.save(any(CareerMaterial.class))).thenAnswer(inv -> {
+            CareerMaterial m = inv.getArgument(0);
+            m.setId(1L);
+            return m;
+        });
+
+        // 出现 schema 非主体键(startDate/endDate)而没有主体键 → 进入软校验告警路径,
+        // 但请求必须仍然成功(三步走第一步:只观察、不阻断)。
+        Map<String, Object> halfFilled = Map.of("startDate", "2025-01", "endDate", "2026-01");
+        CareerMaterialDetail detail = service.create(
+                new CreateCareerMaterialRequest(MaterialType.WORK_EXPERIENCE, "半填资料", halfFilled, null, null), 100L);
+
+        assertEquals(MaterialType.WORK_EXPERIENCE, detail.materialType());
+        assertEquals(halfFilled, detail.contentJson());
+        verify(repository).save(any(CareerMaterial.class));
     }
 
     @Test
