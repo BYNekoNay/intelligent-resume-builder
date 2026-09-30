@@ -1745,6 +1745,18 @@ h3 { font-size: 15px; font-weight: 600; color: var(--text-primary); }
   margin-top: 10px;
 }
 
+/* #7：账号数据与隐私带（导出 / 删除账号），沿用授权带版式、换风险色系 */
+.account-data-band {
+  border-color: color-mix(in srgb, var(--danger) 22%, var(--border));
+  background: color-mix(in srgb, var(--danger-light) 60%, transparent);
+}
+
+.account-data-band > span {
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--border));
+  background: #fff;
+  color: var(--danger);
+}
+
 .account-dialog-overlay {
   position: fixed;
   inset: 0;

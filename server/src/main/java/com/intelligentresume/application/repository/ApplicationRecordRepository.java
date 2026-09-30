@@ -13,6 +13,9 @@ import java.util.Optional;
 public interface ApplicationRecordRepository extends JpaRepository<ApplicationRecord, Long> {
     Optional<ApplicationRecord> findByIdAndUserId(Long id, Long userId);
 
+    /** 账号数据导出（#7）：当前用户全部投递记录（含长文本）。 */
+    List<ApplicationRecord> findByUserIdOrderByUpdatedAtDesc(Long userId);
+
     /**
      * 投递漏斗统计所需的精简列投影：只取状态与时间列，避免全量行（含长文本）传输。
      *

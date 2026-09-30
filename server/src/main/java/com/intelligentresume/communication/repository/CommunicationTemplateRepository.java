@@ -30,6 +30,12 @@ public interface CommunicationTemplateRepository extends JpaRepository<Communica
     Optional<CommunicationTemplate> findByIdAndUserId(Long id, Long userId);
 
     /**
+     * 账号数据导出（#7）：仅当前用户的自定义模板（{@code user_id} 非空）。
+     * 内置系统模板（{@code user_id IS NULL}）属全局种子数据，不是用户数据。
+     */
+    List<CommunicationTemplate> findByUserIdOrderByUpdatedAtDesc(Long userId);
+
+    /**
      * 使用计数原子自增（ideation #25）：避免「读改写」在并发下丢增量；
      * 计数不经过乐观锁版本，不产生伪冲突。
      */

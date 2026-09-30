@@ -11,6 +11,11 @@ public class CommunicationDraft extends BaseEntity {
     @Column(name = "job_description_id", nullable = false) private Long jobDescriptionId;
     @Enumerated(EnumType.STRING) @Column(name = "draft_type", nullable = false, length = 32) private CommunicationType type;
     @Column(name = "draft_text", nullable = false, columnDefinition = "TEXT") private String draftText;
+    public Long getUserId() { return userId; }
+    public Long getResumeVersionId() { return resumeVersionId; }
+    public Long getJobDescriptionId() { return jobDescriptionId; }
+    public CommunicationType getType() { return type; }
+    public String getDraftText() { return draftText; }
     public void setUserId(Long value) { userId = value; }
     public void setResumeVersionId(Long value) { resumeVersionId = value; }
     public void setJobDescriptionId(Long value) { jobDescriptionId = value; }

@@ -54,3 +54,16 @@ export async function changeEmail(payload: { email: string; currentPassword: str
 export async function changePassword(payload: { currentPassword: string; newPassword: string }): Promise<ApiResponse<void>> {
   return (await apiClient.post<ApiResponse<void>>('/api/auth/me/password', payload)).data
 }
+
+/**
+ * #7：导出当前账号在各业务域的个人数据（服务端返回 JSON 文件内容，非统一响应信封）。
+ * 数据量随简历版本/面试记录增长，单独放宽超时。
+ */
+export async function exportAccountData(): Promise<string> {
+  return (await apiClient.get<string>('/api/auth/export', { responseType: 'text', timeout: 30_000 })).data
+}
+
+/** #7：删除账号（服务端软删并撤销全部会话）。 */
+export async function deleteAccount(): Promise<ApiResponse<void>> {
+  return (await apiClient.delete<ApiResponse<void>>('/api/auth/me')).data
+}

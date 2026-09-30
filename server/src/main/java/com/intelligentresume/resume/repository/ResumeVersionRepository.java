@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -54,6 +55,9 @@ public interface ResumeVersionRepository extends JpaRepository<ResumeVersion, Lo
     List<VersionSummaryProjection> findArchivedSummariesByResumeId(@Param("resumeId") Long resumeId);
 
     Optional<ResumeVersion> findByResumeIdAndVersionNo(Long resumeId, Integer versionNo);
+
+    /** 账号数据导出（#7）：按简历批量取全部版本（含已归档），版本号升序保证确定性。 */
+    List<ResumeVersion> findByResumeIdInOrderByResumeIdAscVersionNoAsc(Collection<Long> resumeIds);
 
     @Query("SELECT MAX(v.versionNo) FROM ResumeVersion v WHERE v.resumeId = :resumeId")
     Integer findMaxVersionNoByResumeId(@Param("resumeId") Long resumeId);

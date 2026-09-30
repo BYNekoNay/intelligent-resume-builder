@@ -19,6 +19,9 @@ import java.util.Optional;
 public interface InterviewSessionRepository extends JpaRepository<InterviewSession, Long> {
     Optional<InterviewSession> findByIdAndUserId(Long id, Long userId);
 
+    /** 账号数据导出（#7）：当前用户全部面试会话（含外部简历原文等大字段），创建时间升序。 */
+    List<InterviewSession> findByUserIdOrderByCreatedAtAscIdAsc(Long userId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM InterviewSession s WHERE s.id = :id AND s.userId = :userId")
     Optional<InterviewSession> findByIdAndUserIdForUpdate(@Param("id") Long id, @Param("userId") Long userId);

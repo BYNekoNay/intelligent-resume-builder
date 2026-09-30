@@ -19,6 +19,9 @@ public interface InterviewRecordRepository extends JpaRepository<InterviewRecord
      */
     List<InterviewRecord> findBySessionIdOrderByRoundNoAscIdAsc(Long sessionId);
 
+    /** 账号数据导出（#7）：按会话批量取全部轮次记录。 */
+    List<InterviewRecord> findBySessionIdInOrderBySessionIdAscRoundNoAscIdAsc(Collection<Long> sessionIds);
+
     interface ScoreProjection {
         Long getSessionId();
         Integer getRoundScore();

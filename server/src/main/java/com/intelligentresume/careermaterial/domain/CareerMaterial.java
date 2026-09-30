@@ -1,5 +1,6 @@
 package com.intelligentresume.careermaterial.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.intelligentresume.common.persistence.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -59,7 +60,11 @@ public class CareerMaterial extends BaseEntity {
      * 属 raw 文本匹配的已知取舍；取值文本的命中是修复目标。
      * 依赖 JSON→字符串的隐式转换（lower(content_json)），已在 MySQL 5.7 与测试库
      * H2 上验证。
+     *
+     * <p>{@code @JsonIgnore}：这是搜索用的内部投影，不是实体的对外 JSON 形态
+     * （#7 账号数据导出直接序列化实体，不应携带该字段）。
      */
+    @JsonIgnore
     @Formula("content_json")
     private String contentJsonText;
 

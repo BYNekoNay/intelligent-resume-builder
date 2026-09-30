@@ -621,6 +621,45 @@ test('organizes account identity, security, and AI consent without hiding action
   expect(clearHistoryRequests).toBe(1)
 })
 
+test('exports account data and deletes the account behind typed confirmation', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let exportRequests = 0
+  await page.route('**/api/auth/export', route => {
+    exportRequests += 1
+    return route.fulfill({ json: { formatVersion: 1, account: { username: 'e2e-user' } } })
+  })
+  let deleteRequests = 0
+  await page.route('**/api/auth/me', route => {
+    if (route.request().method() === 'DELETE') {
+      deleteRequests += 1
+      return route.fulfill({ json: response(null) })
+    }
+    return route.fulfill({ json: response({ id: 99, username: 'e2e-user', email: 'e2e@example.com' }) })
+  })
+
+  await page.goto('/account')
+
+  // #7：导出个人数据 → 触发 JSON 文件下载
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出个人数据' }).click()
+  expect((await download).suggestedFilename()).toMatch(/^intelligent-resume-export-\d{4}-\d{2}-\d{2}\.json$/)
+  await expect(page.getByText('已导出个人数据。')).toBeVisible()
+  expect(exportRequests).toBe(1)
+
+  // #7：删号需输入用户名二次确认（不一致时确认按钮禁用）
+  await page.getByRole('button', { name: '删除账号' }).click()
+  const dialog = page.getByRole('dialog', { name: '删除账号' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText(/请输入用户名 e2e-user 以确认/)).toBeVisible()
+  const confirmButton = dialog.getByRole('button', { name: '确认删除账号' })
+  await dialog.getByLabel('输入用户名以确认').fill('other-user')
+  await expect(confirmButton).toBeDisabled()
+  await dialog.getByLabel('输入用户名以确认').fill('e2e-user')
+  await confirmButton.click()
+  await expect(page).toHaveURL(/\/login$/)
+  expect(deleteRequests).toBe(1)
+})
+
 test('gives resume creation, import, and saved resumes a clear action hierarchy', async ({ page }) => {
   await mockAuthenticatedApi(page)
 

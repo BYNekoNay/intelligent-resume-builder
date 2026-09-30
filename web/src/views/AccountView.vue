@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { IdCard, KeyRound, Mail, ShieldCheck, Trash2, UserRound, X } from 'lucide-vue-next'
+import { Download, IdCard, KeyRound, Mail, ShieldAlert, ShieldCheck, Trash2, UserRound, X } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { changeEmail, changePassword } from '@/api/auth'
+import { changeEmail, changePassword, deleteAccount, exportAccountData } from '@/api/auth'
 import { clearAiTaskHistory } from '@/api/ai'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
@@ -24,6 +24,14 @@ const changingCredential = ref(false)
 /** #26：清空 AI 任务历史的进行态与结果提示。 */
 const clearingHistory = ref(false)
 const historyMessage = ref('')
+/** #7：数据导出与删号。 */
+const exporting = ref(false)
+const exportMessage = ref('')
+const deleteDialogOpen = ref(false)
+const deleteConfirmName = ref('')
+const deleting = ref(false)
+const deleteMessage = ref('')
+const deleteConfirmInput = ref<HTMLInputElement | null>(null)
 const activeCredentialPanel = ref<'email' | 'password' | null>(null)
 const emailChangeButton = ref<HTMLButtonElement | null>(null)
 const passwordChangeButton = ref<HTMLButtonElement | null>(null)
@@ -45,6 +53,9 @@ const maskedEmail = computed(() => {
   const visible = local.slice(0, Math.min(2, local.length))
   return `${visible}${'*'.repeat(Math.max(3, local.length - visible.length))}${value.slice(at)}`
 })
+/** #7：删号二次确认——输入的用户名必须与当前账号一致。 */
+const deleteConfirmMatched = computed(() => deleteConfirmName.value.trim() === (user.value?.username ?? ''))
+const deleteDialogDescription = computed(() => t('account.deleteDialogDescription').replace('{username}', user.value?.username ?? ''))
 
 async function save() {
   if (!displayName.value.trim()) return
@@ -117,6 +128,59 @@ async function clearAiHistory() {
     historyMessage.value = resolveApiError(error, 'account.clearAiHistoryError')
   } finally {
     clearingHistory.value = false
+  }
+}
+
+/** #7：导出个人数据——服务端返回 JSON 文本，前端落成 .json 文件下载。 */
+async function exportData() {
+  exporting.value = true
+  exportMessage.value = ''
+  try {
+    const json = await exportAccountData()
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `intelligent-resume-export-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    exportMessage.value = t('account.exportDone')
+  } catch (error) {
+    exportMessage.value = resolveApiError(error, 'account.exportError')
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function openDeleteDialog() {
+  deleteMessage.value = ''
+  deleteConfirmName.value = ''
+  deleteDialogOpen.value = true
+  await nextTick()
+  deleteConfirmInput.value?.focus()
+}
+
+async function closeDeleteDialog() {
+  deleteDialogOpen.value = false
+  deleteMessage.value = ''
+  deleteConfirmName.value = ''
+}
+
+/** #7：删号——用户名二次确认后调 DELETE /api/auth/me；服务端已撤销全部会话并作废 refresh cookie，本地直接清会话跳登录。 */
+async function confirmDeleteAccount() {
+  if (!deleteConfirmMatched.value) return
+  deleting.value = true
+  deleteMessage.value = ''
+  try {
+    await deleteAccount()
+    auth.setAccessToken(null)
+    await router.replace({ name: 'login' })
+  } catch (error) {
+    deleteMessage.value = resolveApiError(error, 'account.deleteError')
+  } finally {
+    deleting.value = false
   }
 }
 </script>
@@ -207,5 +271,45 @@ async function clearAiHistory() {
       </div>
       <RouterLink class="btn-neon btn-ghost" to="/ai-consent"><ShieldCheck :size="16" /> {{ t('account.manageAiConsent') }}</RouterLink>
     </article>
+
+    <article class="account-consent-band account-data-band">
+      <span><ShieldAlert :size="20" /></span>
+      <div>
+        <h2>{{ t('account.dataTitle') }}</h2>
+        <p>{{ t('account.dataDescription') }}</p>
+        <p class="consent-history-action">
+          <button class="btn-neon btn-ghost" type="button" :disabled="exporting" @click="exportData">
+            <Download :size="15" /> {{ exporting ? t('account.exporting') : t('account.exportData') }}
+          </button>
+          <button class="btn-neon btn-ghost danger-action" type="button" @click="openDeleteDialog">
+            <Trash2 :size="15" /> {{ t('account.deleteAccount') }}
+          </button>
+          <span v-if="exportMessage" role="status">{{ exportMessage }}</span>
+        </p>
+      </div>
+    </article>
+
+    <Teleport to="body">
+      <div v-if="deleteDialogOpen" class="account-dialog-overlay" @click.self="closeDeleteDialog">
+        <section class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-delete-title" @keyup.esc="closeDeleteDialog">
+          <header>
+            <div>
+              <p class="eyebrow">{{ t('account.dataTitle') }}</p>
+              <h2 id="account-delete-title">{{ t('account.deleteAccount') }}</h2>
+              <p>{{ deleteDialogDescription }}</p>
+            </div>
+            <button class="icon-button" type="button" :aria-label="t('common.close')" @click="closeDeleteDialog"><X :size="18" /></button>
+          </header>
+          <form @submit.prevent="confirmDeleteAccount">
+            <label>{{ t('account.deleteConfirmLabel') }}<input ref="deleteConfirmInput" v-model="deleteConfirmName" autocomplete="off" required /></label>
+            <p v-if="deleteMessage" class="form-error" role="alert">{{ deleteMessage }}</p>
+            <footer>
+              <button class="btn-neon btn-ghost" type="button" @click="closeDeleteDialog">{{ t('common.cancel') }}</button>
+              <button class="btn-neon btn-ghost danger-action" :disabled="deleting || !deleteConfirmMatched">{{ deleting ? t('account.deleting') : t('account.deleteConfirmAction') }}</button>
+            </footer>
+          </form>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>

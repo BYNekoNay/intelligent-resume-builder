@@ -8,6 +8,7 @@ import com.intelligentresume.auth.dto.RegisterRequest;
 import com.intelligentresume.auth.dto.TokenResponse;
 import com.intelligentresume.auth.dto.UpdateProfileRequest;
 import com.intelligentresume.auth.service.AuthService;
+import com.intelligentresume.auth.service.AccountExportService;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
@@ -17,6 +18,7 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,6 +29,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -34,15 +39,18 @@ public class AuthController {
     private static final String REFRESH_HEADER = "X-Refresh-Token";
 
     private final AuthService authService;
+    private final AccountExportService accountExportService;
     private final String refreshCookieName;
     private final long refreshCookieMaxAge;
     private final boolean refreshCookieSecure;
 
     public AuthController(AuthService authService,
+                          AccountExportService accountExportService,
                           @Value("${app.jwt.refresh-cookie.name}") String refreshCookieName,
                           @Value("${app.jwt.refresh-cookie.max-age}") long refreshCookieMaxAge,
                           @Value("${app.jwt.refresh-cookie.secure}") boolean refreshCookieSecure) {
         this.authService = authService;
+        this.accountExportService = accountExportService;
         this.refreshCookieName = refreshCookieName;
         this.refreshCookieMaxAge = refreshCookieMaxAge;
         this.refreshCookieSecure = refreshCookieSecure;
@@ -114,6 +122,23 @@ public class AuthController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, expiredRefreshCookie().toString())
                 .body(ApiResponse.success(null, traceId(httpRequest)));
+    }
+
+    /**
+     * 导出当前用户在各业务域的个人数据（ideation #7）。
+     *
+     * <p>返回缩进 JSON 文件（{@code Content-Disposition: attachment}），不是统一
+     * {@code ApiResponse} 信封——导出物是可直接保存/迁移的数据文档。
+     */
+    @GetMapping("/export")
+    public ResponseEntity<String> exportData(HttpServletRequest httpRequest) {
+        String json = accountExportService.exportAsJson(currentUserId(httpRequest));
+        String fileName = "intelligent-resume-export-" + LocalDate.now() + ".json";
+        return ResponseEntity.ok()
+                // 显式声明 charset：String 消息转换器默认 ISO-8859-1，中文数据会被写成 '?'
+                .contentType(new MediaType(MediaType.APPLICATION_JSON, StandardCharsets.UTF_8))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                .body(json);
     }
 
     private String extractRefreshToken(HttpServletRequest request) {
