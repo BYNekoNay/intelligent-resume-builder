@@ -124,15 +124,10 @@ def main():
     print(f"测试账号: {USERNAME} / {EMAIL} / {PASSWORD}")
 
     section("0. 环境前置")
+    # 匿名健康探针已收敛为只含 service/status（明细在认证端点 /api/system/health/detail）
     code, payload = call("GET", "/api/system/health")
     health = data_of(payload) or {}
-    chain = {c.get("capability"): c.get("status") for c in health.get("checks", [])}
-    check("api-health", is_2xx(code), f"HTTP {code}")
-    check("ai-provider", chain.get("ai-provider") == "UP", f"密钥配置: {chain.get('ai-provider')}")
-    check("ai-model-chain", chain.get("ai-model-chain") == "UP", f"模型链: {chain.get('ai-model-chain')}")
-    if chain.get("ai-model-chain") != "UP":
-        print("\n模型链不可用，后续 AI 断言将整体阻塞。")
-        return report()
+    check("api-health", is_2xx(code) and bool(health.get("status")), f"HTTP {code}")
 
     section("1. 账号与前置数据")
     code, payload = call("POST", "/api/auth/register",
@@ -147,6 +142,16 @@ def main():
 
     code, payload = call("GET", "/api/auth/me", token=token)
     check("auth-me", is_2xx(code) and data_of(payload, ).get("username") == USERNAME, f"HTTP {code}")
+
+    # AI 依赖明细需认证：checks 已从匿名探针收敛到 /api/system/health/detail
+    code, payload = call("GET", "/api/system/health/detail", token=token)
+    health = data_of(payload) or {}
+    chain = {c.get("capability"): c.get("status") for c in health.get("checks", [])}
+    check("ai-provider", chain.get("ai-provider") == "UP", f"密钥配置: {chain.get('ai-provider')}")
+    check("ai-model-chain", chain.get("ai-model-chain") == "UP", f"模型链: {chain.get('ai-model-chain')}")
+    if chain.get("ai-model-chain") != "UP":
+        print("\n模型链不可用，后续 AI 断言将整体阻塞。")
+        return report()
 
     work = data_of(call("POST", "/api/career-materials", {
         "materialType": "WORK_EXPERIENCE", "title": "后端服务交付",

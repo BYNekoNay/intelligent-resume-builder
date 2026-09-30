@@ -20,9 +20,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 登录/注册/刷新接口的内存令牌桶限流(MVP)。
+ * 认证与重解析端点的内存令牌桶限流(MVP)。
  *
- * <p>按客户端 IP + path 组合分桶,达到阈值时返回 429。
+ * <p>按客户端 IP + path 组合分桶,达到阈值时返回 429。覆盖范围：
+ * <ul>
+ *   <li>认证端点：/api/auth/login、/api/auth/register、/api/auth/refresh</li>
+ *   <li>CPU 放大器端点：/api/resume-imports/parse（PDFBox/POI 全内存解析,阈值严格）、
+ *       /api/jobs/{id}/parse（JD 本地文本解析,阈值宽松）</li>
+ * </ul>
  * 不引入 Redis(13 §2 禁用);进程重启会让计数清零,这是 MVP 的取舍。
  */
 @Component
@@ -32,6 +37,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final int loginPerMinute;
     private final int registerPerMinute;
     private final int refreshPerMinute;
+    private final int resumeImportParsePerMinute;
+    private final int jdParsePerMinute;
     private final boolean trustForwardedHeaders;
     private final int maxBuckets;
     private final ObjectMapper objectMapper;
@@ -41,6 +48,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Value("${app.security.rate-limit.login-per-minute}") int loginPerMinute,
             @Value("${app.security.rate-limit.register-per-minute}") int registerPerMinute,
             @Value("${app.security.rate-limit.refresh-per-minute}") int refreshPerMinute,
+            @Value("${app.security.rate-limit.resume-import-parse-per-minute:6}") int resumeImportParsePerMinute,
+            @Value("${app.security.rate-limit.jd-parse-per-minute:15}") int jdParsePerMinute,
             @Value("${app.security.rate-limit.trust-forwarded-headers:false}") boolean trustForwardedHeaders,
             @Value("${app.security.rate-limit.max-buckets:10000}") int maxBuckets,
             ObjectMapper objectMapper
@@ -48,6 +57,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.loginPerMinute = loginPerMinute;
         this.registerPerMinute = registerPerMinute;
         this.refreshPerMinute = refreshPerMinute;
+        this.resumeImportParsePerMinute = resumeImportParsePerMinute;
+        this.jdParsePerMinute = jdParsePerMinute;
         this.trustForwardedHeaders = trustForwardedHeaders;
         this.maxBuckets = maxBuckets;
         this.objectMapper = objectMapper;
@@ -80,6 +91,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (path.equals("/api/auth/login")) return loginPerMinute;
         if (path.equals("/api/auth/register")) return registerPerMinute;
         if (path.equals("/api/auth/refresh")) return refreshPerMinute;
+        // 简历解析是重 CPU 端点（PDFBox/POI 全内存解析最大 5MB 文件），阈值给最严
+        if (path.equals("/api/resume-imports/parse")) return resumeImportParsePerMinute;
+        // JD 解析是轻量本地文本解析，阈值宽松；仅匹配 /api/jobs/{id}/parse 形态，不影响 /api/jobs 其它端点
+        if (path.startsWith("/api/jobs/") && path.endsWith("/parse")) return jdParsePerMinute;
         return null;
     }
 

@@ -129,6 +129,10 @@ app:
       login-per-minute: ${RATE_LIMIT_LOGIN:10}
       register-per-minute: ${RATE_LIMIT_REGISTER:5}
       refresh-per-minute: ${RATE_LIMIT_REFRESH:30}
+      # CPU 放大器端点：简历解析（PDFBox/POI 全内存解析 5MB 文件）阈值从严
+      resume-import-parse-per-minute: ${RATE_LIMIT_RESUME_IMPORT_PARSE:6}
+      # JD 解析（本地轻量文本解析）阈值宽松
+      jd-parse-per-minute: ${RATE_LIMIT_JD_PARSE:15}
       trust-forwarded-headers: ${RATE_LIMIT_TRUST_FORWARDED_HEADERS:false}
       max-buckets: ${RATE_LIMIT_MAX_BUCKETS:10000}
 

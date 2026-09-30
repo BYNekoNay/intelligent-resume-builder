@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - codex/resume-loop-enhancements
   pull_request:
     branches:
       - master

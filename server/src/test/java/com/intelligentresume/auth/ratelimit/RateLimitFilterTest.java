@@ -15,6 +15,7 @@ import static org.mockito.Mockito.*;
  * RateLimitFilter 单元测试。
  *
  * <p>直接调用 {@code doFilterInternal}，验证内存令牌桶的限流行为。
+ * 覆盖认证端点与 CPU 放大器端点（resume-imports/parse、jobs/{id}/parse）。
  */
 class RateLimitFilterTest {
 
@@ -23,8 +24,8 @@ class RateLimitFilterTest {
 
     @BeforeEach
     void setUp() {
-        // login=2/min, register=5/min, refresh=30/min
-        filter = new RateLimitFilter(2, 5, 30, false, 10000, objectMapper);
+        // login=2/min, register=5/min, refresh=30/min, resume-import-parse=6/min, jd-parse=15/min
+        filter = new RateLimitFilter(2, 5, 30, 6, 15, false, 10000, objectMapper);
     }
 
     @Test
@@ -78,8 +79,96 @@ class RateLimitFilterTest {
         verify(chain, times(3)).doFilter(any(), any());
     }
 
+    @Test
+    @DisplayName("resume-imports/parse 第 7 次请求返回 429（限额 6 次/分钟）")
+    void resumeImportParse_overLimit_returnsRateLimited() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        for (int i = 0; i < 6; i++) {
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(parseRequest("10.0.0.1", "/api/resume-imports/parse"), resp, chain);
+            assertEquals(200, resp.getStatus(), "第 " + (i + 1) + " 次解析应放行");
+        }
+
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+        filter.doFilter(parseRequest("10.0.0.1", "/api/resume-imports/parse"), resp, chain);
+        assertEquals(429, resp.getStatus(), "第 7 次解析应被限流");
+        assertTrue(resp.getContentAsString().contains("42901"));
+    }
+
+    @Test
+    @DisplayName("jobs/{id}/parse 第 16 次请求返回 429（限额 15 次/分钟）")
+    void jdParse_overLimit_returnsRateLimited() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        for (int i = 0; i < 15; i++) {
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123/parse"), resp, chain);
+            assertEquals(200, resp.getStatus(), "第 " + (i + 1) + " 次 JD 解析应放行");
+        }
+
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+        filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123/parse"), resp, chain);
+        assertEquals(429, resp.getStatus(), "第 16 次 JD 解析应被限流");
+        assertTrue(resp.getContentAsString().contains("42901"));
+    }
+
+    @Test
+    @DisplayName("限流只命中 /api/jobs/{id}/parse 分桶，/api/jobs 其它端点不受影响")
+    void jdParse_bucketDoesNotAffectOtherJobEndpoints() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        // 用完 /api/jobs/123/parse 的配额（15 次）
+        for (int i = 0; i < 15; i++) {
+            filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123/parse"),
+                    new MockHttpServletResponse(), chain);
+        }
+        // parse 桶已满，第 16 次 429
+        MockHttpServletResponse parseResp = new MockHttpServletResponse();
+        filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123/parse"), parseResp, chain);
+        assertEquals(429, parseResp.getStatus());
+
+        // /api/jobs/123 本体不在限流范围，不受 parse 桶影响
+        for (int i = 0; i < 5; i++) {
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123"), resp, chain);
+            assertEquals(200, resp.getStatus(), "/api/jobs/123 不应被限流");
+        }
+
+        // 另一个 JD 的 parse 使用独立分桶（key 含 path），也不受 123 的桶影响
+        MockHttpServletResponse otherJdResp = new MockHttpServletResponse();
+        filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/456/parse"), otherJdResp, chain);
+        assertEquals(200, otherJdResp.getStatus(), "/api/jobs/456/parse 应有独立分桶");
+
+        verify(chain, times(15 + 5 + 1)).doFilter(any(), any());
+    }
+
+    @Test
+    @DisplayName("parse 端点不同 IP 分桶独立")
+    void parse_differentIps_independentBuckets() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        for (int i = 0; i < 6; i++) {
+            filter.doFilter(parseRequest("10.0.0.1", "/api/resume-imports/parse"),
+                    new MockHttpServletResponse(), chain);
+        }
+        MockHttpServletResponse respA = new MockHttpServletResponse();
+        filter.doFilter(parseRequest("10.0.0.1", "/api/resume-imports/parse"), respA, chain);
+        assertEquals(429, respA.getStatus(), "IP-A 超配额应被限流");
+
+        MockHttpServletResponse respB = new MockHttpServletResponse();
+        filter.doFilter(parseRequest("10.0.0.2", "/api/resume-imports/parse"), respB, chain);
+        assertEquals(200, respB.getStatus(), "IP-B 不应受 IP-A 影响");
+    }
+
     private MockHttpServletRequest loginRequest(String ip) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/login");
+        request.setRemoteAddr(ip);
+        return request;
+    }
+
+    private MockHttpServletRequest parseRequest(String ip, String path) {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
         request.setRemoteAddr(ip);
         return request;
     }

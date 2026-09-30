@@ -71,6 +71,9 @@ app:
       login-per-minute: 1000
       register-per-minute: 1000
       refresh-per-minute: 1000
+      # 集成测试会连续调用 parse 端点（ResumeImportControllerIT 单类 9 次），同样放宽避免误触发限流
+      resume-import-parse-per-minute: 1000
+      jd-parse-per-minute: 1000
       trust-forwarded-headers: false
       max-buckets: 100
   ai:

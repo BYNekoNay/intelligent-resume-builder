@@ -66,6 +66,8 @@ public class SecurityConfig {
                         "/api/auth/refresh",
                         "/api/auth/logout",
                         "/api/system/health",
+                        // /actuator/* 在公网经 nginx 不可达（nginx 无 /actuator/ location，请求落入 SPA 回退返回 index.html）；
+                        // permitAll 仅供本地 monitoring/ 栈经容器网络直连 api:8080 使用。
                         "/actuator/health/**",
                         "/actuator/info",
                         "/actuator/prometheus"
