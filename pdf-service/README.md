@@ -22,6 +22,7 @@
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `PDF_SERVICE_PORT` | 3001 | 监听端口（也可用 `--port=`） |
+| `PDF_SERVICE_HOST` | 不设置 | 监听地址。**不设置 = 绑定所有接口**，容器部署必须保持不设置；直连/systemd 部署应设为 `127.0.0.1`（见下「绑定范围」）。取值含空白时启动失败 |
 | `PDF_SERVICE_TOKEN` | 开发占位值 | 服务令牌；生产必须为 ≥32 位非默认值 |
 | `PDF_SERVICE_MAX_CONCURRENT_PAGES` | 4 | 并发渲染页面上限（整数 ≥1） |
 | `PDF_SERVICE_MAX_QUEUE_SIZE` | 16 | 等待队列上限（整数 ≥0） |
@@ -30,6 +31,15 @@
 | `PDF_SERVICE_DRAIN_TIMEOUT_MS` | 10000 | 关闭时等待 in-flight 渲染的上限（整数 ≥1） |
 
 非法取值会在启动时直接以退出码 1 失败。
+
+## 绑定范围
+
+本服务是**内部**渲染器（来源：`docs/08` §3.3「只监听私有网络接口」、§10.1「不得暴露公网」），两条交付路径对监听地址的要求相反：
+
+- **容器路径**（`deploy/docker-compose.prod.yml`）：`PDF_SERVICE_HOST` 必须保持不设置。API 容器在私有网络内经服务名访问本服务（`PDF_SERVICE_BASE_URL=http://pdf-service:3001`），收敛到回环会让导出整体不可用。
+- **直连路径**（`deploy/systemd/intelligent-resume-pdf.service`）：单元注入 `Environment=PDF_SERVICE_HOST=127.0.0.1`，与 api 单元的 `SERVER_ADDRESS=127.0.0.1` 同口径。不注入时 Node 绑定所有接口（实测 `ss -lntp` 显示 `*:3001`，且从非回环地址可连通 `/render`，即同网段可达、公网可达与否仅取决于云安全组）。
+
+启动日志会打出**实际绑定地址**，与 `ss -lntp` / `Get-NetTCPConnection -LocalPort <port>` 核对即可确认配置真的生效。该跨运行时契约由 server 侧静态门禁 `PdfServiceBindScopeContractTest` 守护。
 
 ## 验证
 

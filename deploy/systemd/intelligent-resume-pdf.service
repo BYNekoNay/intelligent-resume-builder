@@ -12,6 +12,18 @@ WorkingDirectory=/opt/intelligent-resume/app/pdf-service
 # 缺失时会退回开发默认 token，导致 API 侧 401。
 Environment=NODE_ENV=production
 
+# ⚠ 必须把监听地址收敛到回环（与 api 单元的 SERVER_ADDRESS=127.0.0.1 同一口径）。
+# src/server.js 的 host 缺省为空 = Node 绑定所有接口（实测 `Get-NetTCPConnection` 显示 `::`，
+# 且从非回环地址可连通），于是 3001 对同网段可达、是否公网可达只取决于云安全组——
+# 这违反 08 §3.3「PDF 服务只监听私有网络接口」与 §10.1「PDF 服务不得暴露公网」，
+# 而 api 单元已因同一类问题（.env 键无占位符被静默忽略 → 监听 *:8080）改为在此注入。
+# 同 api 单元：必须是真实环境变量，不能只写进 .env —— .env 由 `--env-file` 读取，优先级低于
+# 进程环境，故这里注入的值生效且不会被 .env 覆盖。
+# 收敛后 `ss -lntp` 应显示 `127.0.0.1:3001` 而不是 `*:3001`。契约由
+# server 侧静态门禁 PdfServiceBindScopeContractTest 守护。
+# ⚠ 容器路径不要照抄这一行：私有网络内 API 需访问 `pdf-service:3001`，必须保持绑定所有接口。
+Environment=PDF_SERVICE_HOST=127.0.0.1
+
 # 直接调用 node，不经 npm：
 #   1) 避免依赖 npm 这个进程包装层（信号转发更干净、少一个进程）；
 #   2) 必须写绝对路径，否则 systemd 报 status=203/EXEC。

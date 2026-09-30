@@ -56,7 +56,7 @@
 | --- | --- | --- | --- |
 | nginx（智历） | 8088 | `0.0.0.0` | 开放（安全组需放行 TCP **8088**） |
 | API | 8080 | `127.0.0.1`（由 `SERVER_ADDRESS` 控制） | 关闭 |
-| pdf-service | 3001 | `0.0.0.0`（应用未提供绑定参数，见 §8 残留风险） | 关闭 |
+| pdf-service | 3001 | `127.0.0.1`（由单元内 `PDF_SERVICE_HOST` 控制，见 §8） | 关闭 |
 | MySQL | 3306 | `127.0.0.1` | 关闭 |
 | Caddy（艺培通，**非本项目**） | 80 / 443 | `0.0.0.0` | 开放，本项目不触碰 |
 
@@ -264,6 +264,8 @@ AI_CHAIN_TOTAL_BUDGET_S=600
 ```dotenv
 NODE_ENV=production
 PDF_SERVICE_PORT=3001
+# 监听地址由 systemd 单元的 Environment=PDF_SERVICE_HOST=127.0.0.1 注入（进程环境优先于 --env-file，
+# 故这里不必再写；若绕过单元手工 `node src/server.js` 启动，务必自行加上这一行）。
 PDF_SERVICE_TOKEN=<与 api 一致>
 # Chromium 缓存目录：必须与部署时下载到的位置一致，且**不能依赖 HOME**
 # （服务以 root 运行，HOME=/root，而部署用户是 ubuntu，HOME=/home/ubuntu；
@@ -491,7 +493,7 @@ HTTP 403  (0.14s)
 | **MySQL 8.4 认证插件** | `mysql_native_password` 在 8.4 已不加载，照旧手册建用户会 `ERROR 1524` | 用默认 `caching_sha2_password`；连接串保留 `allowPublicKeyRetrieval=true&useSSL=false` |
 | **Ubuntu 26.04 包名** | `libasound2` / `libatk1.0-0` / `libcups2` / `libatspi2.0-0` → 均带 `t64` 后缀 | 见 §4.1 清单；`libu2f-udev` 已不存在 |
 | Node 路径 | 本环境 Node 来自发行版包，位于 `/usr/bin/node`（旧环境为 `/usr/local/bin/node`） | 单元里已改为 `/usr/bin/node`；更换 Node 安装方式必须同步改单元，否则 `status=203/EXEC` |
-| pdf-service 绑定 | 应用用 `app.listen(port)` 未指定 host，实际监听 `0.0.0.0:3001` | 目前依赖安全组封闭该端口；如需彻底收敛需改代码加 `server.address` 类参数 |
+| pdf-service 绑定 | 应用原用 `app.listen(port)` 未指定 host，实际监听 `0.0.0.0:3001`，是否可达只取决于安全组 | **已收敛（第四十批）**：`src/server.js` 支持 `PDF_SERVICE_HOST`，pdf 单元注入 `Environment=PDF_SERVICE_HOST=127.0.0.1`（与 api 单元的 `SERVER_ADDRESS` 同口径）。核对方式：启动日志的绑定地址与 `ss -lntp`（应为 `127.0.0.1:3001`）。容器路径刻意不设置该变量（API 容器需经 `pdf-service:3001` 访问）。门禁：`PdfServiceBindScopeContractTest` |
 | 默认 profile 兜底值 | 默认 profile 保留了开发兜底值，若 `.env` 加载失败会静默回退 | 已通过运行期端到端验证补偿（CORS 生效 → 浏览器可跨源；PDF Token 生效 → 导出成功）；这两项任一失败会立即暴露 |
 | **内存偏紧** | 总 3.6 GiB：艺培通 ~935MiB + 系统 ~740MiB，剩余可用约 2 GiB；智历需 JVM(768m) + MySQL(256m buffer pool) + Chromium | JVM 堆已从 1024m 降到 `-Xmx768m`、MySQL buffer pool 降到 256M、2 GiB swap 兜底；**构建与运行不要同时进行**，也不要两侧同时跑重负载 |
 | 时区 | 主机时区须为 `Asia/Shanghai`，与 JDBC `serverTimezone` 对齐 | 本环境安装时已是 Asia/Shanghai |

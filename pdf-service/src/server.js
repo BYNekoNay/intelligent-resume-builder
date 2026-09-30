@@ -6,6 +6,13 @@ const app = express()
 const cliPort = process.argv.find((argument) => argument.startsWith('--port='))?.slice('--port='.length)
 const configuredPort = process.env.PDF_SERVICE_PORT ?? cliPort ?? '3001'
 const port = Number(configuredPort)
+// 监听地址。缺省 = 不指定 host，Node 绑定所有接口（`::`，含 IPv4）。
+// 容器路径**必须**保持缺省：API 容器要经私有网络访问 `pdf-service:3001`。
+// 直连部署（宿主机 systemd + 本机 nginx）必须显式收敛到回环，否则 3001 对同网段可达、
+// 公网可达与否只取决于云安全组——与 api 单元的 `SERVER_ADDRESS=127.0.0.1` 同一口径
+// （实测：未指定 host 时 `ss -lntp`/`Get-NetTCPConnection` 显示 `::`，且非回环地址可连通）。
+const configuredHost = process.env.PDF_SERVICE_HOST ?? ''
+const host = configuredHost.trim()
 const expectedServiceToken = process.env.PDF_SERVICE_TOKEN ?? 'dev-pdf-token-change-me'
 const production = process.env.NODE_ENV === 'production'
 
@@ -33,6 +40,13 @@ const browserPool = createBrowserPool(undefined, { maxConcurrentPages, maxQueueS
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error('PDF_SERVICE_PORT must be an integer between 1 and 65535')
+  process.exit(1)
+}
+
+// 含空白的监听地址是被截断/拼接坏掉的配置（如把端口写进来），绑定结果不可预期 → 启动即失败。
+// 与其它数值配置同一口径：非法取值 fail-closed，不留「看起来启动了但绑错接口」的中间态。
+if (/\s/.test(configuredHost)) {
+  console.error('PDF_SERVICE_HOST must not contain whitespace')
   process.exit(1)
 }
 
@@ -116,9 +130,13 @@ app.use((_request, response) => {
   response.status(404).json({ code: 40401, message: '资源不存在' })
 })
 
-const server = app.listen(port, () => {
-  console.info(`PDF service listening on http://localhost:${port}`)
-})
+// 启动日志打出**实际绑定地址**（缺省显式为 0.0.0.0）：排查「改了没生效」时以运行时事实为准，
+// 直接对应 `ss -lntp` / `Get-NetTCPConnection -LocalPort <port>` 的第一个字段。
+function onListening() {
+  console.info(`PDF service listening on http://${host === '' ? '0.0.0.0' : host}:${port}`)
+}
+
+const server = host === '' ? app.listen(port, onListening) : app.listen(port, host, onListening)
 
 let shuttingDown = false
 async function shutdown(signal) {
