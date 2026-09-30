@@ -4,11 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.ats.domain.AtsCheckResult;
 import com.intelligentresume.ats.repository.AtsCheckResultRepository;
+import com.intelligentresume.resume.domain.Resume;
+import com.intelligentresume.resume.repository.ResumeRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -35,6 +39,8 @@ class ResumeControllerIT {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private AtsCheckResultRepository atsCheckResultRepository;
+    @Autowired private ResumeRepository resumeRepository;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     /** 用户 A 的 access token（Order 1 注册后填充） */
     private static String tokenA;
@@ -296,6 +302,30 @@ class ResumeControllerIT {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.restoredFromVersionId").value(versionIdA))
                 .andExpect(jsonPath("$.data.generationContext").doesNotExist());
+    }
+
+    // ---- 乐观锁（#38） ----
+
+    @Test
+    @Order(13)
+    @DisplayName("#38 乐观锁: 陈旧简历副本保存被拒绝，不再回写并发推进的 current_version_id")
+    void staleResumeWrite_isRejectedByOptimisticLock() {
+        Resume stale = resumeRepository.findById(resumeIdA).orElseThrow();
+
+        // 模拟另一并发事务推进了版本指针（version 前进一格，指针指向 v1）
+        jdbcTemplate.update("UPDATE resume SET version = version + 1, current_version_id = ? WHERE id = ?",
+                versionIdA, resumeIdA);
+        assertEquals(versionIdA, resumeRepository.findById(resumeIdA).orElseThrow().getCurrentVersionId());
+
+        // 陈旧副本（旧 version、旧指针）保存 → 乐观锁冲突，由全局处理器映射 40901
+        stale.setTitle("stale title must be rejected");
+        assertThrows(ObjectOptimisticLockingFailureException.class,
+                () -> resumeRepository.saveAndFlush(stale),
+                "陈旧副本保存必须被乐观锁拒绝 → 全局处理器映射 40901");
+
+        Resume fresh = resumeRepository.findById(resumeIdA).orElseThrow();
+        assertNotEquals("stale title must be rejected", fresh.getTitle(), "陈旧写入不得落库");
+        assertEquals(versionIdA, fresh.getCurrentVersionId(), "并发推进的版本指针不得被陈旧写回退");
     }
 
     private Long userId(String token) throws Exception {

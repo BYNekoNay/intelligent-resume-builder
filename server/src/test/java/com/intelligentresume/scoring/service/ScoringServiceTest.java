@@ -25,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -141,6 +142,58 @@ class ScoringServiceTest {
         ArgumentCaptor<MatchResult> captor = ArgumentCaptor.forClass(MatchResult.class);
         verify(matchResultRepository).save(captor.capture());
         assertEquals("v1.0.0", captor.getValue().getRuleVersion());
+    }
+
+    @Test
+    @DisplayName("#78: JD 未修改时复用既有评分结果，不新增行")
+    void score_reusesExistingResultWhenJdUnchanged() {
+        ResumeVersion version = buildVersion(Map.of("skills", List.of()));
+        JobDescription jd = buildJd("Java", Map.of("keywords", List.of("Java"), "requirements", List.of()));
+        ReflectionTestUtils.setField(jd, "updatedAt", LocalDateTime.now().minusMinutes(5));
+        when(versionRepository.findById(VERSION_ID)).thenReturn(Optional.of(version));
+        Resume resume = new Resume();
+        resume.setId(10L);
+        resume.setUserId(USER_ID);
+        when(resumeRepository.findByIdAndUserId(10L, USER_ID)).thenReturn(Optional.of(resume));
+        when(jdRepository.findByIdAndUserId(JD_ID, USER_ID)).thenReturn(Optional.of(jd));
+        MatchResult existing = new MatchResult();
+        existing.setId(42L);
+        existing.setTotalScore(new BigDecimal("12.34"));
+        existing.setKeywordScore(new BigDecimal("1.00"));
+        existing.setSkillScore(new BigDecimal("2.00"));
+        existing.setExperienceScore(new BigDecimal("3.00"));
+        existing.setRuleVersion("v1.0.0");
+        existing.setExplanationJson(Map.of("matched", List.of("Java"), "disclaimer", "存库免责声明"));
+        ReflectionTestUtils.setField(existing, "createdAt", LocalDateTime.now().minusMinutes(1));
+        when(matchResultRepository.findFirstByResumeVersionIdAndJobDescriptionIdAndRuleVersionOrderByIdDesc(
+                VERSION_ID, JD_ID, "v1.0.0")).thenReturn(Optional.of(existing));
+
+        MatchResponse resp = service.score(new MatchRequest(VERSION_ID, JD_ID), USER_ID);
+
+        assertEquals(42L, resp.matchResultId());
+        assertEquals(new BigDecimal("12.34"), resp.totalScore());
+        assertEquals("存库免责声明", resp.explanation().disclaimer());
+        verify(matchResultRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("#78: JD 在评分后被修改 → 不复用，重新计算并保存")
+    void score_recomputesWhenJdModifiedAfterResult() {
+        ResumeVersion version = buildVersion(Map.of("skills", List.of(Map.of("name", "Java"))));
+        JobDescription jd = buildJd("Java", Map.of("keywords", List.of("Java"), "requirements", List.of()));
+        ReflectionTestUtils.setField(jd, "updatedAt", LocalDateTime.now());
+        setupHappyPath(version, jd);
+        MatchResult stale = new MatchResult();
+        stale.setId(9L);
+        stale.setRuleVersion("v1.0.0");
+        ReflectionTestUtils.setField(stale, "createdAt", LocalDateTime.now().minusMinutes(10));
+        when(matchResultRepository.findFirstByResumeVersionIdAndJobDescriptionIdAndRuleVersionOrderByIdDesc(
+                VERSION_ID, JD_ID, "v1.0.0")).thenReturn(Optional.of(stale));
+
+        MatchResponse resp = service.score(new MatchRequest(VERSION_ID, JD_ID), USER_ID);
+
+        assertEquals(1L, resp.matchResultId());
+        verify(matchResultRepository).save(any());
     }
 
     @Test

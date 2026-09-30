@@ -41,9 +41,9 @@ class MySql57MigrationLiveIT {
                     .cleanDisabled(true)
                     .load();
 
-            // V20~V29 共 10 条迁移必须全部在 MySQL 5.7 上成功（V23~V29 的 5.7 兼容由本门禁证明）
-            assertEquals(10, flyway.migrate().migrationsExecuted);
-            assertEquals("29", scalar(statement,
+            // V20~V31 共 12 条迁移必须全部在 MySQL 5.7 上成功（V23~V31 的 5.7 兼容由本门禁证明）
+            assertEquals(12, flyway.migrate().migrationsExecuted);
+            assertEquals("31", scalar(statement,
                     "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1"));
             assertEquals("1", scalar(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='19' AND type='BASELINE' AND success=1"));
@@ -65,19 +65,27 @@ class MySql57MigrationLiveIT {
             // V25：资产章节关联允许只挂素材（section_key 可空）
             assertEquals("YES", scalar(statement, columnNullableSql(schema, "interview_asset_section", "section_key")));
 
-            // V26/V27/V29：新增可空列与乐观锁版本列（NOT NULL DEFAULT 0）
+            // V26/V27/V29/V30：新增可空列与乐观锁版本列（NOT NULL DEFAULT 0）
             assertEquals("YES", scalar(statement, columnNullableSql(schema, "application_record", "next_follow_up_at")));
             assertEquals("YES", scalar(statement, columnNullableSql(schema, "application_record", "stage_entered_at")));
             assertEquals("NO", scalar(statement, columnNullableSql(schema, "career_material", "version")));
             assertEquals("0", scalar(statement, columnDefaultSql(schema, "career_material", "version")));
             assertEquals("NO", scalar(statement, columnNullableSql(schema, "communication_template", "version")));
             assertEquals("0", scalar(statement, columnDefaultSql(schema, "communication_template", "version")));
+            assertEquals("NO", scalar(statement, columnNullableSql(schema, "resume", "version")));
+            assertEquals("0", scalar(statement, columnDefaultSql(schema, "resume", "version")));
 
             // V28：面试资产 (user_id, interview_record_id) 唯一索引兜底幂等创建
             assertEquals("0", scalar(statement,
                     "SELECT non_unique FROM information_schema.statistics WHERE table_schema='" + schema
                             + "' AND table_name='interview_answer_asset'"
                             + " AND index_name='uq_interview_asset_user_record' AND seq_in_index=1"));
+
+            // V31：配额/跟进查询组合索引（列数即索引定义列数；resume 的 (user_id, job_description_id) 已由 V12 覆盖）
+            assertEquals("3", scalar(statement, indexColumnCountSql(schema, "ai_task", "idx_ai_task_user_type_created")));
+            assertEquals("2", scalar(statement, indexColumnCountSql(schema, "interview_ai_attempt", "idx_iai_user_created")));
+            assertEquals("2", scalar(statement, indexColumnCountSql(schema, "application_record", "idx_application_user_followup")));
+            assertEquals("2", scalar(statement, indexColumnCountSql(schema, "resume", "idx_resume_user_jd")));
         }
     }
 
@@ -100,6 +108,11 @@ class MySql57MigrationLiveIT {
         return "SELECT COUNT(DISTINCT index_name) FROM information_schema.statistics WHERE table_schema='"
                 + schema + "' AND table_name='interview_ai_attempt' AND non_unique=0"
                 + " AND index_name IN ('uq_iai_user_idempotency','uq_iai_session_operation_round')";
+    }
+
+    private String indexColumnCountSql(String schema, String table, String indexName) {
+        return "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema='" + schema
+                + "' AND table_name='" + table + "' AND index_name='" + indexName + "'";
     }
 
     private String scalar(Statement statement, String sql) throws Exception {

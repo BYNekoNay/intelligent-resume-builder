@@ -80,7 +80,17 @@ public class ScoringService {
         JobDescription jd = jdRepository.findByIdAndUserId(req.jobDescriptionId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位描述不存在"));
 
-        // 3. 读取/解析 JD 关键词
+        // 3. 结果复用（#78）：同一（版本, JD, 规则版本）且 JD 在此前评分之后未被修改时，
+        //    直接返回既有结果——重复点击/重放请求不再无限追加等价行。
+        //    JD 修改（含重新解析）会刷新 updatedAt，晚于结果创建时间的 JD 一律重新计算。
+        Optional<MatchResult> reusable = matchResultRepository
+                .findFirstByResumeVersionIdAndJobDescriptionIdAndRuleVersionOrderByIdDesc(
+                        req.resumeVersionId(), req.jobDescriptionId(), ruleVersion);
+        if (reusable.isPresent() && !reusable.get().getCreatedAt().isBefore(jd.getUpdatedAt())) {
+            return toResponse(reusable.get());
+        }
+
+        // 4. 读取/解析 JD 关键词
         ParsedJdSnapshot parsedSnapshot = readParsedJd(jd.getParsedKeywordsJson());
         List<String> jdKeywords;
         List<String> jdRequirements;
@@ -94,13 +104,13 @@ public class ScoringService {
             jdRequirements = parsedResult.requirements();
         }
 
-        // 4. 抽取简历 token
+        // 5. 抽取简历 token
         Set<String> resumeTokens = keywordExtractor.extract(version);
         Set<String> resumeRawTokens = keywordExtractor.extractRaw(version);
         Set<String> skillTokens = keywordExtractor.extractSkillTokens(version);
         Set<String> skillRawTokens = keywordExtractor.extractSkillRaw(version);
 
-        // 5. 三项规则评分
+        // 6. 三项规则评分
         KeywordRule.RuleResult keywordResult =
                 ruleRegistry.keywordRule().evaluate(jdKeywords, resumeTokens, resumeRawTokens);
         KeywordRule.RuleResult skillResult =
@@ -108,7 +118,7 @@ public class ScoringService {
         BigDecimal experienceScore =
                 ruleRegistry.experienceRule().evaluate(jdRequirements, version.getResumeJson());
 
-        // 6. 加权总分
+        // 7. 加权总分
         Map<String, BigDecimal> ruleScores = new LinkedHashMap<>();
         ruleScores.put(ruleRegistry.keywordRule().name(), keywordResult.score());
         ruleScores.put(ruleRegistry.skillRule().name(), skillResult.score());
@@ -116,7 +126,7 @@ public class ScoringService {
         BigDecimal totalScore = ruleRegistry.weightedTotal(ruleScores)
                 .setScale(2, RoundingMode.HALF_UP);
 
-        // 7. 构建解释
+        // 8. 构建解释
         List<String> suggestions = buildSuggestions(keywordResult, skillResult);
         Explanation explanation = new Explanation(
                 keywordResult.matched(),
@@ -126,7 +136,7 @@ public class ScoringService {
                 disclaimer
         );
 
-        // 8. 写 match_result
+        // 9. 写 match_result
         MatchResult result = new MatchResult();
         result.setResumeVersionId(req.resumeVersionId());
         result.setJobDescriptionId(req.jobDescriptionId());
@@ -138,12 +148,8 @@ public class ScoringService {
         result.setRuleVersion(ruleVersion);
         matchResultRepository.save(result);
 
-        // 9. 返回
-        return new MatchResponse(
-                result.getId(), totalScore,
-                keywordResult.score(), skillResult.score(), experienceScore,
-                explanation, ruleVersion
-        );
+        // 10. 返回
+        return toResponse(result);
     }
 
     /**
@@ -161,7 +167,11 @@ public class ScoringService {
      */
     @Transactional(readOnly = true)
     public MatchResponse getResultResponse(Long matchResultId, Long userId) {
-        MatchResult result = getResult(matchResultId, userId);
+        return toResponse(getResult(matchResultId, userId));
+    }
+
+    /** 实体 → 公开响应（GET 与 POST/复用它，避免把持久化字段名泄漏成前端无法消费的响应字段）。 */
+    private MatchResponse toResponse(MatchResult result) {
         Map<String, Object> explanationJson = result.getExplanationJson();
         Explanation explanation = new Explanation(
                 toStringList(explanationJson == null ? null : explanationJson.get("matched")),

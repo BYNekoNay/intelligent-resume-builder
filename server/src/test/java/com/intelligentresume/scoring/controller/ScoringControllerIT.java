@@ -157,7 +157,25 @@ class ScoringControllerIT {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
+    @DisplayName("#78 重放幂等: 同一（版本, JD）重复请求复用同一结果，不追加等价行")
+    void postMatch_replayReusesSameResult() throws Exception {
+        mockMvc.perform(post("/api/scoring/match")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"resumeVersionId": %d, "jobDescriptionId": %d}
+                                """.formatted(versionId, jdId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.matchResultId").value(matchResultId));
+
+        Assertions.assertEquals(1, matchResultRepository.findByResumeVersionIdOrderByCreatedAtDesc(versionId).size(),
+                "重复请求不得在 match_result 追加等价行");
+    }
+
+    @Test
+    @Order(7)
     @DisplayName("未登录访问 POST 返回 40101")
     void postMatch_unauthenticated_40101() throws Exception {
         mockMvc.perform(post("/api/scoring/match")

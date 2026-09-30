@@ -22,4 +22,11 @@ public interface MatchResultRepository extends JpaRepository<MatchResult, Long> 
     Optional<MatchResult> findByIdAndUserId(@Param("id") Long id, @Param("userId") Long userId);
 
     List<MatchResult> findByResumeVersionIdOrderByCreatedAtDesc(Long resumeVersionId);
+
+    /**
+     * 结果复用（#78）：同一（简历版本, JD, 规则版本）最近一次评分结果。
+     * 用于重放/重复点击时复用既有行，避免无限追加等价记录。
+     */
+    Optional<MatchResult> findFirstByResumeVersionIdAndJobDescriptionIdAndRuleVersionOrderByIdDesc(
+            Long resumeVersionId, Long jobDescriptionId, String ruleVersion);
 }
