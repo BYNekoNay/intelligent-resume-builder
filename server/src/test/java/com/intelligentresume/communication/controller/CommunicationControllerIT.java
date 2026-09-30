@@ -14,6 +14,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -161,6 +163,57 @@ class CommunicationControllerIT {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("My template v2"));
+    }
+
+    @Test @Order(8)
+    @DisplayName("归档版本不可消费：沟通（同步草稿与 AI 任务）返回 40901 且提示先恢复")
+    void archivedVersionIsRejectedWithConflict() throws Exception {
+        long resumeId = id(postJson("/api/resumes", tokenA, "{\"title\":\"Archived guard resume\"}"));
+        long first = id(postJson("/api/resumes/" + resumeId + "/versions", tokenA, """
+                {"resumeJson":{"basics":{"name":"Alice Chen"}},"sourceType":"MANUAL"}
+                """));
+        long second = id(postJson("/api/resumes/" + resumeId + "/versions", tokenA, """
+                {"resumeJson":{"basics":{"name":"Alice Chen v2"}},"sourceType":"MANUAL"}
+                """));
+
+        // 让第二版成为当前版本，第一版才允许归档（当前版本不可归档）
+        mockMvc.perform(patch("/api/resumes/" + resumeId + "/current-version")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"versionId\":%d}".formatted(second)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/resumes/" + resumeId + "/versions/" + first + "/archive")
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk());
+
+        // 同步模板草稿：归档可逆 → 409 + 可操作文案，而不是「不存在」
+        mockMvc.perform(post("/api/communications/generate").header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"type\":\"EMAIL\"}".formatted(first, jobId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(40901))
+                .andExpect(jsonPath("$.message").value("该简历版本已归档，请先恢复后再发起沟通"));
+
+        // AI 沟通任务：同一消费口径
+        mockMvc.perform(post("/api/communications/ai-generate").header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "archived-version-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"type\":\"EMAIL\"}".formatted(first, jobId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(40901));
+
+        // 模板预览同为「沟通」消费方：归档版本一律 409，不回落为「不存在」
+        long templateId = id(postJson("/api/communications/templates", tokenA, """
+                {"name":"Archived guard template","scene":"GENERAL","type":"EMAIL",
+                 "bodyText":"您好 {{candidateName}}。","outputLanguage":"ZH_CN"}
+                """));
+        mockMvc.perform(get("/api/communications/templates/" + templateId + "/preview")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .param("resumeVersionId", String.valueOf(first))
+                        .param("jobDescriptionId", String.valueOf(jobId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(40901))
+                .andExpect(jsonPath("$.message").value("该简历版本已归档，请先恢复后再发起沟通"));
     }
 
     private String register(String username, String email) throws Exception {

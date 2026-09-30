@@ -239,8 +239,13 @@ public class ApplicationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "JD 不存在"));
         ResumeVersion version = versionRepository.findById(versionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在"));
-        if (!userId.equals(version.getCreatedBy()) || version.getDeletedAt() != null) {
+        // 归属校验先于归档判定：不通过时一律 404，避免用归档状态反推他人版本是否存在
+        if (!userId.equals(version.getCreatedBy())) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在");
+        }
+        // 归档是可逆状态：与 ATS/评分/导出/沟通/面试一致用 409 + 可操作文案
+        if (version.getDeletedAt() != null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "该简历版本已归档，请先恢复后再发起投递");
         }
     }
 

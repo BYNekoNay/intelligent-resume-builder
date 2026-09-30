@@ -59,8 +59,17 @@ public class CommunicationService {
     }
 
     private ResumeVersion ownedResumeVersion(Long id, Long userId) {
-        return versionRepository.findByIdAndCreatedByAndDeletedAtIsNull(id, userId)
+        ResumeVersion version = versionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在"));
+        // 归属校验先于归档判定：不通过时一律 404，避免用归档状态反推他人版本是否存在
+        if (!userId.equals(version.getCreatedBy())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在");
+        }
+        // 归档是可逆状态：与 ATS/评分/导出/投递/面试一致用 409 + 可操作文案
+        if (version.getDeletedAt() != null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "该简历版本已归档，请先恢复后再发起沟通");
+        }
+        return version;
     }
 
     private JobDescription ownedJob(Long id, Long userId) {
@@ -97,11 +106,7 @@ public class CommunicationService {
 
     @Transactional
     public CommunicationResponse generate(GenerateCommunicationRequest request, Long userId) {
-        ResumeVersion version = versionRepository.findById(request.resumeVersionId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在"));
-        if (!userId.equals(version.getCreatedBy()) || version.getDeletedAt() != null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在");
-        }
+        ResumeVersion version = ownedResumeVersion(request.resumeVersionId(), userId);
         JobDescription job = jobRepository.findByIdAndUserId(request.jobDescriptionId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位描述不存在"));
         String draftText = buildDraft(request, version.getResumeJson(), job);

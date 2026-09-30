@@ -294,18 +294,35 @@ class ExportServiceTest {
     }
 
     @Test
-    @DisplayName("失败路径: 软删版本不可导出")
-    void create_deletedVersion_notFound() {
+    @DisplayName("失败路径: 归档版本不可导出 —— 409 且提示先恢复（与 ATS/评分/面试一致）")
+    void create_archivedVersion_conflict() {
         ResumeVersion version = new ResumeVersion();
         version.setId(1L);
         version.setCreatedBy(100L);
-        version.setDeletedAt(LocalDateTime.now()); // 已软删
+        version.setDeletedAt(LocalDateTime.now()); // 已归档
+        when(resumeVersionRepository.findById(1L)).thenReturn(Optional.of(version));
+
+        CreateExportRequest req = new CreateExportRequest(1L, "classic");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(req, 100L));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals("该简历版本已归档，请先恢复后再发起导出", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("失败路径: 归档且不属于当前用户仍返回 40401（不泄露归档状态）")
+    void create_archivedForeignVersion_notFound() {
+        ResumeVersion version = new ResumeVersion();
+        version.setId(1L);
+        version.setCreatedBy(200L); // 他人
+        version.setDeletedAt(LocalDateTime.now());
         when(resumeVersionRepository.findById(1L)).thenReturn(Optional.of(version));
 
         CreateExportRequest req = new CreateExportRequest(1L, "classic");
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.create(req, 100L));
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+        assertEquals("简历版本不存在", ex.getMessage());
     }
 
     @Test

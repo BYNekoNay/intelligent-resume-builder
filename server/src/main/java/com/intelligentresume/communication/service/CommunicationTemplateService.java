@@ -130,8 +130,17 @@ public class CommunicationTemplateService {
     }
 
     private ResumeVersion ownedResumeVersion(Long id, Long userId) {
-        return versionRepository.findByIdAndCreatedByAndDeletedAtIsNull(id, userId)
+        ResumeVersion version = versionRepository.findById(id)
                 .orElseThrow(() -> notFound("简历版本不存在"));
+        // 归属校验先于归档判定：不通过时一律 404，避免用归档状态反推他人版本是否存在
+        if (!userId.equals(version.getCreatedBy())) {
+            throw notFound("简历版本不存在");
+        }
+        // 归档是可逆状态：与其它消费方一致用 409 + 可操作文案
+        if (version.getDeletedAt() != null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "该简历版本已归档，请先恢复后再发起沟通");
+        }
+        return version;
     }
 
     private JobDescription ownedJob(Long id, Long userId) {

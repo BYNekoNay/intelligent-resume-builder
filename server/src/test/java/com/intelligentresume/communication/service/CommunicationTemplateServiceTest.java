@@ -101,9 +101,10 @@ class CommunicationTemplateServiceTest {
         when(templateRepository.findById(TEMPLATE_ID)).thenReturn(Optional.of(template(null, true,
                 "{{candidateName}} 申请 {{jobTitle}}，联系方式 {{email}}")));
         ResumeVersion version = new ResumeVersion();
+        version.setId(VERSION_ID);
+        version.setCreatedBy(USER_ID);
         version.setResumeJson(Map.of("basics", Map.of("name", "张明远", "email", "a@b.com")));
-        when(versionRepository.findByIdAndCreatedByAndDeletedAtIsNull(VERSION_ID, USER_ID))
-                .thenReturn(Optional.of(version));
+        when(versionRepository.findById(VERSION_ID)).thenReturn(Optional.of(version));
         JobDescription job = new JobDescription();
         job.setTitle("后端工程师");
         when(jobRepository.findByIdAndUserId(JOB_ID, USER_ID)).thenReturn(Optional.of(job));
@@ -113,6 +114,38 @@ class CommunicationTemplateServiceTest {
         assertTrue(result.filledBody().contains("张明远"));
         assertTrue(result.filledBody().contains("后端工程师"));
         assertTrue(result.filledBody().contains("a@b.com"));
+    }
+
+    @Test
+    @DisplayName("preview: 归档版本抛 409 且提示先恢复（与 ATS/评分/导出/投递一致）")
+    void preview_archivedVersion_throwsConflict() {
+        when(templateRepository.findById(TEMPLATE_ID)).thenReturn(Optional.of(template(null, true, "{{candidateName}}")));
+        ResumeVersion version = new ResumeVersion();
+        version.setId(VERSION_ID);
+        version.setCreatedBy(USER_ID);
+        version.setDeletedAt(java.time.LocalDateTime.now());
+        when(versionRepository.findById(VERSION_ID)).thenReturn(Optional.of(version));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.preview(TEMPLATE_ID, VERSION_ID, JOB_ID, USER_ID));
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals("该简历版本已归档，请先恢复后再发起沟通", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("preview: 归档且属于他人仍抛 40401（不泄露归档状态）")
+    void preview_archivedForeignVersion_throwsNotFound() {
+        when(templateRepository.findById(TEMPLATE_ID)).thenReturn(Optional.of(template(null, true, "{{candidateName}}")));
+        ResumeVersion version = new ResumeVersion();
+        version.setId(VERSION_ID);
+        version.setCreatedBy(USER_ID + 1);
+        version.setDeletedAt(java.time.LocalDateTime.now());
+        when(versionRepository.findById(VERSION_ID)).thenReturn(Optional.of(version));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.preview(TEMPLATE_ID, VERSION_ID, JOB_ID, USER_ID));
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+        assertEquals("简历版本不存在", ex.getMessage());
     }
 
     @Test

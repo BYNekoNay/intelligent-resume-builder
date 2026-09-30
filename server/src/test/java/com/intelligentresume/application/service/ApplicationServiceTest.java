@@ -324,15 +324,30 @@ class ApplicationServiceTest {
     }
 
     @Test
-    @DisplayName("create: 已删除的简历版本抛 40401")
-    void create_deletedResumeVersion_throwsNotFound() {
+    @DisplayName("create: 归档的简历版本抛 40901 且提示先恢复（与 ATS/评分/导出一致）")
+    void create_archivedResumeVersion_throwsConflict() {
         when(jobRepository.findByIdAndUserId(JOB_ID, USER_ID)).thenReturn(Optional.of(new JobDescription()));
         when(versionRepository.findById(VERSION_ID)).thenReturn(Optional.of(version(USER_ID, LocalDateTime.now())));
         CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null, null);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.create(request, USER_ID));
 
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals("该简历版本已归档，请先恢复后再发起投递", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("create: 归档且属于他人仍抛 40401（不泄露归档状态）")
+    void create_archivedForeignResumeVersion_throwsNotFound() {
+        when(jobRepository.findByIdAndUserId(JOB_ID, USER_ID)).thenReturn(Optional.of(new JobDescription()));
+        when(versionRepository.findById(VERSION_ID))
+                .thenReturn(Optional.of(version(FOREIGN_USER_ID, LocalDateTime.now())));
+        CreateApplicationRequest request = new CreateApplicationRequest(JOB_ID, VERSION_ID, null, null, null, null, null);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.create(request, USER_ID));
+
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+        assertEquals("简历版本不存在", ex.getMessage());
     }
 
     @Test
