@@ -216,16 +216,46 @@ class InterviewPromptContextAssemblerTest {
     }
 
     @Test
-    @DisplayName("findOwnedResumeVersion：已删除版本抛 40401")
+    @DisplayName("findOwnedResumeVersion：已归档版本抛 409 且给出可恢复提示")
     void findOwnedResumeVersion_deleted() {
         when(resumeVersionRepository.findById(20L))
                 .thenReturn(Optional.of(version(1L, LocalDateTime.now(), Map.of())));
+        when(resumeRepository.findByIdAndUserId(1L, USER_ID)).thenReturn(Optional.of(new Resume()));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> assembler.findOwnedResumeVersion(20L, USER_ID));
+
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals("该简历版本已归档，请先恢复后再继续", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("findOwnedResumeVersion：归档但简历属于他人 → 40401（不泄露归档状态）")
+    void findOwnedResumeVersion_deletedAndNotOwned() {
+        when(resumeVersionRepository.findById(20L))
+                .thenReturn(Optional.of(version(1L, LocalDateTime.now(), Map.of())));
+        when(resumeRepository.findByIdAndUserId(1L, USER_ID)).thenReturn(Optional.empty());
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> assembler.findOwnedResumeVersion(20L, USER_ID));
 
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
         assertEquals("简历版本不存在", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("appendResumeContext：会话中途简历版本被归档 → 409 而非「不存在」")
+    void appendResumeContext_archivedVersion_conflict() {
+        when(resumeVersionRepository.findById(20L))
+                .thenReturn(Optional.of(version(1L, LocalDateTime.now(), Map.of("name", "Alice"))));
+        when(resumeRepository.findByIdAndUserId(1L, USER_ID)).thenReturn(Optional.of(new Resume()));
+        InterviewSession session = session(null, InterviewSourceType.PLATFORM_RESUME, 20L, null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> assembler.appendResumeContext(new StringBuilder(), session, USER_ID));
+
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals("该简历版本已归档，请先恢复后再继续", ex.getMessage());
     }
 
     @Test

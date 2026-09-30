@@ -146,10 +146,16 @@ public class InterviewPromptContextAssembler {
 
     public ResumeVersion findOwnedResumeVersion(Long versionId, Long userId) {
         ResumeVersion version = resumeVersionRepository.findById(versionId)
-                .filter(candidate -> candidate.getDeletedAt() == null)
                 .orElseThrow(() -> notFound("简历版本不存在"));
+        // 归属校验放在归档判定之前：不通过时一律以 404 收口，避免用归档状态反推他人版本是否存在。
         resumeRepository.findByIdAndUserId(version.getResumeId(), userId)
                 .orElseThrow(() -> notFound("简历版本不存在"));
+        if (version.getDeletedAt() != null) {
+            // 归档是可逆状态：与 ATS/评分/导出/投递一致用 409 + 可操作文案。
+            // 面试会话（含进行中每轮评估）引用到已归档版本时，用户看到的应是「请先恢复」，
+            // 而不是原因错误且恢复也无法消除的「简历版本不存在」。
+            throw new BusinessException(ErrorCode.CONFLICT, "该简历版本已归档，请先恢复后再继续");
+        }
         return version;
     }
 
