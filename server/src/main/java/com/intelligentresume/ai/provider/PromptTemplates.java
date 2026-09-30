@@ -2,6 +2,7 @@ package com.intelligentresume.ai.provider;
 
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.service.AiTaskCapabilityRegistry;
+import com.intelligentresume.resume.domain.ResumeSections;
 
 import java.util.List;
 import java.util.Map;
@@ -56,13 +57,13 @@ public final class PromptTemplates {
                     """ : """
                     You are a professional resume drafting assistant. Turn the supplied career material into an editable JSON Resume draft.
                     Rules:
-                    1. Return a complete JSON Resume draft under generatedResumeJson, with basics, work, education, skills, and projects sections. The generatedResumeJson must not include meta or any other top-level key outside basics, work, education, skills, projects, certificates, languages, and awards.
+                    1. Return a complete JSON Resume draft under generatedResumeJson. Allowed top-level sections: %s. The generatedResumeJson must not include meta or any other top-level key. Do not include a links section.
                     2. For ordinary material generation, use only information supported by the source material.
                     3. For associative drafts, retain the reference-only boundary: label inferred content as "待核实" and never state it as verified experience.
                     4. Include suggestions as a list of follow-up details the user should verify.
                     5. Write in the SAME LANGUAGE as the input text.
                     6. Output valid JSON only, with keys: generatedResumeJson (object), suggestions (list of strings).
-                    """;
+                    """.formatted(String.join(", ", ResumeSections.AI_CONTEXT_SECTIONS));
             case ACHIEVEMENT_GUIDANCE -> """
                     You are a professional career achievement consultant. You guide users to discover and quantify their work accomplishments.
                     Rules:

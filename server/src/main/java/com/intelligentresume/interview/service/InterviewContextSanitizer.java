@@ -31,7 +31,8 @@ public class InterviewContextSanitizer {
     public Map<String, Object> sanitizePlatformResume(Map<String, Object> resumeJson) {
         if (resumeJson == null) return Map.of();
 
-        // 只提取安全的简历字段
+        // 只提取安全的简历字段（章节集合与 ResumeSections.AI_CONTEXT_SECTIONS 对齐；
+        // links 为联系方式容器，刻意排除）
         StringBuilder sb = new StringBuilder();
 
         Object basics = resumeJson.get("basics");
@@ -43,14 +44,41 @@ public class InterviewContextSanitizer {
             if (summary != null) sb.append("Summary: ").append(summary).append("\n");
         }
 
+        // #54：objective 是对象而不是集合，且 location 属联系方式，只取目标职类/行业/概要
+        Object objective = resumeJson.get("objective");
+        if (objective instanceof Map<?, ?> objectiveMap) {
+            for (String field : List.of("targetRole", "targetIndustry", "summary")) {
+                Object value = objectiveMap.get(field);
+                if (value != null) sb.append(field).append(": ").append(value).append("\n");
+            }
+        }
+
         appendCollection(resumeJson, "work", sb, List.of("company", "position", "description", "startDate", "endDate", "period", "highlights"));
+        appendCollection(resumeJson, "volunteering", sb, List.of("organization", "name", "role", "position", "description", "startDate", "endDate", "period", "highlights"));
         appendCollection(resumeJson, "projects", sb, List.of("name", "description", "role", "technologies", "startDate", "endDate", "period", "highlights"));
         appendCollection(resumeJson, "education", sb, List.of("institution", "area", "studyType", "startDate", "endDate", "period"));
         appendCollection(resumeJson, "skills", sb, List.of("name", "level", "keywords"));
+        appendCollection(resumeJson, "courses", sb, List.of("name", "provider", "date", "description"));
         appendCollection(resumeJson, "certificates", sb, List.of("name", "issuer", "date"));
+        appendCollection(resumeJson, "publications", sb, List.of("title", "name", "publisher", "date", "description"));
+        appendCollection(resumeJson, "awards", sb, List.of("name", "title", "issuer", "organization", "date", "description"));
         appendCollection(resumeJson, "languages", sb, List.of("language", "fluency"));
+        appendCustomSections(resumeJson, sb);
 
         return Map.of("resumeSummary", sanitizeText(sb.toString(), MAX_EXTERNAL_RESUME));
+    }
+
+    /** #54：customSections 是「章节 → 条目」两层结构，先取章节标题再展开条目字段。 */
+    private void appendCustomSections(Map<String, Object> json, StringBuilder sb) {
+        Object sections = json.get("customSections");
+        if (!(sections instanceof List<?> list)) return;
+        for (Object section : list) {
+            if (!(section instanceof Map<?, ?> sectionMap)) continue;
+            Object title = sectionMap.get("title");
+            if (title != null) sb.append("section: ").append(title).append("\n");
+            appendItems(sectionMap.get("entries"), sb, List.of("name", "organization", "role",
+                    "description", "startDate", "endDate", "period", "highlights"));
+        }
     }
 
     /**
@@ -123,19 +151,20 @@ public class InterviewContextSanitizer {
     }
 
     private void appendCollection(Map<String, Object> json, String key, StringBuilder sb, List<String> fields) {
-        Object items = json.get(key);
-        if (items instanceof List<?> list) {
-            for (Object item : list) {
-                if (item instanceof Map<?, ?> map) {
-                    for (String field : fields) {
-                        Object val = map.get(field);
-                        if (val != null) {
-                            sb.append(field).append(": ").append(val).append("\n");
-                        }
-                    }
-                    sb.append("---\n");
+        appendItems(json.get(key), sb, fields);
+    }
+
+    private void appendItems(Object value, StringBuilder sb, List<String> fields) {
+        if (!(value instanceof List<?> list)) return;
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> map)) continue;
+            for (String field : fields) {
+                Object val = map.get(field);
+                if (val != null) {
+                    sb.append(field).append(": ").append(val).append("\n");
                 }
             }
+            sb.append("---\n");
         }
     }
 

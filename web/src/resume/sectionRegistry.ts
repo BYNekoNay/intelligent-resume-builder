@@ -103,6 +103,14 @@ export const CONTENT_SECTION_KEYS = SECTION_KEYS.filter(
 export type ContentSectionKey = (typeof CONTENT_SECTION_KEYS)[number]
 
 /**
+ * Sections allowed in AI inputs/outputs (ideation #53/#55): everything except `links`,
+ * which is a contact container (URLs/handles) — the generation prompt also explicitly
+ * refuses to create links. Must stay aligned with the backend
+ * `com.intelligentresume.resume.domain.ResumeSections.AI_CONTEXT_SECTIONS`.
+ */
+export const AI_CONTEXT_SECTION_KEYS = SECTION_KEYS.filter((key) => key !== 'links')
+
+/**
  * Default rendering order for body sections.
  * `basics` is always rendered as the paper header and is not part of this list.
  * This order matches pdf-service/src/templates/classic.js `defaultOrder`.

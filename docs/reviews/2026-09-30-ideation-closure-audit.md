@@ -218,10 +218,13 @@
 53. ✅ 备注「未发送即保留」（本批全量回归前的自查发现）：`PATCH /api/applications/{id}/status` 此前按请求值无条件覆盖 `feedbackText`（缺席/null 即清空），任何不关心备注的调用（拖拽改状态、第三方客户端）都会静默清空备注；现改为**缺席/null = 不改动，显式空串 = 清空**（空白归一为 null），前端不再回传陈旧值、也不预填草稿（仅发送用户实际编辑过的文本）。同时验证「无任何变更的 PATCH 不写库、乐观锁版本不推进」。`docs/05` §9.2 契约同步；IT 覆盖「发送即更新 / 缺席即保留 / 空串清空」三分支；e2e 断言改状态请求不再携带 `feedbackText`
 54. ✅ #11（分页契约）**决策：记录不实现**（2026-09-30 与用户确认）：全部列表已在 #50 三批中改为摘要投影，响应不再携带长字段；数据为用户维度（简历/JD/版本/投递/面试会话），量级可控。分页需要为选择器类消费方补轻量 options 端点、迁移 31 项功能测试与多处列表 UI（含按状态分列的投递看板），收益/成本不划算。保留为待观察项：若出现单用户数据量显著增长的真实案例，再按「只给纯列表页加分页 + options 端点」方案实施
 
-**需产品/环境决策后再定（2026-09-30 用户已确认推进前三项，待口径确认后实现）**
-- #26 ai_task 留存与清理策略（用户已确认推进：待确认保留期口径与是否提供用户侧删除入口）
-- #7 账号数据导出/删除前端入口（用户已确认推进：待确认导出范围与删除边界）
-- #53/#54/#55 AI 上下文白名单是否扩展（用户已确认推进：待确认哪些章节进入素材生成/面试/沟通的 AI 输入）
+**第十二批 · AI 上下文白名单统一（#53/#54/#55，用户确认「三处统一扩展」）— ✅ 已执行（2026-09-30）**
+55. ✅ #53/#54/#55 章节白名单统一为全章节：新增共享常量 `ResumeSections.AI_CONTEXT_SECTIONS`（13 章，显式排除 `links` 联系方式容器；有序列表保证提示词确定性），三处改为同一来源——① 素材生成（`PromptTemplates` 的 MATERIAL_IMPORT 提示词由常量 `.formatted(String.join(...))` 生成 + 前端 `materialGeneration.ts` 的白名单改从 `sectionRegistry` 派生 `AI_CONTEXT_SECTION_KEYS`，两端注释互指对齐）；② 面试上下文投影（`InterviewContextSanitizer` 新增 objective（只取 targetRole/targetIndustry/summary，`location` 属联系方式）、volunteering、courses、publications、awards、customSections（两层结构：章节标题 + entries 字段白名单），并抽出 `appendItems` 复用渲染）；③ 沟通 prompt（`CommunicationAiPromptBuilder` 8 章 → 全 13 章，`SENSITIVE_KEYS` 与脱敏/截断策略不变）。新增 `CommunicationAiPromptBuilderTest`（提示词含新章节、`links` 与邮箱/URL/`location` 被剔除、常量契约）+ 面试 sanitizer 扩展用例（7 个新字段断言 + `objective.location` 剔除）
+
+**需产品/环境决策后再定（2026-09-30 口径已确认，待实现）**
+- #26 ai_task 留存与清理：口径已确认——**90 天压缩快照**（终态且非待确认任务保留元数据行，清空 `input_snapshot_json` 与 `result_json`）+ 账号页「清空 AI 任务历史」入口
+- #7 账号数据导出/删除入口：口径已确认——**删号入口（输入用户名二次确认，调现有 `DELETE /api/auth/me`）+ 数据导出 JSON**（简历与版本、职业资料、JD、投递、面试会话与资产、沟通模板/草稿、个人资料、AI 同意记录；不含 AI 任务快照）
+- #53/#54/#55 AI 上下文白名单：✅ 已按「三处统一扩展」落地（见第十二批，第 55 条）
 - #22 MySQL 5.7 门禁：门禁本身已更新到当前迁移版本（V32）并用本机 5.7.24 实跑通过（见 §4 第 38/47 条）；**长期是否保留该门禁**（是否有常驻 5.7 环境 / 是否接入 CI）仍待决策——当前仅本地手动执行（用户本次未选择推进）
 
 ## 5. 变更记录
@@ -244,3 +247,4 @@
 | 2026-09-30 | **第十批（投递列表读模型，#50 收尾之二）执行完成**：#50 `GET /api/applications` 改摘要投影（不返回草稿长文本，改 `draftCount` 支撑「n/3」；`feedbackText` 保留——状态迁移接口按请求值覆盖备注）；新增 `GET /api/applications/{id}` 供展开/编辑按需拉取（展开走前端缓存，编辑拉最新，保存后清缓存）；`docs/05` §9.2 契约同步。顺带修复既有不稳定用例：`ResumeImportServiceTest.rejectsExtractionBeyondTimeout` 由「40 页 PDF 必然超过 5ms」改为覆盖抽取实现的确定性阻塞（快机器可毫秒级解析完 → 偶发失败，本批全量回归首次暴露）。回归：server 全量 **794 测试 0 失败**（5 skipped 为环境门控）；web `npm run build` 通过；Playwright 全量 **143 passed / 6 skipped / 0 failed**（新增 1）；CI + Functional Regression 双绿（workflow run 36729273163 / 36729273210，head 21d52a8，复核结论 success） |
 | 2026-09-30 | **第十一批（投递状态更新备注语义）执行完成**：`PATCH /api/applications/{id}/status` 的 `feedbackText` 改为「未发送即保留、空串清空」（此前缺席/null 会静默清空备注，拖拽改状态等调用可误删数据）；前端不再回传陈旧值/不预填草稿，仅发送用户编辑过的文本；`docs/05` §9.2 契约同步。回归：server 全量 **794 测试 0 失败**（5 skipped 为环境门控）；web `npm run build` 通过；Playwright 全量 **143 passed / 6 skipped / 0 failed** |
 | 2026-09-30 | **#11（分页契约）决策记录**：与用户确认「记录不实现」——列表已在 #50 三批中改为摘要投影、数据为用户维度量级可控；分页需补选择器 options 端点、迁移 31 项功能测试与列表/看板 UI，收益/成本不划算。保留为待观察项（出现数据量显著增长的真实案例时再按「纯列表页分页 + options 端点」实施）。同时确认三项产品决策项（#26 / #7 / #53~#55）推进、#22 门禁去留暂不推进 |
+| 2026-09-30 | **第十二批（AI 上下文白名单统一，#53/#54/#55）执行完成**：新增共享常量 `ResumeSections.AI_CONTEXT_SECTIONS`（13 章，排除 `links`）作为唯一来源——素材生成（服务端提示词由常量生成 + 前端白名单从 `sectionRegistry` 派生）、面试上下文投影（新增 objective/志愿/课程/成果/奖项/自定义模块 + `appendItems` 复用）、沟通 prompt（8 章 → 13 章，脱敏策略不变）。回归：server 全量 **797 测试 0 失败**（新增 3，5 skipped 为环境门控）；web `npm run build` 通过；Playwright 全量 **143 passed / 6 skipped / 0 failed** |

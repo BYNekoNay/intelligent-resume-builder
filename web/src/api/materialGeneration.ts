@@ -1,5 +1,6 @@
 import { apiClient, type ApiResponse } from './client'
 import { AI_TASK_POLL_ATTEMPTS, AiTaskTimeoutError } from './ai'
+import { AI_CONTEXT_SECTION_KEYS } from '@/resume/sectionRegistry'
 
 export interface MaterialGenerationResponse {
   taskId: number
@@ -16,7 +17,8 @@ export interface MaterialAssociationResponse {
   disclaimer: string
 }
 
-const RESUME_SECTIONS = new Set(['basics', 'work', 'education', 'skills', 'projects', 'certificates', 'languages', 'awards'])
+/** #53：章节白名单统一取自 sectionRegistry（此前 8 章自成一派，objective/志愿/课程/成果/自定义模块被静默丢弃） */
+const RESUME_SECTIONS = new Set<string>(AI_CONTEXT_SECTION_KEYS)
 
 /** 发起素材生成简历任务，轮询直到完成，返回脱壳后的结果。idempotencyKey 由调用方在动作发起时生成并在该次逻辑提交生命周期内复用 */
 export async function generateResumeFromMaterial(

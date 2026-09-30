@@ -286,6 +286,28 @@ class InterviewContextSanitizerTest {
         assertFalse(summary.contains("https://example.com/me"));
     }
 
+    @Test
+    @DisplayName("#54：平台简历上下文覆盖 objective/志愿/课程/成果/奖项/自定义模块，敏感字段仍被剔除")
+    void structuredContexts_coverExtendedSections() {
+        Map<String, Object> resume = Map.of(
+                "basics", Map.of("summary", "Backend engineer"),
+                "objective", Map.of("targetRole", "Platform Engineer", "location", "Shanghai"),
+                "volunteering", List.of(Map.of("organization", "Code Club", "role", "Mentor")),
+                "courses", List.of(Map.of("name", "Distributed Systems", "provider", "Example University")),
+                "publications", List.of(Map.of("title", "Scaling Notes", "publisher", "Tech Press")),
+                "awards", List.of(Map.of("name", "Hackathon Winner", "issuer", "ACME")),
+                "customSections", List.of(Map.of("title", "Open Source", "entries",
+                        List.of(Map.of("name", "resume-builder", "role", "Maintainer")))));
+
+        String summary = sanitizer.sanitizePlatformResume(resume).get("resumeSummary").toString();
+
+        for (String expected : List.of("Platform Engineer", "Code Club", "Distributed Systems",
+                "Scaling Notes", "Hackathon Winner", "Open Source", "resume-builder")) {
+            assertTrue(summary.contains(expected), "面试上下文应包含 " + expected + "：" + summary);
+        }
+        assertFalse(summary.contains("Shanghai"), "objective.location 属联系方式字段，必须剔除");
+    }
+
     // ---- buildHistoryContext ----
 
     @Test

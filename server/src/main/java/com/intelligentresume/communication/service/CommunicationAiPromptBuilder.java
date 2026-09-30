@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.communication.dto.GenerateCommunicationRequest;
 import com.intelligentresume.jobdescription.domain.JobDescription;
+import com.intelligentresume.resume.domain.ResumeSections;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -15,8 +16,6 @@ import java.util.regex.Pattern;
 
 @Component
 public class CommunicationAiPromptBuilder {
-    private static final Set<String> RESUME_SECTIONS = Set.of(
-            "basics", "work", "education", "skills", "projects", "certificates", "languages", "awards");
     private static final Set<String> SENSITIVE_KEYS = Set.of(
             "email", "phone", "telephone", "address", "location", "url", "website", "profiles", "idNumber");
     private static final Pattern EMAIL = Pattern.compile("[\\w.%+-]+@[\\w.-]+\\.[A-Za-z]{2,}");
@@ -106,7 +105,8 @@ public class CommunicationAiPromptBuilder {
     private Map<String, Object> sanitizeResume(Map<String, Object> resumeJson) {
         Map<String, Object> result = new LinkedHashMap<>();
         if (resumeJson == null) return result;
-        for (String section : RESUME_SECTIONS) {
+        // #55：章节白名单统一取自 ResumeSections（此前 8 章自成一派，objective/志愿/课程/成果/自定义模块被静默丢弃）
+        for (String section : ResumeSections.AI_CONTEXT_SECTIONS) {
             if (resumeJson.containsKey(section)) result.put(section, sanitize(resumeJson.get(section), 0));
         }
         return result;
