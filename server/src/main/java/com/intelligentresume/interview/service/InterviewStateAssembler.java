@@ -44,11 +44,15 @@ public class InterviewStateAssembler {
         long count = recordRepository.countBySessionId(session.getId());
         Integer currentQNo = count > 0 ? (int) count + 1 : null;
 
-        // 自动加载最近一轮评估
+        // 自动加载最近一轮评估（#43：只取末条——此前全量读取本会话所有轮次再取 `size()-1`，
+        // 而这是前端 1/2/4/5s 轮询的热路径：实测 9 轮会话每次轮询向 DB 取 99.6KB（整份答案与
+        // 评估 JSON），改后 13.6KB 且与已完成轮数无关）
         if (lastEval == null && count > 0) {
-            List<InterviewRecord> records = recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(session.getId());
-            if (!records.isEmpty()) {
-                lastEval = buildLastEvaluation(records.get(records.size() - 1));
+            InterviewRecord latest = recordRepository
+                    .findFirstBySessionIdOrderByRoundNoDescIdAsc(session.getId())
+                    .orElse(null);
+            if (latest != null) {
+                lastEval = buildLastEvaluation(latest);
             }
         }
 

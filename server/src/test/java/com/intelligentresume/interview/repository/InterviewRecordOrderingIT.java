@@ -58,6 +58,18 @@ class InterviewRecordOrderingIT {
                 .map(InterviewRecordRepository.ScoreProjection::getRoundScore).toList());
     }
 
+    @Test
+    @DisplayName("#43：最近一轮查询取末条，与「升序取 size()-1」等价（倒序写入也成立）")
+    void latestRecord_fetchesTheLastRound() {
+        Long sessionId = seedRecordsWrittenOutOfRoundOrder();
+
+        InterviewRecord latest =
+                recordRepository.findFirstBySessionIdOrderByRoundNoDescIdAsc(sessionId).orElseThrow();
+
+        assertEquals(2, latest.getRoundNo());
+        assertEquals(70, latest.getRoundScore());
+    }
+
     /** 先写第 2 轮、再写第 1 轮：createdAt 顺序与轮次顺序相反。 */
     private Long seedRecordsWrittenOutOfRoundOrder() {
         // 同一 Spring 上下文里的 H2 库在测试类间共享，用户名/邮箱需唯一

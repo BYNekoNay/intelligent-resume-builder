@@ -19,6 +19,16 @@ public interface InterviewRecordRepository extends JpaRepository<InterviewRecord
      */
     List<InterviewRecord> findBySessionIdOrderByRoundNoAscIdAsc(Long sessionId);
 
+    /**
+     * 最近一轮记录（#43 读放大）：状态接口只需要**最后一轮**的评估，而它是前端
+     * 1/2/4/5s 轮询的热路径（每轮面试期间可调用数十次）。此前用
+     * {@link #findBySessionIdOrderByRoundNoAscIdAsc} 全量读出本会话所有轮次再取末条，
+     * 单次轮询的读取量随已完成轮数线性增长（实测：9 轮会话 19 行/次、1 轮会话 3 行/次），
+     * 且这些行携带 {@code answer_text}(MEDIUMTEXT) 与 {@code feedback_json}(JSON)。
+     * 取末条的次序与 {@code round_no ASC, id ASC} 的末条一致（双键降序 LIMIT 1）。
+     */
+    Optional<InterviewRecord> findFirstBySessionIdOrderByRoundNoDescIdAsc(Long sessionId);
+
     /** 账号数据导出（#7）：按会话批量取全部轮次记录。 */
     List<InterviewRecord> findBySessionIdInOrderBySessionIdAscRoundNoAscIdAsc(Collection<Long> sessionIds);
 

@@ -29,7 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -83,11 +86,11 @@ class InterviewStateAssemblerTest {
     }
 
     @Test
-    @DisplayName("buildStateResponse：统计完成数并自动加载最近评估")
+    @DisplayName("buildStateResponse：统计完成数并自动加载最近评估（只取末条，不全量读取）")
     void buildStateResponse_countsAndLoadsLastEvaluation() {
         when(recordRepository.countBySessionId(1L)).thenReturn(2L);
-        when(recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(1L))
-                .thenReturn(List.of(record(11L, 1, 60, "s1"), record(12L, 2, 80, "s2")));
+        when(recordRepository.findFirstBySessionIdOrderByRoundNoDescIdAsc(1L))
+                .thenReturn(Optional.of(record(12L, 2, 80, "s2")));
         InterviewSession session = session(1L, InterviewStatus.AWAITING_ANSWER, 2, 6);
 
         InterviewStateResponse response = assembler.buildStateResponse(session, null, null);
@@ -106,6 +109,24 @@ class InterviewStateAssemblerTest {
         assertEquals(List.of("s2"), response.getLastEvaluation().getStrengths());
         assertEquals("suggested-2", response.getLastEvaluation().getSuggestedAnswer());
         assertNull(response.getAiFailure());
+    }
+
+    @Test
+    @DisplayName("buildStateResponse 不得全量读取轮次记录（前端轮询热路径，读取量须与已完成轮数无关）")
+    void buildStateResponse_neverLoadsAllRecords() {
+        when(recordRepository.countBySessionId(1L)).thenReturn(9L);
+        when(recordRepository.findFirstBySessionIdOrderByRoundNoDescIdAsc(1L))
+                .thenReturn(Optional.of(record(19L, 9, 90, "s9")));
+        // 同时给出「全量读取」的桩：这样若实现回退成全量读取，失败点是下面的 never() 断言本身
+        // （而不是桩未命中导致的空指针），红的原因才与门禁语义一致。
+        when(recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(1L))
+                .thenReturn(List.of(record(11L, 1, 60, "s1"), record(19L, 9, 90, "s9")));
+        InterviewSession session = session(1L, InterviewStatus.EVALUATING_ANSWER, 9, 6);
+
+        InterviewStateResponse response = assembler.buildStateResponse(session, null, null);
+
+        assertEquals(19L, response.getLastEvaluation().getRecordId());
+        verify(recordRepository, never()).findBySessionIdOrderByRoundNoAscIdAsc(anyLong());
     }
 
     @Test
