@@ -46,16 +46,6 @@ public class CommunicationAiService {
         String draft = composeDraft(validated, type, outputLanguage);
         long resumeVersionId = longValue(input.get("resumeVersionId"), "resumeVersionId");
         long jobDescriptionId = longValue(input.get("jobDescriptionId"), "jobDescriptionId");
-        CommunicationDraft draftToSave = new CommunicationDraft();
-        draftToSave.setUserId(task.getUserId());
-        draftToSave.setResumeVersionId(resumeVersionId);
-        draftToSave.setJobDescriptionId(jobDescriptionId);
-        draftToSave.setType(type);
-        draftToSave.setDraftText(draft);
-        CommunicationDraft entity = draftRepository
-                .findFirstByUserIdAndResumeVersionIdAndJobDescriptionIdAndTypeAndDraftText(
-                        task.getUserId(), resumeVersionId, jobDescriptionId, type, draft)
-                .orElseGet(() -> draftRepository.save(draftToSave));
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("type", type.name());
@@ -63,13 +53,34 @@ public class CommunicationAiService {
         result.put("body", validated.body());
         result.put("draft", draft);
         result.put("generationSource", "AI");
-        result.put("communicationDraftId", entity.getId());
         result.put("resumeVersionId", resumeVersionId);
         result.put("jobDescriptionId", jobDescriptionId);
         result.put("promptVersion", promptBuilder.promptVersion());
         result.put("schemaVersion", promptBuilder.schemaVersion());
         result.put("providerRequestId", response.providerRequestId());
-        return new ExecutionResult(result);
+        // #29：草稿落库不在本方法内完成——必须与任务结果写入同一事务（租约校验通过后才写），
+        // 否则租约被接管时旧 worker 会留下引用不到任何任务的孤儿草稿。
+        return new ExecutionResult(result,
+                new PendingDraft(task.getUserId(), resumeVersionId, jobDescriptionId, type, draft));
+    }
+
+    /**
+     * 草稿落库（#29）。由 worker 在 {@code TaskLeaseService.releaseSuccess} 的租约校验通过后、
+     * 同一事务内回调，并把生成的草稿 id 写回任务结果。
+     */
+    public void persistDraft(PendingDraft pending, Map<String, Object> result) {
+        CommunicationDraft draftToSave = new CommunicationDraft();
+        draftToSave.setUserId(pending.userId());
+        draftToSave.setResumeVersionId(pending.resumeVersionId());
+        draftToSave.setJobDescriptionId(pending.jobDescriptionId());
+        draftToSave.setType(pending.type());
+        draftToSave.setDraftText(pending.draftText());
+        CommunicationDraft entity = draftRepository
+                .findFirstByUserIdAndResumeVersionIdAndJobDescriptionIdAndTypeAndDraftText(
+                        pending.userId(), pending.resumeVersionId(), pending.jobDescriptionId(),
+                        pending.type(), pending.draftText())
+                .orElseGet(() -> draftRepository.save(draftToSave));
+        result.put("communicationDraftId", entity.getId());
     }
 
     private AiCallResult call(AiProvider provider, Map<String, Object> prompt) {
@@ -111,6 +122,10 @@ public class CommunicationAiService {
         return ("EN".equals(language) ? "Subject: " : "主题：") + result.subject() + "\n\n" + result.body();
     }
 
-    public record ExecutionResult(Map<String, Object> taskResult) {
+    public record PendingDraft(Long userId, long resumeVersionId, long jobDescriptionId,
+                               CommunicationType type, String draftText) {
+    }
+
+    public record ExecutionResult(Map<String, Object> taskResult, PendingDraft pendingDraft) {
     }
 }

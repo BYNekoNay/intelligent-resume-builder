@@ -1,5 +1,7 @@
 package com.intelligentresume.ai.task.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.dto.AiTaskContinuationResponse;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
@@ -12,6 +14,7 @@ import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -30,9 +34,14 @@ import java.util.UUID;
 public class AiTaskController {
 
     private final AiTaskService taskService;
+    private final ObjectMapper objectMapper;
+    private final long maxInputJsonBytes;
 
-    public AiTaskController(AiTaskService taskService) {
+    public AiTaskController(AiTaskService taskService, ObjectMapper objectMapper,
+                            @Value("${app.ai.max-input-json-bytes:262144}") long maxInputJsonBytes) {
         this.taskService = taskService;
+        this.objectMapper = objectMapper;
+        this.maxInputJsonBytes = maxInputJsonBytes;
     }
 
     @PostMapping("/tasks")
@@ -45,6 +54,7 @@ public class AiTaskController {
             throw new BusinessException(ErrorCode.VALIDATION,
                     "This AI task must start from its domain endpoint");
         }
+        requireInputWithinSizeLimit(request.input());
         String provided = idempotencyKey == null ? null : idempotencyKey.trim();
         if (provided != null && !provided.isEmpty() && provided.length() > 128) {
             throw new BusinessException(ErrorCode.VALIDATION, "Idempotency-Key 最长 128 字符");
@@ -73,5 +83,22 @@ public class AiTaskController {
         Object id = request.getAttribute("currentUserId");
         if (id == null) throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         return (Long) id;
+    }
+
+    /**
+     * #44：通用端点 input 的语义大小约束。此前只受容器请求体上限约束，
+     * 超大 JSON 会直接写入任务快照并进入提示词。按序列化字节数拒绝，不做截断（截断会静默丢数据）。
+     */
+    private void requireInputWithinSizeLimit(Map<String, Object> input) {
+        if (input == null) return;
+        int bytes;
+        try {
+            bytes = objectMapper.writeValueAsBytes(input).length;
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.VALIDATION, "输入内容无法序列化");
+        }
+        if (bytes > maxInputJsonBytes) {
+            throw new BusinessException(ErrorCode.VALIDATION, "输入内容超过大小上限");
+        }
     }
 }

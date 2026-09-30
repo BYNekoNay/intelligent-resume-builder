@@ -269,7 +269,10 @@ public class TaskExecutionService {
     private void executeCommunicationGeneration(AiTask task, String owner) {
         try {
             CommunicationAiService.ExecutionResult result = communicationAiService.executeTask(task);
-            leaseService.releaseSuccess(task, owner, result.taskResult());
+            // #29：草稿落库在租约校验通过后、与结果写入同一事务内完成；
+            // 租约被接管时结果被丢弃，草稿也不会作为孤儿留下。
+            leaseService.releaseSuccess(task, owner, result.taskResult(),
+                    leasedResult -> communicationAiService.persistDraft(result.pendingDraft(), leasedResult));
         } catch (CommunicationAiException e) {
             log.warn("Communication AI generation failed: retryable={}, exception={}",
                     e.retryable(), e.getClass().getSimpleName());

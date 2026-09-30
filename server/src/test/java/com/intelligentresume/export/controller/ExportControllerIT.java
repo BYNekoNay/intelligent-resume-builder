@@ -225,4 +225,40 @@ class ExportControllerIT {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(40101));
     }
+
+    @Test
+    @Order(11)
+    @DisplayName("#14 结果复用: 过期任务不算复用对象；同一（版本, 模板）重复提交复用同一在途任务")
+    void create_reusesInFlightTaskAndRefreshesExpiredOne() throws Exception {
+        // Order(8) 已把原任务标记 EXPIRED → 现在必须新建任务，而不是复用过期任务
+        MvcResult refreshed = mockMvc.perform(post("/api/exports/pdf")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"resumeVersionId": %d, "templateCode": "classic"}
+                                """.formatted(versionId)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andReturn();
+        Long refreshedId = objectMapper.readTree(refreshed.getResponse().getContentAsString())
+                .get("data").get("taskId").asLong();
+        Assertions.assertNotEquals(exportTaskId, refreshedId);
+
+        // 重复提交同一（版本, 模板）→ 复用同一在途任务，不重复排队渲染
+        mockMvc.perform(post("/api/exports/pdf")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"resumeVersionId": %d, "templateCode": "classic"}
+                                """.formatted(versionId)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.taskId").value(refreshedId));
+
+        long tupleRows = exportTaskRepository.findAll().stream()
+                .filter(task -> versionId.equals(task.getResumeVersionId())
+                        && "classic".equals(task.getTemplateCode()))
+                .count();
+        Assertions.assertEquals(2L, tupleRows,
+                "过期任务保留在库中，但重复提交不得再新增行（EXPIRED + 复用中的 PENDING）");
+    }
 }

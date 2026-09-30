@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.time.LocalDateTime;
@@ -64,6 +65,13 @@ public interface ExportTaskRepository extends JpaRepository<ExportTask, Long> {
     Optional<ExportTask> findRunningByIdAndOwnerForUpdate(@Param("id") Long id, @Param("owner") String owner);
 
     long countByStatus(ExportStatus status);
+
+    /**
+     * 结果复用（#14）：同一（用户, 简历版本, 模板）最新的在途/成功任务。
+     * 用于避免重复提交触发重复渲染。
+     */
+    Optional<ExportTask> findFirstByUserIdAndResumeVersionIdAndTemplateCodeAndStatusInOrderByIdDesc(
+            Long userId, Long resumeVersionId, String templateCode, Collection<ExportStatus> statuses);
 
     @Query("SELECT MIN(e.createdAt) FROM ExportTask e WHERE e.status = com.intelligentresume.export.domain.ExportStatus.PENDING")
     java.time.LocalDateTime findOldestPendingCreatedAt();

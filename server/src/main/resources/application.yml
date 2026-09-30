@@ -68,6 +68,10 @@ app:
   # 简历导入(上传解析)——单文件大小上限,与 spring.servlet.multipart.max-file-size(5MB)保持一致
   resume-import:
     max-bytes: ${RESUME_IMPORT_MAX_BYTES:5242880}
+    # #17：解析资源边界——页数/文本长度/单次解析耗时上限（入口 5MB 之外的第二道闸）
+    max-pdf-pages: ${RESUME_IMPORT_MAX_PDF_PAGES:60}
+    max-text-characters: ${RESUME_IMPORT_MAX_TEXT_CHARACTERS:200000}
+    extract-timeout-ms: ${RESUME_IMPORT_EXTRACT_TIMEOUT_MS:15000}
 
   # T03 简历 JSON 校验
   resume:
@@ -141,6 +145,9 @@ app:
 
   # T06 AI 同意与任务
   ai:
+    # #44：通用 /api/ai/tasks 的 input 语义大小上限（序列化后字节数）。
+    # 与简历 JSON 校验上限一致（262144），足够承载内联简历/JD，同时挡住超大 JSON 写入任务快照与提示词。
+    max-input-json-bytes: ${AI_MAX_INPUT_JSON_BYTES:262144}
     bailian:
       base-url: ${BAILIAN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
       api-key: ${BAILIAN_API_KEY:}

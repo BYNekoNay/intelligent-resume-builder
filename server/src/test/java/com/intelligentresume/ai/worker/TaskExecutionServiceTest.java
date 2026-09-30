@@ -18,6 +18,7 @@ import com.intelligentresume.ats.service.AtsResultStateService;
 import com.intelligentresume.ats.service.AtsAiAnalysisException;
 import com.intelligentresume.ats.dto.AtsAiInsights;
 import com.intelligentresume.ats.dto.AtsFallbackCode;
+import com.intelligentresume.communication.domain.CommunicationType;
 import com.intelligentresume.communication.service.CommunicationAiService;
 import com.intelligentresume.interview.service.InterviewFollowUpAiService;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
@@ -39,11 +41,15 @@ class TaskExecutionServiceTest {
         CommunicationAiService communicationService = mock(CommunicationAiService.class);
         when(consentService.hasValidConsent(1L, "COMMUNICATION_GENERATE",
                 List.of("RESUME", "JOB_DESCRIPTION"))).thenReturn(true);
+        CommunicationAiService.PendingDraft pendingDraft = new CommunicationAiService.PendingDraft(
+                1L, 11L, 22L, CommunicationType.COVER_LETTER, "Validated communication draft");
         when(communicationService.executeTask(any())).thenReturn(
                 new CommunicationAiService.ExecutionResult(Map.of(
-                        "generationSource", "AI", "draft", "Validated communication draft")));
-        when(leaseService.releaseSuccess(any(), eq("worker-1"), any())).thenAnswer(invocation -> {
+                        "generationSource", "AI", "draft", "Validated communication draft"), pendingDraft));
+        when(leaseService.releaseSuccess(any(), eq("worker-1"), any(), any())).thenAnswer(invocation -> {
             AiTask completed = invocation.getArgument(0);
+            Consumer<Map<String, Object>> withinTransaction = invocation.getArgument(3);
+            withinTransaction.accept(invocation.getArgument(2));
             completed.setStatus(AiTaskStatus.SUCCESS);
             return true;
         });
@@ -62,8 +68,10 @@ class TaskExecutionServiceTest {
         service.execute(task, "worker-1");
 
         verify(communicationService).executeTask(task);
-        verify(leaseService).releaseSuccess(task, "worker-1",
-                Map.of("generationSource", "AI", "draft", "Validated communication draft"));
+        // #29：草稿落库必须经 releaseSuccess 的同事务钩子，而不是在 executeTask 内先落库
+        verify(communicationService).persistDraft(eq(pendingDraft), eq(Map.of(
+                "generationSource", "AI", "draft", "Validated communication draft")));
+        verify(leaseService).releaseSuccess(eq(task), eq("worker-1"), any(), any());
         service.shutdownHeartbeatExecutor();
     }
 

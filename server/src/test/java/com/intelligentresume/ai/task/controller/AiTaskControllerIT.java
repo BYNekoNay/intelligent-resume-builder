@@ -293,6 +293,26 @@ class AiTaskControllerIT {
         }
     }
 
+    // ---- 9. 通用端点 input 大小上限（#44） ----
+
+    @Test
+    @Order(12)
+    @DisplayName("#44 通用端点: 超大 input 被拒绝 40001 且不落库")
+    void createTask_oversizedInputRejected() throws Exception {
+        Long userId = userRepository.findByUsername("ai_user_a").orElseThrow().getId();
+        String oversized = "x".repeat(300_000);
+        mockMvc.perform(post("/api/ai/tasks")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "oversized-input-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"taskType\":\"RESUME_OPTIMIZE\",\"input\":{\"prompt\":\"" + oversized + "\"}}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001));
+        assertTrue(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                userId, AiTaskType.RESUME_OPTIMIZE, "oversized-input-1").isEmpty(),
+                "超大 input 的请求不得落库");
+    }
+
     private AiTask saveTask(Long userId, String key, AiTaskType type, AiTaskStatus status,
                             ConfirmationStatus confirmationStatus) {
         AiTask task = new AiTask();

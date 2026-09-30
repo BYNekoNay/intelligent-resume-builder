@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * 任务租约服务。管理任务的领取、续租、释放。
@@ -78,10 +79,26 @@ public class TaskLeaseService {
      */
     @Transactional
     public boolean releaseSuccess(AiTask task, String owner, Map<String, Object> result) {
+        return releaseSuccess(task, owner, result, null);
+    }
+
+    /**
+     * 释放成功（带同事务副作用钩子）。
+     *
+     * <p>租约校验通过后、结果写入前，在同一事务内执行 {@code withinTransaction}
+     * （例如 #29 沟通草稿落库并把 id 写回结果）。租约已被接管时钩子不会执行，
+     * 也不会留下引用不到任何任务的孤儿副作用行。
+     */
+    @Transactional
+    public boolean releaseSuccess(AiTask task, String owner, Map<String, Object> result,
+                                  Consumer<Map<String, Object>> withinTransaction) {
         AiTask stored = taskRepository.findRunningByIdAndOwnerForUpdate(task.getId(), owner).orElse(null);
         if (stored == null) {
             log.warn("Discarding stale success for task {} from owner {}", task.getId(), owner);
             return false;
+        }
+        if (withinTransaction != null) {
+            withinTransaction.accept(result);
         }
         stored.setStatus(AiTaskStatus.SUCCESS);
         stored.setResultJson(result);

@@ -35,7 +35,7 @@ class ResumeImportServiceTest {
     /** 与业务上限一致：5MB */
     private static final long MAX_BYTES = 5 * 1024 * 1024;
 
-    private final ResumeImportService service = new ResumeImportService(MAX_BYTES);
+    private final ResumeImportService service = new ResumeImportService(MAX_BYTES, 60, 200_000, 15_000);
 
     // ---- 三种格式抽取 ----
 
@@ -187,6 +187,50 @@ class ResumeImportServiceTest {
         assertEquals("+86 13812345678", basics(response).get("phone"));
     }
 
+    // ---- #17 解析资源边界（页数 / 文本长度 / 耗时） ----
+
+    @Test
+    @DisplayName("#17：PDF 页数超过上限拒绝")
+    void rejectsPdfBeyondPageLimit() throws Exception {
+        ResumeImportService limited = new ResumeImportService(MAX_BYTES, 2, 200_000, 15_000);
+        MockMultipartFile file = new MockMultipartFile("file", "long.pdf", "application/pdf",
+                multiPagePdfBytes(3));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> limited.parse(file));
+
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertEquals("PDF 页数过多，请上传精简版简历", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("#17：抽取文本超过长度上限拒绝")
+    void rejectsTextBeyondCharacterLimit() {
+        ResumeImportService limited = new ResumeImportService(MAX_BYTES, 60, 500, 15_000);
+        MockMultipartFile file = new MockMultipartFile("file", "huge.txt", "text/plain",
+                ("Alice Chen\n" + "Java platform delivery evidence. ".repeat(100))
+                        .getBytes(StandardCharsets.UTF_8));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> limited.parse(file));
+
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertEquals("文件文本过长，请上传精简版简历", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("#17：解析超过耗时上限拒绝（不占住请求线程）")
+    void rejectsExtractionBeyondTimeout() throws Exception {
+        // 5ms 超时 + 40 页 PDF（未触发页数上限）：加载与抽取总耗时远超 5ms，超时判定确定生效
+        ResumeImportService limited = new ResumeImportService(MAX_BYTES, 60, 200_000, 5);
+        MockMultipartFile file = new MockMultipartFile("file", "long.pdf", "application/pdf",
+                multiPagePdfBytes(40));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> limited.parse(file));
+
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertEquals("文件解析超时，请更换文件后重试", ex.getMessage());
+        limited.shutdownExtractExecutor();
+    }
+
     // ---- 帮助方法 ----
 
     @SuppressWarnings("unchecked")
@@ -207,6 +251,25 @@ class ResumeImportServiceTest {
                     cs.newLineAtOffset(0, -20);
                 }
                 cs.endText();
+            }
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            doc.save(baos);
+            return baos.toByteArray();
+        }
+    }
+
+    private byte[] multiPagePdfBytes(int pages) throws Exception {
+        try (PDDocument doc = new PDDocument()) {
+            for (int index = 0; index < pages; index++) {
+                PDPage page = new PDPage();
+                doc.addPage(page);
+                try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                    cs.setFont(PDType1Font.HELVETICA, 12);
+                    cs.beginText();
+                    cs.newLineAtOffset(50, 700);
+                    cs.showText("Page " + (index + 1));
+                    cs.endText();
+                }
             }
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             doc.save(baos);

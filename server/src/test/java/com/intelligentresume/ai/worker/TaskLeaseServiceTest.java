@@ -136,6 +136,37 @@ class TaskLeaseServiceTest {
     }
 
     @Test
+    @DisplayName("#29 同事务钩子：租约在持有者手中时执行，并写入被钩子补充过的结果")
+    void releaseSuccess_runsWithinTransactionHookBeforePersistingResult() {
+        AiTask task = task(1L, AiTaskStatus.RUNNING, 1);
+        task.setLeaseOwner("worker-1");
+        Map<String, Object> result = new java.util.HashMap<>(Map.of("draft", "content"));
+        when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.of(task));
+
+        boolean released = service.releaseSuccess(task, "worker-1", result,
+                leasedResult -> leasedResult.put("communicationDraftId", 42L));
+
+        assertTrue(released);
+        assertEquals(42L, result.get("communicationDraftId"));
+        assertEquals(result, task.getResultJson());
+    }
+
+    @Test
+    @DisplayName("#29 同事务钩子：租约已被接管时不执行（不留孤儿副作用）")
+    void releaseSuccess_staleOwner_doesNotRunWithinTransactionHook() {
+        AiTask task = task(1L, AiTaskStatus.RUNNING, 2);
+        task.setLeaseOwner("worker-1");
+        when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.empty());
+        boolean[] hookRan = {false};
+
+        boolean released = service.releaseSuccess(task, "worker-1", new java.util.HashMap<>(),
+                leasedResult -> hookRan[0] = true);
+
+        assertFalse(released);
+        assertFalse(hookRan[0], "租约被接管时同事务副作用不得执行");
+    }
+
+    @Test
     void staleOwnerCannotRenewOrCompleteTask() {
         AiTask task = task(1L, AiTaskStatus.RUNNING, 2);
         task.setLeaseOwner("worker-2");

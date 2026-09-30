@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 导出服务。编排创建、查询、下载流程。
@@ -75,7 +76,19 @@ public class ExportService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在");
         }
 
-        // 3. 创建任务
+        // 3. 结果复用（#14）：同一用户 + 同一版本 + 同一模板 已有未过期的在途/成功任务时直接复用，
+        //    PDF 内容由（版本, 模板）唯一决定，重复排队只会重复渲染。
+        ExportTask reusable = exportTaskRepository
+                .findFirstByUserIdAndResumeVersionIdAndTemplateCodeAndStatusInOrderByIdDesc(
+                        userId, req.resumeVersionId(), req.templateCode(),
+                        List.of(ExportStatus.PENDING, ExportStatus.RUNNING, ExportStatus.SUCCESS))
+                .orElse(null);
+        if (reusable != null && isReusable(reusable)) {
+            log.debug("Reusing export task: id={}, versionId={}", reusable.getId(), req.resumeVersionId());
+            return toResponse(reusable);
+        }
+
+        // 4. 创建任务
         ExportTask task = new ExportTask();
         task.setUserId(userId);
         task.setResumeVersionId(req.resumeVersionId());
@@ -93,37 +106,21 @@ public class ExportService {
      * 查询导出任务状态。
      */
     public ExportTaskStatusResponse get(Long taskId, Long userId) {
-        ExportTask task = findForUser(taskId, userId);
-
-        // 过期检测:SUCCESS 但 expires_at < now → EXPIRED
-        if (task.getStatus() == ExportStatus.SUCCESS
-                && task.getExpiresAt() != null
-                && task.getExpiresAt().isBefore(LocalDateTime.now())) {
-            expiryService.expireIfDue(task.getId(), LocalDateTime.now());
-            task.setStatus(ExportStatus.EXPIRED);
-            task.setStorageKey(null);
-            task.setFileSizeBytes(null);
-            task.setSha256(null);
-        }
-
-        return toResponse(task);
+        return toResponse(resolveExpiry(findForUser(taskId, userId), userId));
     }
 
     /**
      * 下载 PDF 文件。受控流:校验归属、状态、过期。
      */
     public Resource download(Long taskId, Long userId) {
-        ExportTask task = findForUser(taskId, userId);
+        ExportTask task = resolveExpiry(findForUser(taskId, userId), userId);
 
+        if (task.getStatus() == ExportStatus.EXPIRED) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "导出文件已过期");
+        }
         // 必须 SUCCESS
         if (task.getStatus() != ExportStatus.SUCCESS) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "导出文件不可用");
-        }
-
-        // 过期检测
-        if (task.getExpiresAt() != null && task.getExpiresAt().isBefore(LocalDateTime.now())) {
-            expiryService.expireIfDue(task.getId(), LocalDateTime.now());
-            throw new BusinessException(ErrorCode.NOT_FOUND, "导出文件已过期");
         }
 
         // 读取文件
@@ -150,6 +147,32 @@ public class ExportService {
         task.setExpiresAt(LocalDateTime.now().plusHours(fileTtlHours));
         exportTaskRepository.save(task);
         return toResponse(task);
+    }
+
+    /** 在途任务总是可复用；SUCCESS 仅当文件尚未过期时可复用。 */
+    private boolean isReusable(ExportTask task) {
+        if (task.getStatus() != ExportStatus.SUCCESS) return true;
+        return task.getExpiresAt() != null && task.getExpiresAt().isAfter(LocalDateTime.now());
+    }
+
+    /**
+     * 过期落地（#54）：只有确实写入 EXPIRED 时才在返回视图上标记；若行已被并发操作推进
+     * （例如过期前重试排队、状态被其它请求改写），以数据库最新状态为准，不把新状态误报为已过期。
+     */
+    private ExportTask resolveExpiry(ExportTask task, Long userId) {
+        if (task.getStatus() != ExportStatus.SUCCESS
+                || task.getExpiresAt() == null
+                || !task.getExpiresAt().isBefore(LocalDateTime.now())) {
+            return task;
+        }
+        if (expiryService.expireIfDue(task.getId(), LocalDateTime.now())) {
+            task.setStatus(ExportStatus.EXPIRED);
+            task.setStorageKey(null);
+            task.setFileSizeBytes(null);
+            task.setSha256(null);
+            return task;
+        }
+        return findForUser(task.getId(), userId);
     }
 
     private ExportTask findForUser(Long taskId, Long userId) {

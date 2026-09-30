@@ -23,6 +23,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.*;
 
 /**
@@ -137,11 +138,113 @@ class ExportServiceTest {
         task.setExpiresAt(LocalDateTime.now().minusHours(1)); // 已过期
         task.setStorageKey("test-key.pdf");
         when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(task));
+        when(expiryService.expireIfDue(eq(1L), any(LocalDateTime.class))).thenReturn(true);
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.download(1L, 100L));
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+        assertEquals("导出文件已过期", ex.getMessage());
         verify(expiryService).expireIfDue(eq(1L), any(LocalDateTime.class));
+    }
+
+    @Test
+    @DisplayName("#54: 过期判定被并发推进（重试排队）时以库存最新状态为准，不误报 EXPIRED")
+    void get_expiredButConcurrentlyRetried_returnsLatestState() {
+        ExportTask stale = new ExportTask();
+        stale.setId(1L);
+        stale.setUserId(100L);
+        stale.setStatus(ExportStatus.SUCCESS);
+        stale.setExpiresAt(LocalDateTime.now().minusHours(1));
+        ExportTask refreshed = new ExportTask();
+        refreshed.setId(1L);
+        refreshed.setUserId(100L);
+        refreshed.setStatus(ExportStatus.PENDING);
+        refreshed.setExpiresAt(LocalDateTime.now().plusHours(23));
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L))
+                .thenReturn(Optional.of(stale))
+                .thenReturn(Optional.of(refreshed));
+        when(expiryService.expireIfDue(eq(1L), any(LocalDateTime.class))).thenReturn(false);
+
+        ExportTaskStatusResponse resp = service.get(1L, 100L);
+
+        assertEquals("PENDING", resp.status());
+    }
+
+    @Test
+    @DisplayName("#14: 同一（版本, 模板）的在途任务被复用，不重复排队")
+    void create_reusesInFlightTaskForSameTuple() {
+        ResumeVersion version = new ResumeVersion();
+        version.setId(1L);
+        version.setCreatedBy(100L);
+        when(resumeVersionRepository.findById(1L)).thenReturn(Optional.of(version));
+        ExportTask pending = new ExportTask();
+        pending.setId(5L);
+        pending.setUserId(100L);
+        pending.setResumeVersionId(1L);
+        pending.setTemplateCode("classic");
+        pending.setStatus(ExportStatus.PENDING);
+        when(exportTaskRepository.findFirstByUserIdAndResumeVersionIdAndTemplateCodeAndStatusInOrderByIdDesc(
+                eq(100L), eq(1L), eq("classic"), anyList())).thenReturn(Optional.of(pending));
+
+        ExportTaskStatusResponse resp = service.create(new CreateExportRequest(1L, "classic"), 100L);
+
+        assertEquals(5L, resp.taskId());
+        assertEquals("PENDING", resp.status());
+        verify(exportTaskRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("#14: 未过期的成功结果被复用，返回下载链接")
+    void create_reusesNonExpiredSuccessTask() {
+        ResumeVersion version = new ResumeVersion();
+        version.setId(1L);
+        version.setCreatedBy(100L);
+        when(resumeVersionRepository.findById(1L)).thenReturn(Optional.of(version));
+        ExportTask success = new ExportTask();
+        success.setId(6L);
+        success.setUserId(100L);
+        success.setResumeVersionId(1L);
+        success.setTemplateCode("classic");
+        success.setStatus(ExportStatus.SUCCESS);
+        success.setExpiresAt(LocalDateTime.now().plusHours(2));
+        when(exportTaskRepository.findFirstByUserIdAndResumeVersionIdAndTemplateCodeAndStatusInOrderByIdDesc(
+                eq(100L), eq(1L), eq("classic"), anyList())).thenReturn(Optional.of(success));
+
+        ExportTaskStatusResponse resp = service.create(new CreateExportRequest(1L, "classic"), 100L);
+
+        assertEquals(6L, resp.taskId());
+        assertEquals("SUCCESS", resp.status());
+        assertEquals("/api/exports/files/6", resp.downloadUrl());
+        verify(exportTaskRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("#14: 已过期的成功结果不复用，重新排队渲染")
+    void create_expiredSuccessTask_queuesNewTask() {
+        ResumeVersion version = new ResumeVersion();
+        version.setId(1L);
+        version.setCreatedBy(100L);
+        when(resumeVersionRepository.findById(1L)).thenReturn(Optional.of(version));
+        ExportTask expired = new ExportTask();
+        expired.setId(7L);
+        expired.setUserId(100L);
+        expired.setResumeVersionId(1L);
+        expired.setTemplateCode("classic");
+        expired.setStatus(ExportStatus.SUCCESS);
+        expired.setExpiresAt(LocalDateTime.now().minusMinutes(5));
+        when(exportTaskRepository.findFirstByUserIdAndResumeVersionIdAndTemplateCodeAndStatusInOrderByIdDesc(
+                eq(100L), eq(1L), eq("classic"), anyList())).thenReturn(Optional.of(expired));
+        when(exportTaskRepository.save(any())).thenAnswer(inv -> {
+            ExportTask t = inv.getArgument(0);
+            t.setId(8L);
+            return t;
+        });
+
+        ExportTaskStatusResponse resp = service.create(new CreateExportRequest(1L, "classic"), 100L);
+
+        assertEquals(8L, resp.taskId());
+        assertEquals("PENDING", resp.status());
+        verify(exportTaskRepository).save(any());
     }
 
     @Test
@@ -183,6 +286,7 @@ class ExportServiceTest {
         task.setStatus(ExportStatus.SUCCESS);
         task.setExpiresAt(LocalDateTime.now().minusHours(1));
         when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(task));
+        when(expiryService.expireIfDue(eq(1L), any(LocalDateTime.class))).thenReturn(true);
 
         ExportTaskStatusResponse resp = service.get(1L, 100L);
         assertEquals("EXPIRED", resp.status());

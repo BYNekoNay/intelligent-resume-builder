@@ -90,7 +90,14 @@ public class ExportTaskWorker {
 
                 byte[] pdfBytes = pdfServiceClient.render(task.getTemplateCode(), payload);
                 ExportStorageService.StoredFile stored = storageService.store(pdfBytes, "pdf");
-                leaseService.releaseSuccess(task, stored);
+                if (!leaseService.releaseSuccess(task, stored)) {
+                    // #30：租约已被接管时结果被丢弃，本 worker 渲染出的文件没有任何任务引用，
+                    // 立即清理，否则过期清理作业不会看到它（只清理 SUCCESS 行的文件）。
+                    if (!storageService.delete(stored.storageKey())) {
+                        log.warn("Failed to delete orphaned export file for task {}", task.getId());
+                    }
+                    return;
+                }
                 log.info("PDF export task completed: template={}, fileSizeBytes={}", task.getTemplateCode(), stored.size());
             } catch (Exception e) {
                 PdfFailureCategory category = failureCategoryClassifier.pdf(e);
