@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { fetchCurrentUser, login, logout, refresh, register, updateProfile, type CurrentUser, type LoginPayload, type RegisterPayload } from '@/api/auth'
+import { clearUserLocalData } from '@/utils/localUserData'
 
 const LEGACY_ACCESS_TOKEN_KEY = 'intelligent-resume.access-token'
 sessionStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY)
@@ -67,6 +68,9 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await logout()
     } finally {
+      // 退出登录即离开该账号：连同浏览器里留存的本账号数据（简历/编辑草稿、待恢复任务、
+      // 导入原文、文案草稿）一起清掉，避免共享设备上换人使用后仍能读到上一账号的 PII。
+      clearUserLocalData(currentUser.value?.id)
       setAccessToken(null)
     }
   }

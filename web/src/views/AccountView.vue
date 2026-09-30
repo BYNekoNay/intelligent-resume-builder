@@ -7,6 +7,7 @@ import { changeEmail, changePassword, deleteAccount, exportAccountData } from '@
 import { clearAiTaskHistory } from '@/api/ai'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
+import { clearUserLocalData } from '@/utils/localUserData'
 
 const auth = useAuthStore()
 const { t } = useLocale()
@@ -175,6 +176,9 @@ async function confirmDeleteAccount() {
   deleteMessage.value = ''
   try {
     await deleteAccount()
+    // 删号即数据主体要求清理：服务端删除账号数据，浏览器本地也不能留（完整简历草稿、
+    // 导入原文、文案草稿等），否则共享设备上仍可读到已删账号的 PII（docs/08 §9.6 口径）。
+    clearUserLocalData(auth.currentUser?.id)
     auth.setAccessToken(null)
     await router.replace({ name: 'login' })
   } catch (error) {
