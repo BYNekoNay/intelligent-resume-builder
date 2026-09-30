@@ -68,6 +68,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          # 缓存 maven 本地仓库：functional 作业每次都要重新拉取全部依赖
+          cache: maven
+          cache-dependency-path: server/pom.xml
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -84,6 +87,16 @@ jobs:
       - name: Package server (skip tests — covered by the `server` job)
         working-directory: server
         run: mvn --batch-mode --no-transfer-progress package -DskipTests
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          # 固定 Node 版本：此前依赖 runner 预装（ubuntu-latest 迁移到 26.04 后会从 20 变 24），
+          # 版本漂移会静默改变 npm/node 行为；22 为当前维护中的 LTS，且满足 puppeteer ^25 的
+          # engines 要求（>=22.12；此前锁 20 会持续产生 EBADENGINE 告警）
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: pdf-service/package-lock.json
 
       - name: Install pdf-service dependencies and Chromium
         working-directory: pdf-service
@@ -188,6 +201,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          # 缓存 maven 本地仓库：functional 作业每次都要重新拉取全部依赖
+          cache: maven
+          cache-dependency-path: server/pom.xml
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -200,6 +216,16 @@ jobs:
       - name: Package server
         working-directory: server
         run: mvn --batch-mode --no-transfer-progress package -DskipTests
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          # 固定 Node 版本：此前依赖 runner 预装（ubuntu-latest 迁移到 26.04 后会从 20 变 24），
+          # 版本漂移会静默改变 npm/node 行为；22 为当前维护中的 LTS，且满足 puppeteer ^25 的
+          # engines 要求（>=22.12；此前锁 20 会持续产生 EBADENGINE 告警）
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: pdf-service/package-lock.json
 
       - name: Install pdf-service dependencies and Chromium
         working-directory: pdf-service
