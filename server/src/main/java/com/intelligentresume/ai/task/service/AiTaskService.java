@@ -11,6 +11,7 @@ import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import com.intelligentresume.ai.worker.AiTaskWorkerProperties;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,10 +52,13 @@ public class AiTaskService {
      *   <li>校验配额</li>
      *   <li>计算请求指纹</li>
      *   <li>幂等性检查:相同 idempotencyKey + 相同指纹 → 返回已有任务;不同指纹 → CONFLICT</li>
-     *   <li>创建 PENDING 任务</li>
+     *   <li>创建 PENDING 任务;并发同键竞态撞唯一键时回读赢家(幂等语义)</li>
      * </ol>
+     *
+     * <p>刻意不加外层事务：并发同键创建的唯一键冲突会污染当前持久化上下文，
+     * 而幂等回读必须基于干净会话；本流程只有一次写入（saveAndFlush），
+     * 各步骤各自事务即可保证一致。
      */
-    @Transactional
     public AiTaskStatusResponse create(CreateAiTaskRequest req, String idempotencyKey, Long userId) {
         AiTaskCapabilityRegistry.requireRegistered(req.taskType());
         Map<String, Object> inputSnapshot = buildInputSnapshot(req);
@@ -97,7 +101,20 @@ public class AiTaskService {
         task.setStatus(AiTaskStatus.PENDING);
         task.setRetryCount(0);
 
-        task = taskRepository.save(task);
+        try {
+            task = taskRepository.saveAndFlush(task);
+        } catch (DataIntegrityViolationException conflict) {
+            // 并发同键竞态：另一请求已成为赢家（唯一键 uk_ai_task_idem）。
+            // 按幂等语义回读赢家：同指纹 → 返回同一任务；不同 → 409；非本竞态 → 原样上抛。
+            AiTask winner = taskRepository
+                    .findByUserIdAndTaskTypeAndIdempotencyKey(userId, req.taskType(), idempotencyKey)
+                    .orElseThrow(() -> conflict);
+            if (winner.getRequestFingerprint().equals(fingerprint)) {
+                return toResponse(winner);
+            }
+            throw new BusinessException(ErrorCode.CONFLICT,
+                    "相同幂等键的请求内容不一致");
+        }
         return toResponse(task);
     }
 

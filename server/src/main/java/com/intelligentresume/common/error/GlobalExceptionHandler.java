@@ -16,6 +16,8 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 
 @RestControllerAdvice
@@ -65,6 +67,31 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(OptimisticLockingFailureException.class)
     public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(
             OptimisticLockingFailureException exception, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.failure(ErrorCode.CONFLICT.code(), ErrorCode.CONFLICT.message(), traceId(request)));
+    }
+
+    /**
+     * 完整性约束冲突（唯一键/外键等）：并发注册、并发创建同键资源等场景下，
+     * 应用层先行检查通过的请求可能在提交时撞约束——这是稳定的「冲突」语义，不是 500。
+     * 不记录异常 message（可能包含重复值等用户数据），只记 traceId 供排查。
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(
+            DataIntegrityViolationException exception, HttpServletRequest request) {
+        log.warn("Data integrity conflict during request handling, traceId={}", traceId(request));
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.failure(ErrorCode.CONFLICT.code(), ErrorCode.CONFLICT.message(), traceId(request)));
+    }
+
+    /**
+     * 并发冲突（如 H2/MySQL 并发更新同一行）与唯一键冲突同属「调用方重试可能成功」的
+     * 稳定冲突语义，统一 40901；乐观锁失败由其更具体的子类 handler 优先匹配。
+     */
+    @ExceptionHandler(ConcurrencyFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConcurrencyFailure(
+            ConcurrencyFailureException exception, HttpServletRequest request) {
+        log.warn("Concurrent data conflict during request handling, traceId={}", traceId(request));
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.failure(ErrorCode.CONFLICT.code(), ErrorCode.CONFLICT.message(), traceId(request)));
     }

@@ -130,13 +130,17 @@ public class AuthService {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "刷新令牌已过期");
         }
 
+        // 原子轮换(CAS):并发刷新同一 token 时,只有先到者能把旧会话从「未撤销」翻转为「已撤销」;
+        // 后到者(含重放)拿 0 → 视同复用,撤销整族并要求重新登录 —— 杜绝"两个后继 token 同时有效"。
+        // 安全优先取舍:多标签页并发刷新会命中该分支(需重新登录),属既定口径。
+        int rotated = authSessionRepository.revokeIfActive(session.getId(), LocalDateTime.now(), "rotated");
+        if (rotated == 0) {
+            authSessionRevocationService.revokeFamily(session.getTokenFamilyId(), "refresh_reuse_detected");
+            throw new BusinessException(ErrorCode.UNAUTHENTICATED, "刷新令牌已失效,请重新登录");
+        }
+
         User user = userRepository.findById(session.getUserId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));
-
-        // 撤销旧会话、签发新会话
-        session.setRevokedAt(LocalDateTime.now());
-        session.setRevokeReason("rotated");
-        authSessionRepository.save(session);
 
         // 直接发新一对(保持原 family)
         String newRefresh = tokenService.issueRefreshToken();

@@ -2,11 +2,16 @@ package com.intelligentresume.careermaterial.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.auth.repository.UserRepository;
+import com.intelligentresume.careermaterial.domain.CareerMaterial;
+import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -28,6 +33,9 @@ class CareerMaterialControllerIT {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private CareerMaterialRepository materialRepository;
+    @Autowired private UserRepository userRepository;
 
     private static String token;
 
@@ -447,5 +455,25 @@ class CareerMaterialControllerIT {
                                 "contentJson", java.util.Map.of("data", "x".repeat(60000))))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.materialType").value("COURSE"));
+    }
+
+    // ---- 乐观锁（#67） ----
+
+    @Test
+    @Order(14)
+    @DisplayName("乐观锁: 并发写入后的陈旧保存被拒绝（@Version,不再是最后写入覆盖 → 40901）")
+    void staleWrite_isRejectedByOptimisticLock() {
+        Long userId = userRepository.findByUsername("cm_user").orElseThrow().getId();
+        CareerMaterial stale = materialRepository.findByUserIdOrderByUpdatedAtDesc(userId).stream()
+                .findFirst().orElseThrow();
+
+        // 模拟另一并发事务已成功更新同一资料（version 前进一格）
+        jdbcTemplate.update("UPDATE career_material SET version = version + 1 WHERE id = ?", stale.getId());
+
+        // 当前持有的陈旧副本（旧 version）保存 → 乐观锁冲突，
+        // 由全局异常处理器映射为 40901（harness 层无 HTTP，直接断言异常类型）。
+        stale.setTitle("stale write must be rejected");
+        assertThrows(OptimisticLockingFailureException.class,
+                () -> materialRepository.saveAndFlush(stale));
     }
 }

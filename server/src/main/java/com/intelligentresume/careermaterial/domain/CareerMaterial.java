@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.type.SqlTypes;
@@ -48,6 +49,14 @@ public class CareerMaterial extends BaseEntity {
 
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
+
+    /**
+     * 乐观锁版本（ideation #67）：并发编辑不再「最后写入覆盖」，冲突时抛
+     * OptimisticLockingFailureException → 全局异常处理器返回 40901。
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
 
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }

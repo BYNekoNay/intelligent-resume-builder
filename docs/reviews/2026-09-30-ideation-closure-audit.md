@@ -142,15 +142,17 @@
 3. ✅ #60 worker 租约 180s → **660s**（须 > 单任务最坏执行时长＝链总预算 600s + 余量，否则心跳失联期间旧 worker 仍可能被接管重跑、重复调用 provider）；心跳池由单线程升为 2 线程（防单次 renew 卡顿连锁拖慢其它任务续租）
 4. ✅ #49 幂等键契约统一：`AiTaskController` / `JobMaterialSelectionController`（可选键，≤128 + trim + 超长拒绝）、`CommunicationController`（必填 + ≤128 + trim）、`InterviewController`（保持 64＝存储列宽，三端点补 trim）
 
-**第二批 · 并发健壮性（中成本）**
-5. #46 + #48 唯一键竞态统一映射 409（`DataIntegrityViolationException` handler + 幂等并发回读）
-6. #45 refresh 轮换原子化（行锁或条件更新）
-7. #67 职业资料乐观锁（`@Version` + 冲突 40901）
+**第二批 · 并发健壮性（中成本）— ✅ 已执行（2026-09-30）**
+5. ✅ #46 唯一键竞态统一映射 409：新增 `DataIntegrityViolationException` 与 `ConcurrencyFailureException` 全局 handler（40901，不记录异常 message 防用户数据入日志）
+6. ✅ #45 refresh 轮换原子化：`AuthSessionRepository.revokeIfActive` 原子条件更新（CAS）——并发刷新只有一个赢家，败者走复用检测撤族并 401；**刻意不用行锁**（行锁与 `REQUIRES_NEW` 撤销服务组合会自锁：过期分支需更新被本事务锁定的行）
+7. ✅ #67 职业资料乐观锁：`CareerMaterial` 加 `@Version` + V27 迁移（`version BIGINT NOT NULL DEFAULT 0`），并发编辑由「最后写入覆盖」变为显式 40901
+8. ✅ #48 AI 任务幂等并发回读：`create` 去外层事务 + `saveAndFlush` 捕获唯一键冲突 → 回读赢家（同指纹返回同一任务/不同指纹 409/非本竞态原样上抛）
+9. ✅ 测试：`AuthConcurrencyIT`（并发注册恰好一个 201+一个 409；并发 refresh 恰好一个签发者+一个 401+族内无双活）；`AiTaskServiceTest` 并发回读三分支；`CareerMaterialControllerIT` 陈旧保存乐观锁用例；`AuthServiceTest` CAS 双分支
 
 **第三批 · 功能与性能（中成本）**
-8. #2 搜索覆盖 contentJson（修复错误零结果；需定匹配策略）
-9. PA-2 JWT 短 TTL 缓存（30–60s，抵消 #6 带来的每请求查库）
-10. #66 错误码映射接入收尾（~6 处视图）
+10. #2 搜索覆盖 contentJson（修复错误零结果；需定匹配策略）
+11. PA-2 JWT 短 TTL 缓存（30–60s，抵消 #6 带来的每请求查库）
+12. #66 错误码映射接入收尾（~6 处视图）
 
 **需产品/环境决策后再定**
 - #26 ai_task 留存与清理策略（保留多久、是否提供用户删除入口）
@@ -164,3 +166,4 @@
 | --- | --- |
 | 2026-09-30 | 初版：4 个并行 agent 分区间核对 101 条 finding + Ranked Ideas + 新增核对表；人工抽查 5 处关键证据；产出「仍存在」聚类清单与三批推荐 |
 | 2026-09-30 | **第一批（隐私与配置对齐）执行完成**：#68 日志 userId 移除 + `LogPrivacyGateTest` 静态门禁（扫描全部日志调用，防复发）；#71 consent 排序加 `id` tie-break；#60 租约 180→660s（> 链总预算 600s）+ 心跳池 2 线程；#49 四处入口幂等键契约统一（AiTask/JobMaterialSelection/Communication/Interview）。回归：全量 **740 测试 0 失败**（含新门禁），新增幂等键契约 IT 用例定向通过 |
+| 2026-09-30 | **第二批（并发健壮性）执行完成**：#46 完整性/并发冲突统一 409（两个全局 handler，日志不记异常 message）；#45 refresh 轮换 CAS 原子化（不用行锁——避免与 REQUIRES_NEW 撤销服务自锁），并发刷新单赢家 + 败者撤族 401；#67 职业资料 `@Version` + V27 迁移；#48 AI 任务幂等并发回读（三分支）。新增 `AuthConcurrencyIT`（真并发双场景）与 5 个分支用例，回归：全量 **748 测试 0 失败** |

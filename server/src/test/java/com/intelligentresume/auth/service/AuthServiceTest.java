@@ -169,12 +169,14 @@ class AuthServiceTest {
     // ---- 刷新轮换 ----
 
     @Test
-    @DisplayName("正常路径: 刷新令牌轮换,旧令牌被撤销")
+    @DisplayName("正常路径: 刷新令牌轮换,旧令牌被原子撤销(CAS)")
     void refresh_rotatesOldSession() {
         AuthSession oldSession = activeSession(10L, 1L, "family-1", "old-hash");
         when(tokenService.hashToken("old-refresh")).thenReturn("old-hash");
         when(authSessionRepository.findByRefreshTokenHash("old-hash"))
                 .thenReturn(Optional.of(oldSession));
+        // 原子轮换 CAS 成功：旧会话由「未撤销」翻转为「rotated」
+        when(authSessionRepository.revokeIfActive(eq(10L), any(LocalDateTime.class), eq("rotated"))).thenReturn(1);
         when(userRepository.findById(1L)).thenReturn(Optional.of(activeUser(1L, "alice")));
         when(tokenService.issueRefreshToken()).thenReturn("new-refresh");
         when(tokenService.hashToken("new-refresh")).thenReturn("new-hash");
@@ -184,20 +186,38 @@ class AuthServiceTest {
 
         TokenResponse resp = authService.refresh("old-refresh", "TestAgent", "127.0.0.1");
 
-        // 旧 session 被撤销
-        assertNotNull(oldSession.getRevokedAt());
-        assertEquals("rotated", oldSession.getRevokeReason());
+        // 旧会话的撤销必须由 CAS 完成（不再通过实体 save 落库，避免并发双签发）
+        verify(authSessionRepository).revokeIfActive(eq(10L), any(LocalDateTime.class), eq("rotated"));
+        verify(authSessionRepository, never()).save(oldSession);
 
-        // 新 session 被创建
+        // 新 session 被创建（保持原 family），只保存这一条
         ArgumentCaptor<AuthSession> captor = ArgumentCaptor.forClass(AuthSession.class);
-        verify(authSessionRepository, times(2)).save(captor.capture());
-        AuthSession fresh = captor.getAllValues().get(1);
+        verify(authSessionRepository, times(1)).save(captor.capture());
+        AuthSession fresh = captor.getAllValues().get(0);
         assertEquals("family-1", fresh.getTokenFamilyId());
         assertEquals("new-hash", fresh.getRefreshTokenHash());
         assertNull(fresh.getRevokedAt());
 
         assertEquals("new-access", resp.accessToken());
         assertEquals("new-refresh", resp.refreshToken());
+    }
+
+    @Test
+    @DisplayName("并发轮换: CAS 落败(0 行) → 视同复用,撤销整族并 401,不签发任何后继")
+    void refresh_lostCasRace_revokesFamilyAndRejects() {
+        AuthSession oldSession = activeSession(10L, 1L, "family-1", "old-hash");
+        when(tokenService.hashToken("old-refresh")).thenReturn("old-hash");
+        when(authSessionRepository.findByRefreshTokenHash("old-hash"))
+                .thenReturn(Optional.of(oldSession));
+        // 另一并发请求已先行完成轮换：本请求的 CAS 拿 0 行
+        when(authSessionRepository.revokeIfActive(eq(10L), any(LocalDateTime.class), eq("rotated"))).thenReturn(0);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refresh("old-refresh", "TestAgent", "127.0.0.1"));
+
+        assertEquals(ErrorCode.UNAUTHENTICATED, ex.getErrorCode());
+        verify(authSessionRevocationService).revokeFamily("family-1", "refresh_reuse_detected");
+        verify(authSessionRepository, never()).save(any(AuthSession.class));
     }
 
     @Test

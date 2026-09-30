@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -60,7 +61,7 @@ class AiTaskServiceTest {
         doNothing().when(quotaService).check(eq(100L), any());
         when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
                 eq(100L), any(), anyString())).thenReturn(Optional.empty());
-        when(taskRepository.save(any(AiTask.class))).thenAnswer(inv -> {
+        when(taskRepository.saveAndFlush(any(AiTask.class))).thenAnswer(inv -> {
             AiTask t = inv.getArgument(0);
             t.setId(1L);
             t.setCreatedAt(LocalDateTime.now());
@@ -77,6 +78,81 @@ class AiTaskServiceTest {
         assertEquals(AiTaskType.JOB_GENERATION, response.taskType());
         assertNull(response.jobDescriptionId());
         assertEquals(0, response.retryCount());
+    }
+
+    // ---- 并发同键竞态（#48）：唯一键冲突后按幂等语义回读赢家 ----
+
+    @Test
+    @DisplayName("并发同键竞态: 撞唯一键后回读赢家,同指纹 → 返回同一任务(幂等)")
+    void create_concurrentSameKey_sameFingerprint_readsBackWinner() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        doNothing().when(quotaService).check(eq(100L), any());
+        when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(eq(100L), any(), eq("idem-race")))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winnerTask(50L, "idem-race", generationFingerprint())));
+        when(taskRepository.saveAndFlush(any(AiTask.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key uk_ai_task_idem"));
+
+        AiTaskStatusResponse response = service.create(generationRequest(), "idem-race", 100L);
+
+        assertEquals(50L, response.id(), "应返回并发赢家的任务（幂等重放语义）");
+        assertEquals(AiTaskStatus.PENDING, response.status());
+    }
+
+    @Test
+    @DisplayName("并发同键竞态: 回读赢家指纹不同 → 40901（同键不同内容）")
+    void create_concurrentSameKey_differentFingerprint_conflicts() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        doNothing().when(quotaService).check(eq(100L), any());
+        when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(eq(100L), any(), eq("idem-race")))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winnerTask(50L, "idem-race", "different-fingerprint")));
+        when(taskRepository.saveAndFlush(any(AiTask.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key uk_ai_task_idem"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(generationRequest(), "idem-race", 100L));
+
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("并发同键竞态: 回读为空（非本竞态）→ 原样上抛完整性异常")
+    void create_concurrentSameKey_noWinner_rethrows() {
+        when(consentService.hasValidConsent(100L)).thenReturn(true);
+        doNothing().when(quotaService).check(eq(100L), any());
+        when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(eq(100L), any(), eq("idem-race")))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.empty());
+        when(taskRepository.saveAndFlush(any(AiTask.class)))
+                .thenThrow(new DataIntegrityViolationException("foreign key violation"));
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> service.create(generationRequest(), "idem-race", 100L));
+    }
+
+    private CreateAiTaskRequest generationRequest() {
+        return new CreateAiTaskRequest(
+                AiTaskType.JOB_GENERATION, Map.of("key", "value"), null, null, null, null, null, null);
+    }
+
+    private String generationFingerprint() {
+        return idempotencyService.fingerprint(Map.of("taskType", "JOB_GENERATION", "input", Map.of("key", "value")));
+    }
+
+    private AiTask winnerTask(Long id, String key, String fingerprint) {
+        AiTask task = new AiTask();
+        task.setId(id);
+        task.setUserId(100L);
+        task.setTaskType(AiTaskType.JOB_GENERATION);
+        task.setIdempotencyKey(key);
+        task.setRequestFingerprint(fingerprint);
+        task.setInputSnapshotJson(Map.of("taskType", "JOB_GENERATION", "input", Map.of("key", "value")));
+        task.setStatus(AiTaskStatus.PENDING);
+        task.setRetryCount(0);
+        task.setCreatedAt(LocalDateTime.now());
+        task.setUpdatedAt(LocalDateTime.now());
+        return task;
     }
 
     @Test
@@ -101,7 +177,7 @@ class AiTaskServiceTest {
         doNothing().when(quotaService).check(eq(100L), any());
         when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(anyLong(), any(), anyString()))
                 .thenReturn(Optional.empty());
-        when(taskRepository.save(any(AiTask.class))).thenAnswer(invocation -> {
+        when(taskRepository.saveAndFlush(any(AiTask.class))).thenAnswer(invocation -> {
             AiTask task = invocation.getArgument(0);
             task.setId(1L);
             task.setCreatedAt(LocalDateTime.now());
@@ -175,7 +251,7 @@ class AiTaskServiceTest {
                 "material-import-no-consent", 100L));
 
         assertEquals(ErrorCode.CONSENT_REQUIRED, ex.getErrorCode());
-        verify(taskRepository, never()).save(any());
+        verify(taskRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -204,7 +280,7 @@ class AiTaskServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.create(req, "key", 100L));
         assertEquals(ErrorCode.CONSENT_REQUIRED, ex.getErrorCode());
-        verify(taskRepository, never()).save(any());
+        verify(taskRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -240,7 +316,7 @@ class AiTaskServiceTest {
 
         assertEquals(1L, response.id());
         assertEquals(AiTaskStatus.PENDING, response.status());
-        verify(taskRepository, never()).save(any());
+        verify(taskRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -283,7 +359,7 @@ class AiTaskServiceTest {
                 () -> service.retry(9L, 100L));
 
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
-        verify(taskRepository, never()).save(any());
+        verify(taskRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -339,7 +415,7 @@ class AiTaskServiceTest {
         when(consentService.hasValidConsent(100L)).thenReturn(true);
         when(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
                 eq(100L), any(), anyString())).thenReturn(Optional.empty());
-        when(taskRepository.save(any(AiTask.class))).thenAnswer(invocation -> {
+        when(taskRepository.saveAndFlush(any(AiTask.class))).thenAnswer(invocation -> {
             AiTask task = invocation.getArgument(0);
             task.setId(1L);
             task.setCreatedAt(LocalDateTime.now());

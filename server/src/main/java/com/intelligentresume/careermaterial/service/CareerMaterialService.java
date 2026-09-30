@@ -129,7 +129,9 @@ public class CareerMaterialService {
         if (req.usagePreference() != null) {
             material.setUsagePreference(req.usagePreference());
         }
-        repository.save(material);
+        // saveAndFlush：版本冲突（@Version）在服务内即抛，由全局处理器映射为 40901，
+        // 而不是延迟到事务提交点。
+        repository.saveAndFlush(material);
         return toDetail(material);
     }
 
