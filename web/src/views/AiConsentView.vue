@@ -4,6 +4,7 @@ import { CheckCircle2, Database, Eye, RotateCcw, ShieldCheck, ShieldOff } from '
 import { useRoute, useRouter } from 'vue-router'
 import { AI_CONSENT_DATA_CATEGORIES, AI_CONSENT_TASK_SCOPES, getConsent, grantConsent, hasFullAiConsent, JOB_GENERATION_POLICY_VERSION, withdrawConsent, type ConsentResponse } from '@/api/ai'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 
 const { t } = useLocale()
 const route = useRoute()
@@ -41,7 +42,10 @@ async function grant() {
     consent.value = (await getConsent()).data.data
     message.value = t('aiConsent.grantSuccess')
     if (redirectAfterConsent.value) await router.replace(redirectAfterConsent.value)
-  } catch { message.value = t('aiConsent.grantError') }
+  } catch (cause: unknown) {
+    // TC-3：授予失败可能携带业务码（如重复授予 40901），映射文案优先于固定兜底
+    message.value = resolveApiError(cause, 'aiConsent.grantError')
+  }
   finally { loading.value = false }
 }
 

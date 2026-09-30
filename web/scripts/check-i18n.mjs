@@ -8,14 +8,18 @@ import { parse as parseVueSfc } from '@vue/compiler-sfc'
 const scriptPath = fileURLToPath(import.meta.url)
 const projectRoot = resolve(dirname(scriptPath), '..')
 
-function collectVueFiles(dir) {
+function collectFilesWithExtensions(dir, extensions) {
   const results = []
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry)
-    if (statSync(full).isDirectory()) results.push(...collectVueFiles(full))
-    else if (extname(full) === '.vue') results.push(full)
+    if (statSync(full).isDirectory()) results.push(...collectFilesWithExtensions(full, extensions))
+    else if (extensions.includes(extname(full))) results.push(full)
   }
   return results
+}
+
+function collectVueFiles(dir) {
+  return collectFilesWithExtensions(dir, ['.vue'])
 }
 
 function lineNumber(source, index) {
@@ -53,7 +57,8 @@ function needsTranslation(value, { expression = false } = {}) {
   if (visibleLiteralAllowlist.has(text)) return false
   if (/^(?:https?:\/\/|mailto:|tel:)/i.test(text) || /^\S+@\S+\.\S+$/.test(text)) return false
   if (/^\d{4}(?:[-/.]\d{1,2}){1,2}$/.test(text)) return false
-  if (/^[A-Z0-9][A-Z0-9+#./-]{1,11}$/.test(text)) return false
+  // 全大写 + 下划线 = 错误码/语义键（如 TASK_STATUS_UNAVAILABLE），消费方负责映射文案
+  if (/^[A-Z0-9][A-Z0-9+#./_-]{1,63}$/.test(text)) return false
   if (expression && /^[a-z_$][\w$.-]*$/.test(text)) return false
   return true
 }
@@ -206,10 +211,16 @@ export function collectRegistryTranslationKeys(source) {
 }
 
 function run() {
-  const auditedFiles = [
+  // TC-2（2026-09-30）：审计范围从 .vue 扩展到 api/stores/composables 的 .ts ——
+  // api 层硬编码中文曾 8+ 处绕过门禁。.ts 不是 SFC，findVisibleLiterals（模板检测）
+  // 不适用；findRuntimeLiterals（message 赋值 / window popup）与 t() 静态键校验通用。
+  const auditedVueFiles = [
     ...collectVueFiles(join(projectRoot, 'src', 'views')),
     ...collectVueFiles(join(projectRoot, 'src', 'components')),
   ]
+  const auditedTsDirs = ['api', 'stores', 'composables']
+  const auditedTsFiles = auditedTsDirs
+    .flatMap(dir => collectFilesWithExtensions(join(projectRoot, 'src', dir), ['.ts']))
   const catalogSource = readFileSync(join(projectRoot, 'src', 'i18n', 'index.ts'), 'utf8')
   const navigationSource = readFileSync(join(projectRoot, 'src', 'navigation', 'registry.ts'), 'utf8')
   const { locales, duplicates } = inspectCatalog(catalogSource)
@@ -222,10 +233,23 @@ function run() {
   failures.push(...findLocaleKeyMismatches(locales, requiredLocales)
     .map(message => `src/i18n/index.ts: ${message}`))
 
-  for (const file of auditedFiles) {
+  for (const file of auditedVueFiles) {
     const source = readFileSync(file, 'utf8')
     const displayPath = relative(projectRoot, file)
     for (const message of [...findVisibleLiterals(source), ...findRuntimeLiterals(source)]) {
+      failures.push(`${displayPath}: ${message}`)
+    }
+    for (const key of new Set(collectStaticTranslationKeys(source))) {
+      for (const locale of requiredLocales) {
+        if (!locales.get(locale)?.has(key)) failures.push(`${displayPath}: missing ${locale} translation for ${key}`)
+      }
+    }
+  }
+
+  for (const file of auditedTsFiles) {
+    const source = readFileSync(file, 'utf8')
+    const displayPath = relative(projectRoot, file)
+    for (const message of findRuntimeLiterals(source)) {
       failures.push(`${displayPath}: ${message}`)
     }
     for (const key of new Set(collectStaticTranslationKeys(source))) {
@@ -247,7 +271,7 @@ function run() {
     process.exitCode = 1
     return
   }
-  console.log(`i18n guard passed for ${auditedFiles.length} audited Vue files and ${requiredLocales.length} locales`)
+  console.log(`i18n guard passed for ${auditedVueFiles.length} Vue files + ${auditedTsFiles.length} TS files and ${requiredLocales.length} locales`)
 }
 
 if (resolve(process.argv[1] ?? '') === resolve(scriptPath)) run()

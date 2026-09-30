@@ -1,9 +1,11 @@
 import { computed, ref } from 'vue'
 import { listJobs, type JobDescriptionSummary } from '@/api/jobDescription'
 import { listResumes, listVersions, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
+import { useLocale } from '@/i18n'
 
 /** Loads the choices shared by workflows that need a resume version and a target job. */
 export function useResumeJobOptions() {
+  const { t } = useLocale()
   const resumes = ref<ResumeSummary[]>([])
   const jobs = ref<JobDescriptionSummary[]>([])
   const versions = ref<ResumeVersionSummary[]>([])
@@ -22,7 +24,7 @@ export function useResumeJobOptions() {
       if (selectedResumeId.value == null && resumes.value.length > 0) selectedResumeId.value = resumes.value[0].id
       await loadVersions()
     } catch {
-      error.value = '可选简历或 JD 无法加载，请检查网络后重试。'
+      error.value = t('jobOptions.loadError')
     } finally {
       loading.value = false
     }
@@ -34,7 +36,7 @@ export function useResumeJobOptions() {
     try {
       versions.value = (await listVersions(selectedResumeId.value)).data.data
     } catch {
-      error.value = '该简历的版本无法加载，请重新选择简历。'
+      error.value = t('jobOptions.versionsLoadError')
     }
   }
 

@@ -1,12 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getTask, type AiTask } from '@/api/ai'
+import { useLocale } from '@/i18n'
 import { useAuthStore } from '@/stores/auth'
 
 const TASK_STORAGE_PREFIX = 'intelligent-resume.active-ai-task'
 const TERMINAL_STATUSES = new Set<AiTask['status']>(['SUCCESS', 'FAILED', 'CANCELLED'])
 
 export const useAiTaskStore = defineStore('ai-task', () => {
+  const { t } = useLocale()
   const current = ref<AiTask | null>(null)
   const polling = ref(false)
   const error = ref<string | null>(null)
@@ -91,7 +93,7 @@ export const useAiTaskStore = defineStore('ai-task', () => {
         const delay = [1000, 2000, 4000, 5000][Math.min(attempt - 1, 3)]
         timer = window.setTimeout(tick, delay)
       } catch {
-        error.value = '任务状态暂时无法获取，请检查网络后重试。'
+        error.value = t('aiTask.pollingError')
         polling.value = false
       }
     }

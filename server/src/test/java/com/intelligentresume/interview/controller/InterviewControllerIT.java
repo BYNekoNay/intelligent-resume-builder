@@ -543,6 +543,66 @@ class InterviewControllerIT {
                 "initial-question and reused answer attempts should be the only attempts");
     }
 
+    @Test @Order(23)
+    void idempotentFollowUpReplayReturnsSameTask() throws Exception {
+        grantAiConsent(tokenA);
+        long sid = startSession();
+        mockMvc.perform(post("/api/interviews/" + sid + "/continue-with-rules")
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/interviews/" + sid + "/answer")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"answer\":\"Situation: I investigated latency. Action: I fixed the query. Result: P99 fell by 30 percent.\"}"))
+                .andExpect(status().isOk());
+
+        // 会话未完成时 follow-up 必须被拒（409），且该拒绝不消费幂等键
+        mockMvc.perform(post("/api/interviews/" + sid + "/follow-up")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"weakness\":\"缓存与并发控制经验不足\"}"))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(post("/api/interviews/" + sid + "/finish")
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+
+        // 同键重放必须返回同一任务（TC-1：前端有调用方的 AI 触发端点，幂等语义零覆盖）
+        String key = UUID.randomUUID().toString();
+        String body = "{\"weakness\":\"缓存与并发控制经验不足\"}";
+        MvcResult first = mockMvc.perform(post("/api/interviews/" + sid + "/follow-up")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.id").isNumber())
+                .andReturn();
+        long firstTaskId = objectMapper.readTree(first.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        mockMvc.perform(post("/api/interviews/" + sid + "/follow-up")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.data.id").value(firstTaskId));
+
+        // 新键必须创建新任务，不得复用旧键的任务
+        MvcResult fresh = mockMvc.perform(post("/api/interviews/" + sid + "/follow-up")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        long freshTaskId = objectMapper.readTree(fresh.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+        Assertions.assertNotEquals(firstTaskId, freshTaskId,
+                "a fresh idempotency key must create a new follow-up task");
+    }
+
     private void grantAiConsent(String token) throws Exception {
         mockMvc.perform(post("/api/ai/consent")
                         .header("Authorization", "Bearer " + token)

@@ -12,6 +12,7 @@ import {
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const { locale, t } = useLocale()
@@ -191,7 +192,11 @@ async function submit() {
       pendingAnswer.value = null
       answer.value = ''
     }
-  } catch { error.value = t('interview.submitError') }
+  } catch (e: unknown) {
+    // TC-3：提交失败不再一律吞成固定文案——40901（状态机冲突）/40302（授权失效）
+    // 等业务码有专属引导文案，帮助用户做出正确动作而不是盲目重试
+    error.value = resolveApiError(e, 'interview.submitError')
+  }
   finally { submitting.value = false }
 }
 
@@ -207,7 +212,9 @@ async function retry() {
       pendingAnswer.value = null
       answer.value = ''
     }
-  } catch { error.value = t('interview.retryError') }
+  } catch (e: unknown) {
+    error.value = resolveApiError(e, 'interview.retryError')
+  }
   finally { retrying.value = false }
 }
 
