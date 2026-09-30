@@ -244,6 +244,19 @@
 
 修复动作：`RateLimitFilter` 新增 `change-credential-per-minute`（构造注入，默认 5），`limitFor` 增加两端点映射，`bucketGroup()` 将两端点归为 `/api/auth/me:credential` 一组（其它端点仍按路径独立分桶）；`application.yml` 与 `server/.env.example` 同步 `RATE_LIMIT_CREDENTIAL`；`docs/05` §1.3 受限端点清单更新。测试：`RateLimitFilterTest` +2（共享分桶 / 资料更新不受影响）、`AuthRateLimitIT` +1（真实过滤链：未登录先计数，改密耗尽后改邮箱 429）。
 
+### 2.20 上传路径体积与死线对账（2026-10-01 第二十八批扫描，已随本批修复）
+
+方法：核对「上传限制」与「同步长耗时请求死线」在**全部三层**（外层 nginx → 内层 nginx → 应用 → 前端）的一致性与可达性（与第二十一批 PDF 死线链同族）。本机 Docker 守护进程不可用，故证据来自配置内容 + 构建链路（镜像实际打包哪份配置）+ nginx 文档化默认值。
+
+| 项 | 取证（修复前） | 结论 |
+| --- | --- | --- |
+| 内层 nginx 把上传上限悄悄收紧为 1m | 容器 prod 拓扑 = `edge` → `web` → `api`（`deploy/docker-compose.prod.yml`）。`edge` 用 `deploy/nginx/edge.conf`（`client_max_body_size 5m`），但 `web` 镜像实际打包的是 `web/nginx.conf`（`web/Dockerfile` L12 COPY，**未声明**该指令）→ 生效 nginx 内置默认 **1m**。`edge` 已放行的 1~5MB 简历会被内层拒绝，且响应是 nginx 自带 HTML 而非统一信封。**该缺陷对现有测试全谱不可见**：功能回归直连 API（不经 nginx）、本地开发走 Vite 代理（无体积限制）、`deploy/nginx/web.conf` 同步副本同样漏声明 | **存在缺陷 → 修复**：`web/nginx.conf` 与 `deploy/nginx/web.conf` 均补 `client_max_body_size 5m`，与 `edge` 及 `spring.servlet.multipart.max-file-size`(5MB) 对齐 |
+| 层间关系无门禁 | 只有注释声称「两份内容需保持一致」；无任何检查断言「内层上限 ≥ 外层上限」，故外层承诺可被内层静默收紧 | **补静态门禁**：`UploadPathContractTest` |
+| 前端上传超时早于服务端预算 | `web/src/api/resumeImport.ts` 未覆盖超时 → 用全局 10s，而服务端单次解析预算 15s（`resume-import.extract-timeout-ms`）：慢但成功的解析被客户端先判失败（前端显示泛化解析错误），服务端仍在校验；与仓库既有惯例（导出 30s、面试步进 60s 均显式放宽）不一致 | **存在缺陷 → 修复**：上传请求显式 `timeout: 30_000` |
+| 「host.conf 与 web.conf 并存」的直连部署 | `deploy/nginx/host.conf`（宿主机直连版）已声明 5m，无此缺陷 | 无需改动（门禁覆盖） |
+
+修复动作：两份 web nginx 配置补 `client_max_body_size 5m`；前端上传请求显式 `timeout: 30_000`；新增跨运行时静态门禁 `UploadPathContractTest`（5 条断言：含 `/api/` 反代的配置必须显式声明体积上限；容器内层 web ≥ 外层 edge 与 ip-test 覆盖层；生产各层 ≥ 应用 multipart 上限；镜像内 `web/nginx.conf` 与 `deploy/nginx/web.conf` 取值一致；前端上传超时 > 服务端解析预算）。`docs/05` §13 与 `docs/08` 补代理层体积契约。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
