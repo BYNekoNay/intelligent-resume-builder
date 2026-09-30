@@ -9,7 +9,7 @@
   5. 投递 CRUD 与状态迁移、统计
   6. 沟通模板列表
   7. 简历导入（TXT multipart）
-  8. 边界码：未认证 401、不存在 404、非法模板 400
+  8. 边界码：未认证 401、不存在 404、非法模板 400、超限上传 413（>5MB multipart）
 
 用法：python3 test_non_ai.py [base_url]
 """
@@ -254,6 +254,19 @@ def main():
     code, _, _ = call("POST", "/api/exports/pdf",
                       {"resumeVersionId": version_id, "templateCode": "not-a-template"}, token=token_a)
     check("invalid-template-400", code == 400, f"非法模板码 -> HTTP {code}")
+
+    # 超限上传（超过 multipart max-file-size 5MB）：必须 413 + 统一信封。
+    # 回归背景：此前 MaxUploadSizeExceededException 落兜底分支被报成 500「系统异常」
+    # （生产前置 nginx 时用户看到 413，直连 API 的语义丢失并污染 5xx 告警）。
+    big = b"x" * (6 * 1024 * 1024)
+    boundary_big = "----big" + RUN
+    mp_big = (f"--{boundary_big}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"big.txt\"\r\n"
+              f"Content-Type: text/plain\r\n\r\n").encode("utf-8") + big + f"\r\n--{boundary_big}--\r\n".encode("utf-8")
+    code, payload, _ = call("POST", "/api/resume-imports/parse", raw_body=mp_big, token=token_a,
+                            content_type=f"multipart/form-data; boundary={boundary_big}")
+    body = j(payload) or {}
+    check("oversized-upload-413", code == 413 and body.get("code") == 40001,
+          f"6MB 上传 -> HTTP {code} {str(body)[:120]}")
 
     return report()
 

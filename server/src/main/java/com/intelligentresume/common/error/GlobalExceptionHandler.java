@@ -7,11 +7,17 @@ import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -55,6 +61,63 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception exception, HttpServletRequest request) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.failure(ErrorCode.VALIDATION.code(), ErrorCode.VALIDATION.message(), traceId(request)));
+    }
+
+    /**
+     * HTTP 协议级调用方错误：方法不允许（405）/ 不支持的请求媒体类型（415）/ 不可接受的响应媒体类型（406）。
+     *
+     * <p>与「缺请求头 / 缺参数」同族：若落兜底分支会被报成 500「系统异常」并输出 ERROR 级完整堆栈，
+     * 调用方无法区分自己传错与服务端故障，还会污染监控里的 API 5xx 告警。HTTP 状态保留协议语义，
+     * 业务码沿用文档化清单中的 40001（docs/05 §1.3）。
+     */
+    @ExceptionHandler({
+            HttpRequestMethodNotSupportedException.class,
+            HttpMediaTypeNotSupportedException.class,
+            HttpMediaTypeNotAcceptableException.class
+    })
+    public ResponseEntity<ApiResponse<Void>> handleHttpSemantics(Exception exception, HttpServletRequest request) {
+        HttpStatus status;
+        String message;
+        if (exception instanceof HttpRequestMethodNotSupportedException) {
+            status = HttpStatus.METHOD_NOT_ALLOWED;
+            message = "请求方法不受支持";
+        } else if (exception instanceof HttpMediaTypeNotSupportedException) {
+            status = HttpStatus.UNSUPPORTED_MEDIA_TYPE;
+            message = "不支持的媒体类型";
+        } else {
+            status = HttpStatus.NOT_ACCEPTABLE;
+            message = "不支持的响应媒体类型";
+        }
+        return ResponseEntity.status(status)
+                // 显式指定 JSON：406 场景下请求的 Accept 本身就排除了 JSON，不指定会导致响应体无法写出
+                // → 触发 ERROR 派发 → 被安全链当匿名请求拒绝成 401（真实 HTTP 实测），状态语义彻底丢失
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.failure(ErrorCode.VALIDATION.code(), message, traceId(request)));
+    }
+
+    /**
+     * 上传类调用方错误：超出 multipart 大小上限（413）与非法 multipart 请求（400）。
+     *
+     * <p>实测（本地真实 HTTP 探针）：6MB 上传（`spring.servlet.multipart.max-file-size=5MB`）
+     * 抛 `MaxUploadSizeExceededException` 落兜底分支 → 500「系统异常」+ ERROR 全栈；
+     * 生产前置 nginx 时用户看到的是 413，直连 API（功能回归环境）语义丢失且污染 5xx 告警。
+     * 消息不含具体字节数：上限由配置持有，写死数字会漂移。
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUploadTooLarge(
+            MaxUploadSizeExceededException exception, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.failure(ErrorCode.VALIDATION.code(), "上传文件超出大小限制", traceId(request)));
+    }
+
+    /** 非法 multipart 表单（边界损坏、缺少 part 等）同样属调用方错误，不能报 500。 */
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMultipart(
+            MultipartException exception, HttpServletRequest request) {
+        return ResponseEntity.badRequest()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.failure(ErrorCode.VALIDATION.code(), "上传表单不合法", traceId(request)));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

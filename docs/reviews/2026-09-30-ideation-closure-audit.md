@@ -192,6 +192,19 @@
 
 修复动作：`server.shutdown: graceful` + `spring.lifecycle.timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}`；compose `api.stop_grace_period: 25s`（> 20s + 余量；systemd 默认 `TimeoutStopSec=90s` 已足够）；新增静态门禁 `ShutdownContractTest`（API/PDF 两侧：容器宽限期 ≥ 停机上限 + 5s，防再次漂移）。
 
+### 2.16 协议级调用方错误映射对账（2026-10-01 第二十四批扫描，已随本批修复）
+
+方法：对「调用方传错」的 HTTP 协议错误做**真实 HTTP 探针**（本机 H2 实例 + curl）与 MockMvc/单测双取证，检查是否落 catch-all 兜底被报成 500（与既有「缺请求头 → 500」修复同族）。
+
+| 项 | 取证（修复前） | 结论 |
+| --- | --- | --- |
+| 方法不允许（405） | 真实 HTTP `POST /api/system/health`（GET-only）→ **500**「系统异常」 | **存在缺陷 → 第二十四批修复**：405 + 40001 |
+| 不支持的请求媒体类型（415） | 真实 HTTP `POST /api/auth/login` + `Content-Type: text/plain` → **500** | **存在缺陷 → 第二十四批修复**：415 + 40001 |
+| 不可接受的响应媒体类型（406） | 修复首版后实测仍坍缩为 **401**（错误体按请求 Accept 无法写出 → ERROR 派发被安全链当匿名请求拒绝） | **联动缺陷 → 修复**：协议级错误响应显式 `Content-Type: application/json`，实测 406 + 统一信封（`Accept: xml` 亦不再坍缩） |
+| 超限上传（413） | 真实 HTTP 6MB 上传（`max-file-size=5MB`）→ **500** + ERROR 全栈（`MaxUploadSizeExceededException` 落兜底；生产前置 nginx 时用户看到的是 413，直连 API 语义丢失） | **存在缺陷 → 第二十四批修复**：413 + 40001；非法 multipart 表单 → 400 + 40001 |
+
+修复动作：`GlobalExceptionHandler` 新增协议级 handler（405/415/406、413、非法 multipart 400），响应显式 JSON 内容类型；`docs/05` §1.3 错误码表与 §13 导入契约同步；新增 `HttpSemanticsIT`（MockMvc 405/415/406）+ 5 个 handler 单测 + `functional-tests/suite_core.py` 超限上传真实 HTTP 断言（本地整套件 28/28 通过）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -351,3 +364,4 @@
 | 2026-10-01 | **第二十一批（PDF 导出死线链：排队上限 + 服务端预算可配置 + 租约/批次对齐；§2.14 扫描新增项）执行完成**：核对三层时间边界发现——① API 读超时默认 15s 早于 pdf-service 服务端上界（`setContent` 15s + `pdf` 15s，且队列等待无时长上限），合法慢渲染会被客户端先断开（渲染浪费 + 任务误判失败）；② 队列只限条数不限时长；③ `claimBatch` 一次性把 90s 租约写给整批、worker 串行处理（默认 3 条），读超时提升后会超出租约（处理途中被接管 → 重复渲染）。修复：pdf-service 新增 `PDF_SERVICE_QUEUE_TIMEOUT_MS`（默认 15s，排队超时以可重试 503 拒绝；队列项带超时计时器，获名额/drain 时清理）与 `PDF_SERVICE_RENDER_TIMEOUT_MS`（默认 15s，替换硬编码 `setDefaultTimeout`；非法取值启动即失败）；API 读超时默认 15 → **50s**（覆盖 15+15+15+余量；CI profile 30 → 50 对齐）、PDF worker `batch-size` 默认 3 → **1**（串行处理吞吐不变，保证「租约 90s ≥ batch × 读超时 + 余量」）；`.env.example` / `pdf-service/README.md` 补死线链说明；新增跨运行时静态门禁 `PdfDeadlineContractTest`（链序 + `@Value` 兜底与 yml 默认值一致）。回归：pdf-service `npm run check` + `npm test` **31 通过**（新增 3）；server 全量 **820 测试 0 失败**（新增 2 门禁，5 skipped 为环境门控）；CI 首跑（be094e9）在 Linux/Node 20 下暴露测试缺陷——排队计时器 `unref()` 使 node:test 报「Promise resolution is still pending…」并取消 2 个用例，改为保持 ref（d6d808d；获名额/drain 均 `clearTimeout`）后 **CI + Functional Regression 双绿**（workflow run 36752112374 / 36752112314，head d6d808d，复核结论 success） |
 | 2026-10-01 | **第二十二批（进程关闭语义：API 优雅停机 + 容器宽限期 + 关闭契约门禁；§2.15 扫描新增项）执行完成**：核对停语义发现——① `application.yml` 未声明 `server.shutdown`（默认 immediate），SIGTERM 立即断开在途 HTTP 请求（发布/重启期间连接被重置，导入解析等长请求首当其冲）；② compose `api` 未声明 `stop_grace_period`（docker 默认 10s），即使开启优雅停机也会中途 SIGKILL；③ pdf-service 侧已有 drain + 30s 宽限期（第十六批），但「宽限期 ≥ 停机上限」的关系仅靠注释约束。修复：`server.shutdown: graceful` + `spring.lifecycle.timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}`（刻意不等待 worker——AI/PDF worker 均为守护线程、由租约接管在途任务，故只影响 Web 请求）；compose `api.stop_grace_period: 25s`（> 20s + 余量；systemd 默认 TimeoutStopSec=90s 足够）；新增静态门禁 `ShutdownContractTest`（API 与 pdf-service 两侧：容器宽限期必须 ≥ 停机/drain 上限 + 5s）。回归：server 全量 **822 测试 0 失败**（新增 2 门禁，5 skipped 为环境门控）；CI + Functional Regression 双绿（workflow run 36753021486 / 36753021510，head 7a46115，复核结论 success） |
 | 2026-10-01 | **第二十三批（CI 交付链收敛：Node 运行时对齐 + functional 作业依赖缓存）执行完成**：`ci.yml` 的 web 与 pdf-service 作业 Node 由 20 → **22**（Node 20 已于 2026-04 EOL；pdf-service 依赖 puppeteer ^25 声明 engines ≥22.12，锁 20 会持续产生 EBADENGINE 告警）；`functional.yml` 两个作业此前**依赖 runner 预装 Node**（ubuntu-latest 迁到 26.04 后会从 20 变 24，版本漂移静默改变行为），现显式 `actions/setup-node@v5`（Node 22 + npm 缓存 + pdf-service lock 路径）并给两个 `setup-java` 步骤补 maven 缓存（此前每次运行全量拉取依赖）。两个 workflow 的 YAML 经本地解析校验；CI + Functional Regression 双绿（workflow run 36753598577 / 36753598642，head 3c46b1c，复核结论 success；new 配置实跑：web/pdf-service 作业 Node 22、functional 作业 setup-node + maven/npm 缓存全部生效） |
+| 2026-10-01 | **第二十四批（协议级调用方错误映射：405/415/406 + 上传超限 413；§2.16 扫描新增项）执行完成**：用真实 HTTP 探针（本机 H2 实例 + curl）取证发现四类「调用方传错」落 catch-all 被报成 500——① `POST` 打到 GET-only 端点 → 500；② `text/plain` 打到 JSON 端点 → 500；③ 6MB 上传（超 `max-file-size=5MB`）→ 500 + ERROR 全栈（`MaxUploadSizeExceededException`）；④ 修复 406 首版后实测仍坍缩为 401（错误体按请求 `Accept` 无法写出 → ERROR 派发被安全链拒绝）。修复：`GlobalExceptionHandler` 新增协议级 handler（405/415/406、413、非法 multipart 400），响应显式 `Content-Type: application/json`；`docs/05` §1.3/§13 契约同步。验证：真实 HTTP 四类探针全部返回 405/415/406/413 + 统一信封（`Accept: xml` 也不再坍缩）；新增 `HttpSemanticsIT`（3）+ handler 单测（5）+ `functional-tests` 超限上传断言（本机整套件 28/28 通过）；回归：server 全量 **830 测试 0 失败**（新增 8，5 skipped 为环境门控） |

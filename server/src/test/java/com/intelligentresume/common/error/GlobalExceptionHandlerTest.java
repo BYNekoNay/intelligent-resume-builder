@@ -6,8 +6,16 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -51,5 +59,64 @@ class GlobalExceptionHandlerTest {
                 missingHeader("X-Any-Required-Header"), mock(HttpServletRequest.class));
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+    }
+
+    @Test
+    @DisplayName("方法不允许映射为 405 信封（保留协议语义，不落 500 兜底）")
+    void methodNotAllowedIs405() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleHttpSemantics(
+                new HttpRequestMethodNotSupportedException("GET"), mock(HttpServletRequest.class));
+
+        assertEquals(HttpStatus.METHOD_NOT_ALLOWED, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(ErrorCode.VALIDATION.code(), response.getBody().code());
+        assertEquals("请求方法不受支持", response.getBody().message());
+    }
+
+    @Test
+    @DisplayName("不支持的请求媒体类型映射为 415")
+    void unsupportedMediaTypeIs415() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleHttpSemantics(
+                new HttpMediaTypeNotSupportedException("Unsupported '" + MediaType.TEXT_PLAIN + "'"), mock(HttpServletRequest.class));
+
+        assertEquals(HttpStatus.UNSUPPORTED_MEDIA_TYPE, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(ErrorCode.VALIDATION.code(), response.getBody().code());
+        assertEquals("不支持的媒体类型", response.getBody().message());
+    }
+
+    @Test
+    @DisplayName("不可接受的响应媒体类型映射为 406")
+    void notAcceptableIs406() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleHttpSemantics(
+                new HttpMediaTypeNotAcceptableException(List.of(MediaType.APPLICATION_XML)), mock(HttpServletRequest.class));
+
+        assertEquals(HttpStatus.NOT_ACCEPTABLE, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals("不支持的响应媒体类型", response.getBody().message());
+    }
+
+    @Test
+    @DisplayName("超限上传映射为 413 信封（不落 500 兜底）")
+    void oversizedUploadIs413() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleUploadTooLarge(
+                new MaxUploadSizeExceededException(5 * 1024 * 1024), mock(HttpServletRequest.class));
+
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(ErrorCode.VALIDATION.code(), response.getBody().code());
+        assertEquals("上传文件超出大小限制", response.getBody().message());
+        assertEquals(MediaType.APPLICATION_JSON, response.getHeaders().getContentType());
+    }
+
+    @Test
+    @DisplayName("非法 multipart 表单映射为 400（不落 500 兜底）")
+    void malformedMultipartIs400() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleMultipart(
+                new MultipartException("Malformed multipart request"), mock(HttpServletRequest.class));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals("上传表单不合法", response.getBody().message());
     }
 }
