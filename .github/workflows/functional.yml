@@ -74,13 +74,17 @@ jobs:
         with:
           python-version: "3.11"
 
+      # 仓库根无聚合 pom，必须在 server/ 目录下单模块构建（-pl 语法在此仓库不可用；
+      # 2026-09-30 首次真实运行暴露：Package step 在根目录执行报 no POM in this directory）
       - name: Package server (skip tests — covered by the `server` job)
-        run: mvn --batch-mode --no-transfer-progress -pl server -am package -DskipTests
+        working-directory: server
+        run: mvn --batch-mode --no-transfer-progress package -DskipTests
 
       - name: Install pdf-service dependencies and Chromium
+        working-directory: pdf-service
         run: |
-          npm ci --prefix pdf-service
-          npx --prefix pdf-service puppeteer browsers install chrome
+          npm ci
+          npx puppeteer browsers install chrome
 
       - name: Start pdf-service
         run: |
@@ -184,12 +188,14 @@ jobs:
           python-version: "3.11"
 
       - name: Package server
-        run: mvn --batch-mode --no-transfer-progress -pl server -am package -DskipTests
+        working-directory: server
+        run: mvn --batch-mode --no-transfer-progress package -DskipTests
 
       - name: Install pdf-service dependencies and Chromium
+        working-directory: pdf-service
         run: |
-          npm ci --prefix pdf-service
-          npx --prefix pdf-service puppeteer browsers install chrome
+          npm ci
+          npx puppeteer browsers install chrome
 
       - name: Start pdf-service
         run: |
