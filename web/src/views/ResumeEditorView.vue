@@ -2,12 +2,12 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, BookOpen, GripVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sparkles, WandSparkles, X } from 'lucide-vue-next'
-import type { AxiosError } from 'axios'
 import { createManualVersion, getResume, getResumeVersion, listVersions, restoreResumeVersion, type ResumeVersion } from '@/api/resume'
 import { getAtsCheck, type AtsCheckResponse } from '@/api/ats'
 import { getMaterial, listMaterials, type CareerMaterial, type CareerMaterialSummary, type MaterialType } from '@/api/careerMaterial'
 import { AiTaskTimeoutError, inlineOptimize, waitForAiTaskResult, type InlineOptimizeResponse } from '@/api/ai'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 import { useAuthStore } from '@/stores/auth'
 import sampleResume from '@/data/sampleResume'
 import ResumeEditorNavigation, { type ResumeEditorSection } from '@/components/resume/ResumeEditorNavigation.vue'
@@ -833,8 +833,7 @@ async function save() {
     await router.push({ name: 'resume-detail', params: { id: submittedResumeId } })
   } catch (requestError) {
     if (props.id === submittedResumeId && epoch === editorContextEpoch) {
-      const apiMessage = (requestError as AxiosError<{ message?: string }>).response?.data?.message?.trim()
-      error.value = apiMessage || t('resumeEditor.saveFailed')
+      error.value = resolveApiError(requestError, 'resumeEditor.saveFailed')
     }
   }
   finally { if (props.id === submittedResumeId && epoch === editorContextEpoch) saving.value = false }

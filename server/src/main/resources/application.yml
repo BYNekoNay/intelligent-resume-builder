@@ -118,6 +118,9 @@ app:
     issuer: ${JWT_ISSUER:intelligent-resume-builder}
     access-token-ttl-seconds: ${JWT_ACCESS_TTL:3600}
     refresh-token-ttl-seconds: ${JWT_REFRESH_TTL:2592000}
+    # 每请求用户状态校验的短 TTL 缓存（PA-2）：抵消 #6 安全闭环的每请求查库。
+    # 代价：直改库等非删号路径的状态变更最迟 TTL 后生效；删号路径提交后即时清除。
+    active-user-cache-ttl-seconds: ${JWT_ACTIVE_USER_CACHE_TTL:30}
     refresh-cookie:
       name: ${REFRESH_COOKIE_NAME:irt_refresh}
       max-age: ${JWT_REFRESH_TTL:2592000}

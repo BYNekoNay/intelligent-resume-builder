@@ -13,6 +13,7 @@ import {
 import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useAiTaskStore } from '@/stores/aiTask'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 
 const { t } = useLocale()
 const route = useRoute()
@@ -94,7 +95,7 @@ async function loadTask(initialize = false) {
     }
     startPolling(initialize)
   } catch (e: any) {
-    error.value = e.response?.data?.message || t('materialSelection.errorLoadFailed')
+    error.value = resolveApiError(e, 'materialSelection.errorLoadFailed')
     loading.value = false
   }
 }
@@ -126,7 +127,7 @@ function startPolling(initialize: boolean) {
     },
     onError: (e: any) => {
       // 与原实现一致：单次读取失败视为终止并展示错误
-      error.value = e.response?.data?.message || t('materialSelection.errorLoadFailed')
+      error.value = resolveApiError(e, 'materialSelection.errorLoadFailed')
       loading.value = false
       polling.stop()
     },
@@ -170,7 +171,7 @@ async function confirmSelection() {
     taskStore.remember(generationTask.id)
     await router.push(`/generate/confirm?taskId=${generationTask.id}`)
   } catch (e: any) {
-    error.value = e.response?.data?.message || t('materialSelection.errorConfirmFailed')
+    error.value = resolveApiError(e, 'materialSelection.errorConfirmFailed')
   } finally {
     confirming.value = false
   }
@@ -185,7 +186,7 @@ async function retry() {
     await loadTask(true)
   } catch (e: any) {
     loading.value = false
-    error.value = e.response?.data?.message || t('materialSelection.errorRetryFailed')
+    error.value = resolveApiError(e, 'materialSelection.errorRetryFailed')
   }
 }
 

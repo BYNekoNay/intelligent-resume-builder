@@ -26,7 +26,8 @@ public interface CareerMaterialRepository extends JpaRepository<CareerMaterial, 
               and (:usagePreference is null or material.usagePreference = :usagePreference)
               and (:query is null
                    or lower(material.title) like concat('%', lower(:query), '%') escape '\\'
-                   or lower(coalesce(material.sourceText, '')) like concat('%', lower(:query), '%') escape '\\')
+                   or lower(coalesce(material.sourceText, '')) like concat('%', lower(:query), '%') escape '\\'
+                   or lower(material.contentJsonText) like concat('%', lower(:query), '%') escape '\\')
             """)
     Page<CareerMaterial> search(
             @Param("userId") Long userId,

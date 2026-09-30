@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { changeEmail, changePassword } from '@/api/auth'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 
 const auth = useAuthStore()
 const { t } = useLocale()
@@ -62,8 +63,8 @@ async function finishCredentialChange(action: () => Promise<unknown>) {
     await action()
     await auth.signOut()
     await router.replace({ name: 'login', query: { changed: '1' } })
-  } catch (error: any) {
-    credentialMessage.value = error?.response?.data?.message || t('account.credentialError')
+  } catch (error) {
+    credentialMessage.value = resolveApiError(error, 'account.credentialError')
   } finally {
     changingCredential.value = false
   }

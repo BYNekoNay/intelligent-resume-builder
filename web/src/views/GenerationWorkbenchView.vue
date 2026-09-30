@@ -8,6 +8,7 @@ import { useAiTaskStore } from '@/stores/aiTask'
 import { getConsent, hasJobGenerationConsent, selectMaterialsForJob, type MaterialSelectionRequest } from '@/api/ai'
 import type { CareerMaterialSummary, MaterialType } from '@/api/careerMaterial'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 
 const { t } = useLocale()
 
@@ -191,7 +192,7 @@ async function resumePendingGeneration() {
     }
     await submitGeneration(pending.payload, pending.idempotencyKey)
   } catch (e: any) {
-    error.value = e.response?.data?.message || e.message || t('generationWorkbench.generationFailed')
+    error.value = resolveApiError(e, 'generationWorkbench.generationFailed')
   } finally {
     generating.value = false
   }
@@ -216,7 +217,7 @@ async function startGeneration() {
 
     await submitGeneration(payload, idempotencyKey)
   } catch (e: any) {
-    error.value = e.response?.data?.message || e.message || t('generationWorkbench.generationFailed')
+    error.value = resolveApiError(e, 'generationWorkbench.generationFailed')
   } finally {
     generating.value = false
   }

@@ -51,6 +51,7 @@ class AuthServiceTest {
     @Mock private AiTaskRepository aiTaskRepository;
     @Mock private ExportTaskRepository exportTaskRepository;
     @Mock private AuthSessionRevocationService authSessionRevocationService;
+    @Mock private ActiveUserCache activeUserCache;
 
     private AuthService authService;
 
@@ -62,7 +63,7 @@ class AuthServiceTest {
         authService = new AuthService(
                 userRepository, authSessionRepository, tokenService, passwordEncoder,
                 aiConsentService, aiTaskRepository, exportTaskRepository,
-                authSessionRevocationService);
+                authSessionRevocationService, activeUserCache);
     }
 
     // ---- 注册 ----
@@ -330,6 +331,8 @@ class AuthServiceTest {
         verify(aiTaskRepository).cancelActiveByUserId(eq(1L), anyString(), any(LocalDateTime.class));
         verify(exportTaskRepository).failActiveByUserId(eq(1L), anyString(), any(LocalDateTime.class));
         verify(authSessionRepository).saveAll(List.of());
+        // 无事务上下文（单测直调）:状态缓存立即清除,保证「删号即失效」
+        verify(activeUserCache).evict(1L);
     }
 
     // ---- 辅助方法 ----

@@ -8,6 +8,7 @@ import { listResumesByJd } from '@/api/resume'
 import { useDraftReview } from '@/composables/useDraftReview'
 import { Check, ClipboardCheck, Sparkles } from 'lucide-vue-next'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 import QualitySummaryCard from '@/components/generation/QualitySummaryCard.vue'
 import DraftSectionReview from '@/components/generation/DraftSectionReview.vue'
 import DraftEditDialog from '@/components/generation/DraftEditDialog.vue'
@@ -69,7 +70,7 @@ async function loadTask(id: number) {
     }
     loading.value = false
   } catch (e: any) {
-    error.value = e.response?.data?.message || t('generationConfirm.loadTaskFailed')
+    error.value = resolveApiError(e, 'generationConfirm.loadTaskFailed')
     loading.value = false
   }
 }
@@ -157,7 +158,7 @@ async function doConfirm(targetResumeId: number | null) {
     // Navigate to resume detail
     router.push(`/resumes/${data.resumeId}`)
   } catch (e: any) {
-    error.value = e.response?.data?.message || t('generationConfirm.confirmFailed')
+    error.value = resolveApiError(e, 'generationConfirm.confirmFailed')
   } finally {
     confirming.value = false
   }
@@ -171,7 +172,7 @@ async function handleReject() {
     taskStore.clear()
     router.push('/generate')
   } catch (e: any) {
-    error.value = e.response?.data?.message || t('generationConfirm.operationFailed')
+    error.value = resolveApiError(e, 'generationConfirm.operationFailed')
   } finally {
     rejecting.value = false
   }
@@ -185,7 +186,7 @@ async function handleRetry() {
     loading.value = true
     startPolling(task.value.id)
   } catch (e: any) {
-    error.value = e.response?.data?.message || t('generationConfirm.retryFailed')
+    error.value = resolveApiError(e, 'generationConfirm.retryFailed')
   }
 }
 </script>

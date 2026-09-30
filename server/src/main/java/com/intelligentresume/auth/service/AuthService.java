@@ -20,6 +20,8 @@ import com.intelligentresume.export.repository.ExportTaskRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -48,6 +50,7 @@ public class AuthService {
     private final AiTaskRepository aiTaskRepository;
     private final ExportTaskRepository exportTaskRepository;
     private final AuthSessionRevocationService authSessionRevocationService;
+    private final ActiveUserCache activeUserCache;
 
     public AuthService(UserRepository userRepository,
                        AuthSessionRepository authSessionRepository,
@@ -56,7 +59,8 @@ public class AuthService {
                        AiConsentService aiConsentService,
                        AiTaskRepository aiTaskRepository,
                        ExportTaskRepository exportTaskRepository,
-                       AuthSessionRevocationService authSessionRevocationService) {
+                       AuthSessionRevocationService authSessionRevocationService,
+                       ActiveUserCache activeUserCache) {
         this.userRepository = userRepository;
         this.authSessionRepository = authSessionRepository;
         this.tokenService = tokenService;
@@ -65,6 +69,7 @@ public class AuthService {
         this.aiTaskRepository = aiTaskRepository;
         this.exportTaskRepository = exportTaskRepository;
         this.authSessionRevocationService = authSessionRevocationService;
+        this.activeUserCache = activeUserCache;
     }
 
     @Transactional
@@ -197,6 +202,19 @@ public class AuthService {
         aiTaskRepository.cancelActiveByUserId(userId, "Account deleted", now);
         exportTaskRepository.failActiveByUserId(userId, "Account deleted", now);
         logoutAll(userId);
+        // 「删号即失效」（#6）:用户状态缓存必须在**事务提交后**清除。
+        // 提交前清除存在竞态:并发请求可能回读到未提交的 ACTIVE 并重新缓存,
+        // 令失效延迟一个 TTL。无事务上下文（如单测直调）时立即清除。
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    activeUserCache.evict(userId);
+                }
+            });
+        } else {
+            activeUserCache.evict(userId);
+        }
     }
 
     public CurrentUserResponse currentUser(Long userId) {

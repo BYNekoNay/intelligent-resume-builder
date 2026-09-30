@@ -149,10 +149,10 @@
 8. ✅ #48 AI 任务幂等并发回读：`create` 去外层事务 + `saveAndFlush` 捕获唯一键冲突 → 回读赢家（同指纹返回同一任务/不同指纹 409/非本竞态原样上抛）
 9. ✅ 测试：`AuthConcurrencyIT`（并发注册恰好一个 201+一个 409；并发 refresh 恰好一个签发者+一个 401+族内无双活）；`AiTaskServiceTest` 并发回读三分支；`CareerMaterialControllerIT` 陈旧保存乐观锁用例；`AuthServiceTest` CAS 双分支
 
-**第三批 · 功能与性能（中成本）**
-10. #2 搜索覆盖 contentJson（修复错误零结果；需定匹配策略）
-11. PA-2 JWT 短 TTL 缓存（30–60s，抵消 #6 带来的每请求查库）
-12. #66 错误码映射接入收尾（~6 处视图）
+**第三批 · 功能与性能（中成本）— ✅ 已执行（2026-09-30）**
+10. ✅ #2 搜索覆盖 contentJson：`CareerMaterial` 增加只读 `@Formula("content_json")` 文本投影（不参与写入与 schema 校验；避免第二个 `@Column` 映射触发 `ddl-auto=validate` 对 String↔JSON 的类型比对），`CareerMaterialRepository.search` 增加 `lower(contentJsonText) LIKE` 子句。匹配策略实测定案：依赖 JSON→字符串隐式转换（`lower(json_col)`），H2 2.2.224 与 MySQL 5.7.24 双端探针均可用；`CAST(... AS CHARACTER VARYING)` 仅 H2 可用、`CAST(... AS CHAR)` 仅 MySQL 可用，故不采用 CAST。新增 IT 用例：命中词只在 contentJson（标题/原文均不含）→ 精确命中、小写查询大小写不敏感、跨用户不串号
+11. ✅ PA-2 JWT 用户状态短 TTL 缓存：新增 `ActiveUserCache`（`app.jwt.active-user-cache-ttl-seconds` 默认 30s；负结果同样缓存；容量兜底惰性清理），`JwtAuthenticationFilter` 改走缓存。删号路径（`AuthService.deleteAccount`）在**事务提交后** evict——提交前清除存在「并发请求回读未提交的 ACTIVE 并重新缓存」竞态，会让 #6 的失效延迟一个 TTL。取舍口径：非删号路径（直改库/多实例）的状态变更最迟 TTL 后生效
+12. ✅ #66 错误码映射收尾：6 个视图 13 处服务端 message 直透全部改为 `resolveApiError`（GenerationWorkbench×2、GenerationConfirm×4、MaterialSelectionConfirm×4、MaterialResumeGeneration×1、Account 凭证变更×1、ResumeEditor 保存×1）；`web/src` 已无 `data?.message` 直透残留（grep 复核）
 
 **需产品/环境决策后再定**
 - #26 ai_task 留存与清理策略（保留多久、是否提供用户删除入口）
@@ -166,4 +166,5 @@
 | --- | --- |
 | 2026-09-30 | 初版：4 个并行 agent 分区间核对 101 条 finding + Ranked Ideas + 新增核对表；人工抽查 5 处关键证据；产出「仍存在」聚类清单与三批推荐 |
 | 2026-09-30 | **第一批（隐私与配置对齐）执行完成**：#68 日志 userId 移除 + `LogPrivacyGateTest` 静态门禁（扫描全部日志调用，防复发）；#71 consent 排序加 `id` tie-break；#60 租约 180→660s（> 链总预算 600s）+ 心跳池 2 线程；#49 四处入口幂等键契约统一（AiTask/JobMaterialSelection/Communication/Interview）。回归：全量 **740 测试 0 失败**（含新门禁），新增幂等键契约 IT 用例定向通过 |
-| 2026-09-30 | **第二批（并发健壮性）执行完成**：#46 完整性/并发冲突统一 409（两个全局 handler，日志不记异常 message）；#45 refresh 轮换 CAS 原子化（不用行锁——避免与 REQUIRES_NEW 撤销服务自锁），并发刷新单赢家 + 败者撤族 401；#67 职业资料 `@Version` + V27 迁移；#48 AI 任务幂等并发回读（三分支）。新增 `AuthConcurrencyIT`（真并发双场景）与 5 个分支用例，回归：全量 **748 测试 0 失败** |
+| 2026-09-30 | **第二批（并发健壮性）执行完成**：#46 完整性/并发冲突统一 409（两个全局 handler，日志不记异常 message）；#45 refresh 轮换 CAS 原子化（不用行锁——避免与 REQUIRES_NEW 撤销服务自锁），并发刷新单赢家 + 败者撤族 401；#67 职业资料 `@Version` + V27 迁移；#48 AI 任务幂等并发回读（三分支）。新增 `AuthConcurrencyIT`（真并发双场景）与 5 个分支用例，回归：全量 **748 测试 0 失败**；CI + Functional Regression 双绿 |
+| 2026-09-30 | **第三批（功能与性能）执行完成**：#2 搜索覆盖 contentJson（`@Formula` 只读文本投影 + `lower(contentJsonText) LIKE`；H2 2.2.224 与 MySQL 5.7.24 双端探针定案匹配策略；新增 IT 用例）；PA-2 `ActiveUserCache` 30s 短 TTL（删号路径事务提交后清除，保住 #6「删号即失效」；新增 4 个可变时钟单测 + AuthServiceTest 断言）；#66 六个视图 13 处错误码映射收尾（web build 通过）。回归：全量 **753 测试 0 失败**（新增 5），web `npm run build` 通过 |

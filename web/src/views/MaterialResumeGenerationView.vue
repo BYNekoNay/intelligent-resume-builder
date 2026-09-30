@@ -7,6 +7,7 @@ import { generateMaterialAssociation, generateResumeFromAssociation, generateRes
 import { AiTaskTimeoutError } from '@/api/ai'
 import { createResume } from '@/api/resume'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 
 const { t } = useLocale()
 const raw = ref(''); const result = ref<MaterialGenerationResponse | null>(null); const association = ref<MaterialAssociationResponse | null>(null); const error = ref(''); const consentRequired = ref(false); const loading = ref(false); const associating = ref(false); const title = ref('From raw materials'); const saving = ref(false)
@@ -68,7 +69,7 @@ async function createDraft() {
 
 function generationError(cause: unknown, fallbackKey: 'errorGenerate' | 'errorAssociation') {
   if (!isAxiosError(cause) || !cause.response) return t('materialGeneration.errorNetwork')
-  return cause.response.data?.message || t(`materialGeneration.${fallbackKey}`)
+  return resolveApiError(cause, `materialGeneration.${fallbackKey}`)
 }
 
 function showGenerationError(cause: unknown, fallbackKey: 'errorGenerate' | 'errorAssociation') {

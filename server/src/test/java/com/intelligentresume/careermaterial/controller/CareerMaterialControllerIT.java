@@ -476,4 +476,63 @@ class CareerMaterialControllerIT {
         assertThrows(OptimisticLockingFailureException.class,
                 () -> materialRepository.saveAndFlush(stale));
     }
+
+    // ---- 搜索覆盖 contentJson（#2） ----
+
+    @Test
+    @Order(15)
+    @DisplayName("搜索覆盖 contentJson：命中词只在结构化字段时不再零结果，且大小写不敏感、不跨用户")
+    void search_matchesContentJsonStructuredFields() throws Exception {
+        String searchToken = registerAndGetToken("cm_searchjson", "cm_searchjson@example.com", "correcthorse");
+
+        // 命中词只出现在 contentJson（标题与原文均不含）
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + searchToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "materialType": "SKILL",
+                                  "title": "结构化搜索命中",
+                                  "contentJson": {"name": "Kubernetes"},
+                                  "sourceText": "集群调度与滚动发布经验"
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        // 反例：同用户另一条，标题/原文/结构化字段都不含该词
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + searchToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "materialType": "SKILL",
+                                  "title": "结构化搜索反例",
+                                  "contentJson": {"name": "Docker"},
+                                  "sourceText": "容器镜像构建经验"
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        // 其他用户的同词资料不得因加入 contentJson 匹配而串号
+        String otherToken = registerAndGetToken("cm_searchother", "cm_searchother@example.com", "correcthorse");
+        mockMvc.perform(post("/api/career-materials")
+                        .header("Authorization", "Bearer " + otherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "materialType": "SKILL",
+                                  "title": "他人结构化资料",
+                                  "contentJson": {"name": "Kubernetes"}
+                                }
+                                """))
+                .andExpect(status().isCreated());
+
+        // 小写查询验证 lower() 对 JSON 文本同样生效
+        mockMvc.perform(get("/api/career-materials/search")
+                        .param("q", "kubernetes")
+                        .header("Authorization", "Bearer " + searchToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].title").value("结构化搜索命中"));
+    }
 }
