@@ -564,7 +564,8 @@ test('keeps application evidence visible while tracking a pipeline stage', async
   await expect(ticket).toHaveCount(1)
   const stage = ticket.getByLabel('投递阶段')
   await stage.selectOption('INTERVIEWING')
-  await expect.poll(() => statusPayload).toEqual({ status: 'INTERVIEWING', version: 2, feedbackText: 'Recruiter replied' })
+  // 未展开备注面板 → 不发送 feedbackText（服务端「未发送即保留」，避免用陈旧值覆盖备注）
+  await expect.poll(() => statusPayload).toEqual({ status: 'INTERVIEWING', version: 2 })
   await expect(page.locator('.lane-interviewing .application-ticket')).toHaveCount(1)
 
   const search = page.locator('.pipeline-search input')

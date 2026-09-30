@@ -118,7 +118,11 @@ public class ApplicationService {
             record.setStageEnteredAt(LocalDateTime.now());
         }
         record.setStatus(request.status());
-        record.setFeedbackText(request.feedbackText());
+        // PATCH 语义：feedbackText 缺席或 null = 不改动备注（否则「拖拽改状态」这类不关心备注的
+        // 调用会把已有备注清空）；显式空串（或纯空白）= 清空备注。
+        if (request.feedbackText() != null) {
+            record.setFeedbackText(request.feedbackText().isBlank() ? null : request.feedbackText());
+        }
         return response(repository.saveAndFlush(record));
     }
 

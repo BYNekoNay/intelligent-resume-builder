@@ -22,7 +22,8 @@ export interface ApplicationRecord {
 /**
  * 投递记录列表摘要（#50）：草稿长文本不进列表（展开/编辑时按需走详情），
  * `draftCount` 支撑卡片上的「n/3」标记；`feedbackText` 仍在列表里——
- * 状态迁移接口按请求值覆盖备注，拖拽改状态时必须携带现值。
+ * 列表页客户端搜索会匹配备注文本，展开面板的备注框以它为初值。
+ * 状态迁移接口为「未发送即保留」语义，无需为防清空而回传现值。
  */
 export interface ApplicationSummary {
   id: number

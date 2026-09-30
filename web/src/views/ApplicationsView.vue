@@ -102,7 +102,8 @@ async function load() {
     ])
     records.value = listResponse.data.data
     stats.value = statsResponse.data.data
-    feedbackDraft.value = Object.fromEntries(records.value.map(record => [record.id, record.feedbackText ?? '']))
+    // 备注草稿不预填：未编辑过的记录在改状态时省略 feedbackText，由服务端保留现值
+    // （避免把别处更新的备注用陈旧副本覆盖）。展开面板的初值直接读列表里的 feedbackText。
   } catch {
     error.value = t('applications.loadError')
   } finally {
@@ -313,7 +314,7 @@ async function changeStatus(record: ApplicationSummary, status: ApplicationStatu
       record.id,
       status,
       record.version,
-      feedbackDraft.value[record.id] ?? record.feedbackText ?? undefined,
+      feedbackDraft.value[record.id],
     )).data.data
     Object.assign(record, toSummary(updated))
     feedbackDraft.value[record.id] = record.feedbackText ?? ''
@@ -369,7 +370,7 @@ async function onLaneDrop(status: ApplicationStatus, event: DragEvent) {
       record.id,
       status,
       record.version,
-      feedbackDraft.value[record.id] ?? record.feedbackText ?? undefined,
+      feedbackDraft.value[record.id],
     )).data.data
     records.value = records.value.map(item => item.id === updated.id ? toSummary(updated) : item)
     feedbackDraft.value[updated.id] = updated.feedbackText ?? ''

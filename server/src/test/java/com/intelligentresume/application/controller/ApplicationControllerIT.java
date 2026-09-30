@@ -111,6 +111,33 @@ class ApplicationControllerIT {
                         .content("{\"status\":\"DRAFT\",\"version\":2}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(40901));
+
+        // PATCH 备注语义：发送即更新；缺席/null 保留现值（不关心备注的调用不再清空）；
+        // 显式空串 = 清空（归一为 null，响应省略该字段）
+        mockMvc.perform(patch("/api/applications/" + applicationId + "/status")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"APPLIED\",\"version\":2,\"feedbackText\":\"Recruiter replied\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.feedbackText").value("Recruiter replied"))
+                .andExpect(jsonPath("$.data.version").value(3));
+
+        mockMvc.perform(patch("/api/applications/" + applicationId + "/status")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"APPLIED\",\"version\":3}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.feedbackText").value("Recruiter replied"))
+                // 无任何变更的 PATCH 不写库（dirty checking），乐观锁版本保持 3
+                .andExpect(jsonPath("$.data.version").value(3));
+
+        mockMvc.perform(patch("/api/applications/" + applicationId + "/status")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"APPLIED\",\"version\":3,\"feedbackText\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.feedbackText").doesNotExist())
+                .andExpect(jsonPath("$.data.version").value(4));
     }
 
     @Test
