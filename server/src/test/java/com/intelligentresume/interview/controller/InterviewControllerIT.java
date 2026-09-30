@@ -141,7 +141,7 @@ class InterviewControllerIT {
             executor.shutdownNow();
         }
 
-        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(concurrentSessionId);
+        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(concurrentSessionId);
         Assertions.assertEquals(2, records.size());
         Assertions.assertEquals(List.of(1, 2), records.stream().map(InterviewRecord::getRoundNo).sorted().toList());
     }

@@ -69,7 +69,7 @@ class InterviewAssetControllerIT {
                 .andExpect(status().isOk()).andReturn();
 
         // 从数据库查询最新记录
-        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(interviewId);
+        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(interviewId);
         Assertions.assertFalse(records.isEmpty(), "应至少有一条回答记录");
         recordId = records.get(0).getId();
     }

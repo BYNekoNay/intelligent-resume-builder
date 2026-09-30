@@ -46,7 +46,7 @@ public class InterviewStateAssembler {
 
         // 自动加载最近一轮评估
         if (lastEval == null && count > 0) {
-            List<InterviewRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(session.getId());
+            List<InterviewRecord> records = recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(session.getId());
             if (!records.isEmpty()) {
                 lastEval = buildLastEvaluation(records.get(records.size() - 1));
             }

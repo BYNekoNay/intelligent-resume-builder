@@ -70,7 +70,7 @@ public class InterviewReportService {
             throw new BusinessException(ErrorCode.CONFLICT, "面试未完成");
         }
 
-        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(session.getId());
+        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(session.getId());
 
         if (records.isEmpty()) {
             return new InterviewReportResponse(0, "尚未完成任何回答", List.of(), List.of(), List.of(), List.of(),

@@ -113,7 +113,7 @@ class InterviewPromptContextAssemblerTest {
     @DisplayName("评估上下文：包含进度、历史、当前问答与不可信标记")
     void buildEvaluationContext_includesAllSections() {
         when(recordRepository.countBySessionId(1L)).thenReturn(1L);
-        when(recordRepository.findBySessionIdOrderByCreatedAtAsc(1L)).thenReturn(List.of());
+        when(recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(1L)).thenReturn(List.of());
         InterviewSession session = session(10L, InterviewSourceType.EXTERNAL_RESUME, null, "EXT_TEXT");
 
         String ctx = assembler.buildEvaluationContext(session, "ANSWER", USER_ID);

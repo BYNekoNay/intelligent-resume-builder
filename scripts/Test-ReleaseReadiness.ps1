@@ -20,7 +20,10 @@ function Invoke-CheckedCommand {
 
 Invoke-CheckedCommand -WorkingDirectory $root -Command 'git diff --check'
 Invoke-CheckedCommand -WorkingDirectory (Join-Path $root 'deploy') -Command 'docker compose --env-file production.env.example -f docker-compose.prod.yml config --quiet'
-Invoke-CheckedCommand -WorkingDirectory (Join-Path $root 'pdf-service') -Command 'npm run check; npm test'
+# 分两步执行：复合命令（`npm run check; npm test`）只回传末位退出码，
+# 前一步失败会被静默掩盖（ideation #21）。
+Invoke-CheckedCommand -WorkingDirectory (Join-Path $root 'pdf-service') -Command 'npm run check'
+Invoke-CheckedCommand -WorkingDirectory (Join-Path $root 'pdf-service') -Command 'npm test'
 
 if (-not $SkipBackendTests) {
     Invoke-CheckedCommand -WorkingDirectory (Join-Path $root 'server') -Command 'mvn -q test'

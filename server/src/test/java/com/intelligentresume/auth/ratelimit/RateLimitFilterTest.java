@@ -161,6 +161,31 @@ class RateLimitFilterTest {
         assertEquals(200, respB.getStatus(), "IP-B 不应受 IP-A 影响");
     }
 
+    @Test
+    @DisplayName("桶数达到 maxBuckets 后新 key 直接被拒（#43：硬上限,防无界增长）")
+    void bucketCapacity_rejectsNewKeys() throws Exception {
+        // maxBuckets=2：两个 IP 占满容量后，第三个新 key 无法再建桶
+        RateLimitFilter capped = new RateLimitFilter(2, 5, 30, 6, 15, false, 2, objectMapper);
+        FilterChain chain = mock(FilterChain.class);
+
+        assertEquals(200, statusOf(capped, "10.0.0.1", chain), "第 1 个 IP 首次请求应放行");
+        assertEquals(200, statusOf(capped, "10.0.0.2", chain), "第 2 个 IP 首次请求应放行");
+
+        MockHttpServletResponse cappedResp = new MockHttpServletResponse();
+        capped.doFilter(loginRequest("10.0.0.3"), cappedResp, chain);
+        assertEquals(429, cappedResp.getStatus(), "新 key 在容量耗尽后应被拒（fail-closed）");
+        assertTrue(cappedResp.getContentAsString().contains("42901"));
+
+        // 已有分桶不受硬上限影响，在其配额内继续放行
+        assertEquals(200, statusOf(capped, "10.0.0.1", chain), "已有分桶不应受影响");
+    }
+
+    private int statusOf(RateLimitFilter target, String ip, FilterChain chain) throws Exception {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        target.doFilter(loginRequest(ip), response, chain);
+        return response.getStatus();
+    }
+
     private MockHttpServletRequest loginRequest(String ip) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/login");
         request.setRemoteAddr(ip);

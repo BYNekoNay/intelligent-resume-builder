@@ -9,7 +9,12 @@ import java.util.List;
 import java.util.Optional;
 
 public interface InterviewRecordRepository extends JpaRepository<InterviewRecord, Long> {
-    List<InterviewRecord> findBySessionIdOrderByCreatedAtAsc(Long sessionId);
+    /**
+     * 按轮次升序返回（#75）：轮次是面试的领域顺序，且 V18 的
+     * {@code uq_interview_record_session_round(session_id, round_no)} 保证其唯一；
+     * 以 createdAt 为主序在同毫秒写入时不稳定。{@code id} 仅作防御性次序键。
+     */
+    List<InterviewRecord> findBySessionIdOrderByRoundNoAscIdAsc(Long sessionId);
 
     interface ScoreProjection {
         Long getSessionId();
@@ -20,12 +25,11 @@ public interface InterviewRecordRepository extends JpaRepository<InterviewRecord
             SELECT r.sessionId AS sessionId, r.roundScore AS roundScore
             FROM InterviewRecord r
             WHERE r.sessionId IN :sessionIds
-            ORDER BY r.createdAt ASC
+            ORDER BY r.roundNo ASC, r.id ASC
             """)
-    List<ScoreProjection> findScoresBySessionIdInOrderByCreatedAtAsc(
+    List<ScoreProjection> findScoresBySessionIdInOrderByRoundNoAscIdAsc(
             @Param("sessionIds") Collection<Long> sessionIds);
 
-    List<InterviewRecord> findBySessionIdInOrderByCreatedAtAsc(Collection<Long> sessionIds);
     long countBySessionId(Long sessionId);
     @Query("SELECT r FROM InterviewRecord r, InterviewSession s WHERE r.id = :id AND r.sessionId = s.id AND s.userId = :userId")
     Optional<InterviewRecord> findOwned(@Param("id") Long id, @Param("userId") Long userId);

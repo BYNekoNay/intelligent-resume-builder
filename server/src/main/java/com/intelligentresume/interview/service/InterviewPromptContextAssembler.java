@@ -83,7 +83,7 @@ public class InterviewPromptContextAssembler {
                 .append("maxQuestionCount: ").append(session.getMaxQuestionCount()).append("\n\n");
 
         // 历史问答
-        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByCreatedAtAsc(session.getId());
+        List<InterviewRecord> records = recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(session.getId());
         List<Map<String, Object>> recordMaps = new ArrayList<>();
         for (InterviewRecord r : records) {
             Map<String, Object> m = new LinkedHashMap<>();

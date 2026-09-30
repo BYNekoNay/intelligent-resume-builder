@@ -86,7 +86,7 @@ class InterviewStateAssemblerTest {
     @DisplayName("buildStateResponse：统计完成数并自动加载最近评估")
     void buildStateResponse_countsAndLoadsLastEvaluation() {
         when(recordRepository.countBySessionId(1L)).thenReturn(2L);
-        when(recordRepository.findBySessionIdOrderByCreatedAtAsc(1L))
+        when(recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(1L))
                 .thenReturn(List.of(record(11L, 1, 60, "s1"), record(12L, 2, 80, "s2")));
         InterviewSession session = session(1L, InterviewStatus.AWAITING_ANSWER, 2, 6);
 

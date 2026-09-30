@@ -46,7 +46,7 @@ public class InterviewHistoryService {
         }
         // 摘要只需要计数和分数；投影避免加载题目、答案和反馈 JSON 等大字段。
         Map<Long, IntSummaryStatistics> scoresBySession = recordRepository
-                .findScoresBySessionIdInOrderByCreatedAtAsc(sessions.stream().map(InterviewSession::getId).toList())
+                .findScoresBySessionIdInOrderByRoundNoAscIdAsc(sessions.stream().map(InterviewSession::getId).toList())
                 .stream()
                 .collect(Collectors.groupingBy(InterviewRecordRepository.ScoreProjection::getSessionId,
                         Collectors.summarizingInt(InterviewRecordRepository.ScoreProjection::getRoundScore)));

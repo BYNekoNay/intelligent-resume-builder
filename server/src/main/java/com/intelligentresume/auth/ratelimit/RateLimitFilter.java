@@ -29,6 +29,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  *       /api/jobs/{id}/parse（JD 本地文本解析,阈值宽松）</li>
  * </ul>
  * 不引入 Redis(13 §2 禁用);进程重启会让计数清零,这是 MVP 的取舍。
+ * {@code maxBuckets} 是硬上限(#43):达到后新分桶直接 429(fail-closed),
+ * 防止海量唯一 IP 把分桶 map 顶到无界增长;已有分桶不受影响。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
@@ -77,7 +79,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String key = path + "|" + ip;
         long currentMinute = System.currentTimeMillis() / 60_000L;
         evictStaleBuckets(currentMinute);
-        Bucket bucket = buckets.computeIfAbsent(key, k -> new Bucket());
+        Bucket bucket = buckets.get(key);
+        if (bucket == null) {
+            // 硬上限（#43）：达到 maxBuckets 且无可清理的过期桶时拒绝新 key（fail-closed），
+            // 避免海量唯一 IP 在同一分钟内把 map 顶成无界增长。
+            // 并发下 size 检查与写入之间有微小竞态，最多超出并发线程数，属可接受上界。
+            if (buckets.size() >= maxBuckets) {
+                writeTooManyRequests(response, request);
+                return;
+            }
+            bucket = buckets.computeIfAbsent(key, k -> new Bucket());
+        }
         boolean allowed = bucket.allow(limit, currentMinute);
         if (!allowed) {
             writeTooManyRequests(response, request);

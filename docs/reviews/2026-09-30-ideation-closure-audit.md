@@ -154,6 +154,12 @@
 11. ✅ PA-2 JWT 用户状态短 TTL 缓存：新增 `ActiveUserCache`（`app.jwt.active-user-cache-ttl-seconds` 默认 30s；负结果同样缓存；容量兜底惰性清理），`JwtAuthenticationFilter` 改走缓存。删号路径（`AuthService.deleteAccount`）在**事务提交后** evict——提交前清除存在「并发请求回读未提交的 ACTIVE 并重新缓存」竞态，会让 #6 的失效延迟一个 TTL。取舍口径：非删号路径（直改库/多实例）的状态变更最迟 TTL 后生效
 12. ✅ #66 错误码映射收尾：6 个视图 13 处服务端 message 直透全部改为 `resolveApiError`（GenerationWorkbench×2、GenerationConfirm×4、MaterialSelectionConfirm×4、MaterialResumeGeneration×1、Account 凭证变更×1、ResumeEditor 保存×1）；`web/src` 已无 `data?.message` 直透残留（grep 复核）
 
+**第四批 · 小项收口（低成本，1 个提交）— ✅ 已执行（2026-09-30）**
+13. ✅ #75 面试记录排序确定性：仓储排序由 `created_at` 改为 `round_no ASC, id ASC`（V18 的 `uq_interview_record_session_round` 保证轮次唯一；`created_at` 同毫秒时顺序无契约）。同时删除未被调用的 `findBySessionIdInOrderByCreatedAtAsc`；新增 `InterviewRecordOrderingIT`（故意倒序写入验证按轮次返回）
+14. ✅ #72 搜索词服务端长度上限：`CareerMaterialService.normalizeQuery` 超 100 字符拒绝（40001），避免长词进入 title/sourceText/contentJson 的无索引包含扫描
+15. ✅ #43 限流分桶硬上限：`RateLimitFilter` 在 maxBuckets 耗尽且无可清理过期桶时，新 key 直接 429（fail-closed），已有分桶不受影响；新增单测
+16. ✅ #21 发布就绪脚本退出码：`Test-ReleaseReadiness.ps1` 的 `npm run check; npm test` 拆为两条 `Invoke-CheckedCommand`，前一步失败不再被末位退出码掩盖
+
 **需产品/环境决策后再定**
 - #26 ai_task 留存与清理策略（保留多久、是否提供用户删除入口）
 - #7 账号数据导出/删除前端入口（隐私治理口径）
@@ -168,3 +174,4 @@
 | 2026-09-30 | **第一批（隐私与配置对齐）执行完成**：#68 日志 userId 移除 + `LogPrivacyGateTest` 静态门禁（扫描全部日志调用，防复发）；#71 consent 排序加 `id` tie-break；#60 租约 180→660s（> 链总预算 600s）+ 心跳池 2 线程；#49 四处入口幂等键契约统一（AiTask/JobMaterialSelection/Communication/Interview）。回归：全量 **740 测试 0 失败**（含新门禁），新增幂等键契约 IT 用例定向通过 |
 | 2026-09-30 | **第二批（并发健壮性）执行完成**：#46 完整性/并发冲突统一 409（两个全局 handler，日志不记异常 message）；#45 refresh 轮换 CAS 原子化（不用行锁——避免与 REQUIRES_NEW 撤销服务自锁），并发刷新单赢家 + 败者撤族 401；#67 职业资料 `@Version` + V27 迁移；#48 AI 任务幂等并发回读（三分支）。新增 `AuthConcurrencyIT`（真并发双场景）与 5 个分支用例，回归：全量 **748 测试 0 失败**；CI + Functional Regression 双绿 |
 | 2026-09-30 | **第三批（功能与性能）执行完成**：#2 搜索覆盖 contentJson（`@Formula` 只读文本投影 + `lower(contentJsonText) LIKE`；H2 2.2.224 与 MySQL 5.7.24 双端探针定案匹配策略；新增 IT 用例）；PA-2 `ActiveUserCache` 30s 短 TTL（删号路径事务提交后清除，保住 #6「删号即失效」；新增 4 个可变时钟单测 + AuthServiceTest 断言）；#66 六个视图 13 处错误码映射收尾（web build 通过）。回归：全量 **753 测试 0 失败**（新增 5），web `npm run build` 通过 |
+| 2026-09-30 | **第四批（小项收口）执行完成**：#75 面试记录排序改 `round_no ASC, id ASC`（新增 `InterviewRecordOrderingIT` 倒序写入断言 + 评分投影 JPQL 执行验证；删除未调用的旧排序方法）；#72 搜索词 100 字符上限（40001）；#43 限流分桶硬上限（容量耗尽新 key fail-closed 429 + 单测）；#21 发布就绪脚本复合命令拆分（仓库内已无其它复合写法）。回归：全量 **756 测试 0 失败**（新增 3） |

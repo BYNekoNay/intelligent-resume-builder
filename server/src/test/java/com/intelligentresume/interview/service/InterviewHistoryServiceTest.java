@@ -78,7 +78,7 @@ class InterviewHistoryServiceTest {
         when(sessionRepository.findCompletedByUserId(USER_ID, InterviewStatus.COMPLETED, null))
                 .thenReturn(List.of(completed));
         var scores = List.of(score(1L, 60), score(1L, 80), score(1L, 100));
-        when(recordRepository.findScoresBySessionIdInOrderByCreatedAtAsc(List.of(1L))).thenReturn(scores);
+        when(recordRepository.findScoresBySessionIdInOrderByRoundNoAscIdAsc(List.of(1L))).thenReturn(scores);
 
         var result = service.list(USER_ID, null);
 
@@ -91,7 +91,7 @@ class InterviewHistoryServiceTest {
         // 仓库查询参数必须锁定 COMPLETED，保证不列出进行中的会话
         verify(sessionRepository).findCompletedByUserId(eq(USER_ID), eq(InterviewStatus.COMPLETED), eq(null));
         // 使用一次批量查询，而非逐会话 N 次查询
-        verify(recordRepository).findScoresBySessionIdInOrderByCreatedAtAsc(List.of(1L));
+        verify(recordRepository).findScoresBySessionIdInOrderByRoundNoAscIdAsc(List.of(1L));
     }
 
     @Test
@@ -112,7 +112,7 @@ class InterviewHistoryServiceTest {
         when(sessionRepository.findCompletedByUserId(USER_ID, InterviewStatus.COMPLETED, JOB_ID))
                 .thenReturn(List.of(completedSession(2L)));
         var scores = List.of(score(2L, 50));
-        when(recordRepository.findScoresBySessionIdInOrderByCreatedAtAsc(List.of(2L))).thenReturn(scores);
+        when(recordRepository.findScoresBySessionIdInOrderByRoundNoAscIdAsc(List.of(2L))).thenReturn(scores);
 
         var result = service.list(USER_ID, JOB_ID);
 

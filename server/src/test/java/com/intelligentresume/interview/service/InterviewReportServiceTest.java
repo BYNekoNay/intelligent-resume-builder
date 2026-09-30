@@ -108,7 +108,7 @@ class InterviewReportServiceTest {
         session.setCurrentQuestion("Q1");
         when(sessionRepository.findByIdAndUserIdForUpdate(1L, 7L)).thenReturn(Optional.of(session));
         when(recordRepository.countBySessionId(1L)).thenReturn(2L);
-        when(recordRepository.findBySessionIdOrderByCreatedAtAsc(1L))
+        when(recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(1L))
                 .thenReturn(List.of(record(1, 60, EvaluationSource.AI, "s1"), record(2, 80, EvaluationSource.AI, "s2")));
 
         InterviewStateResponse response = service.finish(1L, 7L);
@@ -138,7 +138,7 @@ class InterviewReportServiceTest {
     void report_emptyRecords() {
         when(sessionRepository.findByIdAndUserId(1L, 7L))
                 .thenReturn(Optional.of(session(1L, InterviewStatus.COMPLETED, 6)));
-        when(recordRepository.findBySessionIdOrderByCreatedAtAsc(1L)).thenReturn(List.of());
+        when(recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(1L)).thenReturn(List.of());
 
         InterviewReportResponse response = service.report(1L, 7L);
 
@@ -152,7 +152,7 @@ class InterviewReportServiceTest {
         InterviewSession session = session(1L, InterviewStatus.COMPLETED, 6);
         session.setCompletionReason(CompletionReason.USER_FINISHED);
         when(sessionRepository.findByIdAndUserId(1L, 7L)).thenReturn(Optional.of(session));
-        when(recordRepository.findBySessionIdOrderByCreatedAtAsc(1L)).thenReturn(List.of(
+        when(recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(1L)).thenReturn(List.of(
                 record(1, 60, EvaluationSource.AI, "same"),
                 record(2, 80, EvaluationSource.RULE, "same"),
                 record(3, 40, EvaluationSource.RULE, "other")
@@ -188,7 +188,7 @@ class InterviewReportServiceTest {
                 "improvements", List.of("i1"),
                 "suggestedAnswer", "建议答案1"));
         InterviewRecord r2 = record(2, 80, EvaluationSource.RULE, "s2");
-        when(recordRepository.findBySessionIdOrderByCreatedAtAsc(1L)).thenReturn(List.of(r1, r2));
+        when(recordRepository.findBySessionIdOrderByRoundNoAscIdAsc(1L)).thenReturn(List.of(r1, r2));
 
         InterviewReportResponse response = service.report(1L, 7L);
 

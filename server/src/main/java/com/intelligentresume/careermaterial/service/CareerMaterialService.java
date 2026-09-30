@@ -41,6 +41,11 @@ public class CareerMaterialService {
     private static final Logger log = LoggerFactory.getLogger(CareerMaterialService.class);
 
     private static final int MAX_SEARCH_PAGE_SIZE = 100;
+    /**
+     * 搜索词长度上限（ideation #72）：搜索对 title/sourceText/contentJson 做
+     * 无索引包含扫描，长词会线性放大每次请求的字符串处理与扫描成本。
+     */
+    private static final int MAX_SEARCH_QUERY_LENGTH = 100;
     private static final int EXCERPT_MAX_LENGTH = 180;
     private static final Map<String, Sort> SEARCH_SORTS = Map.of(
             "updatedAt,desc", Sort.by(Sort.Direction.DESC, "updatedAt"),
@@ -325,7 +330,11 @@ public class CareerMaterialService {
         if (query == null || query.isBlank()) {
             return null;
         }
-        return query.trim()
+        String trimmed = query.trim();
+        if (trimmed.length() > MAX_SEARCH_QUERY_LENGTH) {
+            throw validation("query must be at most " + MAX_SEARCH_QUERY_LENGTH + " characters");
+        }
+        return trimmed
                 .replace("\\", "\\\\")
                 .replace("%", "\\%")
                 .replace("_", "\\_");

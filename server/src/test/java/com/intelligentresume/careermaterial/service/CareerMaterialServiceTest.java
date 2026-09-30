@@ -176,6 +176,10 @@ class CareerMaterialServiceTest {
         assertEquals(ErrorCode.VALIDATION, assertThrows(BusinessException.class,
                 () -> service.search(100L, null, null, null, 0, 25, "title,desc"))
                 .getErrorCode());
+        // #72：搜索词长度上限（100 字符后拒绝，不再把长词带进无索引扫描）
+        assertEquals(ErrorCode.VALIDATION, assertThrows(BusinessException.class,
+                () -> service.search(100L, "x".repeat(101), null, null, 0, 25, "updatedAt,desc"))
+                .getErrorCode());
         verifyNoInteractions(repository);
     }
 
