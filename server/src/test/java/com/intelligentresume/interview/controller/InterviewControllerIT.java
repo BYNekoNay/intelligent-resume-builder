@@ -2,6 +2,8 @@ package com.intelligentresume.interview.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.interview.domain.AiAttemptOperationType;
+import com.intelligentresume.interview.domain.InterviewAiAttempt;
 import com.intelligentresume.interview.domain.InterviewRecord;
 import com.intelligentresume.interview.repository.InterviewAiAttemptRepository;
 import com.intelligentresume.interview.repository.InterviewRecordRepository;
@@ -601,6 +603,56 @@ class InterviewControllerIT {
                 .path("data").path("id").asLong();
         Assertions.assertNotEquals(firstTaskId, freshTaskId,
                 "a fresh idempotency key must create a new follow-up task");
+    }
+
+    @Test @Order(24)
+    void aiAnswerReplayReturnsSameAttemptWithoutAnotherRound() throws Exception {
+        grantAiConsent(tokenA);
+        long sid = startSession();
+        // 与 Order 22 相同的确定性配方：先用规则模式取得待回答问题，再切回 AI 模式
+        mockMvc.perform(post("/api/interviews/" + sid + "/continue-with-rules")
+                        .header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk());
+        jdbcTemplate.update("update interview_session set execution_mode = 'AI', status = 'AWAITING_ANSWER' where id = ?", sid);
+
+        String key = UUID.randomUUID().toString();
+        String answer = "Situation: a release was unstable. Task: reduce failures. Action: I added canary checks. Result: failures fell by 40 percent.";
+        String body = objectMapper.writeValueAsString(Map.of("answer", answer));
+
+        // 首次 AI 回答（测试环境无 API Key，评估可能立即失败，但不影响幂等契约）
+        mockMvc.perform(post("/api/interviews/" + sid + "/answer")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        List<InterviewAiAttempt> attempts = attemptRepository.findAllBySessionId(sid);
+        long answerAttemptId = attempts.stream()
+                .filter(attempt -> attempt.getOperationType() == AiAttemptOperationType.ANSWER_EVALUATION)
+                .map(InterviewAiAttempt::getId).findFirst().orElseThrow();
+
+        // 同键同答重放：命中既有 attempt，不新增评估尝试、不产生新一轮
+        mockMvc.perform(post("/api/interviews/" + sid + "/answer")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+        List<InterviewAiAttempt> afterReplay = attemptRepository.findAllBySessionId(sid);
+        Assertions.assertEquals(attempts.size(), afterReplay.size(), "AI 模式重放不得新增 attempt");
+        Assertions.assertEquals(answerAttemptId, afterReplay.stream()
+                .filter(attempt -> attempt.getOperationType() == AiAttemptOperationType.ANSWER_EVALUATION)
+                .map(InterviewAiAttempt::getId).findFirst().orElseThrow());
+
+        // 同键不同答：幂等键冲突 → 409 + 40901，且不新增 attempt
+        mockMvc.perform(post("/api/interviews/" + sid + "/answer")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("answer", answer + " 追加一句不同的回答内容。"))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(40901));
+        Assertions.assertEquals(attempts.size(), attemptRepository.findAllBySessionId(sid).size(),
+                "冲突重放也不得新增 attempt");
     }
 
     private void grantAiConsent(String token) throws Exception {

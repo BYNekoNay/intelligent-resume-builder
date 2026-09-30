@@ -83,6 +83,32 @@ class ConfirmationControllerIT {
                 .andExpect(jsonPath("$.code").value(0));
     }
 
+    @Test
+    void rejectsStaleConfirmationWithOptimisticLockConflict() throws Exception {
+        TestUser user = register("stale_confirm_user");
+        AiTask task = taskRepository.saveAndFlush(completedGenerationTask(user.id(), "stale-confirm-1"));
+        task = taskRepository.findById(task.getId()).orElseThrow();
+
+        // 过期 30s 的 taskUpdatedAt → 409 + 40901（乐观锁），且不产生任何简历版本
+        mockMvc.perform(post("/api/ai/tasks/" + task.getId() + "/confirm")
+                        .header("Authorization", "Bearer " + user.token())
+                        .header("Idempotency-Key", "stale-confirm-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(confirmationBody(task.getUpdatedAt().minusSeconds(30))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(40901));
+
+        // 使用最新时间戳重新确认成功——证明拒绝原因只是乐观锁，而不是任务状态
+        mockMvc.perform(post("/api/ai/tasks/" + task.getId() + "/confirm")
+                        .header("Authorization", "Bearer " + user.token())
+                        .header("Idempotency-Key", "stale-confirm-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(confirmationBody(task.getUpdatedAt())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.resumeVersionId").isNumber());
+    }
+
     private TestUser register(String username) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)

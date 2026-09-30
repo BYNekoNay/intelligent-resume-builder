@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MySql57MigrationLiveIT {
 
     @Test
-    void upgradesSupportedV19BaselineToV22OnMySql57() throws Exception {
+    void upgradesSupportedV19BaselineToCurrentOnMySql57() throws Exception {
         String schemaUrl = requiredEnvironment("MYSQL57_JDBC_URL");
         String user = requiredEnvironment("MYSQL57_USER");
         String password = requiredEnvironment("MYSQL57_PASSWORD");
@@ -41,17 +41,43 @@ class MySql57MigrationLiveIT {
                     .cleanDisabled(true)
                     .load();
 
-            assertEquals(2, flyway.migrate().migrationsExecuted);
+            // V20~V29 共 10 条迁移必须全部在 MySQL 5.7 上成功（V23~V29 的 5.7 兼容由本门禁证明）
+            assertEquals(10, flyway.migrate().migrationsExecuted);
+            assertEquals("29", scalar(statement,
+                    "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1"));
+            assertEquals("1", scalar(statement,
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='19' AND type='BASELINE' AND success=1"));
+
+            // V20~V22（原有断言保持）
             assertEquals("YES", scalar(statement, columnNullableSql(schema, "interview_session", "job_description_id")));
             assertEquals("YES", scalar(statement, columnNullableSql(schema, "interview_session", "current_question")));
             assertEquals("NO", scalar(statement, columnNullableSql(schema, "interview_session", "output_language")));
             assertEquals("ZH_CN", scalar(statement, columnDefaultSql(schema, "interview_session", "output_language")));
             assertEquals("1", scalar(statement, tableCountSql(schema, "interview_ai_attempt")));
             assertEquals("2", scalar(statement, uniqueAttemptIndexCountSql(schema)));
-            assertEquals("22", scalar(statement,
-                    "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1"));
-            assertEquals("1", scalar(statement,
-                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='19' AND type='BASELINE' AND success=1"));
+
+            // V23/V24：沟通模板表 + 内置模板种子（16 行，含 EN 变体；验证 5.7 上的中文/多行 INSERT）
+            assertEquals("1", scalar(statement, tableCountSql(schema, "communication_template")));
+            assertEquals("16", scalar(statement,
+                    "SELECT COUNT(*) FROM communication_template WHERE is_system = 1"));
+            assertEquals("1", scalar(statement, tableCountSql(schema, "interview_asset_section")));
+
+            // V25：资产章节关联允许只挂素材（section_key 可空）
+            assertEquals("YES", scalar(statement, columnNullableSql(schema, "interview_asset_section", "section_key")));
+
+            // V26/V27/V29：新增可空列与乐观锁版本列（NOT NULL DEFAULT 0）
+            assertEquals("YES", scalar(statement, columnNullableSql(schema, "application_record", "next_follow_up_at")));
+            assertEquals("YES", scalar(statement, columnNullableSql(schema, "application_record", "stage_entered_at")));
+            assertEquals("NO", scalar(statement, columnNullableSql(schema, "career_material", "version")));
+            assertEquals("0", scalar(statement, columnDefaultSql(schema, "career_material", "version")));
+            assertEquals("NO", scalar(statement, columnNullableSql(schema, "communication_template", "version")));
+            assertEquals("0", scalar(statement, columnDefaultSql(schema, "communication_template", "version")));
+
+            // V28：面试资产 (user_id, interview_record_id) 唯一索引兜底幂等创建
+            assertEquals("0", scalar(statement,
+                    "SELECT non_unique FROM information_schema.statistics WHERE table_schema='" + schema
+                            + "' AND table_name='interview_answer_asset'"
+                            + " AND index_name='uq_interview_asset_user_record' AND seq_in_index=1"));
         }
     }
 

@@ -77,7 +77,7 @@ test('shows consent guidance while preserving the local report', async ({ page }
   await mockAtsPage(page)
   await page.route('**/api/ats/check', route => route.fulfill({ json: response({
     ...ruleResult,
-    fallback: { code: 'CONSENT_REQUIRED', message: 'AI authorization is required.', retryable: false, consentRequired: true },
+    fallback: { code: 'CONSENT_REQUIRED', message: '服务端中文降级说明（不应透传到界面）', retryable: false, consentRequired: true },
   }) }))
 
   await page.goto('/ats')
@@ -86,6 +86,9 @@ test('shows consent guidance while preserving the local report', async ({ page }
 
   await expect(page.getByText('Rules fallback', { exact: true })).toBeVisible()
   await expect(page.getByText('Rule score', { exact: true })).toBeVisible()
+  // TC-4：降级原因码走前端文案映射，服务端 message 不透传
+  await expect(page.getByText('AI data consent is required first, so the local rules completed this check.')).toBeVisible()
+  await expect(page.getByText('服务端中文降级说明（不应透传到界面）')).toHaveCount(0)
   await page.getByRole('button', { name: 'Authorize AI analysis' }).click()
   await expect(page).toHaveURL(/\/ai-consent\?redirect=/)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
@@ -100,7 +103,7 @@ test('retries a provider fallback without rerunning local rules', async ({ page 
     return route.fulfill({ json: response({
       ...ruleResult,
       aiTaskId: 88,
-      fallback: { code: 'PROVIDER_ERROR', message: 'AI is temporarily unavailable.', retryable: true, consentRequired: false },
+      fallback: { code: 'PROVIDER_ERROR', message: '服务端中文降级说明（不应透传到界面）', retryable: true, consentRequired: false },
     }) })
   })
   await page.route('**/api/ats/checks/77/ai-retry', route => {
@@ -112,6 +115,8 @@ test('retries a provider fallback without rerunning local rules', async ({ page 
   await page.goto('/ats')
   await chooseInputs(page)
   await page.getByRole('button', { name: 'Run AI check' }).click()
+  // TC-4：PROVIDER_ERROR 同样走前端映射，不渲染服务端 message
+  await expect(page.getByText('AI analysis is temporarily unavailable, so the local rules completed this check.')).toBeVisible()
   await page.getByRole('button', { name: 'Retry AI analysis' }).click()
 
   await expect(page.getByText('AI + Rules', { exact: true })).toBeVisible({ timeout: 10_000 })

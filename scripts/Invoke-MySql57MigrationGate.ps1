@@ -35,7 +35,7 @@ FLUSH PRIVILEGES;
     Push-Location (Join-Path $root 'server')
     $pushedLocation = $true
     & mvn test '-Dtest=MySql57MigrationLiveIT'
-    if ($LASTEXITCODE -ne 0) { throw 'MySQL 5.7 V19-to-V22 upgrade gate failed.' }
+    if ($LASTEXITCODE -ne 0) { throw 'MySQL 5.7 V19-to-current upgrade gate failed.' }
 } finally {
     if ($pushedLocation) { Pop-Location }
     $cleanupSql = @"

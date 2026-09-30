@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -268,6 +269,28 @@ class AiTaskControllerIT {
         Long returnedId = objectMapper.readTree(replay.getResponse().getContentAsString())
                 .get("data").get("id").asLong();
         assertEquals(taskId, returnedId, "trim 后的幂等键应与既有任务等价");
+    }
+
+    // ---- 8. 通用端点白名单（TC-5） ----
+
+    @Test
+    @Order(11)
+    @DisplayName("TC-5 通用端点白名单: 领域专用任务类型被拒绝 40001 且不落库")
+    void createTask_domainOnlyTypeRejectedByWhitelist() throws Exception {
+        Long userId = userRepository.findByUsername("ai_user_a").orElseThrow().getId();
+        for (String taskType : List.of("JOB_GENERATION", "COMMUNICATION_GENERATE")) {
+            String key = "whitelist-reject-" + taskType;
+            mockMvc.perform(post("/api/ai/tasks")
+                            .header("Authorization", "Bearer " + tokenA)
+                            .header("Idempotency-Key", key)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"taskType\":\"" + taskType + "\",\"input\":{\"prompt\":\"x\"}}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value(40001));
+            assertTrue(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                            userId, AiTaskType.valueOf(taskType), key).isEmpty(),
+                    "被白名单拒绝的请求不得落库: " + taskType);
+        }
     }
 
     private AiTask saveTask(Long userId, String key, AiTaskType type, AiTaskStatus status,

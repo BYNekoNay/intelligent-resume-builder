@@ -182,11 +182,19 @@
 31. ✅ #65 章节关联资产世代：`ResumeEditorView` 与 `ResumeDetailView` 中旧章节的响应不再写入新章节的关联资产（含素材标题映射）
 32. ✅ #61 会话初始化断网重试：`initialize` 失败后可再次调用（在途 Promise 合并并发调用，避免并发 refresh 触发服务端复用检测撤族），页头新增网络恢复重试横幅（zh/en 文案 + 样式）；新增 e2e「断网 → 横幅出现 → 页内重试恢复会话、不整页刷新」
 
+**第五批 D · 测试补齐与门禁更新 — ✅ 已执行（2026-09-30）**
+33. ✅ TC-5 generic 白名单拒绝分支 IT：`AiTaskControllerIT` 新增用例——领域专用类型（`JOB_GENERATION` / `COMMUNICATION_GENERATE`）走通用 `/api/ai/tasks` → 40001，且请求不落库
+34. ✅ TC-6 confirm 乐观锁 IT 断言：`ConfirmationControllerIT` 新增用例——过期 30s 的 `taskUpdatedAt` → 409 + 40901；改用最新时间戳重试成功（证明拒绝原因只是乐观锁、不是任务状态）
+35. ✅ TC-7 AI 模式回答重放 IT：`InterviewControllerIT` 新增用例——同键同答重放命中既有 attempt（不新增评估尝试、不产生新一轮），同键不同答 → 409 + 40901
+36. ✅ TC-4 ATS 降级文案映射：7 个 `AtsFallbackCode` 在 `AtsCheckView` 走 i18n 映射（此前直接渲染服务端中文 `fallback.message`，en-US 界面会显示中文），未识别码回退通用文案；e2e 断言映射文案出现且服务端 message 不透传
+37. ✅ #4 证据边界 e2e：资料库 `evidenceReady=false` 行显示「缺少证据」标注；选材步骤禁用无证据资料并给出「无可用资料」提示（新增 2 个 e2e）
+38. ✅ #22 MySQL 5.7 迁移门禁更新：`MySql57MigrationLiveIT` 从「V19→V22」更新为「V19→当前」（V20~V29 共 10 条迁移 + V23~V29 结构/种子断言）；用本机 MySQL 5.7.24 实跑通过（`scripts/Invoke-MySql57MigrationGate.ps1`，临时 schema 自动清理）
+
 **需产品/环境决策后再定**
 - #26 ai_task 留存与清理策略（保留多久、是否提供用户删除入口）
 - #7 账号数据导出/删除前端入口（隐私治理口径）
 - #53/#54/#55 AI 上下文白名单是否扩展（哪些章节应进 AI 输入）
-- #22 MySQL 5.7 门禁是否维持（有无 5.7 环境）
+- #22 MySQL 5.7 门禁：门禁本身已更新到当前迁移版本（V29）并用本机 5.7.24 实跑通过（见 §4 第 38 条）；**长期是否保留该门禁**（是否有常驻 5.7 环境 / 是否接入 CI）仍待决策——当前仅本地手动执行
 
 ## 5. 变更记录
 
@@ -199,4 +207,5 @@
 | 2026-09-30 | **第四批（小项收口）执行完成**：#75 面试记录排序改 `round_no ASC, id ASC`（新增 `InterviewRecordOrderingIT` 倒序写入断言 + 评分投影 JPQL 执行验证；删除未调用的旧排序方法）；#72 搜索词 100 字符上限（40001）；#43 限流分桶硬上限（容量耗尽新 key fail-closed 429 + 单测）；#21 发布就绪脚本复合命令拆分（仓库内已无其它复合写法）。回归：全量 **756 测试 0 失败**（新增 3）；CI + Functional Regression 双绿 |
 | 2026-09-30 | **第五批 A（读模型与性能）部分执行完成**：#1 职业资料列表投影（新增 `CareerMaterialListRow`，不读 MEDIUMTEXT 原文、类型过滤下推 SQL）；#52 续办列表 metadata-only（`AiTaskContinuationResponse` + 投影，去掉 resultJson/输入快照派生字段）；#50 面试历史列表投影（不读 external_resume_text/current_question，新增 `InterviewSessionSummaryProjectionIT`）；#3 投递统计计数改 SQL group by、时长行只取三态。#50 其余三项暂缓（见 §4 第 21 条）。回归：全量 **758 测试 0 失败**（新增 2），web `npm run build` 通过；CI + Functional Regression 双绿 |
 | 2026-09-30 | **第五批 B（并发一致性与 AI 韧性）执行完成**：#24 面试资产并发幂等（记录行锁 + V28 唯一索引 + `InterviewAssetConcurrencyIT` 双线程断言）；#73 沟通模板 `@Version` + V29 迁移（陈旧副本保存被拒）；#25 使用计数原子自增 + `@DynamicUpdate`（与 #73 联动，防计数自增触发伪冲突）；#85 ATS prompt/schema 版本单一来源（统一取自 prompt builder，消除 v1.0.0/v1.0.1 默认值漂移）；#89 未知 INTERVIEW_COACH operation 显式失败（不再静默落通用路径）；#70 个人资料 upsert 加用户行锁。回归：全量 **762 测试 0 失败**（新增 4）；CI + Functional Regression 双绿 |
-| 2026-09-30 | **第五批 C（前端竞态保护）执行完成**：#58 选择器请求世代；#63 版本对比去重（一次选择一次请求）+ 陈旧 diff 保护；#64 模板列表/预览世代；#65 章节关联资产世代（编辑器 + 详情页）；#61 会话初始化断网后页内重试（在途 Promise 合并并发 + 页头横幅）。回归：web `npm run build`（i18n/draft-fields 门禁 + vue-tsc）通过；Playwright 全量 **139 passed / 6 skipped / 0 failed**（新增 2 个回归用例） |
+| 2026-09-30 | **第五批 C（前端竞态保护）执行完成**：#58 选择器请求世代；#63 版本对比去重（一次选择一次请求）+ 陈旧 diff 保护；#64 模板列表/预览世代；#65 章节关联资产世代（编辑器 + 详情页）；#61 会话初始化断网后页内重试（在途 Promise 合并并发 + 页头横幅）。回归：web `npm run build`（i18n/draft-fields 门禁 + vue-tsc）通过；Playwright 全量 **139 passed / 6 skipped / 0 failed**（新增 2 个回归用例）；CI 绿 |
+| 2026-09-30 | **第五批 D（测试补齐与门禁更新）执行完成**：TC-5 通用端点白名单拒绝 IT（40001 + 不落库）；TC-6 confirm 乐观锁 IT（过期时间戳 40901、刷新后同一请求成功）；TC-7 AI 模式回答重放 IT（同键不新增 attempt、异答 40901）；TC-4 ATS 降级 7 码前端文案映射（不再透传服务端中文 message，e2e 断言）；#4 证据边界 2 个 e2e（资料库标注 + 选材禁用与「无可用资料」）；#22 MySQL 5.7 门禁更新至 V20~V29 并用本机 5.7.24 实跑通过。回归：server 全量 **765 测试 0 失败**（新增 3，5 skipped 为环境门控）；web `npm run build` 通过；Playwright 全量 **141 passed / 6 skipped / 0 failed**（新增 2） |

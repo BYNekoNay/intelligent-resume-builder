@@ -33,6 +33,22 @@ const { resumes, jobs, versions, selectedResumeId, loading: optionsLoading, erro
 const analyzing = computed(() => result.value?.analysisStatus === 'ANALYZING' && !pollingTimedOut.value)
 const showReport = computed(() => Boolean(result.value) && (!analyzing.value || pollingTimedOut.value))
 
+// TC-4：降级原因码 → 前端文案。此前直接渲染服务端 fallback.message（仅中文），
+// en-US 界面会显示中文；未识别的新码回退到通用文案，同样不透传服务端文本。
+const fallbackMessages = computed<Record<string, string>>(() => ({
+  AI_DISABLED: t('ats.fallbackAiDisabled'),
+  CONSENT_REQUIRED: t('ats.fallbackConsentRequired'),
+  QUOTA_EXCEEDED: t('ats.fallbackQuotaExceeded'),
+  PROVIDER_TIMEOUT: t('ats.fallbackProviderTimeout'),
+  PROVIDER_ERROR: t('ats.fallbackProviderError'),
+  INVALID_RESPONSE: t('ats.fallbackInvalidResponse'),
+  UNKNOWN: t('ats.fallbackUnknown'),
+}))
+
+function fallbackMessage(code: string) {
+  return fallbackMessages.value[code] ?? t('ats.fallbackUnknown')
+}
+
 function stopPolling() {
   stopTaskPolling()
 }
@@ -194,7 +210,7 @@ onBeforeUnmount(stopPolling)
         <BrainCircuit :size="18" /><div><strong>{{ t('ats.analyzingBackground') }}</strong><p>{{ t('ats.analyzingBackgroundHint') }}</p></div>
       </section>
       <section v-else-if="result.fallback" class="fallback-banner">
-        <AlertTriangle :size="18" /><div><strong>{{ t('ats.fallbackTitle') }}</strong><p>{{ result.fallback.message }}</p></div>
+        <AlertTriangle :size="18" /><div><strong>{{ t('ats.fallbackTitle') }}</strong><p>{{ fallbackMessage(result.fallback.code) }}</p></div>
         <button v-if="result.fallback.consentRequired" class="btn-neon btn-primary" @click="authorizeAi"><ShieldCheck :size="15" />{{ t('ats.authorizeAi') }}</button>
         <button v-else-if="result.fallback.retryable" class="btn-neon btn-ghost" :disabled="retrying" @click="retryAi"><RefreshCw :size="15" :class="{ spinning: retrying }" />{{ retrying ? t('ats.retrying') : t('ats.retryAi') }}</button>
       </section>

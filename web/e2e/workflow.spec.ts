@@ -701,6 +701,44 @@ test('keeps the desktop material editor wide with a visible action bar', async (
   await page.screenshot({ path: testInfo.outputPath('career-material-editor-desktop-1440x900.png'), fullPage: true })
 })
 
+test('labels unusable career materials with the evidence boundary warning', async ({ page }) => {
+  // #4 证据边界回归：evidenceReady=false 的资料必须在列表上显式标注。
+  await mockAuthenticatedApi(page)
+  const usable = { id: 501, materialType: 'WORK_EXPERIENCE', title: 'Checkout platform', usagePreference: 'NORMAL', updatedAt: now, evidenceReady: true }
+  const invalid = { id: 502, materialType: 'SKILL', title: 'Legacy skill note', usagePreference: 'NORMAL', updatedAt: now, evidenceReady: false }
+  await page.route('**/api/career-materials/search*', route => route.fulfill({ json: response(materialSearch([usable, invalid])) }))
+
+  await page.goto('/career-materials')
+  await expect(page.getByRole('article', { name: invalid.title }).locator('.row-evidence-warning')).toBeVisible()
+  await expect(page.getByRole('article', { name: usable.title }).locator('.row-evidence-warning')).toHaveCount(0)
+})
+
+test('blocks materials without evidence inside the generation workbench', async ({ page }) => {
+  // #4 证据边界回归：选材步骤排除无证据资料（不可标记、不可用于生成）。
+  await mockAuthenticatedApi(page)
+  const usable = { id: 511, materialType: 'WORK_EXPERIENCE', title: 'Checkout platform', usagePreference: 'NORMAL', updatedAt: now, evidenceReady: true }
+  const invalid = { id: 512, materialType: 'SKILL', title: 'Legacy skill note', usagePreference: 'NORMAL', updatedAt: now, evidenceReady: false }
+  let materials = [usable, invalid]
+  await page.route('**/api/career-materials', route => route.fulfill({ json: response(materials) }))
+
+  await page.goto('/generate?jdId=20')
+  await page.getByRole('button', { name: /下一步：选择资料|Next: select materials/ }).click()
+
+  const invalidCard = page.locator('.material-card.invalid')
+  await expect(invalidCard).toHaveCount(1)
+  await expect(invalidCard.locator('.evidence-warning')).toBeVisible()
+  await expect(invalidCard.locator('button').first()).toBeDisabled()
+  await expect(invalidCard.locator('button').nth(1)).toBeDisabled()
+  await expect(page.locator('.material-card').filter({ hasText: usable.title }).locator('button').first()).toBeEnabled()
+
+  // 全部资料都无证据时：给出「无可用资料」提示，且不能进入下一步（noEligibleMaterials 契约）
+  materials = [invalid]
+  await page.reload()
+  await page.getByRole('button', { name: /下一步：选择资料|Next: select materials/ }).click()
+  await expect(page.getByText(/当前没有可用资料|No usable materials/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /下一步：开始生成|Next: start generation/ })).toBeDisabled()
+})
+
 test('opens material details in a tablet drawer', async ({ page }, testInfo) => {
   await mockAuthenticatedApi(page)
   await page.setViewportSize({ width: 1024, height: 768 })
