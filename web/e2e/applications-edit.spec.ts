@@ -71,6 +71,16 @@ async function mockApplicationsPage(page: Page) {
 test('editing an application locates its resume version with a single lookup request', async ({ page }) => {
   await mockApplicationsPage(page)
 
+  // 放大竞态窗口：延迟选项加载（resumes/jobs），使「编辑定位目标简历」在
+  // useResumeJobOptions.load() 的选项响应返回之前就完成。Playwright 后注册的路由优先命中，
+  // 故此处覆盖 mockApplicationsPage 中的 /api/resumes。
+  // 这正是该用例在 CI 上偶发失败（期望 1 实际 2）的成因：load() 在选项返回后按「当前选中简历」
+  // 无条件重新拉取版本列表，与编辑流已完成的加载重复。修复前本用例稳定失败。
+  await page.route('**/api/resumes', async route => {
+    await new Promise(resolve => setTimeout(resolve, 400))
+    await route.fulfill({ json: response(resumes) })
+  })
+
   let lookups = 0
   let versionListsWhileEditing = 0
   let editing = false

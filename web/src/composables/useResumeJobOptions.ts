@@ -21,6 +21,12 @@ export function useResumeJobOptions() {
 
   async function load() {
     const epoch = ++loadEpoch
+    // 记录本次加载开始时的选择。若在选项请求返回前调用方已选定另一份简历
+    //（典型场景：投递页「编辑」需定位被引用旧版本所属的简历），
+    // 则不得在下方按「当前选择」再拉一次版本列表——那会对同一份简历发出第二次
+    // 列表请求，与调用方已发起的加载重复（#33「只重载目标简历一次」在 CI 偶发
+    // 「期望 1 实际 2」的真实成因，已由 e2e 延迟选项响应确定性复现）。
+    const selectionBeforeLoad = selectedResumeId.value
     loading.value = true
     error.value = ''
     try {
@@ -28,8 +34,13 @@ export function useResumeJobOptions() {
       if (epoch !== loadEpoch) return
       resumes.value = resumeResponse.data.data
       jobs.value = jobResponse.data.data
-      if (selectedResumeId.value == null && resumes.value.length > 0) selectedResumeId.value = resumes.value[0].id
-      await loadVersions()
+      const assignedInitialSelection = selectedResumeId.value == null && resumes.value.length > 0
+      if (assignedInitialSelection) selectedResumeId.value = resumes.value[0].id
+      // 仅在「本次加载确立了选择」或「选择自加载开始未变」时加载版本列表：
+      // 前者是首屏默认选中，后者保证重试/重载时版本列表与当前选择一致。
+      if (assignedInitialSelection || selectedResumeId.value === selectionBeforeLoad) {
+        await loadVersions()
+      }
     } catch {
       if (epoch !== loadEpoch) return
       error.value = t('jobOptions.loadError')
