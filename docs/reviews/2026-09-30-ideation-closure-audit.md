@@ -281,6 +281,17 @@
 
 修复动作：`useResumeJobOptions.load()` 增加「加载期间选择已变更则不重复加载版本列表」的判断（`selectionBeforeLoad` + `assignedInitialSelection`）；e2e 用例保留 400ms 延迟作为**确定性竞态守卫**（并注明修复前稳定失败），从而把此前「靠偶发暴露」的缺陷变为每次都能验证。
 
+### 2.23 配置兜底一致性与 429 退避契约（2026-10-01 第三十批扫描，已随本批修复）
+
+方法：同一配置项会在三处出现（代码 `@Value` 兜底、`application.yml` 默认值、环境变量默认），任一漂移都是「配置缺省时行为与预期不同」的静默陷阱。此前只有 `PdfDeadlineContractTest` 覆盖 PDF 的两个键；本批新增门禁用 YAML 解析器把**全部** `@Value` 兜底与 yml 默认值逐项比对（让门禁自己枚举漂移，而非人工抽查）。
+
+| 项 | 取证 | 结论 |
+| --- | --- | --- |
+| 全量兜底比对 | 新增 `ConfigFallbackContractTest`（SnakeYAML 解析 `application.yml` + 扫描 `server/src/main/java` 全部 `@Value`）：共扫描 **52** 条兜底、其中 **26** 条与 yml 可比对；首跑即报出**唯一**漂移 `app.ai.bailian.read-timeout-seconds` → 代码兜底 **60** vs yml 默认 **300** | **存在缺陷 → 修复**：兜底改为 300（yml 注释已说明推理型模型单轮 40~477s，60s 兜底会让合法慢响应被判超时） |
+| 429 退避契约 | `RateLimitFilter` 的 429 只设状态码与信封，**无 `Retry-After`**（RFC 6585 建议携带）；同仓 pdf-service 的 503 已带该头，两处语义不一致；客户端只能盲目重试并继续打满窗口 | **已补齐**：429 携带 `Retry-After` = 固定窗口（自然分钟）剩余秒数 1~60 |
+
+修复动作：`BailianAiProvider` 读超时兜底 60 → 300；`RateLimitFilter.writeTooManyRequests` 增加 `Retry-After`（新增 `secondsUntilNextWindow()`，取值 1~60）；新增静态门禁 `ConfigFallbackContractTest`（含自检：扫描到的兜底数与可比对数不得低于阈值，防止解析失效后门禁静默空转）。`docs/05` §1.3 补 429 退避契约（并注明 AI 日配额超限不带该头，因其按天重置、无等价短窗口值）。验证：门禁首跑 **1 条漂移**（修复后全绿）；单测断言 `Retry-After` 存在且落在 1~60、IT 断言响应头存在；真实 HTTP 探针（本机 H2，登录限流 2/分钟）实测第 3 次请求 `HTTP/1.1 429` + `Retry-After: 25` + 统一信封。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）

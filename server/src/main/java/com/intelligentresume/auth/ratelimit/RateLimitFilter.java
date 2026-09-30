@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -155,9 +156,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
         ApiResponse<Void> body = ApiResponse.failure(ErrorCode.RATE_LIMITED.code(), "请求频率超限,请稍后再试", traceId);
         response.setStatus(429);
+        // Retry-After：固定窗口（自然分钟）剩余秒数 1~60。RFC 6585 建议 429 告知可重试时机，
+        // 与 pdf-service 503 的 Retry-After 语义一致；缺少该头时客户端只能盲目重试并继续打满窗口。
+        response.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(secondsUntilNextWindow()));
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
         response.getWriter().write(objectMapper.writeValueAsString(body));
+    }
+
+    /** 距下一个固定窗口（自然分钟）开始的秒数，取值 1~60。 */
+    static long secondsUntilNextWindow() {
+        return 60 - (System.currentTimeMillis() / 1000L) % 60;
     }
 
     /** 固定窗口计数:每个自然分钟清零一次,窗口边界处突发流量可能达到 2 倍阈值。 */

@@ -50,6 +50,11 @@ class RateLimitFilterTest {
         assertEquals(429, resp.getStatus(), "第 3 次请求应被限流");
         assertTrue(resp.getContentAsString().contains("42901"),
                 "响应体应包含错误码 42901");
+        // RFC 6585：429 应告知可重试时机（固定窗口剩余秒数 1~60），与 pdf-service 503 的语义一致
+        String retryAfter = resp.getHeader("Retry-After");
+        assertNotNull(retryAfter, "429 响应应携带 Retry-After 头");
+        assertTrue(Long.parseLong(retryAfter) >= 1 && Long.parseLong(retryAfter) <= 60,
+                "Retry-After 应为距下一固定窗口的秒数（1~60），实际 " + retryAfter);
 
         // chain 只被调用了 2 次（前 2 次放行）
         verify(chain, times(2)).doFilter(any(), any());

@@ -82,7 +82,9 @@ public class BailianAiProvider implements AiProvider {
             @Value("${app.ai.bailian.model:qwen-plus}") String model,
             @Value("${app.ai.bailian.model-chain:}") String modelChain,
             @Value("${app.ai.bailian.connect-timeout-seconds:10}") int connectTimeout,
-            @Value("${app.ai.bailian.read-timeout-seconds:60}") int readTimeout,
+            // 兜底值必须与 application.yml 默认值一致（300，推理型模型单轮 40~477s）：
+            // 曾为 60，配置缺省时会让合法慢响应被判超时。契约由 ConfigFallbackContractTest 守护。
+            @Value("${app.ai.bailian.read-timeout-seconds:300}") int readTimeout,
             @Value("${app.ai.bailian.chain-quota-cooldown-seconds:1800}") long quotaCooldownSeconds,
             @Value("${app.ai.bailian.chain-transient-cooldown-seconds:60}") long transientCooldownSeconds,
             @Value("${app.ai.bailian.chain-total-budget-seconds:600}") long chainTotalBudgetSeconds,
