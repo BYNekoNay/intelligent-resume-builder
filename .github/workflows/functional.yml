@@ -1,4 +1,4 @@
-name: Functional Regression
+﻿name: Functional Regression
 
 # 黑盒 HTTP 功能回归门禁（functional-tests/）。
 # 目的：让 2026-09-25 全功能验证的 184 条断言进入版本库与 CI，防止回归再次逃逸
@@ -70,7 +70,7 @@ jobs:
           java-version: 17
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -190,7 +190,7 @@ jobs:
           java-version: 17
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
