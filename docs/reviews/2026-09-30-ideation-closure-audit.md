@@ -410,7 +410,21 @@
 
 修复动作：`AccountExportService` 拆成 `loadExportPayload(userId)`（`@Transactional(readOnly = true)`，只做 DB 读取且返回即提交）与 `writePayloadAsJson(payload, out)`（`ObjectMapper.writeValue(OutputStream)` 直接写流）；`AuthController.exportData` 改为 `void` + `HttpServletResponse`，显式设 `Content-Type: application/json;charset=UTF-8` 与 `Content-Disposition` 后写 `getOutputStream()`（刻意不用 `StreamingResponseBody`：无状态安全链在 ASYNC 派发时会重跑过滤器，存在 401 风险；同步写流既避开该风险，也让 MockMvc 断言保持同步）；`docs/05` §2.7 补「流式写出、无 Content-Length」口径。
 
-验证：同一 `-Xmx128m` 堆、同一账号（300 条 × 63KB）——修复前 12.2MB 即 OOM → 修复后 **18.41MB 连续 3 次 200**（399~566ms，`Transfer-Encoding: chunked`、无 `Content-Length`）；`curl` 落盘校验**文档内容不变**（合法 JSON、`formatVersion=1`、`careerMaterials=300`、`sourceText` 长度 63953），并实测首字节 **0.113s** / 总耗时 **0.216s**（不再等整份序列化完成才出首字节）；`AuthControllerIT` 导出两用例（401、聚合内容）无需改动即通过（13/13）——该 IT 走的正是「事务关闭后序列化」这条新路径，本身构成行为回归守卫；另新增静态防复发门禁 `ExportStreamingContractTest`（导出链路不得出现 `writeValueAsString`、写流方法不得被 `@Transactional` 覆盖、`loadExportPayload` 保持只读事务；**修复前红**——临时改回整份缓冲即失败——恢复后绿）；server 全量 **861 测试 0 失败**（新增 2 门禁用例，5 skipped 为环境门控）。
+验证：同一 `-Xmx128m` 堆、同一账号——修复前 12.2MB 即 OOM → 修复后 **18.41MB 连续 3 次 200**（399~566ms，`Transfer-Encoding: chunked`、无 `Content-Length`）；`curl` 落盘校验**文档内容不变**（合法 JSON、`formatVersion=1`、`careerMaterials=300`、`sourceText` 长度 63953），并实测首字节 **0.113s** / 总耗时 **0.216s**（不再等整份序列化完成才出首字节）；`AuthControllerIT` 导出两用例（401、聚合内容）无需改动即通过（13/13）——该 IT 走的正是「事务关闭后序列化」这条新路径，本身构成行为回归守卫；另新增静态防复发门禁 `ExportStreamingContractTest`（导出链路不得出现 `writeValueAsString`、写流方法不得被 `@Transactional` 覆盖、`loadExportPayload` 保持只读事务；**修复前红**——临时改回整份缓冲即失败——恢复后绿）；server 全量 **861 测试 0 失败**（新增 2 门禁用例，5 skipped 为环境门控）。
+
+### 2.32 容器交付路径缺资源边界（2026-10-01 第三十九批扫描，已随本批修复）
+
+方法：核对「同一宿主上多条交付路径的资源边界是否一致」——把 systemd 单元、生产 compose 与验收叠加 compose 的**内存上限、JVM 堆上限、日志上限**逐项对照（数值用真实命令取证，compose 用 `docker compose config` 解析校验）。
+
+| 项 | 取证 | 结论 |
+| --- | --- | --- |
+| 生产容器路径**无任何内存上限** | `deploy/docker-compose.prod.yml` 的 8 个服务（edge/web/api/pdf-service/mysql/prometheus/grafana/alertmanager）都没有 `mem_limit`、没有 `deploy.resources.limits`；而同宿主的 `docker-compose.ip-test.yml` 给 4 个服务都写了 `mem_limit`（128/800/768/700m） | **存在缺陷 → 修复** |
+| API 容器**无堆上限**，默认取 25% 宿主内存 | 生产 compose 的 api 无 `JAVA_TOOL_OPTIONS`（systemd 单元有 `-Xms128m -Xmx768m -XX:MaxMetaspaceSize=224m`；ip-test 叠加层有 `-Xmx512m`）。实测本机 `java -XX:+PrintFlagsFinal` 未指定 `-Xmx` 时 `MaxHeapSize = 4219469824` 字节 = 15.71GiB 的 25% ⇒ 3.6GiB 宿主上等价 **≈922MB**，高于该宿主为省内存刻意压到的 768m | 同上 |
+| 容器日志**无上限**，与 systemd 路径不对称 | compose 全仓无 `logging`/`max-size`；而两个 systemd 单元都写明「日志走 journald（自带轮转）」、`docs/DEPLOYMENT_DIRECT.md` 亦记录该口径。docker 默认 json-file 驱动**不轮转**。（本地实测：正常请求不写日志——200 次匿名探针日志增量为 **0 字节**，增长来自异常全栈与 worker 日志） | 同上 |
+
+修复动作：`docker-compose.prod.yml` 顶部新增 `x-logging` 锚点（json-file + `max-size 10m` × `max-file 5` = 每容器 ≤50MB）并由 8 个服务引用；为 8 个服务补 `mem_limit`（edge/web 128m、api **1200m**、pdf-service 768m（Chromium）、mysql 700m、prometheus 512m、grafana 384m、alertmanager 128m；口径与同宿主已实测的 ip-test 拓扑对齐）；api 服务补 `JAVA_TOOL_OPTIONS: -Xms128m -Xmx768m -XX:MaxMetaspaceSize=224m`（与 systemd 单元**同值**，`mem_limit` 比堆多 208m 余量）；新增静态门禁 `ComposeResourceBoundsContractTest`（生产 compose 每个服务必须有内存上限 + 有界日志；叠加层不得造出无界覆盖；api 堆上限必须等于 systemd 单元且 `mem_limit ≥ 堆 + 256m`）；`docs/08` 补「容器资源边界契约」。
+
+验证：门禁对**修复前**的 compose **2/3 红**（生产 compose 无界 + api 无 `-Xmx`）→ 修复后 **3/3** 绿；`docker compose --env-file production.env.example -f docker-compose.prod.yml config --quiet` **exit 0**（锚点/合并解析通过，CI 的「Validate production Compose manifests」作业同样校验），叠加层 `-f prod -f ip-test` 合并后解析为 api **-Xmx512m / mem_limit 838860800 字节（800m）** 且继承基础文件的 `max-size 10m`——两条拓扑的资源边界自洽；server 全量 **864 测试 0 失败**（新增 3 门禁用例，5 skipped 为环境门控）。
 
 ## 3. 已闭环（不再重复提报）
 
