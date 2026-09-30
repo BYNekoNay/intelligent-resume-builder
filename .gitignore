@@ -50,3 +50,4 @@ pnpm-debug.log*
 # Logs
 *.log
 __pycache__/
+/build/

@@ -176,7 +176,17 @@ def main():
             continue
         code, body, headers = call("GET", f"/api/exports/files/{task_id}", token=token_a)
         is_pdf = body[:5] == b"%PDF-"
-        cjk = b"NotoSansCJK" in body
+        # 中文字体嵌入检测：核心诉求是"PDF 必须嵌入任一 CJK 字体（否则打开是豆腐块）"，
+        # 而非特定字体名。渲染字体由运行环境决定：Linux CI 装 fonts-noto-cjk → NotoSansCJK，
+        # Windows 本机 → MicrosoftYaHei 等系统字体（2026-09-30 CI 首跑实证：写死
+        # NotoSansCJK 会让非 Noto 环境永远失败）。子集前缀（如 AAAAAA+MicrosoftYaHei）
+        # 不影响子串匹配。
+        cjk_font_markers = (
+            b"NotoSansCJK", b"NotoSerifCJK", b"SourceHan", b"MicrosoftYaHei",
+            b"SimSun", b"SimHei", b"KaiTi", b"FangSong", b"PingFang",
+            b"MSung", b"MingLiU",
+        )
+        cjk = any(marker in body for marker in cjk_font_markers)
         ok = code == 200 and is_pdf and len(body) > 20000 and cjk
         if ok:
             pdf_ok += 1

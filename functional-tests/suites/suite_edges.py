@@ -191,27 +191,44 @@ def main():
             _, tr, _ = call("GET", f"/api/ai/tasks/{stid}", tok=tok2)
             if (d(tr) or {}).get("status") in ("SUCCESS", "FAILED"):
                 break
-        check("C2 选材任务成功", (d(tr) or {}).get("status") == "SUCCESS",
-              f"status={(d(tr) or {}).get('status')}")
-        # 确认选材 → 生成 → 拒绝
-        code, raw, _ = call("POST", f"/api/ai/tasks/{stid}/confirm-materials",
-                            {"confirmedMaterialIds": [mid]}, tok=tok2)
-        observe("C3 确认选材", code, raw)
-        gt = d(raw) or {}
-        gid = gt.get("taskId") or gt.get("id")
-        if gid:
-            for _ in range(60):
-                time.sleep(3)
-                _, tr2, _ = call("GET", f"/api/ai/tasks/{gid}", tok=tok2)
-                if (d(tr2) or {}).get("status") in ("SUCCESS", "FAILED"):
-                    break
-            check("C4 生成任务成功", (d(tr2) or {}).get("status") == "SUCCESS",
-                  f"status={(d(tr2) or {}).get('status')}")
-            code, raw, _ = call("POST", f"/api/ai/tasks/{gid}/reject",
-                                {"reason": "内容不符合预期"}, tok=tok2)
-            check("C5 reject 拒绝草稿", code in (200, 204), f"HTTP {code}")
-            code, raw, _ = call("GET", f"/api/ai/tasks/{gid}", tok=tok2)
-            observe("C6 拒绝后的任务状态", code, raw)
+        sel_status = (d(tr) or {}).get("status")
+        sel_err = ((d(tr) or {}).get("errorMessage") or "").strip()
+        if sel_status == "SUCCESS":
+            check("C2 选材任务成功", True, "status=SUCCESS")
+        elif sel_status == "FAILED" and sel_err:
+            # 无模型密钥环境的合法终态（对齐本套件 I 组纪律）：AI 不可用必须显式
+            # 失败并暴露原因，不得静默滞留中间态。AI 成功路径本轮未验证，由
+            # FUNCTIONAL_AI_LIVE 门控的 AI 全链路套件覆盖（QA 纪律：未测必须显式呈现）。
+            # 2026-09-30 CI 首跑实证：此前写死 SUCCESS 断言，无密钥环境必挂
+            # （errorMessage="百炼 API Key 未配置"）——CI Functional Regression 的根因之一。
+            check("C2 选材任务终态（无密钥环境：显式失败为合法终态）", True,
+                  f"status=FAILED，AI 成功路径本轮未验证，err={sel_err[:100]}")
+        else:
+            check("C2 选材任务成功", False,
+                  f"status={sel_status}（中间态滞留，或失败未暴露原因）err={sel_err[:100]}")
+        if sel_status == "SUCCESS":
+            # 确认选材 → 生成 → 拒绝（AI 成功路径，需真实模型密钥）
+            code, raw, _ = call("POST", f"/api/ai/tasks/{stid}/confirm-materials",
+                                {"confirmedMaterialIds": [mid]}, tok=tok2)
+            observe("C3 确认选材", code, raw)
+            gt = d(raw) or {}
+            gid = gt.get("taskId") or gt.get("id")
+            if gid:
+                for _ in range(60):
+                    time.sleep(3)
+                    _, tr2, _ = call("GET", f"/api/ai/tasks/{gid}", tok=tok2)
+                    if (d(tr2) or {}).get("status") in ("SUCCESS", "FAILED"):
+                        break
+                check("C4 生成任务成功", (d(tr2) or {}).get("status") == "SUCCESS",
+                      f"status={(d(tr2) or {}).get('status')}")
+                code, raw, _ = call("POST", f"/api/ai/tasks/{gid}/reject",
+                                    {"reason": "内容不符合预期"}, tok=tok2)
+                check("C5 reject 拒绝草稿", code in (200, 204), f"HTTP {code}")
+                code, raw, _ = call("GET", f"/api/ai/tasks/{gid}", tok=tok2)
+                observe("C6 拒绝后的任务状态", code, raw)
+        else:
+            observe("C3-C6 选材→确认→生成→拒绝链",
+                    0, "SKIPPED：选材任务未成功（无密钥环境 AI 路径本轮未验证，不得视为已测）".encode())
 
     # ---------- D. ATS ai-retry 语义 ----------
     sec("D. POST /api/ats/checks/{id}/ai-retry 的真实语义")

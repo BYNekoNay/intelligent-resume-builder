@@ -39,6 +39,9 @@ app:
       login-per-minute: 1000
       register-per-minute: 1000
       refresh-per-minute: 1000
+      # parse 类重 CPU 端点同样放开（套件注册流程含导入解析；显式键防未来新增用例踩 429）
+      resume-import-parse-per-minute: 1000
+      jd-parse-per-minute: 1000
   ai:
     worker:
       poll-interval-ms: 200
@@ -49,7 +52,7 @@ app:
     service-base-url: ${PDF_SERVICE_BASE_URL:http://127.0.0.1:3001}
     service-token: ${PDF_SERVICE_TOKEN:ci-pdf-token-0123456789abcdef0123456789abcdef}
     render-timeout-seconds: 30
-    max-input-bytes: 65536
-    max-output-bytes: 1048576
+    # max-input/max-output 不在此覆写：主 yml 默认 512KB/10MB（写死 64KB 曾导致套件
+    # PDF 导出超限失败——2026-09-30 CI 首跑实证），继承主配置即可
     file-ttl-hours: 1
     output-dir: ./build/ci-pdf-output

@@ -74,6 +74,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      # 中文简历 PDF 必须嵌入 CJK 字体（suite_core 断言）。ubuntu-latest 默认无 CJK
+      # 字体，Chromium 渲染中文简历会整页豆腐块（2026-09-30 CI 首跑暴露）。
+      - name: Install CJK fonts for PDF rendering
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+
       # 仓库根无聚合 pom，必须在 server/ 目录下单模块构建（-pl 语法在此仓库不可用；
       # 2026-09-30 首次真实运行暴露：Package step 在根目录执行报 no POM in this directory）
       - name: Package server (skip tests — covered by the `server` job)
@@ -186,6 +191,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Install CJK fonts for PDF rendering
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
 
       - name: Package server
         working-directory: server
