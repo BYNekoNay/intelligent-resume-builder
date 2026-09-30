@@ -7,6 +7,7 @@ import com.intelligentresume.ai.task.service.AiTaskConsentPolicy;
 import com.intelligentresume.auth.repository.UserRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.common.persistence.AsyncFailureMessages;
 import com.intelligentresume.interview.domain.AiAttemptOperationType;
 import com.intelligentresume.interview.domain.AiAttemptStatus;
 import com.intelligentresume.interview.domain.CompletionReason;
@@ -187,7 +188,7 @@ public class InterviewOperationSupport {
         sessionRepository.save(session);
         attempt.setStatus(AiAttemptStatus.FAILED);
         attempt.setErrorCode(errorCode);
-        attempt.setErrorMessage(errorMessage);
+        attempt.setErrorMessage(AsyncFailureMessages.persisted(errorMessage));
         attempt.setRetryable(retryable);
         attempt.setProviderRequestId(providerRequestId);
         attemptRepository.save(attempt);

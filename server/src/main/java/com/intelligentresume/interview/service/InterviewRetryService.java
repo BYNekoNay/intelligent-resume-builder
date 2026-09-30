@@ -2,6 +2,7 @@ package com.intelligentresume.interview.service;
 
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.common.persistence.AsyncFailureMessages;
 import com.intelligentresume.interview.domain.AiAttemptOperationType;
 import com.intelligentresume.interview.domain.AiAttemptStatus;
 import com.intelligentresume.interview.domain.EvaluationSource;
@@ -86,7 +87,7 @@ public class InterviewRetryService {
                 operationSupport.checkInterviewQuota(userId);
             } catch (BusinessException e) {
                 // 配额不足，保持 AI_ACTION_REQUIRED
-                lastFailed.setErrorMessage(e.getMessage());
+                lastFailed.setErrorMessage(AsyncFailureMessages.persisted(e.getMessage()));
                 lastFailed.setErrorCode("RATE_LIMITED");
                 attemptRepository.save(lastFailed);
                 return new long[]{session.getId(), lastFailed.getId(), -1,

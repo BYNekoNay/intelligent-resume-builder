@@ -2,6 +2,7 @@ package com.intelligentresume.interview.service;
 
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.common.persistence.AsyncFailureMessages;
 import com.intelligentresume.interview.domain.AiAttemptOperationType;
 import com.intelligentresume.interview.domain.AiAttemptStatus;
 import com.intelligentresume.interview.domain.EvaluationSource;
@@ -146,7 +147,7 @@ public class InterviewAnswerService {
                 attempt.setStatus(AiAttemptStatus.FAILED);
                 attempt.setAttemptCount(0);
                 attempt.setErrorCode("RATE_LIMITED");
-                attempt.setErrorMessage(e.getMessage());
+                attempt.setErrorMessage(AsyncFailureMessages.persisted(e.getMessage()));
                 attempt.setRetryable(true);
                 attemptRepository.save(attempt);
                 return new AnswerPreparation(session.getId(), roundNo,

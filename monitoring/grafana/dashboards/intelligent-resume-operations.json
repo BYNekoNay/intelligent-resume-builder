@@ -9,7 +9,7 @@
     {"type":"timeseries","title":"PDF export failures","targets":[{"expr":"sum(rate(resume_pdf_export_tasks_total{outcome=\"failure\"}[5m])) by (failure_category)","refId":"A"}]},
     {"type":"timeseries","title":"Queue depth","targets":[{"expr":"resume_ai_queue_depth","refId":"A"},{"expr":"resume_pdf_queue_depth","refId":"B"}]},
     {"type":"timeseries","title":"Oldest pending task (seconds)","targets":[{"expr":"resume_ai_queue_oldest_pending_seconds","refId":"A"},{"expr":"resume_pdf_queue_oldest_pending_seconds","refId":"B"}]},
-    {"type":"timeseries","title":"AI quota consumption and rejections","targets":[{"expr":"resume_ai_quota_daily_tasks_created","refId":"A"},{"expr":"sum(rate(resume_ai_quota_rejections_total[5m])) by (task_type)","refId":"B"}]}
+    {"type":"timeseries","title":"AI quota attempts (all users) and rejections","targets":[{"expr":"sum by (task_type) (resume_ai_quota_daily_attempts)","refId":"A"},{"expr":"sum(rate(resume_ai_quota_rejections_total[5m])) by (task_type)","refId":"B"}]}
   ],
   "schemaVersion": 39,
   "title": "Intelligent Resume Operations",

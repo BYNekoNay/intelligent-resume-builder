@@ -83,7 +83,14 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
                                                            @Param("taskType") AiTaskType taskType,
                                                            @Param("after") LocalDateTime after);
 
-    long countByTaskTypeAndCreatedAtAfter(AiTaskType taskType, LocalDateTime after);
+    /**
+     * 全站当日「尝试数」（ideation #524）：与每日配额限流同一口径（重试计次），
+     * 供观测 gauge 使用；不按用户维度（gauge 不能引入用户标签）。
+     */
+    @Query("SELECT COALESCE(SUM(CASE WHEN t.retryCount < 1 THEN 1 ELSE t.retryCount END), 0) FROM AiTask t " +
+            "WHERE t.taskType = :taskType AND t.createdAt > :after")
+    long countAttemptsByTaskTypeAndCreatedAtAfter(@Param("taskType") AiTaskType taskType,
+                                                  @Param("after") LocalDateTime after);
 
     /**
      * 保留期清理候选（ideation #26）：终态、非待确认、尚未压缩过的老任务。

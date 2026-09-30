@@ -1,5 +1,6 @@
 package com.intelligentresume.export.service;
 
+import com.intelligentresume.common.persistence.AsyncFailureMessages;
 import com.intelligentresume.export.domain.ExportStatus;
 import com.intelligentresume.export.domain.ExportTask;
 import com.intelligentresume.export.repository.ExportTaskRepository;
@@ -82,8 +83,7 @@ public class ExportTaskLeaseService {
             return false;
         }
         storedTask.setStatus(ExportStatus.FAILED);
-        storedTask.setErrorMessage(errorMessage != null && errorMessage.length() > 1000
-                ? errorMessage.substring(0, 1000) : errorMessage);
+        storedTask.setErrorMessage(AsyncFailureMessages.persisted(errorMessage));
         clearLease(storedTask);
         exportTaskRepository.save(storedTask);
         copyExecutionState(storedTask, task);

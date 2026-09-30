@@ -117,6 +117,19 @@ class TaskLeaseServiceTest {
     }
 
     @Test
+    @DisplayName("#514 超长失败消息按 1000 字符截断落库（列宽 1024，防写入失败掩盖真实失败）")
+    void releaseFailed_longMessage_truncatedToColumnBudget() {
+        AiTask task = task(1L, AiTaskStatus.RUNNING, 1);
+        task.setLeaseOwner("worker-1");
+        when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.of(task));
+
+        service.releaseFailed(task, "worker-1", "e".repeat(5000), false);
+
+        assertEquals(AiTaskStatus.FAILED, task.getStatus());
+        assertEquals(1000, task.getErrorMessage().length());
+    }
+
+    @Test
     @DisplayName("成功释放 → SUCCESS + 结果写入 + 租约清除")
     void releaseSuccess_setsSuccessAndClearsLease() {
         AiTask task = task(1L, AiTaskStatus.RUNNING, 1);

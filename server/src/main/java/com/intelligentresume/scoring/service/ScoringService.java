@@ -75,6 +75,11 @@ public class ScoringService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在"));
         resumeRepository.findByIdAndUserId(version.getResumeId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
+        if (version.getDeletedAt() != null) {
+            // 归档是可逆状态（ideation #533）：与 ATS/导出/投递/沟通一致，恢复后才能消费；
+            // 归属校验放在前面，避免用归档状态区分他人版本是否存在。
+            throw new BusinessException(ErrorCode.CONFLICT, "该简历版本已归档，请先恢复后再发起评分");
+        }
 
         // 2. 校验 JD 归属
         JobDescription jd = jdRepository.findByIdAndUserId(req.jobDescriptionId(), userId)

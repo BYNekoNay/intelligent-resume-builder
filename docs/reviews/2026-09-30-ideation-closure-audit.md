@@ -128,6 +128,22 @@
 
 #19（投递状态机跨运行时契约）、#79~#83（模板/沟通/导入/模式/资料类型多 runtime 登记）、#86~#88（ATS/面试 schema 重复维护）、#91 余项、#15 全量类型化配置 —— 均为扩展性接缝，单作者项目当前属过度工程边界。
 
+### 2.11 台账对账补登（38 行「本轮新增核对」表 → §2 漏登项，2026-09-30 复核）
+
+对账方法：把 `docs/ideation/2026-09-04-project-optimization-ideation.md` 的 38 行核对表（行 506-543）逐行映射到本报告 §2 的 finding 号，无法映射且既未闭环也非架构方向的条目在此补登并逐项核实（下表中 ✅ 已完成项见 §4 第十四/十五批）。
+
+| 台账行 | 核实证据 | 结论 |
+| --- | --- | --- |
+| AI 异步失败消息 | `TaskLeaseService.java`（AI 任务）与 `InterviewOperationSupport.java` 等原样写入 `VARCHAR(1024)` 列，仅 `ExportTaskLeaseService` 截断 | **存在缺陷（超长消息致失败写入失败）→ 第十五批修复** |
+| AI 配额观测口径 | `AppObservability.registerQuotaLimit` 旧 gauge 用全站任务行数，限流用每用户尝试数 | **口径不一致 → 第十五批对齐** |
+| 简历版本消费策略 | `ScoringService.score` 不校验 `deletedAt`，ATS/导出/投递/沟通均拒绝归档版本 | **契约不一致 → 第十五批对齐** |
+| PDF readiness 与容量 | readiness 已闭环（`/health` 动态探测 Chromium + 模板数 + 浏览器池 readiness 单测）；容量/队列/关闭语义仍无许可与上限（`browserPool.js` 每次 `newPage()`，SIGTERM 先关池再 `server.close()`） | **仍存在**：下一批候选（按 ideation 自身建议补容量/关闭语义 + 测试） |
+| Worker 领取与索引 | `AiTaskRepository.claimableTasksByTypes` 注释与实现一致（已说明为何不用 `SKIP LOCKED`）；AI 领取 `ORDER BY id`（主键序），`idx_ai_task_status(status, lease_expires_at)` 对 OR 条件收益有限；导出领取索引已含 `id`（V16） | ✅ 核实：无实测证据（缺真实 MySQL EXPLAIN/压测），保留留观 |
+| 文件导入资源边界 | `ResumeImportService` 的长度上限作用于归一化前文本，归一化只去 NUL + trim（不增长）；解析有 15s 超时（#17）；入口 5MB | ✅ 核实：已覆盖，无需独立上限；DOCX 展开量依赖 POI 防护 + 入口上限，留观 |
+| JD 解析（平铺 contains） | `JdKeywordParser.extractKeywords` 用大小写不敏感 `contains`，存在「JavaScript 命中 Java」类误命中 | 已知取舍：有真实误命中案例再评估；当前评分解释页的 matched/missing 机制可缓解，留观 |
+| 跨运行时时间契约 | 后端 `LocalDateTime` + 服务器自然日；Web 按浏览器时区展示 | 归架构方向类（同 §2.10），单时区部署无故障 |
+| AI 任务恢复收件箱 / 简历导入来源追溯 / PDF 对象存储 / AI 提供者路由 / 投递流水线契约 | 见台账原文 506/507/513/519/520 行 | 归架构方向类（产品范围或扩展性接缝），当前无故障 |
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -224,6 +240,14 @@
 **第十三批 · AI 任务留存清理（#26，用户确认「90 天压缩快照 + 用户入口」）— ✅ 已执行（2026-09-30）**
 56. ✅ #26 `ai_task` 留存与清理：新增 `AiTaskRetentionService`（`@Scheduled` 默认每 24h、每轮 200 行）把超期（`app.ai.task.retention-days`，默认 90 天）的**终态**任务压缩为元数据——内联快照替换为 `{"_purged": true}`、结果 JSON 置空，保留 id/类型/状态/时间/幂等键等行数据；待确认（`SUCCESS + PENDING`）与进行中的任务不压缩。V33 新增 `snapshot_purged` 标记列（NOT NULL DEFAULT FALSE）保证压缩一次性、清理作业不再重复命中（占位 JSON 无 SQL 可判定特征），5.7 门禁同步到 V33（14 条迁移）。用户侧新增 `DELETE /api/ai/tasks/history`（只删本人终态且非待确认任务，返回删除条数）+ 账号页「清空 AI 任务历史」按钮（`window.confirm` 二次确认 + 结果提示）。测试：`AiTaskRetentionIT`（超期终态压缩 / 待确认 / 未超期 / 进行中 / 已压缩 5 类行 + 二次执行返回 0 证明一次性）、`AiTaskControllerIT` 新增清空历史用例（终态删除、待确认与进行中保留、跨用户隔离）、e2e 账号页清空流程；`docs/05` §7.5 留存契约同步
 
+**第十四批 · 账号数据导出与删号入口（#7，用户确认口径）— ✅ 已执行（2026-09-30）**
+57. ✅ #7 账号数据导出与删号入口：新增 `GET /api/auth/export` 把本人各域数据聚合为可下载 JSON（`formatVersion: 1`、`Content-Disposition` 附件、显式 UTF-8；定向测试暴露并修正「String 消息转换器默认 ISO-8859-1 会把中文写成 `?`」）；范围＝简历+版本（含归档）/职业资料/JD/投递/面试会话+轮次/答案资产+章节/自定义沟通模板+草稿/个人资料/AI 同意记录，显式排除 AI 任务内联快照与结果及其派生 ATS/匹配分析、登录会话凭据（`User` 白名单取值）；账号页新增「数据与隐私」带（导出下载 + 删号对话框：输入用户名二次确认 → 现有 `DELETE /api/auth/me` → 清本地会话跳登录）。顺带：`CommunicationDraft` 补标准 getter（原仅 setter，无法序列化）、`CareerMaterial.contentJsonText` 加 `@JsonIgnore`（搜索用内部投影不外泄）。`docs/05` §2.7/§2.8 契约同步
+
+**第十五批 · 异步失败消息边界与观测/消费口径（#514/#524/#533，台账对账新增项）— ✅ 已执行（2026-09-30）**
+58. ✅ #514 异步失败消息持久化边界：AI 任务/面试 AI 尝试的 `error_message`（`VARCHAR(1024)`）此前原样写入 provider/异常 message，超长消息在 MySQL 严格模式下会让「释放失败」事务失败——任务停在 RUNNING（面试尝试停在进行中）直到租约过期被接管，真实失败原因被掩盖、重试计数与告警口径漂移。新增 `AsyncFailureMessages.persisted()`（截断 1000 < 列宽 1024、不切断代理对、null 保持清空语义）并接入 6 处写入路径（`TaskLeaseService`、面试 `markAttemptFailed` 与 3 处配额分支）；PDF 导出任务原有内联截断收敛到同一实现。测试：`AsyncFailureMessagesTest`（null/边界 1000/超长/代理对不切断）+ `TaskLeaseServiceTest` 超长消息用例（断言 5000 → 1000）。**未做**：失败消息「公开文案接缝」（对客户端只暴露稳定文案）仍属架构方向，留观
+59. ✅ #524 AI 配额观测口径：gauge `resume_ai_quota_daily_tasks_created` 用全站**任务行数**（`countByTaskTypeAndCreatedAtAfter`），与限流按「每用户当日尝试数（重试计次）」的口径不可比（面板同时并列「每用户限额」gauge，易读成使用率）。现改为 `resume_ai_quota_daily_attempts{scope="all_users"}`（新增全局尝试数查询，与限流同一单位）；Grafana 面板表达式与标题同步；`AppObservabilityTest` 断言新口径、旧指标不再注册、重复注册幂等；删除已无调用方的旧查询
+60. ✅ #533 归档版本消费契约（评分对齐）：`ScoringService.score` 直接用 `findById` 加载版本、不校验 `deletedAt`，而 ATS/导出/投递/沟通均拒绝归档版本——同一版本在不同模块「能不能消费」结论不一致。现按 ATS 既有语义返回 40901「该简历版本已归档，请先恢复后再发起评分」（归属校验在前，避免用归档状态区分他人版本是否存在）；`ScoringControllerIT` 新增「归档 40901 → 恢复后 200」用例
+
 **需产品/环境决策后再定（2026-09-30 口径已确认）**
 - #26 ai_task 留存与清理：✅ 已按「90 天压缩快照 + 用户入口」落地（见第十三批，第 56 条）
 - #7 账号数据导出/删除入口：✅ 已按确认口径落地（见第十四批，第 57 条）
@@ -252,4 +276,5 @@
 | 2026-09-30 | **#11（分页契约）决策记录**：与用户确认「记录不实现」——列表已在 #50 三批中改为摘要投影、数据为用户维度量级可控；分页需补选择器 options 端点、迁移 31 项功能测试与列表/看板 UI，收益/成本不划算。保留为待观察项（出现数据量显著增长的真实案例时再按「纯列表页分页 + options 端点」实施）。同时确认三项产品决策项（#26 / #7 / #53~#55）推进、#22 门禁去留暂不推进 |
 | 2026-09-30 | **第十二批（AI 上下文白名单统一，#53/#54/#55）执行完成**：新增共享常量 `ResumeSections.AI_CONTEXT_SECTIONS`（13 章，排除 `links`）作为唯一来源——素材生成（服务端提示词由常量生成 + 前端白名单从 `sectionRegistry` 派生）、面试上下文投影（新增 objective/志愿/课程/成果/奖项/自定义模块 + `appendItems` 复用）、沟通 prompt（8 章 → 13 章，脱敏策略不变）。回归：server 全量 **797 测试 0 失败**（新增 3，5 skipped 为环境门控）；web `npm run build` 通过；Playwright 全量 **143 passed / 6 skipped / 0 failed**；CI + Functional Regression 双绿（workflow run 36732641767 / 36732641579，head 278e855，复核结论 success） |
 | 2026-09-30 | **第十三批（AI 任务留存清理，#26）执行完成**：`AiTaskRetentionService` 每日压缩超期（默认 90 天）终态任务的内联快照与结果（待确认/进行中不压缩）；V33 `snapshot_purged` 标记保证一次性（5.7 门禁同步到 V33）；`DELETE /api/ai/tasks/history`（只删本人终态且非待确认任务）+ 账号页「清空 AI 任务历史」入口；`docs/05` §7.5 留存契约同步。回归：server 全量 **799 测试 0 失败**（新增 2，5 skipped 为环境门控）；MySQL 5.7 门禁推进到 V33（14 条迁移）实跑通过；web `npm run build` 通过；Playwright 全量 **143 passed / 6 skipped / 0 failed**（首次全量运行出现 1 次 `ats-ai` 偶发失败——隔离运行与随后的全量重跑均通过，疑与并行 worker 冷启动解析链有关，留观 CI）；CI + Functional Regression 双绿（workflow run 36734555890 / 36734556149，head 3d790b8，复核结论 success） |
-| 2026-09-30 | **第十四批（账号数据导出与删号入口，#7）执行完成**：新增 `GET /api/auth/export`——按用户聚合为可下载 JSON（`formatVersion: 1` + `Content-Disposition` 附件 + 显式 UTF-8；定向测试暴露「String 消息转换器默认 ISO-8859-1 会把中文写成 `?`」并修正）；范围＝简历+版本（含归档）/职业资料/JD/投递/面试会话+轮次/答案资产+章节/自定义沟通模板+草稿/个人资料/AI 同意记录，显式排除 AI 任务内联快照与结果及其派生 ATS/匹配分析、登录会话凭据（`User` 白名单取值，不导出 `passwordHash`）；账号页新增「数据与隐私」带：导出即下载 `.json` + 删号对话框（输入用户名二次确认 → 现有 `DELETE /api/auth/me` → 清本地会话跳登录，服务端同时作废 refresh cookie）；顺带 `CommunicationDraft` 补标准 getter（原仅 setter，无法序列化）、`CareerMaterial.contentJsonText` 加 `@JsonIgnore`（搜索用内部投影不外泄）。回归：server 全量 **801 测试 0 失败**（新增 2，5 skipped 为环境门控）；web `npm run build` 通过；Playwright 全量 **144 passed / 6 skipped / 0 failed**（新增 1）；`docs/05` §2.7/§2.8 契约同步 |
+| 2026-09-30 | **第十四批（账号数据导出与删号入口，#7）执行完成**：新增 `GET /api/auth/export`——按用户聚合为可下载 JSON（`formatVersion: 1` + `Content-Disposition` 附件 + 显式 UTF-8；定向测试暴露「String 消息转换器默认 ISO-8859-1 会把中文写成 `?`」并修正）；范围＝简历+版本（含归档）/职业资料/JD/投递/面试会话+轮次/答案资产+章节/自定义沟通模板+草稿/个人资料/AI 同意记录，显式排除 AI 任务内联快照与结果及其派生 ATS/匹配分析、登录会话凭据（`User` 白名单取值，不导出 `passwordHash`）；账号页新增「数据与隐私」带：导出即下载 `.json` + 删号对话框（输入用户名二次确认 → 现有 `DELETE /api/auth/me` → 清本地会话跳登录，服务端同时作废 refresh cookie）；顺带 `CommunicationDraft` 补标准 getter（原仅 setter，无法序列化）、`CareerMaterial.contentJsonText` 加 `@JsonIgnore`（搜索用内部投影不外泄）。回归：server 全量 **801 测试 0 失败**（新增 2，5 skipped 为环境门控）；web `npm run build` 通过；Playwright 全量 **144 passed / 6 skipped / 0 failed**（新增 1）；`docs/05` §2.7/§2.8 契约同步；CI + Functional Regression 双绿（workflow run 36737379821 / 36737380285，head b68400a，复核结论 success） |
+| 2026-09-30 | **第十五批（异步失败消息边界与观测/消费口径，#514/#524/#533；台账对账新增项）执行完成**：#514 新增 `AsyncFailureMessages.persisted()`（截断 1000 < 列宽 1024、不切断代理对、null 保留清空语义）并接入 6 处 `error_message` 写入路径（AI 任务租约、面试 `markAttemptFailed` 与 3 处配额分支），PDF 导出租约的内联截断收敛到同一实现——此前超长 provider/异常 message 会让「释放失败」事务失败、任务卡在 RUNNING 直到租约接管，真实失败原因被掩盖；#524 配额 gauge 由「全站任务行数」改为与限流同单位的 `resume_ai_quota_daily_attempts{scope="all_users"}`（重试计次；新增全局尝试数查询、删除旧查询），Grafana 面板表达式与标题同步；#533 规则评分拒绝归档版本（40901，与 ATS/导出/投递/沟通对齐；归属校验在前避免存在性泄露）；报告新增 §2.11 台账对账（38 行核对表 → §2 漏登项逐项核实，登记 PDF 服务容量/队列/关闭语义为下一批候选）。回归：server 全量 **808 测试 0 失败**（新增 7，5 skipped 为环境门控） |

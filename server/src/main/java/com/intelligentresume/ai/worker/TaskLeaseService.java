@@ -4,6 +4,7 @@ import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
+import com.intelligentresume.common.persistence.AsyncFailureMessages;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -131,7 +132,7 @@ public class TaskLeaseService {
             stored.setStatus(AiTaskStatus.FAILED);
             log.debug("Task {} failed permanently: {}", task.getId(), errorMessage);
         }
-        stored.setErrorMessage(errorMessage);
+        stored.setErrorMessage(AsyncFailureMessages.persisted(errorMessage));
         stored.setLeaseOwner(null);
         stored.setLeaseExpiresAt(null);
         taskRepository.save(stored);

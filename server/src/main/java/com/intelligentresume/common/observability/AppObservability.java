@@ -141,13 +141,24 @@ public class AppObservability {
                 .record(duration);
     }
 
+    /**
+     * 注册每日配额观测 gauge（ideation #524）。
+     *
+     * <p>配额限流按「每用户当日尝试数」计（重试计次，见
+     * {@code AiTaskRepository.countAttemptsByUserIdAndTaskTypeAndCreatedAtAfter}），
+     * 因此全站量指标必须用同一单位结算，否则「消耗量」与「限额」不可比：
+     * gauge 拆成 {@code resume_ai_quota_daily_attempts{scope="all_users"}}（全站当日尝试数）
+     * 与 {@code resume_ai_quota_daily_limit_per_user}（每用户限额，配置值）。Gauge 不引入
+     * 用户标签，避免基数爆炸。
+     */
     public void registerQuotaLimit(AiTaskType taskType, int limit) {
         if (quotaLimits.putIfAbsent(taskType, limit) != null) {
             return;
         }
-        Gauge.builder("resume_ai_quota_daily_tasks_created", aiTaskRepository,
-                        repository -> repository.countByTaskTypeAndCreatedAtAfter(taskType, LocalDate.now().atStartOfDay()))
+        Gauge.builder("resume_ai_quota_daily_attempts", aiTaskRepository,
+                        repository -> repository.countAttemptsByTaskTypeAndCreatedAtAfter(taskType, LocalDate.now().atStartOfDay()))
                 .tag("task_type", taskType.name())
+                .tag("scope", "all_users")
                 .register(registry);
         Gauge.builder("resume_ai_quota_daily_limit_per_user", quotaLimits,
                         limits -> limits.getOrDefault(taskType, 0))

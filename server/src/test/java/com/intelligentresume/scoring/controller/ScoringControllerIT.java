@@ -1,6 +1,8 @@
 package com.intelligentresume.scoring.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.resume.domain.ResumeVersion;
+import com.intelligentresume.resume.repository.ResumeVersionRepository;
 import com.intelligentresume.scoring.repository.MatchResultRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,6 +12,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import java.time.LocalDateTime;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -27,6 +31,7 @@ class ScoringControllerIT {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private MatchResultRepository matchResultRepository;
+    @Autowired private ResumeVersionRepository resumeVersionRepository;
 
     private static String tokenA;
     private static String tokenB;
@@ -185,5 +190,36 @@ class ScoringControllerIT {
                                 """))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(40101));
+    }
+
+    @Test
+    @Order(8)
+    @DisplayName("#533 归档版本不可参与评分（40901）；恢复后可评分")
+    void postMatch_archivedVersion_conflictUntilRestored() throws Exception {
+        ResumeVersion version = resumeVersionRepository.findById(versionId).orElseThrow();
+        version.setDeletedAt(LocalDateTime.now());
+        resumeVersionRepository.save(version);
+        try {
+            mockMvc.perform(post("/api/scoring/match")
+                            .header("Authorization", "Bearer " + tokenA)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"resumeVersionId": %d, "jobDescriptionId": %d}
+                                    """.formatted(versionId, jdId)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value(40901));
+        } finally {
+            version.setDeletedAt(null);
+            resumeVersionRepository.save(version);
+        }
+
+        mockMvc.perform(post("/api/scoring/match")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"resumeVersionId": %d, "jobDescriptionId": %d}
+                                """.formatted(versionId, jdId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
     }
 }
