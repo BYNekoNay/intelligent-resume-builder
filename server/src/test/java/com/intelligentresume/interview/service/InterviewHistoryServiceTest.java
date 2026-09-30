@@ -5,7 +5,6 @@ import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.interview.domain.CompletionReason;
 import com.intelligentresume.interview.domain.ExecutionMode;
 import com.intelligentresume.interview.domain.InterviewMode;
-import com.intelligentresume.interview.domain.InterviewSession;
 import com.intelligentresume.interview.domain.InterviewSourceType;
 import com.intelligentresume.interview.domain.InterviewStatus;
 import com.intelligentresume.interview.repository.InterviewRecordRepository;
@@ -49,18 +48,17 @@ class InterviewHistoryServiceTest {
         service = new InterviewHistoryService(sessionRepository, recordRepository, jobRepository);
     }
 
-    private InterviewSession completedSession(Long id) {
-        InterviewSession session = new InterviewSession();
-        session.setId(id);
-        session.setUserId(USER_ID);
-        session.setJobDescriptionId(JOB_ID);
-        session.setResumeVersionId(10L);
-        session.setSourceType(InterviewSourceType.PLATFORM_RESUME);
-        session.setInterviewMode(InterviewMode.TECHNICAL);
-        session.setExecutionMode(ExecutionMode.AI);
-        session.setCompletionReason(CompletionReason.USER_FINISHED);
-        session.setTargetQuestionCount(6);
-        session.setStatus(InterviewStatus.COMPLETED);
+    private InterviewSessionRepository.SessionSummaryProjection completedSession(Long id) {
+        InterviewSessionRepository.SessionSummaryProjection session =
+                mock(InterviewSessionRepository.SessionSummaryProjection.class);
+        when(session.getId()).thenReturn(id);
+        when(session.getJobDescriptionId()).thenReturn(JOB_ID);
+        when(session.getResumeVersionId()).thenReturn(10L);
+        when(session.getSourceType()).thenReturn(InterviewSourceType.PLATFORM_RESUME);
+        when(session.getInterviewMode()).thenReturn(InterviewMode.TECHNICAL);
+        when(session.getExecutionMode()).thenReturn(ExecutionMode.AI);
+        when(session.getCompletionReason()).thenReturn(CompletionReason.USER_FINISHED);
+        when(session.getTargetQuestionCount()).thenReturn(6);
         return session;
     }
 
@@ -74,8 +72,8 @@ class InterviewHistoryServiceTest {
     @Test
     @DisplayName("list：仅返回 COMPLETED 会话，服务端聚合题数与平均分（批量加载避免 N+1）")
     void list_returnsCompletedWithAggregation() {
-        InterviewSession completed = completedSession(1L);
-        when(sessionRepository.findCompletedByUserId(USER_ID, InterviewStatus.COMPLETED, null))
+        var completed = completedSession(1L);
+        when(sessionRepository.findCompletedSummariesByUserId(USER_ID, InterviewStatus.COMPLETED, null))
                 .thenReturn(List.of(completed));
         var scores = List.of(score(1L, 60), score(1L, 80), score(1L, 100));
         when(recordRepository.findScoresBySessionIdInOrderByRoundNoAscIdAsc(List.of(1L))).thenReturn(scores);
@@ -89,7 +87,7 @@ class InterviewHistoryServiceTest {
         assertEquals(JOB_ID, result.get(0).jobDescriptionId());
         assertEquals(InterviewSourceType.PLATFORM_RESUME, result.get(0).sourceType());
         // 仓库查询参数必须锁定 COMPLETED，保证不列出进行中的会话
-        verify(sessionRepository).findCompletedByUserId(eq(USER_ID), eq(InterviewStatus.COMPLETED), eq(null));
+        verify(sessionRepository).findCompletedSummariesByUserId(eq(USER_ID), eq(InterviewStatus.COMPLETED), eq(null));
         // 使用一次批量查询，而非逐会话 N 次查询
         verify(recordRepository).findScoresBySessionIdInOrderByRoundNoAscIdAsc(List.of(1L));
     }
@@ -102,15 +100,16 @@ class InterviewHistoryServiceTest {
         BusinessException ex = assertThrows(BusinessException.class, () -> service.list(USER_ID, JOB_ID));
 
         assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
-        verify(sessionRepository, never()).findCompletedByUserId(any(), any(), any());
+        verify(sessionRepository, never()).findCompletedSummariesByUserId(any(), any(), any());
     }
 
     @Test
     @DisplayName("list：按 JD 筛选时透传 jobDescriptionId")
     void list_passesJobFilter() {
         when(jobRepository.findByIdAndUserId(JOB_ID, USER_ID)).thenReturn(Optional.of(new JobDescription()));
-        when(sessionRepository.findCompletedByUserId(USER_ID, InterviewStatus.COMPLETED, JOB_ID))
-                .thenReturn(List.of(completedSession(2L)));
+        var filtered = completedSession(2L);
+        when(sessionRepository.findCompletedSummariesByUserId(USER_ID, InterviewStatus.COMPLETED, JOB_ID))
+                .thenReturn(List.of(filtered));
         var scores = List.of(score(2L, 50));
         when(recordRepository.findScoresBySessionIdInOrderByRoundNoAscIdAsc(List.of(2L))).thenReturn(scores);
 
@@ -120,6 +119,6 @@ class InterviewHistoryServiceTest {
         assertEquals(2L, result.get(0).id());
         assertEquals(1, result.get(0).actualQuestionCount());
         assertEquals(50, result.get(0).totalScore());
-        verify(sessionRepository).findCompletedByUserId(USER_ID, InterviewStatus.COMPLETED, JOB_ID);
+        verify(sessionRepository).findCompletedSummariesByUserId(USER_ID, InterviewStatus.COMPLETED, JOB_ID);
     }
 }

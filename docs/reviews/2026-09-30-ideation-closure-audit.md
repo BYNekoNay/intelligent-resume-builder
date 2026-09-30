@@ -160,6 +160,13 @@
 15. ✅ #43 限流分桶硬上限：`RateLimitFilter` 在 maxBuckets 耗尽且无可清理过期桶时，新 key 直接 429（fail-closed），已有分桶不受影响；新增单测
 16. ✅ #21 发布就绪脚本退出码：`Test-ReleaseReadiness.ps1` 的 `npm run check; npm test` 拆为两条 `Invoke-CheckedCommand`，前一步失败不再被末位退出码掩盖
 
+**第五批 A · 读模型与性能（部分完成）— ✅ 已执行（2026-09-30）**
+17. ✅ #1 职业资料列表读模型：新增 `CareerMaterialListRow` 投影查询（摘要列 + contentJson + SQL 侧「原文非空」标志），列表不再传输 MEDIUMTEXT sourceText，类型过滤下推 SQL；`evidenceReady` 仍由 `CareerMaterialEvidence` 规则计算（SQL 近似只影响历史直写行的空白字符边界，已在 DTO 注释记录）
+18. ✅ #52 续办列表 metadata-only：`AiTaskContinuationResponse` + `ContinuationProjection`，不再返回 resultJson/errorMessage/inputSnapshot 派生字段（结果 JSON 单任务可达 64KB）；Web `AiTaskContinuation` 类型同步（HomeView 仅消费 id/类型/状态/时间）
+19. ✅ #50 面试历史列表读模型：`InterviewSessionRepository.SessionSummaryProjection`，不再加载 external_resume_text（MEDIUMTEXT）与 current_question；新增 `InterviewSessionSummaryProjectionIT`
+20. ✅ #3 投递统计：计数改 SQL group by（`countGroupByStatus`），时长行只取 APPLIED/INTERVIEWING/OFFERED 三态，不再为统计读回全部投递行
+21. ⏭ #50 其余三项**暂缓**（JD 预览、简历版本 templateCode、投递列表长文本）：其摘要字段从宽列派生（JD 预览需 `\s+` 归一化、templateCode 取自 resumeJson），SQL 无跨库等价表达；投递列表的长文本被前端编辑面板直接消费。需要「持久化派生列」或前端改为按需拉详情，属下一次设计决策——不做会牺牲语义精确性的近似实现
+
 **需产品/环境决策后再定**
 - #26 ai_task 留存与清理策略（保留多久、是否提供用户删除入口）
 - #7 账号数据导出/删除前端入口（隐私治理口径）
@@ -174,4 +181,5 @@
 | 2026-09-30 | **第一批（隐私与配置对齐）执行完成**：#68 日志 userId 移除 + `LogPrivacyGateTest` 静态门禁（扫描全部日志调用，防复发）；#71 consent 排序加 `id` tie-break；#60 租约 180→660s（> 链总预算 600s）+ 心跳池 2 线程；#49 四处入口幂等键契约统一（AiTask/JobMaterialSelection/Communication/Interview）。回归：全量 **740 测试 0 失败**（含新门禁），新增幂等键契约 IT 用例定向通过 |
 | 2026-09-30 | **第二批（并发健壮性）执行完成**：#46 完整性/并发冲突统一 409（两个全局 handler，日志不记异常 message）；#45 refresh 轮换 CAS 原子化（不用行锁——避免与 REQUIRES_NEW 撤销服务自锁），并发刷新单赢家 + 败者撤族 401；#67 职业资料 `@Version` + V27 迁移；#48 AI 任务幂等并发回读（三分支）。新增 `AuthConcurrencyIT`（真并发双场景）与 5 个分支用例，回归：全量 **748 测试 0 失败**；CI + Functional Regression 双绿 |
 | 2026-09-30 | **第三批（功能与性能）执行完成**：#2 搜索覆盖 contentJson（`@Formula` 只读文本投影 + `lower(contentJsonText) LIKE`；H2 2.2.224 与 MySQL 5.7.24 双端探针定案匹配策略；新增 IT 用例）；PA-2 `ActiveUserCache` 30s 短 TTL（删号路径事务提交后清除，保住 #6「删号即失效」；新增 4 个可变时钟单测 + AuthServiceTest 断言）；#66 六个视图 13 处错误码映射收尾（web build 通过）。回归：全量 **753 测试 0 失败**（新增 5），web `npm run build` 通过 |
-| 2026-09-30 | **第四批（小项收口）执行完成**：#75 面试记录排序改 `round_no ASC, id ASC`（新增 `InterviewRecordOrderingIT` 倒序写入断言 + 评分投影 JPQL 执行验证；删除未调用的旧排序方法）；#72 搜索词 100 字符上限（40001）；#43 限流分桶硬上限（容量耗尽新 key fail-closed 429 + 单测）；#21 发布就绪脚本复合命令拆分（仓库内已无其它复合写法）。回归：全量 **756 测试 0 失败**（新增 3） |
+| 2026-09-30 | **第四批（小项收口）执行完成**：#75 面试记录排序改 `round_no ASC, id ASC`（新增 `InterviewRecordOrderingIT` 倒序写入断言 + 评分投影 JPQL 执行验证；删除未调用的旧排序方法）；#72 搜索词 100 字符上限（40001）；#43 限流分桶硬上限（容量耗尽新 key fail-closed 429 + 单测）；#21 发布就绪脚本复合命令拆分（仓库内已无其它复合写法）。回归：全量 **756 测试 0 失败**（新增 3）；CI + Functional Regression 双绿 |
+| 2026-09-30 | **第五批 A（读模型与性能）部分执行完成**：#1 职业资料列表投影（新增 `CareerMaterialListRow`，不读 MEDIUMTEXT 原文、类型过滤下推 SQL）；#52 续办列表 metadata-only（`AiTaskContinuationResponse` + 投影，去掉 resultJson/输入快照派生字段）；#50 面试历史列表投影（不读 external_resume_text/current_question，新增 `InterviewSessionSummaryProjectionIT`）；#3 投递统计计数改 SQL group by、时长行只取三态。#50 其余三项暂缓（见 §4 第 21 条）。回归：全量 **758 测试 0 失败**（新增 2），web `npm run build` 通过 |

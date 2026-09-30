@@ -92,6 +92,22 @@ export interface AiTask {
   updatedAt: string
 }
 
+/**
+ * 续办列表元数据（#52）：列表不携带 resultJson 等大字段；
+ * 需要完整结果时用 getTask(id) 拉详情。
+ */
+export interface AiTaskContinuation {
+  id: number
+  taskType: AiTask['taskType']
+  parentTaskId: number | null
+  status: TaskStatus
+  confirmationStatus: ConfirmationStatus
+  resultResumeVersionId: number | null
+  retryCount: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ConfirmRequest {
   taskUpdatedAt: string
   items: { outputPath: string; decision: 'ACCEPT' | 'EDIT' | 'REJECT'; editedValue?: Record<string, unknown> }[]
@@ -167,7 +183,7 @@ export function getTask(id: number) {
 }
 
 export function listTaskContinuations() {
-  return apiClient.get<ApiResponse<AiTask[]>>('/api/ai/tasks/continuations')
+  return apiClient.get<ApiResponse<AiTaskContinuation[]>>('/api/ai/tasks/continuations')
 }
 
 export function retryTask(id: number) {

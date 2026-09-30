@@ -112,7 +112,7 @@ class CareerMaterialServiceTest {
     @Test
     @DisplayName("边界路径: 列出空列表")
     void list_empty() {
-        when(repository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of());
+        when(repository.findListRowsByUserId(100L, null)).thenReturn(List.of());
 
         List<CareerMaterialSummary> list = service.list(100L, null);
 
@@ -120,18 +120,40 @@ class CareerMaterialServiceTest {
     }
 
     @Test
-    @DisplayName("边界路径: 按 materialType 过滤")
+    @DisplayName("边界路径: 按 materialType 过滤（SQL 侧过滤,投影不读原文）")
     void list_filterByType() {
-        CareerMaterial skill = material(1L, 100L, MaterialType.SKILL, "Java");
-        CareerMaterial work = material(2L, 100L, MaterialType.WORK_EXPERIENCE, "平台项目");
-        when(repository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of(skill, work));
+        when(repository.findListRowsByUserId(100L, MaterialType.SKILL)).thenReturn(List.of(
+                new CareerMaterialListRow(1L, MaterialType.SKILL, "Java", UsagePreference.NORMAL,
+                        null, Map.of("name", "Java"), false)));
 
         List<CareerMaterialSummary> list = service.list(100L, MaterialType.SKILL);
 
         assertEquals(1, list.size());
         assertEquals(MaterialType.SKILL, list.get(0).materialType());
         assertTrue(list.get(0).evidenceReady());
-        verify(repository).findByUserIdOrderByUpdatedAtDesc(100L);
+        verify(repository).findListRowsByUserId(100L, MaterialType.SKILL);
+    }
+
+    @Test
+    @DisplayName("读模型证据口径: 原文非空或结构化内容有意义才算就绪")
+    void list_evidenceReadyMatchesEvidenceRules() {
+        when(repository.findListRowsByUserId(100L, null)).thenReturn(List.of(
+                // 原文非空（SQL 侧标志）→ 就绪
+                new CareerMaterialListRow(1L, MaterialType.WORK_EXPERIENCE, "有原文", UsagePreference.NORMAL,
+                        null, Map.of(), true),
+                // 原文为空但结构化字段有意义 → 就绪
+                new CareerMaterialListRow(2L, MaterialType.EDUCATION, "有结构", UsagePreference.NORMAL,
+                        null, Map.of("school", "示例大学"), false),
+                // 只有 title 键不构成证据 → 不就绪（与创建校验同一规则）
+                new CareerMaterialListRow(3L, MaterialType.EDUCATION, "历史空行", UsagePreference.NORMAL,
+                        null, Map.of("title", "历史空行"), false)));
+
+        List<CareerMaterialSummary> list = service.list(100L, null);
+
+        assertEquals(3, list.size());
+        assertTrue(list.get(0).evidenceReady());
+        assertTrue(list.get(1).evidenceReady());
+        assertFalse(list.get(2).evidenceReady());
     }
 
     @Test
@@ -444,9 +466,9 @@ class CareerMaterialServiceTest {
     @Test
     @DisplayName("契约锚定: list 类型过滤按枚举精确匹配,SKILL 不混入 SKILL_EVIDENCE")
     void list_skillFilterDoesNotMatchSimilarNamedTypes() {
-        CareerMaterial skill = material(1L, 100L, MaterialType.SKILL, "Java");
-        CareerMaterial skillEvidence = material(2L, 100L, MaterialType.SKILL_EVIDENCE, "Java 证据");
-        when(repository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of(skill, skillEvidence));
+        when(repository.findListRowsByUserId(100L, MaterialType.SKILL)).thenReturn(List.of(
+                new CareerMaterialListRow(1L, MaterialType.SKILL, "Java", UsagePreference.NORMAL,
+                        null, Map.of("name", "Java"), false)));
 
         List<CareerMaterialSummary> list = service.list(100L, MaterialType.SKILL);
 

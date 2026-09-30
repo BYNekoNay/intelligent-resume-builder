@@ -3,6 +3,7 @@ package com.intelligentresume.careermaterial.repository;
 import com.intelligentresume.careermaterial.domain.CareerMaterial;
 import com.intelligentresume.careermaterial.domain.MaterialType;
 import com.intelligentresume.careermaterial.domain.UsagePreference;
+import com.intelligentresume.careermaterial.dto.CareerMaterialListRow;
 import com.intelligentresume.careermaterial.dto.CareerMaterialTypeCount;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -18,6 +19,24 @@ public interface CareerMaterialRepository extends JpaRepository<CareerMaterial, 
     Optional<CareerMaterial> findByIdAndUserId(Long id, Long userId);
 
     List<CareerMaterial> findByUserIdOrderByUpdatedAtDesc(Long userId);
+
+    /**
+     * 列表读模型（ideation #1）：只投影摘要列 + contentJson + 「原文非空」标志，
+     * 不传输 MEDIUMTEXT sourceText；类型过滤下推到 SQL，不再内存过滤。
+     */
+    @Query("""
+            select new com.intelligentresume.careermaterial.dto.CareerMaterialListRow(
+                material.id, material.materialType, material.title, material.usagePreference,
+                material.updatedAt, material.contentJson,
+                case when trim(coalesce(material.sourceText, '')) <> '' then true else false end)
+            from CareerMaterial material
+            where material.userId = :userId
+              and (:materialType is null or material.materialType = :materialType)
+            order by material.updatedAt desc
+            """)
+    List<CareerMaterialListRow> findListRowsByUserId(
+            @Param("userId") Long userId,
+            @Param("materialType") MaterialType materialType);
 
     @Query("""
             select material from CareerMaterial material

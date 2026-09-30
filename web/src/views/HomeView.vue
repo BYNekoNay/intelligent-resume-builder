@@ -19,7 +19,7 @@ import {
 import { getSystemHealth, type SystemHealth } from '@/api/system'
 import { listResumes, type ResumeSummary } from '@/api/resume'
 import { listApplications, type ApplicationRecord } from '@/api/application'
-import { listTaskContinuations, type AiTask } from '@/api/ai'
+import { listTaskContinuations, type AiTaskContinuation } from '@/api/ai'
 import { useAuthStore } from '@/stores/auth'
 import { useLocale } from '@/i18n'
 import { navigationWorkflow } from '@/navigation/registry'
@@ -28,7 +28,7 @@ const health = ref<SystemHealth | null>(null)
 const healthLoading = ref(true)
 const resumes = ref<ResumeSummary[]>([])
 const applications = ref<ApplicationRecord[]>([])
-const continuations = ref<AiTask[]>([])
+const continuations = ref<AiTaskContinuation[]>([])
 const workspaceLoading = ref(false)
 const workspaceError = ref(false)
 const workspaceLoaded = ref(false)

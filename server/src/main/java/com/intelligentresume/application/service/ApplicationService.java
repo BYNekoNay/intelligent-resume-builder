@@ -124,19 +124,20 @@ public class ApplicationService {
 
     @Transactional(readOnly = true)
     public ApplicationStatsResponse stats(Long userId) {
-        // 只查统计所需列（status/appliedAt/createdAt/updatedAt），避免全量行（含长文本）传输；
+        // #3：计数在 SQL 聚合（group by），只有需要逐行时间戳的三个阶段才读行；
         // 时长聚合在 Java 侧计算，兼容 MySQL 与 H2（不依赖 TIMESTAMPDIFF）。
-        List<ApplicationRecordRepository.StatsProjection> records = repository.findStatsByUserId(userId);
-        int total = records.size();
-
-        // byStatus：各状态数量 + count/total*100（保留 1 位小数）
         Map<ApplicationStatus, Long> counts = new EnumMap<>(ApplicationStatus.class);
         for (ApplicationStatus status : ApplicationStatus.values()) {
             counts.put(status, 0L);
         }
-        for (ApplicationRecordRepository.StatsProjection record : records) {
-            counts.merge(record.getStatus(), 1L, Long::sum);
+        long total = 0L;
+        for (ApplicationRecordRepository.StatusCountProjection row : repository.countGroupByStatus(userId)) {
+            counts.put(row.getStatus(), row.getCount());
+            total += row.getCount();
         }
+        List<ApplicationRecordRepository.StatsProjection> records = repository.findDurationRowsByUserId(userId);
+
+        // byStatus：各状态数量 + count/total*100（保留 1 位小数）
         List<ApplicationStatsResponse.StatusCount> byStatus = new ArrayList<>();
         for (ApplicationStatus status : ApplicationStatus.values()) {
             long count = counts.get(status);
@@ -145,10 +146,10 @@ public class ApplicationService {
         }
 
         // 转化率：排除 REJECTED/WITHDRAWN 对分母的干扰
-        long appliedOrFurther = countIn(records, ApplicationStatus.APPLIED, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED);
-        long interviewingOrFurther = countIn(records, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED);
+        long appliedOrFurther = countIn(counts, ApplicationStatus.APPLIED, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED);
+        long interviewingOrFurther = countIn(counts, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED);
         long offered = counts.get(ApplicationStatus.OFFERED);
-        Double appliedToInterviewing = ratio(countIn(records, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED), appliedOrFurther);
+        Double appliedToInterviewing = ratio(interviewingOrFurther, appliedOrFurther);
         Double interviewingToOffered = ratio(offered, interviewingOrFurther);
         Double appliedToOffered = ratio(offered, appliedOrFurther);
 
@@ -157,14 +158,17 @@ public class ApplicationService {
         Double interviewingDuration = avgInterviewingDuration(records, LocalDateTime.now());
         Double totalToOffer = avgTotalToOffer(records);
 
-        return new ApplicationStatsResponse(total, byStatus,
+        return new ApplicationStatsResponse((int) total, byStatus,
                 new ApplicationStatsResponse.ConversionRates(appliedToInterviewing, interviewingToOffered, appliedToOffered),
                 new ApplicationStatsResponse.StageDurations(appliedDuration, interviewingDuration, totalToOffer));
     }
 
-    private long countIn(List<ApplicationRecordRepository.StatsProjection> records, ApplicationStatus... statuses) {
-        Set<ApplicationStatus> set = Set.of(statuses);
-        return records.stream().filter(record -> set.contains(record.getStatus())).count();
+    private long countIn(Map<ApplicationStatus, Long> counts, ApplicationStatus... statuses) {
+        long sum = 0L;
+        for (ApplicationStatus status : statuses) {
+            sum += counts.get(status);
+        }
+        return sum;
     }
 
     private Double ratio(long numerator, long denominator) {

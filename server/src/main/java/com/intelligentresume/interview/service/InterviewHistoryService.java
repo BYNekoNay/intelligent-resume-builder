@@ -2,7 +2,6 @@ package com.intelligentresume.interview.service;
 
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
-import com.intelligentresume.interview.domain.InterviewSession;
 import com.intelligentresume.interview.domain.InterviewStatus;
 import com.intelligentresume.interview.dto.InterviewSessionSummaryResponse;
 import com.intelligentresume.interview.repository.InterviewRecordRepository;
@@ -40,13 +39,16 @@ public class InterviewHistoryService {
             jobRepository.findByIdAndUserId(jobDescriptionId, userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位不存在"));
         }
-        List<InterviewSession> sessions = sessionRepository.findCompletedByUserId(userId, InterviewStatus.COMPLETED, jobDescriptionId);
+        // 读模型投影（ideation #50）：会话只取摘要元数据，不加载简历原文/题目等大字段。
+        List<InterviewSessionRepository.SessionSummaryProjection> sessions =
+                sessionRepository.findCompletedSummariesByUserId(userId, InterviewStatus.COMPLETED, jobDescriptionId);
         if (sessions.isEmpty()) {
             return List.of();
         }
         // 摘要只需要计数和分数；投影避免加载题目、答案和反馈 JSON 等大字段。
         Map<Long, IntSummaryStatistics> scoresBySession = recordRepository
-                .findScoresBySessionIdInOrderByRoundNoAscIdAsc(sessions.stream().map(InterviewSession::getId).toList())
+                .findScoresBySessionIdInOrderByRoundNoAscIdAsc(sessions.stream()
+                        .map(InterviewSessionRepository.SessionSummaryProjection::getId).toList())
                 .stream()
                 .collect(Collectors.groupingBy(InterviewRecordRepository.ScoreProjection::getSessionId,
                         Collectors.summarizingInt(InterviewRecordRepository.ScoreProjection::getRoundScore)));
@@ -55,7 +57,8 @@ public class InterviewHistoryService {
                 .toList();
     }
 
-    private InterviewSessionSummaryResponse summary(InterviewSession session, IntSummaryStatistics scores) {
+    private InterviewSessionSummaryResponse summary(InterviewSessionRepository.SessionSummaryProjection session,
+                                                    IntSummaryStatistics scores) {
         int actual = scores == null ? 0 : (int) scores.getCount();
         int totalScore = scores == null ? 0 : (int) Math.round(scores.getAverage());
         return new InterviewSessionSummaryResponse(session.getId(), session.getJobDescriptionId(),

@@ -27,14 +27,35 @@ public interface ApplicationRecordRepository extends JpaRepository<ApplicationRe
         LocalDateTime getUpdatedAt();
     }
 
+    /** 按状态计数（#3）：计数在 SQL 聚合，不再为统计把全量行读回应用层。 */
+    interface StatusCountProjection {
+        ApplicationStatus getStatus();
+        long getCount();
+    }
+
+    @Query("""
+            SELECT a.status AS status, COUNT(a) AS count
+            FROM ApplicationRecord a
+            WHERE a.userId = :userId
+            GROUP BY a.status
+            """)
+    List<StatusCountProjection> countGroupByStatus(@Param("userId") Long userId);
+
+    /**
+     * 停留时长统计所需行（#3）：只有 APPLIED/INTERVIEWING/OFFERED 需要逐行时间戳
+     * （进入时刻与创建时刻），其它状态仅参与计数，由
+     * {@link #countGroupByStatus} 在 SQL 侧聚合。
+     */
     @Query("""
             SELECT a.status AS status, a.appliedAt AS appliedAt, a.stageEnteredAt AS stageEnteredAt,
                    a.createdAt AS createdAt, a.updatedAt AS updatedAt
             FROM ApplicationRecord a
             WHERE a.userId = :userId
-            ORDER BY a.updatedAt DESC
+              AND a.status IN (com.intelligentresume.application.domain.ApplicationStatus.APPLIED,
+                               com.intelligentresume.application.domain.ApplicationStatus.INTERVIEWING,
+                               com.intelligentresume.application.domain.ApplicationStatus.OFFERED)
             """)
-    List<StatsProjection> findStatsByUserId(@Param("userId") Long userId);
+    List<StatsProjection> findDurationRowsByUserId(@Param("userId") Long userId);
 
     /**
      * 按跟进筛选查询当前用户投递记录。

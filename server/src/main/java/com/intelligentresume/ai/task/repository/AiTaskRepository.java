@@ -3,6 +3,7 @@ package com.intelligentresume.ai.task.repository;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
+import com.intelligentresume.ai.task.domain.ConfirmationStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -30,15 +31,39 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
 
     Optional<AiTask> findByUserIdAndTaskTypeAndIdempotencyKey(Long userId, AiTaskType taskType, String idempotencyKey);
 
-    @Query("SELECT t FROM AiTask t WHERE t.userId = :userId " +
-            "AND t.taskType IN (com.intelligentresume.ai.task.domain.AiTaskType.JOB_MATERIAL_SELECTION, " +
-            "com.intelligentresume.ai.task.domain.AiTaskType.JOB_GENERATION) " +
-            "AND (t.status IN (com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING, " +
-            "com.intelligentresume.ai.task.domain.AiTaskStatus.RUNNING) " +
-            "OR (t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.SUCCESS " +
-            "AND t.confirmationStatus = com.intelligentresume.ai.task.domain.ConfirmationStatus.PENDING)) " +
-            "ORDER BY t.updatedAt DESC, t.id DESC")
-    List<AiTask> findContinuationsByUserId(@Param("userId") Long userId);
+    /**
+     * 续办列表读模型（ideation #52）：只投影首页恢复入口需要的元数据，
+     * 不读 {@code resultJson} / {@code inputSnapshotJson}（生成结果可达 64KB/任务，
+     * 首页只消费 id/类型/状态/时间）。
+     */
+    interface ContinuationProjection {
+        Long getId();
+        AiTaskType getTaskType();
+        Long getParentTaskId();
+        AiTaskStatus getStatus();
+        ConfirmationStatus getConfirmationStatus();
+        Long getResultResumeVersionId();
+        Integer getRetryCount();
+        LocalDateTime getCreatedAt();
+        LocalDateTime getUpdatedAt();
+    }
+
+    @Query("""
+            SELECT t.id AS id, t.taskType AS taskType, t.parentTaskId AS parentTaskId,
+                   t.status AS status, t.confirmationStatus AS confirmationStatus,
+                   t.resultResumeVersionId AS resultResumeVersionId, t.retryCount AS retryCount,
+                   t.createdAt AS createdAt, t.updatedAt AS updatedAt
+            FROM AiTask t
+            WHERE t.userId = :userId
+              AND t.taskType IN (com.intelligentresume.ai.task.domain.AiTaskType.JOB_MATERIAL_SELECTION,
+                                 com.intelligentresume.ai.task.domain.AiTaskType.JOB_GENERATION)
+              AND (t.status IN (com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING,
+                                com.intelligentresume.ai.task.domain.AiTaskStatus.RUNNING)
+                   OR (t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.SUCCESS
+                       AND t.confirmationStatus = com.intelligentresume.ai.task.domain.ConfirmationStatus.PENDING))
+            ORDER BY t.updatedAt DESC, t.id DESC
+            """)
+    List<ContinuationProjection> findContinuationRowsByUserId(@Param("userId") Long userId);
 
     long countByUserIdAndTaskTypeAndCreatedAtAfter(Long userId, AiTaskType taskType, LocalDateTime after);
 

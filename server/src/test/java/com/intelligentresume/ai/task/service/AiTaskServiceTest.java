@@ -6,6 +6,7 @@ import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.domain.ConfirmationStatus;
+import com.intelligentresume.ai.task.dto.AiTaskContinuationResponse;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
@@ -396,19 +397,35 @@ class AiTaskServiceTest {
     }
 
     @Test
-    @DisplayName("续办列表仅映射仓储筛选出的当前用户任务")
-    void listContinuations_mapsRepositoryResultsInOrder() {
-        AiTask newer = task(9L, 100L, AiTaskType.JOB_GENERATION, "newer");
-        newer.setStatus(AiTaskStatus.SUCCESS);
-        newer.setConfirmationStatus(com.intelligentresume.ai.task.domain.ConfirmationStatus.PENDING);
-        AiTask older = task(7L, 100L, AiTaskType.JOB_MATERIAL_SELECTION, "older");
-        when(taskRepository.findContinuationsByUserId(100L)).thenReturn(List.of(newer, older));
+    @DisplayName("续办列表只映射元数据投影（不含 resultJson，#52）")
+    void listContinuations_mapsMetadataProjectionInOrder() {
+        when(taskRepository.findContinuationRowsByUserId(100L)).thenReturn(List.of(
+                new ContinuationRow(9L, AiTaskType.JOB_GENERATION, AiTaskStatus.SUCCESS, ConfirmationStatus.PENDING),
+                new ContinuationRow(7L, AiTaskType.JOB_MATERIAL_SELECTION, AiTaskStatus.RUNNING, null)));
 
-        List<AiTaskStatusResponse> response = service.listContinuations(100L);
+        List<AiTaskContinuationResponse> response = service.listContinuations(100L);
 
-        assertEquals(List.of(9L, 7L), response.stream().map(AiTaskStatusResponse::id).toList());
+        assertEquals(List.of(9L, 7L), response.stream().map(AiTaskContinuationResponse::id).toList());
         assertEquals(AiTaskType.JOB_GENERATION, response.get(0).taskType());
-        verify(taskRepository).findContinuationsByUserId(100L);
+        assertEquals(ConfirmationStatus.PENDING, response.get(0).confirmationStatus());
+        // 历史行 confirmationStatus 为 null 时契约归一为 NOT_REQUIRED（与详情一致）
+        assertEquals(ConfirmationStatus.NOT_REQUIRED, response.get(1).confirmationStatus());
+        verify(taskRepository).findContinuationRowsByUserId(100L);
+    }
+
+    /** 测试用投影行：接口投影在单测中以最小实现替代。 */
+    private record ContinuationRow(Long id, AiTaskType taskType, AiTaskStatus status,
+                                   ConfirmationStatus confirmationStatus)
+            implements AiTaskRepository.ContinuationProjection {
+        @Override public Long getId() { return id; }
+        @Override public AiTaskType getTaskType() { return taskType; }
+        @Override public Long getParentTaskId() { return null; }
+        @Override public AiTaskStatus getStatus() { return status; }
+        @Override public ConfirmationStatus getConfirmationStatus() { return confirmationStatus; }
+        @Override public Long getResultResumeVersionId() { return null; }
+        @Override public Integer getRetryCount() { return 0; }
+        @Override public LocalDateTime getCreatedAt() { return null; }
+        @Override public LocalDateTime getUpdatedAt() { return null; }
     }
 
     private void stubTaskCreation() {

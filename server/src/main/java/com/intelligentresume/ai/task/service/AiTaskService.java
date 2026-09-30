@@ -5,6 +5,7 @@ import com.intelligentresume.ai.ratelimit.AiQuotaService;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
 import com.intelligentresume.ai.task.domain.ConfirmationStatus;
+import com.intelligentresume.ai.task.dto.AiTaskContinuationResponse;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.repository.AiTaskRepository;
@@ -129,9 +130,14 @@ public class AiTaskService {
     }
 
     @Transactional(readOnly = true)
-    public List<AiTaskStatusResponse> listContinuations(Long userId) {
-        return taskRepository.findContinuationsByUserId(userId).stream()
-                .map(this::toResponse)
+    public List<AiTaskContinuationResponse> listContinuations(Long userId) {
+        // 读模型投影（ideation #52）：元数据-only，不加载 resultJson/inputSnapshotJson。
+        return taskRepository.findContinuationRowsByUserId(userId).stream()
+                .map(row -> new AiTaskContinuationResponse(
+                        row.getId(), row.getTaskType(), row.getParentTaskId(), row.getStatus(),
+                        normalizeConfirmationStatus(row.getConfirmationStatus()),
+                        row.getResultResumeVersionId(), row.getRetryCount(),
+                        row.getCreatedAt(), row.getUpdatedAt()))
                 .toList();
     }
 

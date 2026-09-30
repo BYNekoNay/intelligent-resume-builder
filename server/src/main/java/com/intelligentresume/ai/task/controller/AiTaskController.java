@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.task.controller;
 
 import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.ai.task.dto.AiTaskContinuationResponse;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
 import com.intelligentresume.ai.task.service.AiTaskService;
@@ -63,7 +64,7 @@ public class AiTaskController {
     }
 
     @GetMapping("/tasks/continuations")
-    public ApiResponse<List<AiTaskStatusResponse>> listContinuations(HttpServletRequest request) {
+    public ApiResponse<List<AiTaskContinuationResponse>> listContinuations(HttpServletRequest request) {
         return ApiResponse.success(taskService.listContinuations(currentUserId(request)),
                 (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
     }

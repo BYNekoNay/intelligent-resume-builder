@@ -23,6 +23,14 @@ public final class CareerMaterialEvidence {
         return material != null && hasMeaningfulEvidence(material.getSourceText(), material.getContentJson());
     }
 
+    /**
+     * 读模型重载（ideation #1）：列表查询由 SQL 判定「原文非空」，
+     * 结构化证据仍在 Java 判定，与 {@link #isReady(CareerMaterial)} 同一规则。
+     */
+    public static boolean isReady(boolean hasSourceText, Map<String, Object> contentJson) {
+        return hasSourceText || hasMeaningfulValue(contentJson);
+    }
+
     public static boolean hasMeaningfulEvidence(String sourceText, Map<String, Object> contentJson) {
         return hasText(sourceText) || hasMeaningfulValue(contentJson);
     }

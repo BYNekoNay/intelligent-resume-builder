@@ -80,6 +80,13 @@ class ApplicationServiceTest {
         return projection(status, null, null, null);
     }
 
+    private ApplicationRecordRepository.StatusCountProjection count(ApplicationStatus status, long value) {
+        return new ApplicationRecordRepository.StatusCountProjection() {
+            @Override public ApplicationStatus getStatus() { return status; }
+            @Override public long getCount() { return value; }
+        };
+    }
+
     private ApplicationRecordRepository.StatsProjection projection(ApplicationStatus status,
                                                                   LocalDateTime appliedAt,
                                                                   LocalDateTime stageEnteredAt,
@@ -401,16 +408,19 @@ class ApplicationServiceTest {
     @Test
     @DisplayName("stats: 转化率与占比符合共享约定公式，分母为 0 返回 null")
     void stats_computesConversionRatesAndPercentages() {
-        // 3 APPLIED + 2 INTERVIEWING + 1 OFFERED + 1 REJECTED = 7
-        when(repository.findStatsByUserId(USER_ID))
+        // 3 APPLIED + 2 INTERVIEWING + 1 OFFERED + 1 REJECTED = 7（计数来自 SQL group by）
+        when(repository.countGroupByStatus(USER_ID))
+                .thenReturn(List.of(
+                        count(ApplicationStatus.APPLIED, 3L),
+                        count(ApplicationStatus.INTERVIEWING, 2L),
+                        count(ApplicationStatus.OFFERED, 1L),
+                        count(ApplicationStatus.REJECTED, 1L)));
+        // 时长行只取三个阶段的投影行
+        when(repository.findDurationRowsByUserId(USER_ID))
                 .thenReturn(List.of(
                         projection(ApplicationStatus.APPLIED),
-                        projection(ApplicationStatus.APPLIED),
-                        projection(ApplicationStatus.APPLIED),
                         projection(ApplicationStatus.INTERVIEWING),
-                        projection(ApplicationStatus.INTERVIEWING),
-                        projection(ApplicationStatus.OFFERED),
-                        projection(ApplicationStatus.REJECTED)));
+                        projection(ApplicationStatus.OFFERED)));
 
         var stats = service.stats(USER_ID);
 
@@ -430,7 +440,8 @@ class ApplicationServiceTest {
     @Test
     @DisplayName("stats: 无记录时 total=0 且各值为 null")
     void stats_emptyRecords_returnsNulls() {
-        when(repository.findStatsByUserId(USER_ID)).thenReturn(List.of());
+        when(repository.countGroupByStatus(USER_ID)).thenReturn(List.of());
+        when(repository.findDurationRowsByUserId(USER_ID)).thenReturn(List.of());
 
         var stats = service.stats(USER_ID);
 
@@ -447,7 +458,9 @@ class ApplicationServiceTest {
     @DisplayName("stats: interviewing 停留时长用 stageEnteredAt 计算，NULL 回退 updatedAt（P1-4）")
     void stats_interviewingDuration_usesStageEnteredAtWithFallback() {
         // 行1：进入面试 3 天前 → 3.0 天；行2：历史行无 stageEnteredAt，回退 updatedAt（1 天前）→ 1.0 天
-        when(repository.findStatsByUserId(USER_ID)).thenReturn(List.of(
+        when(repository.countGroupByStatus(USER_ID))
+                .thenReturn(List.of(count(ApplicationStatus.INTERVIEWING, 2L)));
+        when(repository.findDurationRowsByUserId(USER_ID)).thenReturn(List.of(
                 projection(ApplicationStatus.INTERVIEWING, null, LocalDateTime.now().minusDays(3), LocalDateTime.now().minusMinutes(30)),
                 projection(ApplicationStatus.INTERVIEWING, null, null, LocalDateTime.now().minusDays(1))));
 

@@ -226,6 +226,8 @@ class AiTaskControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.length()").value(2))
+                // #52 元数据-only 契约：列表不返回 resultJson（完整结果走 GET /tasks/{id}）
+                .andExpect(jsonPath("$.data[0].resultJson").doesNotExist())
                 .andReturn();
 
         JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).get("data");

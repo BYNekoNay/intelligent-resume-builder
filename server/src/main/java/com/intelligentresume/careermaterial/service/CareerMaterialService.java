@@ -83,9 +83,12 @@ public class CareerMaterialService {
 
     @Transactional(readOnly = true)
     public List<CareerMaterialSummary> list(Long userId, MaterialType filter) {
-        return repository.findByUserIdOrderByUpdatedAtDesc(userId).stream()
-                .filter(material -> filter == null || material.getMaterialType() == filter)
-                .map(this::toSummary)
+        // 读模型投影（ideation #1）：不读 MEDIUMTEXT 原文，类型过滤在 SQL 完成；
+        // evidenceReady 与详情/搜索路径共用 CareerMaterialEvidence 规则。
+        return repository.findListRowsByUserId(userId, filter).stream()
+                .map(row -> new CareerMaterialSummary(
+                        row.id(), row.materialType(), row.title(), row.usagePreference(), row.updatedAt(),
+                        CareerMaterialEvidence.isReady(row.hasSourceText(), row.contentJson())))
                 .toList();
     }
 
@@ -307,11 +310,6 @@ public class CareerMaterialService {
                 material.getId(), material.getMaterialType(), material.getTitle(),
                 material.getUsagePreference(), material.getUpdatedAt(), excerpt(material),
                 CareerMaterialEvidence.isReady(material));
-    }
-
-    private CareerMaterialSummary toSummary(CareerMaterial material) {
-        return new CareerMaterialSummary(material.getId(), material.getMaterialType(), material.getTitle(),
-                material.getUsagePreference(), material.getUpdatedAt(), CareerMaterialEvidence.isReady(material));
     }
 
     private void validateSearchParameters(int page, int size, String sortValue) {
