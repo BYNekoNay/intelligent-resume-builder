@@ -44,7 +44,7 @@ public class PdfServiceClient {
     public PdfServiceClient(
             @Value("${app.pdf.service-base-url:http://127.0.0.1:3001}") String baseUrl,
             @Value("${app.pdf.service-token:dev-pdf-token-change-me}") String serviceToken,
-            @Value("${app.pdf.render-timeout-seconds:15}") int timeoutSeconds,
+            @Value("${app.pdf.render-timeout-seconds:50}") int timeoutSeconds,
             @Value("${app.pdf.max-input-bytes:524288}") long maxInputBytes,
             AppObservability observability,
             FailureCategoryClassifier failureCategoryClassifier) {

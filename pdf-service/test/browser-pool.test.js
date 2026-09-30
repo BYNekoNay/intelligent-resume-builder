@@ -138,7 +138,7 @@ test('caps concurrent pages and queues the excess in FIFO order', async () => {
 
   // 名额同步占用/入队，但渲染回调在微任务里才开始
   await new Promise(resolve => setImmediate(resolve))
-  assert.deepEqual(pool.stats(), { activePages: 1, queued: 1, maxConcurrentPages: 1, maxQueueSize: 2, draining: false })
+  assert.deepEqual(pool.stats(), { activePages: 1, queued: 1, maxConcurrentPages: 1, maxQueueSize: 2, queueTimeoutMs: 15000, draining: false })
   assert.deepEqual(order, ['first'], '等待队列中的请求不得提前打开页面')
 
   first.release()
@@ -166,6 +166,30 @@ test('rejects with a retryable 503 once the wait queue is full', async () => {
   running.release()
   await first
   await pool.close()
+})
+
+test('rejects a queued request with a retryable 503 once the queue wait budget expires', async () => {
+  const browser = new FakeBrowser()
+  const pool = createBrowserPool(async () => browser, { maxConcurrentPages: 1, maxQueueSize: 2, queueTimeoutMs: 30 })
+  const running = gate()
+
+  const first = pool.withPage(async () => { await running.promise })
+  await new Promise(resolve => setImmediate(resolve))
+  const queued = pool.withPage(async () => undefined)
+
+  await assert.rejects(
+    queued,
+    error => error.status === 503 && error.retryable === true && /排队超时/.test(error.message),
+  )
+  assert.equal(pool.stats().queued, 0, '超时请求应从等待队列移除，不占用队位')
+
+  // 名额释放后队列仍可正常交接（超时项不会误唤醒/误占位）
+  running.release()
+  await first
+  await pool.withPage(async () => undefined)
+  assert.equal(pool.stats().activePages, 0)
+  await pool.close()
+  assert.equal(browser.closeCount, 1)
 })
 
 test('drain rejects new work, lets in-flight renders finish, then reports idle', async () => {

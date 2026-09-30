@@ -41,7 +41,7 @@ public class ExportTaskWorker {
                             PdfServiceClient pdfServiceClient,
                             ExportStorageService storageService,
                             ExportTaskLeaseService leaseService,
-                            @Value("${app.pdf.worker.batch-size:3}") int batchSize,
+                            @Value("${app.pdf.worker.batch-size:1}") int batchSize,
                             AppObservability observability,
                             FailureCategoryClassifier failureCategoryClassifier) {
         this.resumeVersionRepository = resumeVersionRepository;

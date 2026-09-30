@@ -34,3 +34,25 @@ test('startup rejects an invalid render capacity configuration', () => {
   assert.equal(result.status, 1)
   assert.match(result.stderr, /PDF_SERVICE_MAX_CONCURRENT_PAGES must be an integer >= 1/)
 })
+
+test('startup rejects an invalid queue wait budget configuration', () => {
+  const result = spawnSync(process.execPath, ['src/server.js', '--port=3103'], {
+    cwd: process.cwd(),
+    env: { ...process.env, PDF_SERVICE_QUEUE_TIMEOUT_MS: '0' },
+    encoding: 'utf8',
+  })
+
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /PDF_SERVICE_QUEUE_TIMEOUT_MS must be an integer >= 1/)
+})
+
+test('startup rejects a non-numeric render timeout configuration', () => {
+  const result = spawnSync(process.execPath, ['src/server.js', '--port=3104'], {
+    cwd: process.cwd(),
+    env: { ...process.env, PDF_SERVICE_RENDER_TIMEOUT_MS: 'fast' },
+    encoding: 'utf8',
+  })
+
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /PDF_SERVICE_RENDER_TIMEOUT_MS must be an integer >= 1/)
+})

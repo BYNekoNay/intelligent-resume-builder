@@ -7,6 +7,7 @@ const defaultLaunch = () => puppeteer.launch({
 
 const DEFAULT_MAX_CONCURRENT_PAGES = 4
 const DEFAULT_MAX_QUEUE_SIZE = 16
+const DEFAULT_QUEUE_TIMEOUT_MS = 15_000
 
 /**
  * 容量拒绝错误：status=503 供 HTTP 层映射为「可重试」响应（ideation「PDF readiness 与容量」）。
@@ -27,6 +28,10 @@ function capacityError(message) {
  * <ul>
  *   <li>最多 {@code maxConcurrentPages} 个页面同时在渲染，超出的请求进入 FIFO 等待队列；</li>
  *   <li>队列长度上限 {@code maxQueueSize}，队满或 drain 中立即返回可重试的 503，渲染请求不会无限堆积；</li>
+ *   <li>等待时长上限 {@code queueTimeoutMs}（第二十一批）：排队超时的请求以可重试 503 拒绝，
+ *       保证服务端总耗时上界 = 排队上限 + 两次页面操作预算，调用方（API 读超时 50s）
+ *       的硬死线永远晚于服务端自身的拒绝/失败路径——否则请求会「客户端先断、服务端后成」，
+ *       渲染被浪费且导出任务被误判失败；</li>
  *   <li>{@code beginDrain()} 后拒绝新请求并清空等待队列，in-flight 渲染继续跑完，
  *       {@code waitForIdle()} 供关闭流程等待它们结束。</li>
  * </ul>
@@ -34,6 +39,7 @@ function capacityError(message) {
 export function createBrowserPool(launch = defaultLaunch, options = {}) {
   const maxConcurrentPages = options.maxConcurrentPages ?? DEFAULT_MAX_CONCURRENT_PAGES
   const maxQueueSize = options.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
+  const queueTimeoutMs = options.queueTimeoutMs ?? DEFAULT_QUEUE_TIMEOUT_MS
 
   let browserPromise = null
   let activePages = 0
@@ -72,7 +78,17 @@ export function createBrowserPool(launch = defaultLaunch, options = {}) {
     if (waiters.length >= maxQueueSize) {
       return Promise.reject(capacityError('PDF 渲染容量已满，请稍后重试'))
     }
-    return new Promise((resolve, reject) => waiters.push({ resolve, reject }))
+    return new Promise((resolve, reject) => {
+      const entry = { resolve, reject, timer: null }
+      // 排队超时：从队列移除并以可重试 503 拒绝（服务端总耗时上界 = 排队上限 + 渲染预算）
+      entry.timer = setTimeout(() => {
+        const index = waiters.indexOf(entry)
+        if (index >= 0) waiters.splice(index, 1)
+        reject(capacityError('PDF 渲染排队超时，请稍后重试'))
+      }, queueTimeoutMs)
+      entry.timer.unref?.()
+      waiters.push(entry)
+    })
   }
 
   function releaseSlot() {
@@ -80,6 +96,7 @@ export function createBrowserPool(launch = defaultLaunch, options = {}) {
     const next = waiters.shift()
     if (next) {
       // 释放的名额直接转交给队首等待者（active 数不变）
+      clearTimeout(next.timer)
       activePages += 1
       next.resolve()
       return
@@ -112,14 +129,16 @@ export function createBrowserPool(launch = defaultLaunch, options = {}) {
   }
 
   function stats() {
-    return { activePages, queued: waiters.length, maxConcurrentPages, maxQueueSize, draining }
+    return { activePages, queued: waiters.length, maxConcurrentPages, maxQueueSize, queueTimeoutMs, draining }
   }
 
   /** 开始 drain：拒绝新请求、清空等待队列（in-flight 渲染继续跑完）。 */
   function beginDrain() {
     draining = true
     while (waiters.length) {
-      waiters.shift().reject(capacityError('PDF 服务正在关闭，请稍后重试'))
+      const entry = waiters.shift()
+      clearTimeout(entry.timer)
+      entry.reject(capacityError('PDF 服务正在关闭，请稍后重试'))
     }
   }
 

@@ -53,7 +53,9 @@ app:
   pdf:
     service-base-url: ${PDF_SERVICE_BASE_URL:http://127.0.0.1:3001}
     service-token: ${PDF_SERVICE_TOKEN:ci-pdf-token-0123456789abcdef0123456789abcdef}
-    render-timeout-seconds: 30
+    render-timeout-seconds: 50
+    # 与主配置同一死线链：必须 ≥ 服务端上界（排队 15s + setContent 15s + pdf 15s），
+    # 否则 CI 里合法慢渲染会被客户端先断开（此前 30s 低于该上界）
     # max-input/max-output 不在此覆写：主 yml 默认 512KB/10MB。写死 64KB/1MB 与主配置
     # 不一致属配置卫生问题（2026-09-30 排查 CI 失败时实测套件 payload 仅 1178 bytes，
     # 64KB 并非 CI 失败根因——真正的根因是套件 AI 门控缺陷与 CI 无 CJK 字体——

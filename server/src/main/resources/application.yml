@@ -269,11 +269,20 @@ app:
   pdf:
     worker:
       poll-interval-ms: ${PDF_WORKER_POLL_MS:1000}
-      batch-size: ${PDF_WORKER_BATCH:3}
+      # 领取批次须满足：batch-size × 读超时 + 余量 ≤ 租约（批量在循环内串行处理，租约在领取时
+      # 一次性写到 lease-seconds 之后）。此前默认 3 是「渲染足够快」的侥幸成立；第二十一批把
+      # 读超时提升到服务端真实上界（50s）后，3 × 50s 会超过 90s 租约，故默认降为 1
+      # （串行处理下吞吐不变，仅多一次领取查询）。关系由 PdfDeadlineContractTest 守护。
+      batch-size: ${PDF_WORKER_BATCH:1}
+      # 租约：单次投递（读超时 50s + 存储收尾）必须远小于它，否则租约在渲染中途被第二 worker
+      # 接管 → 重复渲染（releaseSuccess 会丢弃 stale 结果，但外部渲染工作已浪费）
       lease-seconds: ${PDF_WORKER_LEASE_S:90}
     service-base-url: ${PDF_SERVICE_BASE_URL:http://127.0.0.1:3001}
     service-token: ${PDF_SERVICE_TOKEN:dev-pdf-token-change-me}
-    render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:15}
+    # 读超时必须晚于 pdf-service 的服务端上界（排队上限 15s + setContent 15s + pdf 15s = 45s）：
+    # 内层死线先触发，服务端的 503/失败路径才能正常到达客户端；此前 15s 会让「合法慢渲染
+    # （16~45s，服务端自身预算内）」被客户端先断开——渲染被浪费、任务被误判失败。
+    render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:50}
     max-input-bytes: ${PDF_MAX_INPUT_BYTES:524288}
     max-output-bytes: ${PDF_MAX_OUTPUT_BYTES:10485760}
     file-ttl-hours: ${PDF_FILE_TTL_HOURS:24}

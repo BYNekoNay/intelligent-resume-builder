@@ -22,8 +22,14 @@ function positiveInteger(envName, fallback, minimum) {
 
 const maxConcurrentPages = positiveInteger('PDF_SERVICE_MAX_CONCURRENT_PAGES', 4, 1)
 const maxQueueSize = positiveInteger('PDF_SERVICE_MAX_QUEUE_SIZE', 16, 0)
+const queueTimeoutMs = positiveInteger('PDF_SERVICE_QUEUE_TIMEOUT_MS', 15_000, 1)
+// 单次页面操作（setContent / pdf）的预算；服务端总耗时上界 = queueTimeout + 2 × renderTimeout。
+// API 侧读超时（app.pdf.render-timeout-seconds，默认 50s）必须晚于该上界——内层死线先触发，
+// 客户端才不会「先断开、后成功」（浪费渲染并误判失败）。该跨运行时关系由
+// server 侧静态门禁 PdfDeadlineContractTest 守护。
+const renderTimeoutMs = positiveInteger('PDF_SERVICE_RENDER_TIMEOUT_MS', 15_000, 1)
 const drainTimeoutMs = positiveInteger('PDF_SERVICE_DRAIN_TIMEOUT_MS', 10_000, 1)
-const browserPool = createBrowserPool(undefined, { maxConcurrentPages, maxQueueSize })
+const browserPool = createBrowserPool(undefined, { maxConcurrentPages, maxQueueSize, queueTimeoutMs })
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error('PDF_SERVICE_PORT must be an integer between 1 and 65535')
@@ -82,7 +88,7 @@ app.post('/render', requireServiceToken, async (request, response) => {
   try {
     assertSafePayload(payload)
     const pdf = await browserPool.withPage(async page => {
-      page.setDefaultTimeout(15_000)
+      page.setDefaultTimeout(renderTimeoutMs)
       await page.setContent(renderResumeHtml(templateCode, payload), { waitUntil: 'load' })
       return page.pdf({ format: 'A4', printBackground: true, margin: { top: '0', right: '0', bottom: '0', left: '0' } })
     })
