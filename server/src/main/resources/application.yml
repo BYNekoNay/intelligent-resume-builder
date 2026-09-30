@@ -48,6 +48,14 @@ server:
   # 优雅停机：停止接收新连接并等待在途请求（上限 spring.lifecycle.timeout-per-shutdown-phase）。
   # 缺省（immediate）会在收到 SIGTERM 时立即断开在途请求——发布/重启期间前端会看到连接被重置。
   shutdown: graceful
+  tomcat:
+    # 请求体超限（multipart max-request-size 6MB / max-file-size 5MB）时，Tomcat 需要把
+    # 客户端尚未发完的剩余字节读掉（swallow）才能把 413 响应送达；默认上限 2MB 时，
+    # CI（Linux + 慢客户端）实测客户端在写完前拿到连接重置（HTTP 0）而不是 413。
+    # 8MB 覆盖「6MB 请求上限 + 余量」：被拒请求的剩余字节都能被丢弃，413 稳定送达。
+    # 远大于该值的流式请求仍会被连接级中断（无界 swallow 会让任意大请求占带宽），
+    # 生产由 nginx 的 client_max_body_size 5m 先行拒绝。
+    max-swallow-size: 8MB
 
 management:
   defaults:

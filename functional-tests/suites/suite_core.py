@@ -258,7 +258,9 @@ def main():
     # 超限上传（超过 multipart max-file-size 5MB）：必须 413 + 统一信封。
     # 回归背景：此前 MaxUploadSizeExceededException 落兜底分支被报成 500「系统异常」
     # （生产前置 nginx 时用户看到 413，直连 API 的语义丢失并污染 5xx 告警）。
-    big = b"x" * (6 * 1024 * 1024)
+    # 体积取 5.5MB（仅略超上限）：被拒时服务端需 swallow 的剩余字节最少，413 送达最稳
+    # （CI 首跑用 6MB 时客户端在写完前拿到连接重置 → HTTP 0；配置已补 max-swallow-size=8MB）。
+    big = b"x" * (5 * 1024 * 1024 + 512 * 1024)
     boundary_big = "----big" + RUN
     mp_big = (f"--{boundary_big}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"big.txt\"\r\n"
               f"Content-Type: text/plain\r\n\r\n").encode("utf-8") + big + f"\r\n--{boundary_big}--\r\n".encode("utf-8")
@@ -266,7 +268,7 @@ def main():
                             content_type=f"multipart/form-data; boundary={boundary_big}")
     body = j(payload) or {}
     check("oversized-upload-413", code == 413 and body.get("code") == 40001,
-          f"6MB 上传 -> HTTP {code} {str(body)[:120]}")
+          f"5.5MB 上传 -> HTTP {code} {str(body)[:80] if body else payload[:80]!r}")
 
     return report()
 
