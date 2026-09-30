@@ -10,6 +10,7 @@ import com.intelligentresume.auth.dto.UpdateProfileRequest;
 import com.intelligentresume.auth.service.AuthService;
 import com.intelligentresume.auth.service.AccountExportService;
 import com.intelligentresume.common.api.ApiResponse;
+import com.intelligentresume.common.api.ClientIpResolver;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
@@ -40,17 +41,20 @@ public class AuthController {
 
     private final AuthService authService;
     private final AccountExportService accountExportService;
+    private final ClientIpResolver clientIpResolver;
     private final String refreshCookieName;
     private final long refreshCookieMaxAge;
     private final boolean refreshCookieSecure;
 
     public AuthController(AuthService authService,
                           AccountExportService accountExportService,
+                          ClientIpResolver clientIpResolver,
                           @Value("${app.jwt.refresh-cookie.name}") String refreshCookieName,
                           @Value("${app.jwt.refresh-cookie.max-age}") long refreshCookieMaxAge,
                           @Value("${app.jwt.refresh-cookie.secure}") boolean refreshCookieSecure) {
         this.authService = authService;
         this.accountExportService = accountExportService;
+        this.clientIpResolver = clientIpResolver;
         this.refreshCookieName = refreshCookieName;
         this.refreshCookieMaxAge = refreshCookieMaxAge;
         this.refreshCookieSecure = refreshCookieSecure;
@@ -71,7 +75,7 @@ public class AuthController {
     public ResponseEntity<ApiResponse<TokenResponse>> refresh(HttpServletRequest httpRequest) {
         String refresh = extractRefreshToken(httpRequest);
         String ua = httpRequest.getHeader(HttpHeaders.USER_AGENT);
-        String ip = clientIp(httpRequest);
+        String ip = clientIpResolver.resolve(httpRequest);
         return withRefreshCookie(authService.refresh(refresh, ua, ip), httpRequest);
     }
 
@@ -154,15 +158,6 @@ public class AuthController {
             }
         }
         return null;
-    }
-
-    private String clientIp(HttpServletRequest request) {
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int comma = xff.indexOf(',');
-            return (comma > 0 ? xff.substring(0, comma) : xff).trim();
-        }
-        return request.getRemoteAddr();
     }
 
     private Long currentUserId(HttpServletRequest request) {

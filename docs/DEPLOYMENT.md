@@ -69,6 +69,8 @@ TEST_TLS_DIR=/opt/intelligent-resume/tls
 
 还必须设置 `MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`JWT_SECRET`、`PDF_SERVICE_TOKEN`、`BAILIAN_API_KEY` 和 `GRAFANA_ADMIN_PASSWORD`。告警渠道变量（`ALERTMANAGER_WEBHOOK_URL`、`SMTP_*`）可选，未配置时监控栈仍可启动，仅告警不会真正送达。
 
+反向代理契约：生产流量经 `edge → web` 两层代理到达 API，环境文件中的 `RATE_LIMIT_TRUST_FORWARDED_HEADERS=true` 不可省略（prod profile 启动时强制校验）。`edge` 负责用 `$remote_addr` 覆写 `X-Forwarded-For`（阻断客户端伪造），内层 `web` 继续追加——限流与会话审计依赖该链路取到真实客户端 IP。
+
 关键约束：`SPRING_DATASOURCE_USERNAME` 必须等于 `MYSQL_USER`，`SPRING_DATASOURCE_PASSWORD` 必须等于 `MYSQL_PASSWORD`。MySQL 数据卷首次初始化后会固定应用用户密码；修改环境文件不会重置已有数据库用户密码。
 
 创建自签名测试证书：

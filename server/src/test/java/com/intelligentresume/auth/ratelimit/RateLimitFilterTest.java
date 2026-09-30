@@ -1,6 +1,7 @@
 package com.intelligentresume.auth.ratelimit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.common.api.ClientIpResolver;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,7 +26,7 @@ class RateLimitFilterTest {
     @BeforeEach
     void setUp() {
         // login=2/min, register=5/min, refresh=30/min, resume-import-parse=6/min, jd-parse=15/min
-        filter = new RateLimitFilter(2, 5, 30, 6, 15, false, 10000, objectMapper);
+        filter = new RateLimitFilter(2, 5, 30, 6, 15, new ClientIpResolver(false), 10000, objectMapper);
     }
 
     @Test
@@ -165,7 +166,7 @@ class RateLimitFilterTest {
     @DisplayName("桶数达到 maxBuckets 后新 key 直接被拒（#43：硬上限,防无界增长）")
     void bucketCapacity_rejectsNewKeys() throws Exception {
         // maxBuckets=2：两个 IP 占满容量后，第三个新 key 无法再建桶
-        RateLimitFilter capped = new RateLimitFilter(2, 5, 30, 6, 15, false, 2, objectMapper);
+        RateLimitFilter capped = new RateLimitFilter(2, 5, 30, 6, 15, new ClientIpResolver(false), 2, objectMapper);
         FilterChain chain = mock(FilterChain.class);
 
         assertEquals(200, statusOf(capped, "10.0.0.1", chain), "第 1 个 IP 首次请求应放行");
@@ -180,9 +181,44 @@ class RateLimitFilterTest {
         assertEquals(200, statusOf(capped, "10.0.0.1", chain), "已有分桶不应受影响");
     }
 
+    @Test
+    @DisplayName("不信任转发头：换着伪造 X-Forwarded-For 也拿不到新分桶（按 remoteAddr 同桶）")
+    void untrustedForwardedHeaders_spoofedHeaderCannotBypass() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        assertEquals(200, statusWithXff(filter, "10.0.0.1", "203.0.113.7", chain));
+        assertEquals(200, statusWithXff(filter, "10.0.0.1", "198.51.100.9", chain));
+        assertEquals(429, statusWithXff(filter, "10.0.0.1", "192.0.2.55", chain),
+                "第 3 次即使换新 XFF 值也应被限流（桶按 remoteAddr）");
+    }
+
+    @Test
+    @DisplayName("信任转发头：按 XFF 最左值分桶，同一代理地址后的不同真实客户端互不影响")
+    void trustedForwardedHeaders_bucketsByForwardedClient() throws Exception {
+        RateLimitFilter trusted = new RateLimitFilter(2, 5, 30, 6, 15, new ClientIpResolver(true), 10000, objectMapper);
+        FilterChain chain = mock(FilterChain.class);
+
+        // 同一 remoteAddr（代理地址）下，客户端 A 用完 2 次配额
+        assertEquals(200, statusWithXff(trusted, "172.18.0.4", "203.0.113.7", chain));
+        assertEquals(200, statusWithXff(trusted, "172.18.0.4", "203.0.113.7", chain));
+        assertEquals(429, statusWithXff(trusted, "172.18.0.4", "203.0.113.7", chain), "客户端 A 超配额应被限流");
+
+        // 客户端 B（同一代理地址）不受影响
+        assertEquals(200, statusWithXff(trusted, "172.18.0.4", "198.51.100.9", chain), "客户端 B 应有独立分桶");
+    }
+
     private int statusOf(RateLimitFilter target, String ip, FilterChain chain) throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         target.doFilter(loginRequest(ip), response, chain);
+        return response.getStatus();
+    }
+
+    /** 同时设置 remoteAddr 与 X-Forwarded-For 的登录请求状态码。 */
+    private int statusWithXff(RateLimitFilter target, String remoteAddr, String forwardedFor, FilterChain chain) throws Exception {
+        MockHttpServletRequest request = loginRequest(remoteAddr);
+        request.addHeader("X-Forwarded-For", forwardedFor);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        target.doFilter(request, response, chain);
         return response.getStatus();
     }
 

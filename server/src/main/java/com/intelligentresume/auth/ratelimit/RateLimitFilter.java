@@ -2,6 +2,7 @@ package com.intelligentresume.auth.ratelimit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.common.api.ApiResponse;
+import com.intelligentresume.common.api.ClientIpResolver;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.ErrorCode;
 import jakarta.servlet.FilterChain;
@@ -29,6 +30,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  *       /api/jobs/{id}/parse（JD 本地文本解析,阈值宽松）</li>
  * </ul>
  * 不引入 Redis(13 §2 禁用);进程重启会让计数清零,这是 MVP 的取舍。
+ * 客户端 IP 由 {@link ClientIpResolver} 统一解析（与会话审计同一语义）：默认不信任
+ * X-Forwarded-For；生产开启信任时要求最外层代理覆写该头（见该类 Javadoc 的可信链前提）。
  * {@code maxBuckets} 是硬上限(#43):达到后新分桶直接 429(fail-closed),
  * 防止海量唯一 IP 把分桶 map 顶到无界增长;已有分桶不受影响。
  */
@@ -41,7 +44,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final int refreshPerMinute;
     private final int resumeImportParsePerMinute;
     private final int jdParsePerMinute;
-    private final boolean trustForwardedHeaders;
+    private final ClientIpResolver clientIpResolver;
     private final int maxBuckets;
     private final ObjectMapper objectMapper;
     private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
@@ -52,7 +55,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Value("${app.security.rate-limit.refresh-per-minute}") int refreshPerMinute,
             @Value("${app.security.rate-limit.resume-import-parse-per-minute:6}") int resumeImportParsePerMinute,
             @Value("${app.security.rate-limit.jd-parse-per-minute:15}") int jdParsePerMinute,
-            @Value("${app.security.rate-limit.trust-forwarded-headers:false}") boolean trustForwardedHeaders,
+            ClientIpResolver clientIpResolver,
             @Value("${app.security.rate-limit.max-buckets:10000}") int maxBuckets,
             ObjectMapper objectMapper
     ) {
@@ -61,7 +64,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.refreshPerMinute = refreshPerMinute;
         this.resumeImportParsePerMinute = resumeImportParsePerMinute;
         this.jdParsePerMinute = jdParsePerMinute;
-        this.trustForwardedHeaders = trustForwardedHeaders;
+        this.clientIpResolver = clientIpResolver;
         this.maxBuckets = maxBuckets;
         this.objectMapper = objectMapper;
     }
@@ -75,7 +78,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        String ip = clientIp(request);
+        String ip = clientIpResolver.resolve(request);
         String key = path + "|" + ip;
         long currentMinute = System.currentTimeMillis() / 60_000L;
         evictStaleBuckets(currentMinute);
@@ -108,15 +111,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // JD 解析是轻量本地文本解析，阈值宽松；仅匹配 /api/jobs/{id}/parse 形态，不影响 /api/jobs 其它端点
         if (path.startsWith("/api/jobs/") && path.endsWith("/parse")) return jdParsePerMinute;
         return null;
-    }
-
-    private String clientIp(HttpServletRequest request) {
-        String xff = trustForwardedHeaders ? request.getHeader("X-Forwarded-For") : null;
-        if (xff != null && !xff.isBlank()) {
-            int comma = xff.indexOf(',');
-            return (comma > 0 ? xff.substring(0, comma) : xff).trim();
-        }
-        return request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
     }
 
     private void evictStaleBuckets(long currentMinute) {

@@ -140,6 +140,11 @@ app:
       resume-import-parse-per-minute: ${RATE_LIMIT_RESUME_IMPORT_PARSE:6}
       # JD 解析（本地轻量文本解析）阈值宽松
       jd-parse-per-minute: ${RATE_LIMIT_JD_PARSE:15}
+      # 客户端 IP 解析（限流分桶 + 会话审计）：仅在可信反代之后开启。
+      # 开启时取 X-Forwarded-For 最左值，要求最外层代理**覆写**该头
+      # （deploy/nginx/edge.conf、host.conf 均用 $remote_addr 覆写，内层 web 继续追加）。
+      # prod profile 由 ProductionConfigurationValidator 强制要求 true；直连部署（默认 profile）也应显式开启，
+      # 否则所有客户端共用代理地址这一个分桶（登录 10/min 等阈值退化为全站共享）。
       trust-forwarded-headers: ${RATE_LIMIT_TRUST_FORWARDED_HEADERS:false}
       max-buckets: ${RATE_LIMIT_MAX_BUCKETS:10000}
 

@@ -232,6 +232,10 @@ SPRING_DATASOURCE_PASSWORD=<secrets.env 的 MYSQL_PASSWORD>
 JWT_SECRET=<secrets.env 的 JWT_SECRET>
 COOKIE_SECURE=false
 CORS_ALLOWED_ORIGINS=http://101.35.239.218:8088
+# 本机 nginx（host.conf）是唯一入口并以 $remote_addr 覆写 X-Forwarded-For；
+# 开启后限流按真实客户端 IP 分桶。不开启会退化为按 127.0.0.1 全局共享一个分桶
+# （登录 10/min 等阈值全站共用）。默认 profile 不强制，但本部署应显式设为 true。
+RATE_LIMIT_TRUST_FORWARDED_HEADERS=true
 PDF_SERVICE_BASE_URL=http://127.0.0.1:3001
 PDF_SERVICE_TOKEN=<secrets.env 的 PDF_SERVICE_TOKEN>
 PDF_OUTPUT_DIR=/opt/intelligent-resume/app/api/pdf-output
