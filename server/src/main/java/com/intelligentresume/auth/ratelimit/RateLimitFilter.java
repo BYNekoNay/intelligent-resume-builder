@@ -32,6 +32,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *       且两端点共享同一分桶，避免在改密/改邮箱之间交替获得双倍预算</li>
  *   <li>CPU 放大器端点：/api/resume-imports/parse（PDFBox/POI 全内存解析,阈值严格）、
  *       /api/jobs/{id}/parse（JD 本地文本解析,阈值宽松）</li>
+ *   <li>数据放大器端点：/api/auth/export——单次请求把本人各业务域数据整体重读并序列化，
+ *       成本随账号数据量线性增长（实测 200 条 62KB 资料的账号单次响应 11.9MB / ~230ms），
+ *       而导出是低频操作，不设上限即可用单个会话把 API 的 DB 与出站带宽打满</li>
  * </ul>
  * 不引入 Redis(13 §2 禁用);进程重启会让计数清零,这是 MVP 的取舍。
  * 窗口语义是**滑动窗口**而非固定窗口(自然分钟):每个分桶保留「当前窗口 + 上一窗口」两个计数,
@@ -70,6 +73,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final int resumeImportParsePerMinute;
     private final int jdParsePerMinute;
     private final int changeCredentialPerMinute;
+    private final int accountExportPerMinute;
     private final ClientIpResolver clientIpResolver;
     private final int maxBuckets;
     private final ObjectMapper objectMapper;
@@ -82,6 +86,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Value("${app.security.rate-limit.resume-import-parse-per-minute:6}") int resumeImportParsePerMinute,
             @Value("${app.security.rate-limit.jd-parse-per-minute:15}") int jdParsePerMinute,
             @Value("${app.security.rate-limit.change-credential-per-minute:5}") int changeCredentialPerMinute,
+            @Value("${app.security.rate-limit.account-export-per-minute:3}") int accountExportPerMinute,
             ClientIpResolver clientIpResolver,
             @Value("${app.security.rate-limit.max-buckets:10000}") int maxBuckets,
             ObjectMapper objectMapper
@@ -92,6 +97,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.resumeImportParsePerMinute = resumeImportParsePerMinute;
         this.jdParsePerMinute = jdParsePerMinute;
         this.changeCredentialPerMinute = changeCredentialPerMinute;
+        this.accountExportPerMinute = accountExportPerMinute;
         this.clientIpResolver = clientIpResolver;
         this.maxBuckets = maxBuckets;
         this.objectMapper = objectMapper;
@@ -141,6 +147,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (path.equals("/api/resume-imports/parse")) return resumeImportParsePerMinute;
         // JD 解析是轻量本地文本解析，阈值宽松；仅匹配 /api/jobs/{id}/parse 形态，不影响 /api/jobs 其它端点
         if (path.startsWith("/api/jobs/") && path.endsWith("/parse")) return jdParsePerMinute;
+        // 账号导出是「数据放大器」：单次请求把本人各业务域数据整体重读并序列化为一个 JSON 文档，
+        // 成本随账号数据量线性增长且无内部分页/上限。导出属低频操作（换设备/备份时偶尔下载），
+        // 故阈值给最严一档；若下次请求仍在同一窗口内，客户端应读 Retry-After 退避。
+        if (path.equals("/api/auth/export")) return accountExportPerMinute;
         return null;
     }
 

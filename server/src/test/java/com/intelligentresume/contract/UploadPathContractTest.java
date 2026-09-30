@@ -118,6 +118,21 @@ class UploadPathContractTest {
                         + "ms）：内层死线先触发，客户端才不会「先断开、后成功」并把合法慢解析显示为失败");
     }
 
+    @Test
+    @DisplayName("账号导出下载超时与兄弟下载路径对齐：体量随账号增长且无上限，30s 只够 ~3.2Mbps")
+    void accountExportDownloadSetsSufficientTimeout() throws Exception {
+        String api = read("web/src/api/auth.ts");
+        Matcher call = Pattern.compile("apiClient\\.get<string>\\('/api/auth/export'[^)]*\\)").matcher(api);
+        assertTrue(call.find(), "web/src/api/auth.ts 应存在账号导出调用（否则本门禁需更新）");
+        Matcher timeout = Pattern.compile("timeout:\\s*([\\d_]+)").matcher(call.group());
+        assertTrue(timeout.find(), "账号导出未显式设置 timeout：会回落到全局 10s");
+        long clientTimeoutMs = Long.parseLong(timeout.group(1).replace("_", ""));
+        assertTrue(clientTimeoutMs >= 60_000,
+                "账号导出下载超时（" + clientTimeoutMs + "ms）应 ≥ 60000ms：响应体随账号数据量线性增长"
+                        + "（实测 200 条 62KB 职业资料的账号单次响应 11.92MB，且导出无体积上限），"
+                        + "与同一类下载路径（PDF 导出，体上限 10MB）的 60s 对齐");
+    }
+
     private static final Pattern BODY_LIMIT =
             Pattern.compile("client_max_body_size\\s+(\\d+)\\s*([kKmMgG]?)");
 

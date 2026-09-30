@@ -26,8 +26,8 @@ class RateLimitFilterTest {
     @BeforeEach
     void setUp() {
         // login=2/min, register=5/min, refresh=30/min, resume-import-parse=6/min, jd-parse=15/min,
-        // 凭证变更=2/min（本测试内的取值）
-        filter = new RateLimitFilter(2, 5, 30, 6, 15, 2, new ClientIpResolver(false), 10000, objectMapper);
+        // 凭证变更=2/min、账号导出=3/min（本测试内的取值）
+        filter = new RateLimitFilter(2, 5, 30, 6, 15, 2, 3, new ClientIpResolver(false), 10000, objectMapper);
     }
 
     @Test
@@ -253,7 +253,7 @@ class RateLimitFilterTest {
     @DisplayName("桶数达到 maxBuckets 后新 key 直接被拒（#43：硬上限,防无界增长）")
     void bucketCapacity_rejectsNewKeys() throws Exception {
         // maxBuckets=2：两个 IP 占满容量后，第三个新 key 无法再建桶
-        RateLimitFilter capped = new RateLimitFilter(2, 5, 30, 6, 15, 2, new ClientIpResolver(false), 2, objectMapper);
+        RateLimitFilter capped = new RateLimitFilter(2, 5, 30, 6, 15, 2, 3, new ClientIpResolver(false), 2, objectMapper);
         FilterChain chain = mock(FilterChain.class);
 
         assertEquals(200, statusOf(capped, "10.0.0.1", chain), "第 1 个 IP 首次请求应放行");
@@ -282,7 +282,7 @@ class RateLimitFilterTest {
     @Test
     @DisplayName("信任转发头：按 XFF 最左值分桶，同一代理地址后的不同真实客户端互不影响")
     void trustedForwardedHeaders_bucketsByForwardedClient() throws Exception {
-        RateLimitFilter trusted = new RateLimitFilter(2, 5, 30, 6, 15, 2, new ClientIpResolver(true), 10000, objectMapper);
+        RateLimitFilter trusted = new RateLimitFilter(2, 5, 30, 6, 15, 2, 3, new ClientIpResolver(true), 10000, objectMapper);
         FilterChain chain = mock(FilterChain.class);
 
         // 同一 remoteAddr（代理地址）下，客户端 A 用完 2 次配额
@@ -300,7 +300,7 @@ class RateLimitFilterTest {
         // 可控时钟：把时间钉在「距自然分钟结束还有 100ms」处，随后手动跨过边界
         long[] clock = {1_800_000_000_000L - Math.floorMod(1_800_000_000_000L, 60_000L) + 59_900L};
         // login 限额 10/min（构造器第 1 个参数）
-        RateLimitFilter sliding = new RateLimitFilter(10, 5, 30, 6, 15, 2, new ClientIpResolver(false), 10000, objectMapper) {
+        RateLimitFilter sliding = new RateLimitFilter(10, 5, 30, 6, 15, 2, 3, new ClientIpResolver(false), 10000, objectMapper) {
             @Override
             long nowMs() {
                 return clock[0];
@@ -325,6 +325,25 @@ class RateLimitFilterTest {
         }
         assertEquals(1, allowedAfterBoundary,
                 "跨越边界后应只多放行 1 次（固定窗口缺陷为 10 次，即 2 倍突发）");
+    }
+
+    @Test
+    @DisplayName("账号导出受限：第 4 次请求 429（单次导出重读全账号数据）")
+    void accountExport_overLimit_returnsRateLimited() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        for (int i = 0; i < 3; i++) {
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(getRequest("10.0.0.1", "/api/auth/export"), resp, chain);
+            assertEquals(200, resp.getStatus(), "第 " + (i + 1) + " 次导出应放行");
+        }
+
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+        filter.doFilter(getRequest("10.0.0.1", "/api/auth/export"), resp, chain);
+        assertEquals(429, resp.getStatus(), "第 4 次导出应被限流");
+        assertTrue(resp.getContentAsString().contains("42901"));
+
+        verify(chain, times(3)).doFilter(any(), any());
     }
 
     private int statusOf(RateLimitFilter target, String ip, FilterChain chain) throws Exception {
@@ -357,6 +376,13 @@ class RateLimitFilterTest {
     /** 任意 POST 路径（用于凭证变更/资料更新等用例）。 */
     private MockHttpServletRequest postRequest(String ip, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        request.setRemoteAddr(ip);
+        return request;
+    }
+
+    /** 任意 GET 路径（用于账号导出等只读端点）。 */
+    private MockHttpServletRequest getRequest(String ip, String path) {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
         request.setRemoteAddr(ip);
         return request;
     }

@@ -57,10 +57,12 @@ export async function changePassword(payload: { currentPassword: string; newPass
 
 /**
  * #7：导出当前账号在各业务域的个人数据（服务端返回 JSON 文件内容，非统一响应信封）。
- * 数据量随简历版本/面试记录增长，单独放宽超时。
+ * 数据量随简历版本/面试记录/职业资料增长且**无体积上限**（实测 200 条 62KB 职业资料的账号
+ * 单次响应 11.92MB）：超时与同类下载路径（PDF 导出，体上限 10MB）对齐为 60s；
+ * 30s 只够 ~3.2Mbps 的持续带宽，慢网络下合法下载会被中断。
  */
 export async function exportAccountData(): Promise<string> {
-  return (await apiClient.get<string>('/api/auth/export', { responseType: 'text', timeout: 30_000 })).data
+  return (await apiClient.get<string>('/api/auth/export', { responseType: 'text', timeout: 60_000 })).data
 }
 
 /** #7：删除账号（服务端软删并撤销全部会话）。 */
