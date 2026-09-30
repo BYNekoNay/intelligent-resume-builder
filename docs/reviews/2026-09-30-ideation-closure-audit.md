@@ -383,6 +383,22 @@
 
 验证：新增 IT 用例**修复前红**（批量 5、播 12 行 → 只有前 5 行被压缩，「同一轮清完」断言失败；未清理的 7 行还污染了相邻用例的全局计数断言，`expected <2> but was <9>`）→ 修复后 **3/3** 绿（含「单轮上限 7 行生效、剩余 5 行下一轮清完」）；新配置键由 `ConfigFallbackContractTest` 守护；server 全量 **856 测试 0 失败**（新增 2，5 skipped 为环境门控）。
 
+### 2.30 数值型运维配置无取值校验（2026-10-01 第三十七批扫描，已随本批修复）
+
+方法：核对「由环境变量注入的数值配置，取 0/负值时会发生什么」——`@Value` 只保证「能解析成整数」，故逐个键追到使用点看语义（本批用一次性探针 + 真实 HTTP 探针实证，探针用完即删）。
+
+| 项 | 取证 | 结论 |
+| --- | --- | --- |
+| 清理批量取 0 → 作业每次抛异常 | `AI_TASK_CLEANUP_BATCH_SIZE=0` 时 `PageRequest.of(0, 0)` 抛 `IllegalArgumentException: Page size must not be less than one`（探针实录）；`ExportExpiryService` 同理。间隔 24h ⇒ 一天一条错误日志、清理从未生效 | **存在缺陷 → 修复** |
+| 续批上限取 0 → 静默不清理 | `AI_TASK_CLEANUP_MAX_ROWS_PER_RUN=0` 时续批条件 `total < 0` 不成立 ⇒ 直接返回 0：探针下 3 行合格超期行一轮清理 **0** 行，无任何日志（与 #26 的目标相反） | 同上 |
+| 保留期取 0 天 → 语义反转 | 探针：`retention-days=0` 时 cutoff = now，**刚创建**的终态任务立刻被压缩（实测 1 行新建任务结果被清空） | 同上 |
+| 限流阈值取 0 → 端点永久 429，但启动正常 | 真实 HTTP 探针（本机 H2，`--app.security.rate-limit.login-per-minute=0`）：应用启动成功、`/api/system/health` 200，而**第 1 次**登录即 `429 + 42901`（`Retry-After: 43`）——登录入口静默砖化，健康检查毫无察觉 | 同上 |
+| 既有校验不可见 | `ProductionConfigurationValidator` 只校验密钥与两个布尔开关（prod profile）；`@Value` 对「数值但非法」无任何约束 | 本批补齐 |
+
+修复动作：新增 `NumericConfigurationValidator`（所有 profile 生效，`@PostConstruct`）——把「必须为正」的 14 个键集中成一张表（限流 7 个阈值 + `max-buckets`、AI 留存 4 个、PDF 过期清理 2 个），取 0/负值即抛 `IllegalStateException` 拒绝启动；表内同时自检「键是否都解析到」，未解析即失败（防配置解析路径失效后门禁静默空转）；`docs/08`「配置原则」补该口径。
+
+验证：单测 `NumericConfigurationValidatorTest` **逐键**取「最小值 − 1」断言 fail-closed 且异常点明键名、取最小值本身放行、键缺省时门禁自身失败（3/3 绿）；真实探针对照——修复前：应用启动正常 + 第 1 次登录 429；修复后：**启动即失败**（`login-per-minute=0 < 1` 由 `NumericConfigurationValidator.validate` 抛出、BUILD FAILURE、8089 不可达）；server 全量 **859 测试 0 失败**（新增 3，5 skipped 为环境门控）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
