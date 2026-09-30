@@ -43,9 +43,10 @@ CI 里默认**跳过**（`FUNCTIONAL_AI_LIVE` 未设为 `true`），并在汇总
 | 日期 | 环境 | 结果 | 关键证据 |
 | --- | --- | --- | --- |
 | 2026-09-30 | 本地（ci profile + 真实百炼密钥 + 8 模型链，实测模型 `qwen3.8-max`） | **31 通过 / 0 失败 / 0 阻塞**（510s） | 7 类 AI 任务全绿：选材（推荐 4/4）、生成（草稿 8 个顶层字段 + 确认建版本）、ATS（HYBRID 无 fallback）、沟通、润色（3 候选待确认）、成果引导、面试（AI 模式首题异步）；撤回同意后 AI 触发被 403 拦截；批次④ 分组线程实证（执行线程 `ai-task-heavy-1`） |
+| 2026-09-30 | **CI（GitHub Actions `functional.yml` ai-live job，workflow_dispatch 勾选）** | **31 通过 / 0 失败 / 0 阻塞**（220s） | run `36696664363` 全绿（同轮常规功能回归 job 亦通过）：8 模型链经 `vars.BAILIAN_MODEL_CHAIN` 显式传入（`qwen3.8-max,glm-5.3,...`）、`ai-provider`/`ai-model-chain` 双 UP |
 
-验证方式：`python functional-tests/suites/suite_ai_full.py http://127.0.0.1:8081`（jar 为 `3f0722a` 打包）。
-CI 侧 `ai-live` job 的启用条件（`BAILIAN_API_KEY` secret + workflow_dispatch 勾选）见 `.github/workflows/functional.yml`。
+验证方式：`python functional-tests/suites/suite_ai_full.py <base_url>`（本地 jar 为 `3f0722a` 打包；CI 走 workflow_dispatch）。
+CI 侧 `ai-live` job 的启用条件：`BAILIAN_API_KEY` secret + 可选 `BAILIAN_MODEL_CHAIN` variable（未设置时后端回退 `BAILIAN_MODEL` 单模型）+ workflow_dispatch 勾选 `run_ai_live`，见 `.github/workflows/functional.yml`。
 
 ## 已固化的契约（写用例前先读，避免再猜）
 
