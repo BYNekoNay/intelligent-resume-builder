@@ -1,6 +1,31 @@
 groups:
   - name: intelligent-resume-operations
     rules:
+      # ── 可用性（第四十一批补齐）──────────────────────────────────────────────
+      # ⚠ 为什么必须有这一条：本文件的其余规则全部建立在**应用自身导出的指标**上，
+      # 而这些序列在应用不可用时会随抓取失败一起消失（rate/histogram_quantile 在空区间上
+      # 返回空向量、gauge 走 staleness），于是「整机不可用」这一最该告警的事件反而是
+      # **零告警**——`up` 由 Prometheus 自身产生，是唯一不受此影响的可用性信号。
+      # `for: 1m` ≈ 4 个抓取周期（`scrape_interval: 15s`），满足 docs/08 §7.1
+      # 「连续 3 次失败触发告警」且留 1 次抖动余量。
+      - alert: ApiTargetDown
+        expr: up{job="intelligent-resume-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: API scrape target is down
+          description: Prometheus 连续 4 个周期（≈1 分钟）抓取失败。此时应用自身的全部指标均已消失，其余告警规则**不会触发**（空向量），本条是唯一的可用性信号。请检查 systemd/容器状态、端口与数据库连通性。
+      # 目标被从抓取配置中移除（改名/误删）时 `up` 序列整体消失，上面的 == 0 也不会触发 →
+      # 监控静默失效。absent() 是这种「监控自身坏了」的唯一信号。
+      - alert: ApiScrapeTargetMissing
+        expr: absent(up{job="intelligent-resume-api"})
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: API scrape target disappeared from Prometheus configuration
+          description: 抓取目标整体消失（配置漂移或目标被移除），此时所有基于应用指标的告警都会静默失效。请核对 monitoring/prometheus/prometheus.yml 的 job_name/targets 与部署拓扑是否一致。
       - alert: AiProviderSuccessRateLow
         expr: sum(rate(resume_ai_provider_calls_total{outcome="success"}[10m])) / clamp_min(sum(rate(resume_ai_provider_calls_total[10m])), 0.001) < 0.95
         for: 10m
@@ -61,6 +86,24 @@ groups:
           severity: warning
         annotations:
           summary: API 5xx rate is above 1%
+      # docs/08 §7.1 承诺「5xx 超过 1% 警告、超过 5% 严重」：本条与上面的 warning 级构成分级
+      - alert: ApiServerErrorsCritical
+        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: API 5xx rate is above 5%
+          description: 5xx 占比超过 5%（docs/08 §7.1 的严重级阈值）。请优先查看 /actuator/health/readiness 与全局异常日志中的 traceId。
+      # docs/08 §7.1 承诺「p95 超过 500ms 警告、超过 2s 严重」：本条与下面的 critical 级构成分级
+      - alert: ApiLatencyWarning
+        expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: API p95 latency is above 500ms
+          description: p95 响应时间超过 500ms（docs/08 §7.1 的警告级阈值），尚未达到 2s 的严重级。可先看 AI 任务队列积压与数据库慢查询。
       - alert: ApiLatencyCritical
         expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 2
         for: 10m
