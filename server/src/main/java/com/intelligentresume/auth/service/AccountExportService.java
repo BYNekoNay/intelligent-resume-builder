@@ -29,6 +29,8 @@ import com.intelligentresume.resume.repository.ResumeVersionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -100,13 +102,29 @@ public class AccountExportService {
         this.objectMapper = objectMapper;
     }
 
-    /** 返回缩进格式的导出 JSON（供下载；不记日志，避免用户数据进入日志）。 */
+    /**
+     * 读取导出负载（供下载；不记日志，避免用户数据进入日志）。
+     *
+     * <p>事务边界**只覆盖 DB 读取**：序列化刻意留在事务外（见 {@link #writePayloadAsJson}），
+     * 连接不会在 JSON 生成期间被占用。实体之间没有 JPA 关联，故返回后以分离态序列化是安全的。
+     */
     @Transactional(readOnly = true)
-    public String exportAsJson(Long userId) {
-        Map<String, Object> payload = buildPayload(userId);
+    public Map<String, Object> loadExportPayload(Long userId) {
+        return buildPayload(userId);
+    }
+
+    /**
+     * 把导出负载**流式**写入输出流（不构造整份 String / 字节数组）。
+     *
+     * <p>账号数据无体积上限，整份缓冲意味着峰值堆 ≈ 2× 响应体（先构造 JSON 字符串、
+     * 再由消息转换器编码成字节数组）：实测 12.2MB 的响应在 {@code -Xmx128m} 上直接
+     * {@code OutOfMemoryError}（6.1MB 则可完成）。流式写出的堆占用为常数级。
+     */
+    public void writePayloadAsJson(Map<String, Object> payload, OutputStream out) throws IOException {
         try {
-            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(payload);
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(out, payload);
         } catch (JsonProcessingException exception) {
+            // 映射失败（而非流写失败）才包装成业务错误：流已开始写出时无法再改写响应
             throw new BusinessException(ErrorCode.INTERNAL, "导出数据序列化失败");
         }
     }

@@ -399,6 +399,19 @@
 
 验证：单测 `NumericConfigurationValidatorTest` **逐键**取「最小值 − 1」断言 fail-closed 且异常点明键名、取最小值本身放行、键缺省时门禁自身失败（3/3 绿）；真实探针对照——修复前：应用启动正常 + 第 1 次登录 429；修复后：**启动即失败**（`login-per-minute=0 < 1` 由 `NumericConfigurationValidator.validate` 抛出、BUILD FAILURE、8089 不可达）；server 全量 **859 测试 0 失败**（新增 3，5 skipped 为环境门控）。
 
+### 2.31 账号导出的堆放大面（§2.26 留观项 ①：流式写出；2026-10-01 第三十八批，已随本批修复）
+
+方法：把 §2.26 登记的「导出整份缓冲」从「推测」做成**实测**——用生产口径之外的受限堆（`-Xmx128m`，本机 MySQL 承载数据、避免数据本身占堆）逐步加量导出，定位失败阈值。
+
+| 项 | 取证 | 结论 |
+| --- | --- | --- |
+| 整份缓冲的峰值堆 ≈ 2× 响应体，且响应体无上限 | 修复前实测（`-Xmx128m` + 本机 MySQL，账号逐轮补 100 条 × 63KB 职业资料）：**6.14MB 响应 → 200（304ms）**；**12.2MB 响应 → HTTP 500**，日志为 `java.lang.OutOfMemoryError: Java heap space`（`GlobalExceptionHandler` 记于 `http-nio-8089-exec-*`）；18.3MB 同样 500。机制：`exportAsJson` 先构造整份 JSON **String**，控制器再用 `StringHttpMessageConverter` 编码出等长 **byte[]**（两条拷贝都在堆上，另加序列化中间段） | **存在缺陷 → 修复**：改流式写出 |
+| 序列化还在事务内 | `exportAsJson` 标了 `@Transactional(readOnly = true)` 且**序列化发生在方法体内**：连接在整个 JSON 生成期间被占用（限流按 IP，不同用户各自的配额互不约束，多用户并发导出会同时占连接 + 叠加堆） | **已修正**：事务边界只覆盖 DB 读取 |
+
+修复动作：`AccountExportService` 拆成 `loadExportPayload(userId)`（`@Transactional(readOnly = true)`，只做 DB 读取且返回即提交）与 `writePayloadAsJson(payload, out)`（`ObjectMapper.writeValue(OutputStream)` 直接写流）；`AuthController.exportData` 改为 `void` + `HttpServletResponse`，显式设 `Content-Type: application/json;charset=UTF-8` 与 `Content-Disposition` 后写 `getOutputStream()`（刻意不用 `StreamingResponseBody`：无状态安全链在 ASYNC 派发时会重跑过滤器，存在 401 风险；同步写流既避开该风险，也让 MockMvc 断言保持同步）；`docs/05` §2.7 补「流式写出、无 Content-Length」口径。
+
+验证：同一 `-Xmx128m` 堆、同一账号（300 条 × 63KB）——修复前 12.2MB 即 OOM → 修复后 **18.41MB 连续 3 次 200**（399~566ms，`Transfer-Encoding: chunked`、无 `Content-Length`）；`curl` 落盘校验**文档内容不变**（合法 JSON、`formatVersion=1`、`careerMaterials=300`、`sourceText` 长度 63953），并实测首字节 **0.113s** / 总耗时 **0.216s**（不再等整份序列化完成才出首字节）；`AuthControllerIT` 导出两用例（401、聚合内容）无需改动即通过（13/13）——该 IT 走的正是「事务关闭后序列化」这条新路径，本身构成行为回归守卫；另新增静态防复发门禁 `ExportStreamingContractTest`（导出链路不得出现 `writeValueAsString`、写流方法不得被 `@Transactional` 覆盖、`loadExportPayload` 保持只读事务；**修复前红**——临时改回整份缓冲即失败——恢复后绿）；server 全量 **861 测试 0 失败**（新增 2 门禁用例，5 skipped 为环境门控）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -517,7 +530,7 @@
   2. **架构方向类**（§2.10 与 §2.11 归并）：投递状态机 / 模板 / 沟通 / 导入 / 模式 / 资料类型多 runtime 登记、ATS/面试 schema 重复维护、全量类型化配置、跨运行时时间契约、AI 任务恢复收件箱、导入来源追溯、PDF 对象存储、AI 提供者路由、投递流水线契约——当前规模属过度工程边界，留待真实需求。
   3. **两项证据化留观**：a) JD 解析平铺 `contains` 的误命中（有真实案例再评估）；b) DOCX 展开量上限（POI 防护 + 5MB 入口 + 15s 超时已覆盖）。
   4. **失败消息「公开文案接缝」**（对客户端只暴露稳定文案，而非 provider 原文）——需要产品文案层，未做。
-  5. **第三十二~三十五批新增留观**：a) 账号导出仍把整份 JSON 先构造为 `String` 再编码（12MB 响应约 2~3 份副本的瞬时堆占用），改流式写出可把单请求堆占用降到常数级；b) 导出文档本身无体积上限（是否给账号数据/导出文档设上限或分片，属产品口径）；c) ~~静态资源压缩~~ → **第三十五批已完成**（三份 nginx 配置开启 gzip 并补哈希产物长缓存，见 §2.28）；d) 镜像内 `web/nginx.conf` 不含 `security-headers.conf` 片段（构建上下文为 `web/`），其与部署侧「同步副本」多出 4 处 include —— 公网响应由 `edge` 统一下发安全头，故无影响，但片段的单一来源需一次设计取舍（见 §2.28 末段）。
+  5. **第三十二~三十八批新增留观**：a) ~~账号导出整份缓冲为 String~~ → **第三十八批已完成**（改流式写出并把序列化移出事务：`-Xmx128m` 上 12.2MB 响应由 OOM 变为可服务 18.41MB，见 §2.31）；b) 导出文档本身无体积上限（是否给账号数据/导出文档设上限或分片，属产品口径）；c) ~~静态资源压缩~~ → **第三十五批已完成**（三份 nginx 配置开启 gzip 并补哈希产物长缓存，见 §2.28）；d) 镜像内 `web/nginx.conf` 不含 `security-headers.conf` 片段（构建上下文为 `web/`），其与部署侧「同步副本」多出 4 处 include —— 公网响应由 `edge` 统一下发安全头，故无影响，但片段的单一来源需一次设计取舍（见 §2.28 末段）。
 - 持续留观：`web/e2e/ats-ai.spec.ts` 在第十三批出现过 1 次偶发失败（尚无第二次复现，继续留观）。
 - ~~`web/e2e/applications-edit.spec.ts`（「编辑投递时只发 1 次版本列表请求」）偶发失败~~ → **第二十九批已按登记口径排查并修复**（第二次复现于纯文档提交的 CI run 36768442619，head 900f5c1）：根因是真实前端竞态（非测试问题），详见 §2.22；同时把该用例的竞态窗口用「延迟选项响应」固化，修复前稳定失败、修复后稳定通过。
 - **CI runner 迁移预检（2026-10-01）**：GitHub 公告 `ubuntu-latest` 将于 **10/19–11/19 渐进迁移到 Ubuntu 26.04**（默认 JDK 17→25、Node 22→24、MySQL 8.0→8.4，并移除若干工具；官方建议先在 `ubuntu-26.04` 上显式验证）。已用临时探针分支（`workflow_dispatch` 显式触发，**验证后已删除**）把 5 个 job 全部切到 `ubuntu-26.04` 实跑：**CI 与功能回归双绿**（server 测试 / web 构建 + Playwright Chromium / MySQL 8.0 容器 / CJK 字体 apt / pdf-service Puppeteer 渲染全部通过）——结论：**本次迁移对本仓无破坏，无需 pin 到 24.04**；顺带把 `actions/setup-python` 由 v5 升到 v7（v5 基于已被 GitHub 移除的 Node 20，运行时被强制替换并产生弃用告警）。

@@ -15,6 +15,7 @@ import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -30,8 +31,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -133,16 +136,22 @@ public class AuthController {
      *
      * <p>返回缩进 JSON 文件（{@code Content-Disposition: attachment}），不是统一
      * {@code ApiResponse} 信封——导出物是可直接保存/迁移的数据文档。
+     *
+     * <p>**流式写出**：账号数据无体积上限，整份缓冲的峰值堆 ≈ 2× 响应体（先建 JSON 字符串、
+     * 再编码成字节数组），实测 12.2MB 响应在 {@code -Xmx128m} 上直接 OutOfMemoryError；
+     * 流式写出的堆占用为常数级，且事务在序列化前已提交（DB 连接不在 JSON 生成期间被占用）。
+     * 代价：响应无 {@code Content-Length}（分块传输），且流已写出后无法再改写为错误信封。
      */
     @GetMapping("/export")
-    public ResponseEntity<String> exportData(HttpServletRequest httpRequest) {
-        String json = accountExportService.exportAsJson(currentUserId(httpRequest));
+    public void exportData(HttpServletRequest httpRequest, HttpServletResponse httpResponse) throws IOException {
+        Map<String, Object> payload = accountExportService.loadExportPayload(currentUserId(httpRequest));
         String fileName = "intelligent-resume-export-" + LocalDate.now() + ".json";
-        return ResponseEntity.ok()
-                // 显式声明 charset：String 消息转换器默认 ISO-8859-1，中文数据会被写成 '?'
-                .contentType(new MediaType(MediaType.APPLICATION_JSON, StandardCharsets.UTF_8))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
-                .body(json);
+        httpResponse.setStatus(HttpServletResponse.SC_OK);
+        // 显式声明 charset：默认 ISO-8859-1 会把中文数据写成 '?'
+        httpResponse.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        httpResponse.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        httpResponse.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
+        accountExportService.writePayloadAsJson(payload, httpResponse.getOutputStream());
     }
 
     private String extractRefreshToken(HttpServletRequest request) {
