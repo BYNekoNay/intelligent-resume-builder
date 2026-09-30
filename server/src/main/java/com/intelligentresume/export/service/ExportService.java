@@ -84,7 +84,8 @@ public class ExportService {
         task.setExpiresAt(LocalDateTime.now().plusHours(fileTtlHours));
         exportTaskRepository.save(task);
 
-        log.debug("Export task created: id={}, userId={}, versionId={}", task.getId(), userId, req.resumeVersionId());
+        // 隐私约束（PROJECT_CONTEXT.md）：用户 ID 不得写入日志；taskId/versionId 足够排障。
+        log.debug("Export task created: id={}, versionId={}", task.getId(), req.resumeVersionId());
         return toResponse(task);
     }
 

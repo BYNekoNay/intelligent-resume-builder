@@ -233,6 +233,41 @@ class AiTaskControllerIT {
         assertTrue(data.toString().contains(String.valueOf(pendingSelection.getId())));
     }
 
+    // ---- 7. 幂等键契约: 长度上限 + trim（#49 契约统一） ----
+
+    @Test
+    @Order(10)
+    @DisplayName("幂等键契约: 超长拒绝 40001; 前后空白 trim 后命中同一任务")
+    void idempotencyKeyContract_lengthLimitAndTrim() throws Exception {
+        // 超过 128 字符 → 40001（修正此前超长键直落数据库的隐式失败）
+        mockMvc.perform(post("/api/ai/tasks")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "k".repeat(129))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"taskType": "RESUME_OPTIMIZE", "input": {"prompt": "超长键"}}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001));
+
+        // 前后空白 trim 后与 Order(3) 的键等价 → 返回同一任务
+        MvcResult replay = mockMvc.perform(post("/api/ai/tasks")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "  test-idem-key-001  ")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "taskType": "RESUME_OPTIMIZE",
+                                  "input": {"prompt": "生成简历"}
+                                }
+                                """))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        Long returnedId = objectMapper.readTree(replay.getResponse().getContentAsString())
+                .get("data").get("id").asLong();
+        assertEquals(taskId, returnedId, "trim 后的幂等键应与既有任务等价");
+    }
+
     private AiTask saveTask(Long userId, String key, AiTaskType type, AiTaskStatus status,
                             ConfirmationStatus confirmationStatus) {
         AiTask task = new AiTask();

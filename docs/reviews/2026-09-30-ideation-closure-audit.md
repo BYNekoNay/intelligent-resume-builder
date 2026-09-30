@@ -136,11 +136,11 @@
 
 ## 4. 推荐下一批（按 收益/成本 排序）
 
-**第一批 · 隐私与配置对齐（低成本，建议 1 个提交收口）**
-1. #68 移除日志 userId + 全仓日志模板静态门禁（防复发）
-2. #71 consent 排序加 `id` tie-break
-3. #60 worker 租约 180s → 与 provider 读超时对齐（≥420s，或改为心跳续租策略）
-4. #49 幂等键契约统一（128+trim，全入口对齐）
+**第一批 · 隐私与配置对齐（低成本，1 个提交收口）— ✅ 已执行（2026-09-30）**
+1. ✅ #68 移除日志 userId（`ExportService.java:87`）+ 新增 `LogPrivacyGateTest` 静态门禁（扫描全部日志调用，禁止 userId/user_id/email/phone，防复发）
+2. ✅ #71 consent 最新事件排序加 `id` tie-break（`AiConsentRepository` 方法改 `...CreatedAtDescIdDesc`，service 与测试同步）
+3. ✅ #60 worker 租约 180s → **660s**（须 > 单任务最坏执行时长＝链总预算 600s + 余量，否则心跳失联期间旧 worker 仍可能被接管重跑、重复调用 provider）；心跳池由单线程升为 2 线程（防单次 renew 卡顿连锁拖慢其它任务续租）
+4. ✅ #49 幂等键契约统一：`AiTaskController` / `JobMaterialSelectionController`（可选键，≤128 + trim + 超长拒绝）、`CommunicationController`（必填 + ≤128 + trim）、`InterviewController`（保持 64＝存储列宽，三端点补 trim）
 
 **第二批 · 并发健壮性（中成本）**
 5. #46 + #48 唯一键竞态统一映射 409（`DataIntegrityViolationException` handler + 幂等并发回读）
@@ -163,3 +163,4 @@
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-30 | 初版：4 个并行 agent 分区间核对 101 条 finding + Ranked Ideas + 新增核对表；人工抽查 5 处关键证据；产出「仍存在」聚类清单与三批推荐 |
+| 2026-09-30 | **第一批（隐私与配置对齐）执行完成**：#68 日志 userId 移除 + `LogPrivacyGateTest` 静态门禁（扫描全部日志调用，防复发）；#71 consent 排序加 `id` tie-break；#60 租约 180→660s（> 链总预算 600s）+ 心跳池 2 线程；#49 四处入口幂等键契约统一（AiTask/JobMaterialSelection/Communication/Interview）。回归：全量 **740 测试 0 失败**（含新门禁），新增幂等键契约 IT 用例定向通过 |

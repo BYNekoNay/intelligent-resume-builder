@@ -62,7 +62,7 @@ public class AiConsentService {
      */
     @Transactional(readOnly = true)
     public ConsentResponse current(Long userId) {
-        return repository.findFirstByUserIdOrderByCreatedAtDesc(userId)
+        return repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(userId)
                 .map(this::toResponse)
                 .orElse(null);
     }
@@ -73,7 +73,7 @@ public class AiConsentService {
     @Transactional
     public ConsentResponse withdraw(Long userId) {
         // 获取最新事件以继承 policyVersion 和 providerCode
-        AiConsent latest = repository.findFirstByUserIdOrderByCreatedAtDesc(userId)
+        AiConsent latest = repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "尚无同意记录,无法撤回"));
 
         return toResponse(appendWithdrawal(latest));
@@ -84,7 +84,7 @@ public class AiConsentService {
      */
     @Transactional
     public boolean withdrawIfGranted(Long userId) {
-        return repository.findFirstByUserIdOrderByCreatedAtDesc(userId)
+        return repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(userId)
                 .filter(c -> c.getEventType() == ConsentStatus.GRANTED)
                 .map(latest -> {
                     appendWithdrawal(latest);
@@ -113,14 +113,14 @@ public class AiConsentService {
      */
     @Transactional(readOnly = true)
     public boolean hasValidConsent(Long userId) {
-        return repository.findFirstByUserIdOrderByCreatedAtDesc(userId)
+        return repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(userId)
                 .map(c -> c.getEventType() == ConsentStatus.GRANTED)
                 .orElse(false);
     }
 
     @Transactional(readOnly = true)
     public boolean hasValidConsent(Long userId, String taskScope, Collection<String> dataCategories) {
-        return repository.findFirstByUserIdOrderByCreatedAtDesc(userId)
+        return repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(userId)
                 .filter(c -> c.getEventType() == ConsentStatus.GRANTED)
                 .filter(c -> policyVersion.equals(c.getPolicyVersion()))
                 .filter(c -> c.getTaskScopesJson() != null && c.getTaskScopesJson().contains(taskScope))

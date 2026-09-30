@@ -167,7 +167,10 @@ app:
       read-timeout-seconds: ${BAILIAN_READ_TIMEOUT_S:300}
     worker:
       poll-interval-ms: ${AI_WORKER_POLL_MS:1000}
-      lease-seconds: ${AI_WORKER_LEASE_S:180}
+      # 租约须大于单任务最坏执行时长（provider 链总预算 600s + 余量）：否则心跳失联时
+      # 旧 worker 仍可能在调用 provider，而第二 worker 已接管重跑，造成重复外部调用/计费。
+      # 代价：进程崩溃后的任务恢复需等租约到期（可接受——崩溃场景旧进程已死，无重复调用）。
+      lease-seconds: ${AI_WORKER_LEASE_S:660}
       max-retries: ${AI_WORKER_MAX_RETRIES:3}
       batch-size: ${AI_WORKER_BATCH:5}
       # 分组并发额度:重任务(分钟级)与轻任务(秒级)各自独立,防止长任务饿死短任务

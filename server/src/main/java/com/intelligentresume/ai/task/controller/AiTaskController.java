@@ -44,8 +44,12 @@ public class AiTaskController {
             throw new BusinessException(ErrorCode.VALIDATION,
                     "This AI task must start from its domain endpoint");
         }
-        String key = idempotencyKey == null || idempotencyKey.isBlank()
-                ? UUID.randomUUID().toString() : idempotencyKey;
+        String provided = idempotencyKey == null ? null : idempotencyKey.trim();
+        if (provided != null && !provided.isEmpty() && provided.length() > 128) {
+            throw new BusinessException(ErrorCode.VALIDATION, "Idempotency-Key 最长 128 字符");
+        }
+        String key = provided == null || provided.isEmpty()
+                ? UUID.randomUUID().toString() : provided;
         AiTaskStatusResponse task = taskService.create(request, key, currentUserId(servletRequest));
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(task,

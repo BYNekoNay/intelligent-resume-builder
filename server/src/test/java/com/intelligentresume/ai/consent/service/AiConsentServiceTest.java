@@ -84,7 +84,7 @@ class AiConsentServiceTest {
     @DisplayName("撤回后 current 返回 WITHDRAWN")
     void withdraw_thenCurrent_returnsWithdrawn() {
         AiConsent granted = consent(1L, 100L, ConsentStatus.GRANTED);
-        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+        when(repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(100L))
                 .thenReturn(Optional.of(granted));
         when(repository.save(any(AiConsent.class))).thenAnswer(inv -> {
             AiConsent c = inv.getArgument(0);
@@ -104,7 +104,7 @@ class AiConsentServiceTest {
     @Test
     @DisplayName("无同意记录时撤回抛 NOT_FOUND")
     void withdraw_noPriorConsent_throwsNotFound() {
-        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+        when(repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(100L))
                 .thenReturn(Optional.empty());
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -116,7 +116,7 @@ class AiConsentServiceTest {
     @DisplayName("事件溯源: 撤回追加新事件,不修改历史")
     void withdraw_appendsNewEvent_preservesHistory() {
         AiConsent granted = consent(1L, 100L, ConsentStatus.GRANTED);
-        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+        when(repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(100L))
                 .thenReturn(Optional.of(granted));
         when(repository.save(any(AiConsent.class))).thenAnswer(inv -> {
             AiConsent c = inv.getArgument(0);
@@ -141,7 +141,7 @@ class AiConsentServiceTest {
     @DisplayName("删除账号场景：仅对当前 GRANTED 事件追加撤回")
     void withdrawIfGranted_appendsOnlyForGrantedEvent() {
         AiConsent granted = consent(1L, 100L, ConsentStatus.GRANTED);
-        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+        when(repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(100L))
                 .thenReturn(Optional.of(granted));
         when(repository.save(any(AiConsent.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -149,7 +149,7 @@ class AiConsentServiceTest {
         verify(repository).save(argThat(event -> event.getEventType() == ConsentStatus.WITHDRAWN));
 
         AiConsent withdrawn = consent(2L, 100L, ConsentStatus.WITHDRAWN);
-        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+        when(repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(100L))
                 .thenReturn(Optional.of(withdrawn));
         assertFalse(service.withdrawIfGranted(100L));
         verify(repository, times(1)).save(any(AiConsent.class));
@@ -159,16 +159,16 @@ class AiConsentServiceTest {
     @DisplayName("hasValidConsent: 最新事件为 GRANTED 返回 true,WITHDRAWN 返回 false")
     void hasValidConsent_checksLatestEvent() {
         AiConsent granted = consent(1L, 100L, ConsentStatus.GRANTED);
-        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+        when(repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(100L))
                 .thenReturn(Optional.of(granted));
         assertTrue(service.hasValidConsent(100L));
 
         AiConsent withdrawn = consent(2L, 100L, ConsentStatus.WITHDRAWN);
-        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+        when(repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(100L))
                 .thenReturn(Optional.of(withdrawn));
         assertFalse(service.hasValidConsent(100L));
 
-        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L))
+        when(repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(100L))
                 .thenReturn(Optional.empty());
         assertFalse(service.hasValidConsent(100L));
     }
@@ -178,7 +178,7 @@ class AiConsentServiceTest {
         AiConsent granted = consent(1L, 100L, ConsentStatus.GRANTED);
         granted.setTaskScopesJson(List.of("JOB_GENERATION"));
         granted.setDataCategoriesJson(List.of("JOB_DESCRIPTION", "CAREER_MATERIAL", "PERSONAL_PROFILE"));
-        when(repository.findFirstByUserIdOrderByCreatedAtDesc(100L)).thenReturn(Optional.of(granted));
+        when(repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(100L)).thenReturn(Optional.of(granted));
 
         assertTrue(service.hasValidConsent(100L, "JOB_GENERATION",
                 List.of("JOB_DESCRIPTION", "PERSONAL_PROFILE")));

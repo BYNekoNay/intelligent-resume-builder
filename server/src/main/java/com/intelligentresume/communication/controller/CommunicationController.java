@@ -46,8 +46,8 @@ public class CommunicationController {
             @Valid @RequestBody GenerateCommunicationRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             HttpServletRequest httpRequest) {
-        if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new BusinessException(ErrorCode.VALIDATION, "缺少 Idempotency-Key");
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.trim().length() > 128) {
+            throw new BusinessException(ErrorCode.VALIDATION, "Idempotency-Key 必填且最长 128 字符");
         }
         AiTaskStatusResponse task = service.generateWithAi(request, idempotencyKey.trim(), currentUserId(httpRequest));
         return ResponseEntity.status(HttpStatus.ACCEPTED)

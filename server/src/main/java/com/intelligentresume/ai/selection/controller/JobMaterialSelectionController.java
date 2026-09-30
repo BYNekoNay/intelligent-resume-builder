@@ -57,7 +57,11 @@ public class JobMaterialSelectionController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             HttpServletRequest servletRequest) {
         Long userId = currentUserId(servletRequest);
-        String key = idempotencyKey == null || idempotencyKey.isBlank() ? UUID.randomUUID().toString() : idempotencyKey;
+        String provided = idempotencyKey == null ? null : idempotencyKey.trim();
+        if (provided != null && !provided.isEmpty() && provided.length() > 128) {
+            throw new BusinessException(ErrorCode.VALIDATION, "Idempotency-Key 最长 128 字符");
+        }
+        String key = provided == null || provided.isEmpty() ? UUID.randomUUID().toString() : provided;
         Long jobId = request.jobDescriptionId();
         if (jobId == null && request.jdText() != null && !request.jdText().isBlank()) {
             AiTask existing = taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(

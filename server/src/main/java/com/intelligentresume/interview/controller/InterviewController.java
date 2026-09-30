@@ -36,7 +36,7 @@ public class InterviewController {
     public ApiResponse<InterviewStateResponse> start(@Valid @RequestBody StartInterviewRequest request,
                                                       @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 64) String idempotencyKey,
                                                       HttpServletRequest httpRequest) {
-        return ApiResponse.success(service.start(request, currentUserId(httpRequest), idempotencyKey), traceId(httpRequest));
+        return ApiResponse.success(service.start(request, currentUserId(httpRequest), idempotencyKey.trim()), traceId(httpRequest));
     }
 
     @PostMapping("/{id}/follow-up")
@@ -46,7 +46,7 @@ public class InterviewController {
             @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 64) String idempotencyKey,
             HttpServletRequest httpRequest) {
         AiTaskStatusResponse task = service.createFollowUp(id, request.weakness(),
-                currentUserId(httpRequest), idempotencyKey);
+                currentUserId(httpRequest), idempotencyKey.trim());
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(task, traceId(httpRequest)));
     }
@@ -62,9 +62,9 @@ public class InterviewController {
                                                        @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 64) String idempotencyKey,
                                                        HttpServletRequest httpRequest) {
         if (service.getState(id, currentUserId(httpRequest)).getExecutionMode() == com.intelligentresume.interview.domain.ExecutionMode.RULE) {
-            return ApiResponse.success(service.ruleAnswer(id, request.getAnswer().trim(), currentUserId(httpRequest), idempotencyKey), traceId(httpRequest));
+            return ApiResponse.success(service.ruleAnswer(id, request.getAnswer().trim(), currentUserId(httpRequest), idempotencyKey.trim()), traceId(httpRequest));
         }
-        return ApiResponse.success(service.answer(id, request.getAnswer().trim(), currentUserId(httpRequest), idempotencyKey), traceId(httpRequest));
+        return ApiResponse.success(service.answer(id, request.getAnswer().trim(), currentUserId(httpRequest), idempotencyKey.trim()), traceId(httpRequest));
     }
 
     @PostMapping("/{id}/ai/retry")

@@ -61,7 +61,12 @@ public class TaskExecutionService {
     private final CommunicationAiService communicationAiService;
     private final InterviewFollowUpAiService interviewFollowUpAiService;
     private final AiTaskWorkerProperties workerProperties;
-    private final ScheduledExecutorService heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+    /**
+     * 心跳调度池：分组并发下（HEAVY+LIGHT）多个任务各有心跳，独立线程池避免
+     * 单次 renew 卡顿（DB 抖动/连接池等待）连锁拖慢其它任务的续租——
+     * 续租失败会使租约到期、任务被第二 worker 接管并重复调用 provider。
+     */
+    private final ScheduledExecutorService heartbeatExecutor = Executors.newScheduledThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "ai-task-lease-heartbeat");
         thread.setDaemon(true);
         return thread;

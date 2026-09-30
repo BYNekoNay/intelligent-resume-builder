@@ -16,5 +16,6 @@ public interface AiConsentRepository extends JpaRepository<AiConsent, Long> {
 
     List<AiConsent> findByUserIdOrderByCreatedAtDesc(Long userId);
 
-    Optional<AiConsent> findFirstByUserIdOrderByCreatedAtDesc(Long userId);
+    /** 最新事件按 (created_at, id) 降序：同毫秒并发撤回/授权时以自增 id 保证稳定顺序。 */
+    Optional<AiConsent> findFirstByUserIdOrderByCreatedAtDescIdDesc(Long userId);
 }
