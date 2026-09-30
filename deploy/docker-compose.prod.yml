@@ -30,6 +30,10 @@ services:
       context: ../server
       dockerfile: Dockerfile
     restart: unless-stopped
+    # 优雅停机：Spring 在收到 SIGTERM 后等待在途 HTTP 请求（上限
+    # spring.lifecycle.timeout-per-shutdown-phase，默认 20s）；docker 默认 10s 宽限期
+    # 会中途 SIGKILL，因此必须大于该上限。契约由 ShutdownContractTest 门禁守护。
+    stop_grace_period: 25s
     env_file: ${DEPLOY_ENV_FILE:-production.env}
     environment:
       SPRING_PROFILES_ACTIVE: prod

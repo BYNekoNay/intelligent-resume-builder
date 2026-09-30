@@ -3,6 +3,14 @@ spring:
     name: intelligent-resume-server
   config:
     import: optional:file:../.env[.properties],optional:file:.env[.properties]
+  # 优雅停机：SIGTERM 后先停止接收新请求，等待在途 HTTP 请求完成（上限见下），再关闭其它组件。
+  # 刻意不等待 worker：AI/PDF worker 线程均为守护线程、租约语义接管在途任务（见 app.ai.worker /
+  # app.pdf.worker 注释），故本设置只影响 Web 请求，不会拖长发布停机时间。
+  # 容器部署须让宽限期大于该上限（deploy/docker-compose.prod.yml 的 api.stop_grace_period=25s，
+  # 否则 docker 会在优雅停机中途 SIGKILL）；systemd 默认 TimeoutStopSec=90s 足够。
+  # 契约由 ShutdownContractTest 静态门禁守护。
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}
   mvc:
     problemdetails:
       enabled: false
@@ -37,6 +45,9 @@ server:
   port: ${SERVER_PORT:8080}
   servlet:
     context-path: /
+  # 优雅停机：停止接收新连接并等待在途请求（上限 spring.lifecycle.timeout-per-shutdown-phase）。
+  # 缺省（immediate）会在收到 SIGTERM 时立即断开在途请求——发布/重启期间前端会看到连接被重置。
+  shutdown: graceful
 
 management:
   defaults:
