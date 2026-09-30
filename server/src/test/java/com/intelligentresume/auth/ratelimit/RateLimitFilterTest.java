@@ -294,6 +294,39 @@ class RateLimitFilterTest {
         assertEquals(200, statusWithXff(trusted, "172.18.0.4", "198.51.100.9", chain), "客户端 B 应有独立分桶");
     }
 
+    @Test
+    @DisplayName("滑动窗口：跨自然分钟边界不能重置配额（固定窗口在边界可稳定拿到 2 倍阈值）")
+    void slidingWindow_burstAcrossMinuteBoundary_isBounded() throws Exception {
+        // 可控时钟：把时间钉在「距自然分钟结束还有 100ms」处，随后手动跨过边界
+        long[] clock = {1_800_000_000_000L - Math.floorMod(1_800_000_000_000L, 60_000L) + 59_900L};
+        // login 限额 10/min（构造器第 1 个参数）
+        RateLimitFilter sliding = new RateLimitFilter(10, 5, 30, 6, 15, 2, new ClientIpResolver(false), 10000, objectMapper) {
+            @Override
+            long nowMs() {
+                return clock[0];
+            }
+        };
+        FilterChain chain = mock(FilterChain.class);
+
+        // 窗口末尾用满 10 次配额
+        for (int i = 0; i < 10; i++) {
+            assertEquals(200, statusOf(sliding, "10.0.0.1", chain), "第 " + (i + 1) + " 次应放行");
+        }
+
+        // 跨过自然分钟边界 200ms：固定窗口会把计数清零、再放行整份配额（10 次 = 2 倍阈值，
+        // 攻击者对齐边界即可把 10/min 稳定跑成 20/min）；滑动窗口按上一窗口的剩余比例加权，
+        // 最多多放行 1 次（权重近满但非满，故估计值恰低于阈值一次）
+        clock[0] += 200;
+        int allowedAfterBoundary = 0;
+        for (int i = 0; i < 10; i++) {
+            if (statusOf(sliding, "10.0.0.1", chain) == 200) {
+                allowedAfterBoundary++;
+            }
+        }
+        assertEquals(1, allowedAfterBoundary,
+                "跨越边界后应只多放行 1 次（固定窗口缺陷为 10 次，即 2 倍突发）");
+    }
+
     private int statusOf(RateLimitFilter target, String ip, FilterChain chain) throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         target.doFilter(loginRequest(ip), response, chain);
