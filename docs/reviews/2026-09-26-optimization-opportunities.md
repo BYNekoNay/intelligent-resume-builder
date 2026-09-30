@@ -89,6 +89,6 @@
 | --- | --- | --- |
 | ① | OD-1 分支/CI 对齐 | ✅ **完成**（CI 全绿实证） |
 | ② | SH-0 health 收敛 + SH-2 parse 限流 + SH-3 安全响应头 | ✅ **完成**（云端探针 + CI 全绿） |
-| ③ | TC-1/2/3 测试契约三件套 | ⏳ 待启动 |
+| ③ | TC-1/2/3 测试契约三件套 | ✅ **完成**（89d07bb：TC-1 follow-up 幂等 IT 20 tests 绿；TC-2 门禁扫 .ts 实测 48 Vue+29 TS、修 3 处硬编码；TC-3 错误码映射表十码+resolveApiError+5 单测+3 处接入，web build 全绿） |
 | ④ | PA-1 worker 分组领取 | ⏳ 待启动（容量数据已就位，需单独迭代） |
 | ⑤ | TC-8/9 + OD-2（schema 三步走 + ADR + ai-live 启用） | ⏳ 待启动（ai-live 阻塞于 BAILIAN_API_KEY secret） |
