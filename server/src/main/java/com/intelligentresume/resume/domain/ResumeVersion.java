@@ -39,6 +39,13 @@ public class ResumeVersion extends BaseEntity {
     @Column(name = "optimization_summary", length = 512)
     private String optimizationSummary;
 
+    /**
+     * #50：列表投影用的派生列（{@code resume_json.template.code} 归一化结果）。
+     * 历史行（V32 之前）为 NULL，由列表读路径惰性回填；新建版本在写入时即派生。
+     */
+    @Column(name = "template_code", length = 32)
+    private String templateCode;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "generation_context", columnDefinition = "json")
     private Map<String, Object> generationContext;
@@ -62,6 +69,8 @@ public class ResumeVersion extends BaseEntity {
     public void setResumeJson(Map<String, Object> resumeJson) { this.resumeJson = resumeJson; }
     public String getOptimizationSummary() { return optimizationSummary; }
     public void setOptimizationSummary(String optimizationSummary) { this.optimizationSummary = optimizationSummary; }
+    public String getTemplateCode() { return templateCode; }
+    public void setTemplateCode(String templateCode) { this.templateCode = templateCode; }
     public Map<String, Object> getGenerationContext() { return generationContext; }
     public void setGenerationContext(Map<String, Object> generationContext) { this.generationContext = generationContext; }
     public Long getCreatedBy() { return createdBy; }

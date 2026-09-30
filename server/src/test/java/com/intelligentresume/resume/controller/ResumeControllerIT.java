@@ -287,10 +287,12 @@ class ResumeControllerIT {
                 .andExpect(jsonPath("$.data.generationContext.atsProvenance.optimizationObjective")
                         .value("Quantify delivery impact"));
 
+        // #50：版本列表为摘要投影——不返回 generationContext（大字段，编辑器仅从版本详情读取）
         mockMvc.perform(get("/api/resumes/" + resumeIdA + "/versions")
                         .header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].generationContext.atsProvenance.resultId").value(result.getId()));
+                .andExpect(jsonPath("$.data[0].generationContext").doesNotExist())
+                .andExpect(jsonPath("$.data[0].templateCode").exists());
     }
 
     @Test

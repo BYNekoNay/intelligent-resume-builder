@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -129,23 +130,46 @@ class ResumeVersionServiceTest {
     }
 
     @Test
-    @DisplayName("正常路径: 列出版本历史按版本号降序")
+    @DisplayName("正常路径: 列出版本历史按版本号降序（摘要投影 + 历史行 template_code 惰性回填）")
     void listByResume_descending() {
         Resume resume = resume(1L, 100L);
         when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
 
-        ResumeVersion v2 = version(11L, 1L, 2);
-        v2.setResumeJson(Map.of("basics", Map.of("name", "Test"), "template", Map.of("code", "modern")));
-        ResumeVersion v1 = version(10L, 1L, 1);
-        when(versionRepository.findByResumeIdAndDeletedAtIsNullOrderByVersionNoDesc(1L))
-                .thenReturn(List.of(v2, v1));
+        LocalDateTime now = LocalDateTime.now();
+        // V32 之前的历史行：模板列为 NULL，读路径惰性回填（派生自 resume_json）
+        ResumeVersion legacy = version(10L, 1L, 1);
+        legacy.setResumeJson(Map.of("basics", Map.of("name", "Test")));
+        when(versionRepository.findActiveSummariesByResumeId(1L)).thenReturn(List.of(
+                new SummaryRow(11L, 2, ResumeSourceType.MANUAL, "modern", null, now, null, null),
+                new SummaryRow(10L, 1, ResumeSourceType.MANUAL, null, null, now, null, null)));
+        when(versionRepository.findAllById(List.of(10L))).thenReturn(List.of(legacy));
 
         List<ResumeVersionSummary> list = versionService.listByResume(1L, false, 100L);
+
         assertEquals(2, list.size());
         assertEquals(2, list.get(0).versionNo());
         assertEquals("modern", list.get(0).templateCode());
         assertEquals(1, list.get(1).versionNo());
         assertEquals("classic", list.get(1).templateCode());
+        // 惰性回填写回实体：下次列表无需再读 resume_json
+        assertEquals("classic", legacy.getTemplateCode());
+    }
+
+    @Test
+    @DisplayName("#50：保存版本时即写入 template_code 派生列（归一化取白名单）")
+    void save_storesDerivedTemplateCode() {
+        Resume resume = resume(1L, 100L);
+        when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
+        when(versionRepository.findMaxVersionNoByResumeId(1L)).thenReturn(null);
+        when(versionRepository.save(any(ResumeVersion.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        SaveVersionRequest req = new SaveVersionRequest(
+                Map.of("template", Map.of("code", "modern")), ResumeSourceType.MANUAL, null);
+        versionService.save(1L, req, 100L);
+
+        ArgumentCaptor<ResumeVersion> captor = ArgumentCaptor.forClass(ResumeVersion.class);
+        verify(versionRepository).save(captor.capture());
+        assertEquals("modern", captor.getValue().getTemplateCode());
     }
 
     @Test
@@ -301,18 +325,18 @@ class ResumeVersionServiceTest {
     @DisplayName("归档版本列表只返回已归档记录")
     void listByResume_archived_returnsOnlyArchivedVersions() {
         Resume resume = resume(1L, 100L);
-        ResumeVersion archived = version(10L, 1L, 2);
-        archived.setDeletedAt(LocalDateTime.now());
-        archived.setGenerationContext(Map.of("atsProvenance", Map.of("resultId", 31L)));
+        LocalDateTime archivedAt = LocalDateTime.now();
         when(resumeRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(resume));
-        when(versionRepository.findByResumeIdAndDeletedAtIsNotNullOrderByVersionNoDesc(1L))
-                .thenReturn(List.of(archived));
+        when(versionRepository.findArchivedSummariesByResumeId(1L)).thenReturn(List.of(
+                new SummaryRow(10L, 2, ResumeSourceType.RESTORED, "minimal", "恢复自 v1",
+                        archivedAt, archivedAt, 9L)));
 
         List<ResumeVersionSummary> list = versionService.listByResume(1L, true, 100L);
 
         assertEquals(1, list.size());
         assertNotNull(list.get(0).archivedAt());
-        assertEquals(31L, castMap(list.get(0).generationContext().get("atsProvenance")).get("resultId"));
+        assertEquals("minimal", list.get(0).templateCode());
+        assertEquals(9L, list.get(0).restoredFromVersionId());
     }
 
     @Test
@@ -373,5 +397,21 @@ class ResumeVersionServiceTest {
     @SuppressWarnings("unchecked")
     private Map<String, Object> castMap(Object value) {
         return (Map<String, Object>) value;
+    }
+
+    /** 测试用摘要投影行（生产环境由 Spring Data 接口投影生成）。 */
+    private record SummaryRow(Long id, Integer versionNo, ResumeSourceType sourceType,
+                              String templateCode, String optimizationSummary,
+                              LocalDateTime createdAt, LocalDateTime deletedAt,
+                              Long restoredFromVersionId)
+            implements ResumeVersionRepository.VersionSummaryProjection {
+        @Override public Long getId() { return id; }
+        @Override public Integer getVersionNo() { return versionNo; }
+        @Override public ResumeSourceType getSourceType() { return sourceType; }
+        @Override public String getTemplateCode() { return templateCode; }
+        @Override public String getOptimizationSummary() { return optimizationSummary; }
+        @Override public LocalDateTime getCreatedAt() { return createdAt; }
+        @Override public LocalDateTime getDeletedAt() { return deletedAt; }
+        @Override public Long getRestoredFromVersionId() { return restoredFromVersionId; }
     }
 }

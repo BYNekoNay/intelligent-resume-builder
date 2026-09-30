@@ -32,7 +32,6 @@ export interface ResumeVersionSummary {
   createdAt: string
   archivedAt: string | null
   restoredFromVersionId: number | null
-  generationContext?: Record<string, unknown> | null
 }
 
 export function createResume(title: string, resumeJson: Record<string, unknown>) {

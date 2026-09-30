@@ -41,9 +41,9 @@ class MySql57MigrationLiveIT {
                     .cleanDisabled(true)
                     .load();
 
-            // V20~V31 共 12 条迁移必须全部在 MySQL 5.7 上成功（V23~V31 的 5.7 兼容由本门禁证明）
-            assertEquals(12, flyway.migrate().migrationsExecuted);
-            assertEquals("31", scalar(statement,
+            // V20~V32 共 13 条迁移必须全部在 MySQL 5.7 上成功（V23~V32 的 5.7 兼容由本门禁证明）
+            assertEquals(13, flyway.migrate().migrationsExecuted);
+            assertEquals("32", scalar(statement,
                     "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1"));
             assertEquals("1", scalar(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='19' AND type='BASELINE' AND success=1"));
@@ -86,6 +86,9 @@ class MySql57MigrationLiveIT {
             assertEquals("2", scalar(statement, indexColumnCountSql(schema, "interview_ai_attempt", "idx_iai_user_created")));
             assertEquals("2", scalar(statement, indexColumnCountSql(schema, "application_record", "idx_application_user_followup")));
             assertEquals("2", scalar(statement, indexColumnCountSql(schema, "resume", "idx_resume_user_jd")));
+
+            // V32：版本列表投影的派生列（历史行为 NULL，由服务端读路径惰性回填）
+            assertEquals("YES", scalar(statement, columnNullableSql(schema, "resume_version", "template_code")));
         }
     }
 

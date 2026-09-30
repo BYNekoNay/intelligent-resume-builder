@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -88,6 +89,8 @@ public class ResumeVersionService {
         version.setVersionNo(nextNo);
         version.setSourceType(req.sourceType());
         version.setResumeJson(req.resumeJson());
+        // #50：派生列在写入时即归一化，列表投影无需再读 resume_json。
+        version.setTemplateCode(templateCode(req.resumeJson()));
         version.setOptimizationSummary(req.optimizationSummary());
         version.setCreatedBy(userId);
 
@@ -106,19 +109,48 @@ public class ResumeVersionService {
         return toDetail(version);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<ResumeVersionSummary> listByResume(Long resumeId, boolean archived, Long userId) {
         // 校验简历归属
         resumeRepository.findByIdAndUserId(resumeId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
 
-        List<ResumeVersion> versions = archived
-                ? versionRepository.findByResumeIdAndDeletedAtIsNotNullOrderByVersionNoDesc(resumeId)
-                : versionRepository.findByResumeIdAndDeletedAtIsNullOrderByVersionNoDesc(resumeId);
-        return versions
-                .stream()
-                .map(this::toSummary)
+        // #50：摘要投影不加载 resume_json（单版本上限 256KB）与 generation_context。
+        // 本方法非只读：首次读到 V32 之前的历史行时会惰性回填 template_code（幂等）。
+        List<ResumeVersionRepository.VersionSummaryProjection> rows = archived
+                ? versionRepository.findArchivedSummariesByResumeId(resumeId)
+                : versionRepository.findActiveSummariesByResumeId(resumeId);
+        Map<Long, String> backfilled = backfillTemplateCodes(rows);
+        return rows.stream()
+                .map(row -> new ResumeVersionSummary(
+                        row.getId(), row.getVersionNo(), row.getSourceType(),
+                        backfilled.getOrDefault(row.getId(), row.getTemplateCode()),
+                        row.getOptimizationSummary(), row.getCreatedAt(), row.getDeletedAt(),
+                        row.getRestoredFromVersionId()))
                 .toList();
+    }
+
+    /**
+     * template_code 为 V32 新增派生列：历史行为 NULL，首次被列表读到时就地派生并写回（幂等）。
+     *
+     * <p>不在迁移里 SQL 回填的原因：归一化白名单属应用层语义
+     * （{@code ResumeTemplateCodes.normalize}，含大小写与未知取值兜底），SQL 无法安全复刻。
+     */
+    private Map<Long, String> backfillTemplateCodes(List<ResumeVersionRepository.VersionSummaryProjection> rows) {
+        List<Long> missing = rows.stream()
+                .filter(row -> row.getTemplateCode() == null)
+                .map(ResumeVersionRepository.VersionSummaryProjection::getId)
+                .toList();
+        if (missing.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> derived = new HashMap<>();
+        for (ResumeVersion version : versionRepository.findAllById(missing)) {
+            String code = templateCode(version.getResumeJson());
+            version.setTemplateCode(code); // 事务提交时由脏检查写回
+            derived.put(version.getId(), code);
+        }
+        return derived;
     }
 
     @Transactional(readOnly = true)
@@ -227,6 +259,8 @@ public class ResumeVersionService {
         version.setVersionNo((maxNo == null ? 0 : maxNo) + 1);
         version.setSourceType(sourceType);
         version.setResumeJson(resumeJson);
+        // #50：派生列在写入时即归一化，列表投影无需再读 resume_json。
+        version.setTemplateCode(templateCode(resumeJson));
         version.setOptimizationSummary(summary);
         version.setGenerationContext(generationContext);
         version.setCreatedBy(userId);
@@ -235,12 +269,6 @@ public class ResumeVersionService {
         } catch (DataIntegrityViolationException e) {
             throw new BusinessException(ErrorCode.CONFLICT, "版本号冲突，请重试");
         }
-    }
-
-    private ResumeVersionSummary toSummary(ResumeVersion v) {
-        return new ResumeVersionSummary(v.getId(), v.getVersionNo(), v.getSourceType(),
-                templateCode(v.getResumeJson()), v.getOptimizationSummary(), v.getGenerationContext(),
-                v.getCreatedAt(), v.getDeletedAt(), v.getRestoredFromVersionId());
     }
 
     private String templateCode(Map<String, Object> resumeJson) {
