@@ -167,6 +167,14 @@
 20. ✅ #3 投递统计：计数改 SQL group by（`countGroupByStatus`），时长行只取 APPLIED/INTERVIEWING/OFFERED 三态，不再为统计读回全部投递行
 21. ⏭ #50 其余三项**暂缓**（JD 预览、简历版本 templateCode、投递列表长文本）：其摘要字段从宽列派生（JD 预览需 `\s+` 归一化、templateCode 取自 resumeJson），SQL 无跨库等价表达；投递列表的长文本被前端编辑面板直接消费。需要「持久化派生列」或前端改为按需拉详情，属下一次设计决策——不做会牺牲语义精确性的近似实现
 
+**第五批 B · 并发一致性与 AI 韧性 — ✅ 已执行（2026-09-30）**
+22. ✅ #24 面试资产幂等并发：服务端先对面试记录行加锁（`findOwnedForUpdate`）串行化同一记录的并发创建，V28 加唯一索引 `uq_interview_asset_user_record`（先核对本地库 0 组重复，避免迁移失败）兜底；新增 `InterviewAssetConcurrencyIT`（双线程起跑 → 只落一条、两请求同 id）
+23. ✅ #73 沟通模板乐观锁：`CommunicationTemplate` 加 `@Version` + V29 迁移；并发内容更新由「最后写入覆盖」变为 40901（`CommunicationControllerIT` 新增陈旧副本断言）
+24. ✅ #25 模板使用计数原子化（与 #73 联动，避免计数自增触发伪冲突）：`incrementUsageCount` 原子 UPDATE，实体加 `@DynamicUpdate` 防止内容更新把计数按旧值写回；IT 断言两次引用后 `usage_count = 2`
+25. ✅ #85 ATS prompt/schema 版本单一来源：`AtsAiPromptBuilder` 暴露实际使用版本，`AtsAiAnalysisService` 结果与 `AtsService`（规则回退/任务快照）统一取自构建器——此前两个 bean 的默认值不同（v1.0.0 vs v1.0.1）导致记录版本漂移；新增判别性单测（快照带过期版本仍记录构建器版本）
+26. ✅ #89 INTERVIEW_COACH 未知 operation 显式失败：不再静默落 `executeDefault`（避免按任意 input 直调模型）；错误信息不回显 operation 取值；新增 worker 路由单测
+27. ✅ #70 个人资料首次 upsert 并发：先锁用户行串行化「查后插」（唯一键冲突仍由全局 handler 兜底 40901）
+
 **需产品/环境决策后再定**
 - #26 ai_task 留存与清理策略（保留多久、是否提供用户删除入口）
 - #7 账号数据导出/删除前端入口（隐私治理口径）
@@ -182,4 +190,5 @@
 | 2026-09-30 | **第二批（并发健壮性）执行完成**：#46 完整性/并发冲突统一 409（两个全局 handler，日志不记异常 message）；#45 refresh 轮换 CAS 原子化（不用行锁——避免与 REQUIRES_NEW 撤销服务自锁），并发刷新单赢家 + 败者撤族 401；#67 职业资料 `@Version` + V27 迁移；#48 AI 任务幂等并发回读（三分支）。新增 `AuthConcurrencyIT`（真并发双场景）与 5 个分支用例，回归：全量 **748 测试 0 失败**；CI + Functional Regression 双绿 |
 | 2026-09-30 | **第三批（功能与性能）执行完成**：#2 搜索覆盖 contentJson（`@Formula` 只读文本投影 + `lower(contentJsonText) LIKE`；H2 2.2.224 与 MySQL 5.7.24 双端探针定案匹配策略；新增 IT 用例）；PA-2 `ActiveUserCache` 30s 短 TTL（删号路径事务提交后清除，保住 #6「删号即失效」；新增 4 个可变时钟单测 + AuthServiceTest 断言）；#66 六个视图 13 处错误码映射收尾（web build 通过）。回归：全量 **753 测试 0 失败**（新增 5），web `npm run build` 通过 |
 | 2026-09-30 | **第四批（小项收口）执行完成**：#75 面试记录排序改 `round_no ASC, id ASC`（新增 `InterviewRecordOrderingIT` 倒序写入断言 + 评分投影 JPQL 执行验证；删除未调用的旧排序方法）；#72 搜索词 100 字符上限（40001）；#43 限流分桶硬上限（容量耗尽新 key fail-closed 429 + 单测）；#21 发布就绪脚本复合命令拆分（仓库内已无其它复合写法）。回归：全量 **756 测试 0 失败**（新增 3）；CI + Functional Regression 双绿 |
-| 2026-09-30 | **第五批 A（读模型与性能）部分执行完成**：#1 职业资料列表投影（新增 `CareerMaterialListRow`，不读 MEDIUMTEXT 原文、类型过滤下推 SQL）；#52 续办列表 metadata-only（`AiTaskContinuationResponse` + 投影，去掉 resultJson/输入快照派生字段）；#50 面试历史列表投影（不读 external_resume_text/current_question，新增 `InterviewSessionSummaryProjectionIT`）；#3 投递统计计数改 SQL group by、时长行只取三态。#50 其余三项暂缓（见 §4 第 21 条）。回归：全量 **758 测试 0 失败**（新增 2），web `npm run build` 通过 |
+| 2026-09-30 | **第五批 A（读模型与性能）部分执行完成**：#1 职业资料列表投影（新增 `CareerMaterialListRow`，不读 MEDIUMTEXT 原文、类型过滤下推 SQL）；#52 续办列表 metadata-only（`AiTaskContinuationResponse` + 投影，去掉 resultJson/输入快照派生字段）；#50 面试历史列表投影（不读 external_resume_text/current_question，新增 `InterviewSessionSummaryProjectionIT`）；#3 投递统计计数改 SQL group by、时长行只取三态。#50 其余三项暂缓（见 §4 第 21 条）。回归：全量 **758 测试 0 失败**（新增 2），web `npm run build` 通过；CI + Functional Regression 双绿 |
+| 2026-09-30 | **第五批 B（并发一致性与 AI 韧性）执行完成**：#24 面试资产并发幂等（记录行锁 + V28 唯一索引 + `InterviewAssetConcurrencyIT` 双线程断言）；#73 沟通模板 `@Version` + V29 迁移（陈旧副本保存被拒）；#25 使用计数原子自增 + `@DynamicUpdate`（与 #73 联动，防计数自增触发伪冲突）；#85 ATS prompt/schema 版本单一来源（统一取自 prompt builder，消除 v1.0.0/v1.0.1 默认值漂移）；#89 未知 INTERVIEW_COACH operation 显式失败（不再静默落通用路径）；#70 个人资料 upsert 加用户行锁。回归：全量 **762 测试 0 失败**（新增 4） |

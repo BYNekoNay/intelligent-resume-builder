@@ -5,6 +5,7 @@ import com.intelligentresume.communication.domain.CommunicationTemplate;
 import com.intelligentresume.communication.domain.CommunicationType;
 import com.intelligentresume.communication.domain.TemplateScene;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -27,4 +28,12 @@ public interface CommunicationTemplateRepository extends JpaRepository<Communica
                                        @Param("language") CommunicationOutputLanguage language);
 
     Optional<CommunicationTemplate> findByIdAndUserId(Long id, Long userId);
+
+    /**
+     * 使用计数原子自增（ideation #25）：避免「读改写」在并发下丢增量；
+     * 计数不经过乐观锁版本，不产生伪冲突。
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE CommunicationTemplate t SET t.usageCount = t.usageCount + 1 WHERE t.id = :id")
+    int incrementUsageCount(@Param("id") Long id);
 }

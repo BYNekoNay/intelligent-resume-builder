@@ -81,8 +81,8 @@ public class CommunicationService {
             if (template.getUserId() != null && !userId.equals(template.getUserId())) {
                 throw new BusinessException(ErrorCode.NOT_FOUND, "沟通模板不存在");
             }
-            template.setUsageCount(template.getUsageCount() + 1);
-            templateRepository.save(template);
+            // #25：计数改为原子自增，避免读改写丢增量（计数不推进乐观锁版本）。
+            templateRepository.incrementUsageCount(template.getId());
         }
         CommunicationDraft entity = new CommunicationDraft();
         entity.setUserId(userId);

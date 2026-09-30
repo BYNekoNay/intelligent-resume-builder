@@ -73,7 +73,7 @@ class InterviewAssetServiceTest {
     @Test
     @DisplayName("create: (userId, interviewRecordId) 已存在时返回已有资产，不重复创建")
     void create_idempotent_returnsExisting() {
-        when(recordRepository.findOwned(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
+        when(recordRepository.findOwnedForUpdate(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
         when(repository.findByUserIdAndInterviewRecordId(USER_ID, RECORD_ID))
                 .thenReturn(Optional.of(asset(11L)));
         when(sectionRepository.findByAssetId(11L)).thenReturn(List.of());
@@ -89,7 +89,7 @@ class InterviewAssetServiceTest {
     @Test
     @DisplayName("create: 非法章节键抛 40001 且不落库")
     void create_invalidSectionKey_throwsValidation() {
-        when(recordRepository.findOwned(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
+        when(recordRepository.findOwnedForUpdate(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
         when(repository.findByUserIdAndInterviewRecordId(USER_ID, RECORD_ID)).thenReturn(Optional.empty());
         InterviewAssetRequest request = new InterviewAssetRequest(RECORD_ID, "问题", "回答", null,
                 Map.of(), List.of("not-a-section"), List.of());
@@ -102,7 +102,7 @@ class InterviewAssetServiceTest {
     @Test
     @DisplayName("create: 合法请求创建并保存章节关联")
     void create_valid_savesAssetAndSections() {
-        when(recordRepository.findOwned(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
+        when(recordRepository.findOwnedForUpdate(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
         when(repository.findByUserIdAndInterviewRecordId(USER_ID, RECORD_ID)).thenReturn(Optional.empty());
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> {
             InterviewAnswerAsset saved = invocation.getArgument(0);
@@ -122,7 +122,7 @@ class InterviewAssetServiceTest {
     @Test
     @DisplayName("create: 仅关联素材时保留素材且不伪造章节")
     void create_materialOnly_keepsMaterialWithoutSectionSentinel() {
-        when(recordRepository.findOwned(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
+        when(recordRepository.findOwnedForUpdate(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
         when(repository.findByUserIdAndInterviewRecordId(USER_ID, RECORD_ID)).thenReturn(Optional.empty());
         when(materialRepository.findByIdAndUserId(21L, USER_ID)).thenReturn(Optional.of(new com.intelligentresume.careermaterial.domain.CareerMaterial()));
         when(repository.saveAndFlush(any())).thenAnswer(invocation -> {
@@ -153,7 +153,7 @@ class InterviewAssetServiceTest {
     @Test
     @DisplayName("create: 素材不属于当前用户抛 40401")
     void create_foreignMaterial_throwsNotFound() {
-        when(recordRepository.findOwned(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
+        when(recordRepository.findOwnedForUpdate(RECORD_ID, USER_ID)).thenReturn(Optional.of(record()));
         when(repository.findByUserIdAndInterviewRecordId(USER_ID, RECORD_ID)).thenReturn(Optional.empty());
         when(materialRepository.findByIdAndUserId(99L, USER_ID)).thenReturn(Optional.empty());
         InterviewAssetRequest request = new InterviewAssetRequest(RECORD_ID, "问题", "回答", null,

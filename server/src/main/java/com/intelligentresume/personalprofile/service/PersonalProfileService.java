@@ -1,5 +1,6 @@
 package com.intelligentresume.personalprofile.service;
 
+import com.intelligentresume.auth.repository.UserRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.personalprofile.domain.PersonalProfile;
@@ -23,13 +24,16 @@ public class PersonalProfileService {
     private final PersonalProfileRepository profileRepository;
     private final ResumeRepository resumeRepository;
     private final ResumeVersionRepository versionRepository;
+    private final UserRepository userRepository;
 
     public PersonalProfileService(PersonalProfileRepository profileRepository,
                                   ResumeRepository resumeRepository,
-                                  ResumeVersionRepository versionRepository) {
+                                  ResumeVersionRepository versionRepository,
+                                  UserRepository userRepository) {
         this.profileRepository = profileRepository;
         this.resumeRepository = resumeRepository;
         this.versionRepository = versionRepository;
+        this.userRepository = userRepository;
     }
 
     @Transactional(readOnly = true)
@@ -41,6 +45,11 @@ public class PersonalProfileService {
 
     @Transactional
     public PersonalProfileResponse upsert(PersonalProfileRequest request, Long userId) {
+        // 首次 upsert 的并发保护（ideation #70）：先锁用户行，串行化同一用户上的
+        // 「查后插」。否则两个请求可能都判定「不存在」，随后撞唯一键只能得到 409。
+        // 唯一键冲突仍由全局 handler 兜底映射 40901。
+        userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));
         PersonalProfile profile = profileRepository.findByUserId(userId).orElseGet(() -> {
             PersonalProfile created = new PersonalProfile();
             created.setUserId(userId);

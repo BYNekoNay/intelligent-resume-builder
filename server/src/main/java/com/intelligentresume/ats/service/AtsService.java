@@ -21,7 +21,6 @@ import com.intelligentresume.resume.repository.ResumeVersionRepository;
 import com.intelligentresume.scoring.dto.MatchRequest;
 import com.intelligentresume.scoring.dto.MatchResponse;
 import com.intelligentresume.scoring.service.ScoringService;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,16 +46,12 @@ public class AtsService {
     private final AtsResultStateService stateService;
     private final AtsAiPromptBuilder promptBuilder;
     private final ObjectMapper objectMapper;
-    private final String promptVersion;
-    private final String schemaVersion;
 
     public AtsService(ScoringService scoringService, ResumeVersionRepository versionRepository,
                       ResumeRepository resumeRepository, JobDescriptionRepository jobRepository,
                       AtsCheckResultRepository repository, AiTaskService taskService, IdempotencyService idempotencyService,
                       AiProviderRegistry providerRegistry, AtsResultStateService stateService,
-                      AtsAiPromptBuilder promptBuilder, ObjectMapper objectMapper,
-                      @Value("${app.ai.ats.prompt-version:v1.0.0}") String promptVersion,
-                      @Value("${app.ai.ats.schema-version:v1.0.0}") String schemaVersion) {
+                      AtsAiPromptBuilder promptBuilder, ObjectMapper objectMapper) {
         this.scoringService = scoringService;
         this.versionRepository = versionRepository;
         this.resumeRepository = resumeRepository;
@@ -68,8 +63,6 @@ public class AtsService {
         this.stateService = stateService;
         this.promptBuilder = promptBuilder;
         this.objectMapper = objectMapper;
-        this.promptVersion = promptVersion;
-        this.schemaVersion = schemaVersion;
     }
 
     public AtsCheckResponse check(AtsCheckRequest request, String idempotencyKey, Long userId) {
@@ -117,8 +110,8 @@ public class AtsService {
         persisted.put("aiTaskId", null);
         persisted.put("aiInsights", null);
         persisted.put("fallback", null);
-        persisted.put("promptVersion", promptVersion);
-        persisted.put("schemaVersion", schemaVersion);
+        persisted.put("promptVersion", promptBuilder.promptVersion());
+        persisted.put("schemaVersion", promptBuilder.schemaVersion());
 
         AtsCheckResult entity = new AtsCheckResult();
         entity.setUserId(userId);
@@ -209,8 +202,8 @@ public class AtsService {
         input.put("resumeJson", promptBuilder.sanitizeResume(version.getResumeJson()));
         input.put("jdText", job.getJdText());
         input.put("localResult", localSnapshot(result.getResultJson()));
-        input.put("promptVersion", promptVersion);
-        input.put("schemaVersion", schemaVersion);
+        input.put("promptVersion", promptBuilder.promptVersion());
+        input.put("schemaVersion", promptBuilder.schemaVersion());
         CreateAiTaskRequest request = new CreateAiTaskRequest(
                 AiTaskType.ATS_ANALYSIS, promptBuilder.sanitizeInput(input), null, result.getJobDescriptionId(),
                 null, null, null, null);

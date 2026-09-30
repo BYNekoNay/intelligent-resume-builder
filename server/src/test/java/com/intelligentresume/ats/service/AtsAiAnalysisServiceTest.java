@@ -70,6 +70,24 @@ class AtsAiAnalysisServiceTest {
         verify(provider, times(2)).call(any());
     }
 
+    @Test
+    void recordsVersionsFromPromptBuilder_notStaleSnapshotCopy() {
+        when(provider.call(any())).thenReturn(AiCallResult.ok(validOutput("ok"), "req-version"));
+        // 任务快照里带一个过期的版本副本：结果必须记录构建器实际使用的版本（#85）
+        AiTask task = new AiTask();
+        task.setInputSnapshotJson(Map.of("input", Map.of(
+                "atsCheckResultId", 9L,
+                "resumeJson", Map.of("basics", Map.of("name", "Alice")),
+                "jdText", "Java backend engineer",
+                "promptVersion", "stale-v0",
+                "schemaVersion", "stale-v0")));
+
+        AtsAiAnalysisService.AnalysisResult result = service.analyze(task);
+
+        assertEquals("v1", result.taskResult().get("promptVersion"));
+        assertEquals("v1", result.taskResult().get("schemaVersion"));
+    }
+
     private Map<String, Object> validOutput(String summary) {
         return Map.of(
                 "summary", summary,

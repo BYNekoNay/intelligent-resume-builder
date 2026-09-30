@@ -20,6 +20,7 @@ import com.intelligentresume.ats.dto.AtsAiInsights;
 import com.intelligentresume.ats.dto.AtsFallbackCode;
 import com.intelligentresume.communication.service.CommunicationAiService;
 import com.intelligentresume.interview.service.InterviewFollowUpAiService;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -63,6 +64,32 @@ class TaskExecutionServiceTest {
         verify(communicationService).executeTask(task);
         verify(leaseService).releaseSuccess(task, "worker-1",
                 Map.of("generationSource", "AI", "draft", "Validated communication draft"));
+        service.shutdownHeartbeatExecutor();
+    }
+
+    @Test
+    @DisplayName("#89: INTERVIEW_COACH 未知 operation 显式失败，不静默落通用路径")
+    void unsupportedInterviewCoachOperation_failsExplicitly() {
+        TaskLeaseService leaseService = mock(TaskLeaseService.class);
+        AiConsentService consentService = mock(AiConsentService.class);
+        when(consentService.hasValidConsent(any(), any(), any())).thenReturn(true);
+        InterviewFollowUpAiService followUpService = mock(InterviewFollowUpAiService.class);
+        TaskExecutionService service = new TaskExecutionService(
+                mock(AiProviderRegistry.class), leaseService, mock(JobGenerationService.class),
+                mock(JobMaterialSelectionService.class), consentService, mock(AppObservability.class),
+                new FailureCategoryClassifier(), new InlineOptimizeResultFormatter(),
+                mock(AtsAiAnalysisService.class), mock(AtsResultStateService.class),
+                mock(CommunicationAiService.class), followUpService, new AiTaskWorkerProperties());
+        AiTask task = new AiTask();
+        task.setId(5L);
+        task.setUserId(1L);
+        task.setTaskType(AiTaskType.INTERVIEW_COACH);
+        task.setInputSnapshotJson(Map.of("input", Map.of("operation", "SOMETHING_UNKNOWN")));
+
+        service.execute(task, "worker-1");
+
+        verify(leaseService).releaseFailed(task, "worker-1", "Unsupported INTERVIEW_COACH operation", false);
+        verifyNoInteractions(followUpService);
         service.shutdownHeartbeatExecutor();
     }
 

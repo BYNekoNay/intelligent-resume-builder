@@ -1,7 +1,10 @@
 package com.intelligentresume.interview.repository;
 
 import com.intelligentresume.interview.domain.InterviewRecord;
+import com.intelligentresume.interview.domain.InterviewSession;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import java.util.Collection;
@@ -33,4 +36,13 @@ public interface InterviewRecordRepository extends JpaRepository<InterviewRecord
     long countBySessionId(Long sessionId);
     @Query("SELECT r FROM InterviewRecord r, InterviewSession s WHERE r.id = :id AND r.sessionId = s.id AND s.userId = :userId")
     Optional<InterviewRecord> findOwned(@Param("id") Long id, @Param("userId") Long userId);
+
+    /**
+     * 锁定面试记录行（#24）：面试资产「先查后插」的幂等创建需要串行化同一记录的
+     * 并发请求；锁随创建事务释放，唯一索引 {@code uq_interview_asset_user_record}
+     * 作为兜底。
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM InterviewRecord r, InterviewSession s WHERE r.id = :id AND r.sessionId = s.id AND s.userId = :userId")
+    Optional<InterviewRecord> findOwnedForUpdate(@Param("id") Long id, @Param("userId") Long userId);
 }

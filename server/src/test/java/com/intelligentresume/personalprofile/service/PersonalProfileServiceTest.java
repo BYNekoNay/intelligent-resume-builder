@@ -1,5 +1,7 @@
 package com.intelligentresume.personalprofile.service;
 
+import com.intelligentresume.auth.domain.User;
+import com.intelligentresume.auth.repository.UserRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.personalprofile.domain.PersonalProfile;
 import com.intelligentresume.personalprofile.dto.PersonalProfileRequest;
@@ -28,6 +30,7 @@ class PersonalProfileServiceTest {
     @Mock private PersonalProfileRepository profileRepository;
     @Mock private ResumeRepository resumeRepository;
     @Mock private ResumeVersionRepository versionRepository;
+    @Mock private UserRepository userRepository;
 
     @Test
     void getReturnsEmptyProfileWhenUserHasNotCreatedOne() {
@@ -44,6 +47,7 @@ class PersonalProfileServiceTest {
     @Test
     void upsertCreatesThenUpdatesTheProfileOwnedByTheUser() {
         PersonalProfileService service = service();
+        when(userRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(new User()));
         when(profileRepository.findByUserId(7L)).thenReturn(Optional.empty());
         when(profileRepository.save(any(PersonalProfile.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -122,6 +126,6 @@ class PersonalProfileServiceTest {
     }
 
     private PersonalProfileService service() {
-        return new PersonalProfileService(profileRepository, resumeRepository, versionRepository);
+        return new PersonalProfileService(profileRepository, resumeRepository, versionRepository, userRepository);
     }
 }

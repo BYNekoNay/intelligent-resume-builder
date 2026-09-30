@@ -61,14 +61,21 @@ public class InterviewAssetService {
 
     @Transactional
     public InterviewAssetResponse create(InterviewAssetRequest request, Long userId) {
-        validateRecord(request.interviewRecordId(), userId);
+        Long recordId = request.interviewRecordId();
+        if (recordId != null) {
+            // 幂等 + 并发保护（ideation #24）：先锁定面试记录行，把同一记录上的并发
+            // 创建串行化，随后的「查后插」在同一事务内不再有竞态；数据库唯一索引
+            // uq_interview_asset_user_record 作为兜底（违反者由全局 handler 映射 409）。
+            recordRepository.findOwnedForUpdate(recordId, userId)
+                    .orElseThrow(() -> notFound("面试回答记录不存在"));
+        }
         validateSectionKeys(request.sectionKeys());
         validateMaterials(request.materialIds(), userId);
 
         // 幂等：(userId, interviewRecordId) 已存在资产时返回已有资产（不重复创建）
-        if (request.interviewRecordId() != null) {
+        if (recordId != null) {
             InterviewAnswerAsset existing = repository
-                    .findByUserIdAndInterviewRecordId(userId, request.interviewRecordId()).orElse(null);
+                    .findByUserIdAndInterviewRecordId(userId, recordId).orElse(null);
             if (existing != null) {
                 return response(existing, userId);
             }

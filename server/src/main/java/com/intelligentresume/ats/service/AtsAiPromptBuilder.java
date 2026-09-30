@@ -26,6 +26,18 @@ public class AtsAiPromptBuilder {
         this.schemaVersion = schemaVersion;
     }
 
+    /**
+     * 实际用于构建请求的版本号（#85）：结果记录必须采用这里的值，
+     * 而不是任务输入快照里由创建方写入的副本。
+     */
+    public String promptVersion() {
+        return promptVersion;
+    }
+
+    public String schemaVersion() {
+        return schemaVersion;
+    }
+
     public Map<String, Object> build(Map<String, Object> input) {
         Map<String, Object> safeInput = sanitizeInput(input);
         String json;

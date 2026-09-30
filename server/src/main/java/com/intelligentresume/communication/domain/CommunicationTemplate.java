@@ -6,13 +6,19 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
+import org.hibernate.annotations.DynamicUpdate;
 
 /**
  * 沟通模板。内置模板 user_id=NULL 且 is_system=1（只读）；
  * 自定义模板 user_id 归属当前用户、is_system=0。
+ *
+ * <p>{@code @DynamicUpdate}：只更新脏字段，避免内容更新把 {@code usage_count}
+ * 的并发自增（原子 UPDATE）按加载时的旧值写回、丢掉增量。
  */
 @Entity
 @Table(name = "communication_template")
+@DynamicUpdate
 public class CommunicationTemplate extends BaseEntity {
 
     @Column(name = "user_id")
@@ -44,6 +50,14 @@ public class CommunicationTemplate extends BaseEntity {
 
     @Column(name = "usage_count", nullable = false)
     private int usageCount;
+
+    /**
+     * 乐观锁版本（ideation #73）：自定义模板的并发内容更新不再「最后写入覆盖」，
+     * 冲突时由全局处理器映射 40901。使用计数走原子自增（不经过本版本）。
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
 
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }

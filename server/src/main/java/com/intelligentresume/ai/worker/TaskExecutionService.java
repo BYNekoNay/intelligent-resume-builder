@@ -125,8 +125,16 @@ public class TaskExecutionService {
                     executeAtsAnalysis(task, owner);
                 } else if (capability.executionMode() == AiTaskCapabilityRegistry.ExecutionMode.COMMUNICATION) {
                     executeCommunicationGeneration(task, owner);
-                } else if (capability.executionMode() == AiTaskCapabilityRegistry.ExecutionMode.INTERVIEW && isFollowUpPractice(task)) {
-                    executeInterviewFollowUp(task, owner);
+                } else if (capability.executionMode() == AiTaskCapabilityRegistry.ExecutionMode.INTERVIEW) {
+                    if (isFollowUpPractice(task)) {
+                        executeInterviewFollowUp(task, owner);
+                    } else {
+                        // #89：INTERVIEW_COACH 走 worker 队列的只有 FOLLOW_UP_PRACTICE 一种操作
+                        // （面试主流程在请求内直连 provider）。未知 operation 必须显式失败，
+                        // 不得静默落 executeDefault（那会把任意 input 直接送进模型）。
+                        // 不回显 operation 取值，避免把客户端输入写进任务错误与日志。
+                        leaseService.releaseFailed(task, owner, "Unsupported INTERVIEW_COACH operation", false);
+                    }
                 } else {
                     executeDefault(task, owner);
                 }

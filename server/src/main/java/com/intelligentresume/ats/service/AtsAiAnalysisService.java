@@ -45,8 +45,10 @@ public class AtsAiAnalysisService {
         taskResult.put("atsCheckResultId", input.get("atsCheckResultId"));
         taskResult.put("aiInsights", objectMapper.convertValue(insights, Map.class));
         taskResult.put("providerRequestId", response.providerRequestId());
-        taskResult.put("promptVersion", input.get("promptVersion"));
-        taskResult.put("schemaVersion", input.get("schemaVersion"));
+        // #85：记录「实际用于构建请求」的版本（prompt builder 是版本的唯一所有者），
+        // 而不是任务输入快照里由创建方写入的副本——两者曾因默认值不同而漂移。
+        taskResult.put("promptVersion", promptBuilder.promptVersion());
+        taskResult.put("schemaVersion", promptBuilder.schemaVersion());
         return new AnalysisResult(insights, taskResult);
     }
 
