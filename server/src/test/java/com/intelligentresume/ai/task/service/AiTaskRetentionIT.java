@@ -15,6 +15,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -36,6 +38,7 @@ class AiTaskRetentionIT {
     @Autowired private UserRepository userRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private AiTaskRetentionService retentionService;
+    @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
 
     @Test
     @DisplayName("#26：超期终态任务压缩为元数据；待确认/进行中/未超期/已压缩任务保持原样")
@@ -68,6 +71,53 @@ class AiTaskRetentionIT {
                 "已压缩标记的行不应被本轮再次处理");
 
         assertEquals(0, retentionService.purgeExpiredSnapshots(), "压缩是一次性的：再跑一轮不再命中");
+    }
+
+    @Test
+    @DisplayName("#26：积压多于一批时应在同一轮内续批清完（修复前单轮只清 batchSize 行，积压永不收敛）")
+    void purgeExpiredSnapshots_drainsBacklogWithinOneRun() {
+        Long userId = createUser("ai_task_retention_drain");
+        // 批量置 5：若单轮只处理一批，12 行中只有前 5 行会被压缩
+        AiTaskRetentionService smallBatch = service(5, 1000);
+        // 先清掉其它用例遗留的合格行，使本用例只观察自己插入的行
+        smallBatch.purgeExpiredSnapshots();
+
+        List<Long> ids = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            ids.add(insert(userId, "retention-drain-" + i, AiTaskStatus.SUCCESS, null, 100));
+        }
+
+        assertEquals(12, smallBatch.purgeExpiredSnapshots(), "同一轮内应续批清完积压");
+
+        for (Long id : ids) {
+            assertPurged(id);
+        }
+    }
+
+    @Test
+    @DisplayName("#26：单轮上限生效——积压超过上限时只清上限行，剩余留待下一轮")
+    void purgeExpiredSnapshots_respectsPerRunCap() {
+        Long userId = createUser("ai_task_retention_cap");
+        service(5, 1000).purgeExpiredSnapshots(); // 先清掉遗留合格行
+
+        List<Long> ids = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            ids.add(insert(userId, "retention-cap-" + i, AiTaskStatus.SUCCESS, null, 100));
+        }
+
+        // 批量 5、单轮上限 7：本轮恰好清 7 行（5 + 2），剩余 5 行下一轮清完
+        AiTaskRetentionService capped = service(5, 7);
+        assertEquals(7, capped.purgeExpiredSnapshots(), "单轮最多清 7 行（上限防单轮无界运行）");
+        assertEquals(5, capped.purgeExpiredSnapshots(), "剩余 5 行在下一轮被清完");
+
+        for (Long id : ids) {
+            assertPurged(id);
+        }
+    }
+
+    /** 直接构造服务以控制批量与单轮上限（保留期取默认 90 天）。 */
+    private AiTaskRetentionService service(int batchSize, int maxRowsPerRun) {
+        return new AiTaskRetentionService(taskRepository, transactionManager, 90, batchSize, maxRowsPerRun);
     }
 
     private void assertPurged(Long taskId) {

@@ -8,7 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -26,8 +27,11 @@ import java.util.Map;
  *     <li>压缩是一次性的：{@code snapshot_purged} 置位后不再被选中（占位 JSON 无 SQL 可判定特征）。</li>
  * </ul>
  *
- * <p>每轮处理一批（默认 200 行、间隔 24h），不追求一次清完；用户侧另有
- * {@code DELETE /api/ai/tasks/history} 可立即清空自己的任务历史。
+ * <p>每轮**续批**处理直到清完或达到单轮上限（默认 20000 行），每批一批一事务（默认 200 行、
+ * 间隔 24h）。此前实现每轮只处理一批且没有续批：清理速率被硬编码为 200 行/天，而间隔是 24h
+ * ——一旦「每天新超期的任务数 > 200」，积压就单调增长、90 天保留期对超出的部分永不生效
+ * （快照含内联 JD/资料/简历，可达数百 KB/行）。用户侧另有 {@code DELETE /api/ai/tasks/history}
+ * 可立即清空自己的任务历史。
  */
 @Service
 public class AiTaskRetentionService {
@@ -38,31 +42,56 @@ public class AiTaskRetentionService {
     static final Map<String, Object> PURGED_SNAPSHOT = Map.of("_purged", true);
 
     private final AiTaskRepository taskRepository;
+    private final TransactionTemplate transactionTemplate;
     private final int retentionDays;
     private final int batchSize;
+    private final int maxRowsPerRun;
 
     public AiTaskRetentionService(AiTaskRepository taskRepository,
+                                  PlatformTransactionManager transactionManager,
                                   @Value("${app.ai.task.retention-days:90}") int retentionDays,
-                                  @Value("${app.ai.task.cleanup-batch-size:200}") int batchSize) {
+                                  @Value("${app.ai.task.cleanup-batch-size:200}") int batchSize,
+                                  @Value("${app.ai.task.cleanup-max-rows-per-run:20000}") int maxRowsPerRun) {
         this.taskRepository = taskRepository;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.retentionDays = retentionDays;
         this.batchSize = batchSize;
+        this.maxRowsPerRun = maxRowsPerRun;
     }
 
-    /** 返回本轮压缩的任务数（便于测试与可观测性）。 */
+    /** 返回本轮压缩的任务数（便于测试与可观测性）；单轮续批直到清完或触达上限。 */
     @Scheduled(fixedDelayString = "${app.ai.task.cleanup-interval-ms:86400000}")
-    @Transactional
     public int purgeExpiredSnapshots() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(retentionDays);
-        List<AiTask> tasks = taskRepository.findPurgeableForRetention(cutoff, PageRequest.of(0, batchSize));
+        int total = 0;
+        while (total < maxRowsPerRun) {
+            // 逐批独立事务：单事务内累积上万行会让持久化上下文与持锁时间随积压线性增长
+            int limit = Math.min(batchSize, maxRowsPerRun - total);
+            Integer purged = transactionTemplate.execute(status -> purgeBatch(cutoff, limit));
+            int purgedCount = purged == null ? 0 : purged;
+            if (purgedCount == 0) {
+                break;
+            }
+            total += purgedCount;
+        }
+        if (total > 0) {
+            log.info("Purged inline snapshots of {} AI tasks older than {} days", total, retentionDays);
+        }
+        if (total >= maxRowsPerRun) {
+            log.warn("AI task retention stopped at the per-run cap of {} rows; the remaining backlog "
+                    + "drains on the next run", maxRowsPerRun);
+        }
+        return total;
+    }
+
+    /** 压缩一批（调用方保证事务边界）。 */
+    private int purgeBatch(LocalDateTime cutoff, int limit) {
+        List<AiTask> tasks = taskRepository.findPurgeableForRetention(cutoff, PageRequest.of(0, limit));
         for (AiTask task : tasks) {
             task.setInputSnapshotJson(PURGED_SNAPSHOT);
             task.setResultJson(null);
             task.setSnapshotPurged(true);
             taskRepository.save(task);
-        }
-        if (!tasks.isEmpty()) {
-            log.info("Purged inline snapshots of {} AI tasks older than {} days", tasks.size(), retentionDays);
         }
         return tasks.size();
     }

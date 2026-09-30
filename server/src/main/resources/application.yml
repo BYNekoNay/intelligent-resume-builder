@@ -242,6 +242,10 @@ app:
       retention-days: ${AI_TASK_RETENTION_DAYS:90}
       cleanup-interval-ms: ${AI_TASK_CLEANUP_INTERVAL_MS:86400000}
       cleanup-batch-size: ${AI_TASK_CLEANUP_BATCH_SIZE:200}
+      # 单轮续批上限：清理每轮在「清完」与「达到本上限」之间取先到者，避免单轮无界运行；
+      # 触达上限时记录 WARN，剩余积压下一轮继续（此前每轮只清一批 = 200 行/天硬上限，
+      # 「日均新超期 > 200 行」时积压永不收敛、90 天保留期对超出部分不生效）
+      cleanup-max-rows-per-run: ${AI_TASK_CLEANUP_MAX_ROWS_PER_RUN:20000}
     consent:
       policy-version: "v1.2.0"
     quota:
