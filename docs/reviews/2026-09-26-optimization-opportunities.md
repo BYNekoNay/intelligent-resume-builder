@@ -81,3 +81,14 @@
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-26 | 初版：四团并行盘点 + 总监交叉核验；勘误 3 项（E-1 误报撤回 / E-2 JVM 768m / E-3 四项 O 已闭环）；产出 P1×6、P2×10、P3×4 |
+| 2026-09-30 | **批次①（OD-1）+ 批次②（SH-0/SH-2/SH-3）完成并 CI 全绿收口**：双 workflow push 触发已含工作分支、master fast-forward 至 883abee；health 两级拆分 + parse 限流（6/15 每分）+ 安全响应头片段接入 4 份 nginx 配置，云端六项探针全 PASS，后端 704 测试 0 失败。CI 首跑 failure 双根因（suite_edges AI 断言无密钥门控 / CI 无 CJK 字体）已修复（505c0c8）并实证 Functional Regression success；顺带沉淀：套件断言应锚定语义而非环境特定实现（NotoSansCJK 单标记、AI 恒可用均为跨环境必炸写法） |
+
+## 7. 批次执行状态（2026-09-30 更新）
+
+| 批次 | 内容 | 状态 |
+| --- | --- | --- |
+| ① | OD-1 分支/CI 对齐 | ✅ **完成**（CI 全绿实证） |
+| ② | SH-0 health 收敛 + SH-2 parse 限流 + SH-3 安全响应头 | ✅ **完成**（云端探针 + CI 全绿） |
+| ③ | TC-1/2/3 测试契约三件套 | ⏳ 待启动 |
+| ④ | PA-1 worker 分组领取 | ⏳ 待启动（容量数据已就位，需单独迭代） |
+| ⑤ | TC-8/9 + OD-2（schema 三步走 + ADR + ai-live 启用） | ⏳ 待启动（ai-live 阻塞于 BAILIAN_API_KEY secret） |
