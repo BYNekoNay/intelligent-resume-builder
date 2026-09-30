@@ -170,6 +170,8 @@ jobs:
       PDF_SERVICE_TOKEN: ci-pdf-token-0123456789abcdef0123456789abcdef
       PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.puppeteer-cache
       BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+      # 显式传 8 模型链（Repository Variable 非密钥；未设置时后端回退到 BAILIAN_MODEL 单模型）
+      BAILIAN_MODEL_CHAIN: ${{ vars.BAILIAN_MODEL_CHAIN }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
