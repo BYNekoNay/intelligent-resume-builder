@@ -117,7 +117,7 @@ P1 集中在三类：**事务边界打败安全意图**（refresh 族撤销）�
 | 主题 | 条目（来源） |
 | --- | --- |
 | **注释-实现漂移** | SKIP LOCKED 注释 ×2 处（AiTaskRepository:69、ExportTaskRepository:39）【T1+T3】；RateLimitFilter"滑动窗口"实为固定窗口【T4】 |
-| **安全取舍未文档化** | refresh token 进 JSON 响应体【T4】；改密后旧 access 短窗有效【T4】；health 暴露内部细节【T4】；注册端点账号枚举【T4】 |
+| **安全取舍未文档化** | ~~refresh token 进 JSON 响应体~~【T4】（**勘误 2026-09-26 优化盘点**：`TokenResponse.java:8` `@JsonIgnore` 自起步提交 `de480c2` 即存在，Cookie HttpOnly 下发，系审计误报，见 `2026-09-26-optimization-opportunities.md` §0 E-1）；改密后旧 access 短窗有效【T4】；health 暴露内部细节【T4】；注册端点账号枚举【T4】 |
 | **输入健壮性/校验缺口** | contentJson 13 类仅 3 类校验【T4】；KeywordExtractor 畸形输入无测试【T2】；JD 子串误命中+教育词大小写【T4】；imports parse 无限流【T4】 |
 | **跨模块口径不一** | 归档版本：ATS 拒绝 vs scoring 照常评分【T2】；归档错误文案混淆"已归档/不存在"【T2】；by-jd 不校验 JD 存在【T2】；JD/简历删除不级联投递【T3】 |
 | **统计/展示正确性** | percent 求和 99.9~100.2【T3】；saveDraft 硬编码 TEMPLATE【T3】；ANALYZING 态 resumeId=null【T2】；additionalResumeJson 绕过标准化【T1】 |
