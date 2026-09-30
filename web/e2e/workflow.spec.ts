@@ -524,10 +524,9 @@ test('keeps application evidence visible while tracking a pipeline stage', async
     jobDescriptionId: 20,
     resumeVersionId: 11,
     status: 'APPLIED',
-    coverLetterText: 'Evidence-backed cover letter',
-    emailBodyText: null,
-    openingMessageText: null,
+    // #50：列表为摘要——草稿长文本按需走详情，卡片标记用 draftCount
     feedbackText: 'Recruiter replied',
+    draftCount: 1,
     appliedAt: now,
     version: 2,
     createdAt: now,

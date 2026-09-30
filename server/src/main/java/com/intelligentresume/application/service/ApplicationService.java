@@ -48,13 +48,18 @@ public class ApplicationService {
     }
 
     @Transactional(readOnly = true)
-    public List<ApplicationResponse> list(Long userId, String followUp) {
+    public List<ApplicationSummary> list(Long userId, String followUp) {
         String mode = normalizeFollowUp(followUp);
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
         LocalDateTime endOfDay = startOfDay.plusDays(1);
         return repository.findByUserIdAndFollowUp(userId, mode, startOfDay, endOfDay, now)
-                .stream().map(this::response).toList();
+                .stream().map(this::summary).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public ApplicationResponse get(Long id, Long userId) {
+        return response(owned(id, userId));
     }
 
     @Transactional
@@ -251,5 +256,24 @@ public class ApplicationService {
                 record.getStatus(), record.getCoverLetterText(), record.getEmailBodyText(), record.getOpeningMessageText(),
                 record.getFeedbackText(), record.getAppliedAt(), record.getNextFollowUpAt(), record.getVersion(),
                 record.getCreatedAt(), record.getUpdatedAt());
+    }
+
+    /** #50：列表摘要——草稿长文本不进列表（按需从详情接口拉取），用 draftCount 支撑「n/3」标记。 */
+    private ApplicationSummary summary(ApplicationRecord record) {
+        return new ApplicationSummary(record.getId(), record.getJobDescriptionId(), record.getResumeVersionId(),
+                record.getStatus(), record.getFeedbackText(), draftCount(record), record.getAppliedAt(),
+                record.getNextFollowUpAt(), record.getVersion(), record.getCreatedAt(), record.getUpdatedAt());
+    }
+
+    private int draftCount(ApplicationRecord record) {
+        int count = 0;
+        if (present(record.getCoverLetterText())) count++;
+        if (present(record.getEmailBodyText())) count++;
+        if (present(record.getOpeningMessageText())) count++;
+        return count;
+    }
+
+    private boolean present(String value) {
+        return value != null && !value.isEmpty();
     }
 }

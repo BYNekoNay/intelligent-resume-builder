@@ -13,6 +13,7 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -218,11 +219,18 @@ class ResumeImportServiceTest {
 
     @Test
     @DisplayName("#17：解析超过耗时上限拒绝（不占住请求线程）")
-    void rejectsExtractionBeyondTimeout() throws Exception {
-        // 5ms 超时 + 40 页 PDF（未触发页数上限）：加载与抽取总耗时远超 5ms，超时判定确定生效
-        ResumeImportService limited = new ResumeImportService(MAX_BYTES, 60, 200_000, 5);
-        MockMultipartFile file = new MockMultipartFile("file", "long.pdf", "application/pdf",
-                multiPagePdfBytes(40));
+    void rejectsExtractionBeyondTimeout() {
+        // 确定性触发：覆盖抽取实现固定阻塞 200ms（真实 PDF 在快机器上可能毫秒级完成，
+        // 靠「40 页 PDF 必然超过 5ms」的假设会偶发失败）；5ms 上限必然先超时。
+        ResumeImportService limited = new ResumeImportService(MAX_BYTES, 60, 200_000, 5) {
+            @Override
+            protected String extract(String extension, MultipartFile file) throws Exception {
+                Thread.sleep(200);
+                return "slow";
+            }
+        };
+        MockMultipartFile file = new MockMultipartFile("file", "resume.txt", "text/plain",
+                "Alice Chen".getBytes(StandardCharsets.UTF_8));
 
         BusinessException ex = assertThrows(BusinessException.class, () -> limited.parse(file));
 

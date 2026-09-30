@@ -24,9 +24,14 @@ public class ApplicationController {
     }
 
     @GetMapping
-    public ApiResponse<List<ApplicationResponse>> list(@RequestParam(required = false) String followUp,
-                                                       HttpServletRequest httpRequest) {
+    public ApiResponse<List<ApplicationSummary>> list(@RequestParam(required = false) String followUp,
+                                                      HttpServletRequest httpRequest) {
         return ApiResponse.success(service.list(currentUserId(httpRequest), followUp), traceId(httpRequest));
+    }
+
+    @GetMapping("/{id}")
+    public ApiResponse<ApplicationResponse> get(@PathVariable Long id, HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.get(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
     @GetMapping("/stats")

@@ -18,6 +18,7 @@ import {
 import {
   createApplication,
   deleteApplication,
+  getApplication,
   getApplicationStats,
   listApplications,
   updateApplication,
@@ -25,6 +26,7 @@ import {
   type ApplicationRecord,
   type ApplicationStats,
   type ApplicationStatus,
+  type ApplicationSummary,
   type FollowUpFilter,
 } from '@/api/application'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
@@ -33,7 +35,7 @@ import { useLocale } from '@/i18n'
 import { getResumeVersion } from '@/api/resume'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
-const records = ref<ApplicationRecord[]>([])
+const records = ref<ApplicationSummary[]>([])
 const stats = ref<ApplicationStats | null>(null)
 const loading = ref(true)
 const saving = ref(false)
@@ -50,6 +52,8 @@ const openingMessageText = ref('')
 const nextFollowUpAt = ref('')
 const feedbackDraft = ref<Record<number, string>>({})
 const expandedRecordId = ref<number | null>(null)
+/** #50：列表不含草稿长文本，展开卡片/打开编辑面板时按需拉详情并缓存。 */
+const draftTexts = ref<Record<number, Pick<ApplicationRecord, 'coverLetterText' | 'emailBodyText' | 'openingMessageText'>>>({})
 const followUpFilter = ref<FollowUpFilter>('ALL')
 const draggingRecordId = ref<number | null>(null)
 const dragOverLane = ref<ApplicationStatus | null>(null)
@@ -148,20 +152,64 @@ async function locateResumeIdByVersion(versionId: number): Promise<number | null
   }
 }
 
-async function edit(record: ApplicationRecord) {
+/** PATCH/详情返回完整记录；列表只保存摘要（草稿文本缓存在 draftTexts）。 */
+function toSummary(record: ApplicationRecord): ApplicationSummary {
+  return {
+    id: record.id,
+    jobDescriptionId: record.jobDescriptionId,
+    resumeVersionId: record.resumeVersionId,
+    status: record.status,
+    feedbackText: record.feedbackText,
+    draftCount: [record.coverLetterText, record.emailBodyText, record.openingMessageText].filter(Boolean).length,
+    appliedAt: record.appliedAt,
+    nextFollowUpAt: record.nextFollowUpAt,
+    version: record.version,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  }
+}
+
+function cacheDrafts(record: ApplicationRecord) {
+  draftTexts.value[record.id] = {
+    coverLetterText: record.coverLetterText,
+    emailBodyText: record.emailBodyText,
+    openingMessageText: record.openingMessageText,
+  }
+}
+
+async function toggleDetails(record: ApplicationSummary) {
+  if (expandedRecordId.value === record.id) {
+    expandedRecordId.value = null
+    return
+  }
+  expandedRecordId.value = record.id
+  if (draftTexts.value[record.id]) return
+  try {
+    cacheDrafts((await getApplication(record.id)).data.data)
+  } catch {
+    draftTexts.value[record.id] = { coverLetterText: null, emailBodyText: null, openingMessageText: null }
+  }
+}
+
+async function edit(record: ApplicationSummary) {
   if (loadingEdit.value) return
   loadingEdit.value = true
   composerOpen.value = true
   editingId.value = record.id
   jobDescriptionId.value = String(record.jobDescriptionId)
-  coverLetterText.value = record.coverLetterText ?? ''
-  emailBodyText.value = record.emailBodyText ?? ''
-  openingMessageText.value = record.openingMessageText ?? ''
   nextFollowUpAt.value = record.nextFollowUpAt ? record.nextFollowUpAt.slice(0, 16) : ''
   try {
+    // #50：草稿长文本不在列表里，编辑时按需拉一次详情
+    const detail = (await getApplication(record.id)).data.data
+    cacheDrafts(detail)
+    coverLetterText.value = detail.coverLetterText ?? ''
+    emailBodyText.value = detail.emailBodyText ?? ''
+    openingMessageText.value = detail.openingMessageText ?? ''
     await selectResumeVersion(record.resumeVersionId)
     error.value = ''
     document.querySelector('.application-composer')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  } catch {
+    error.value = t('applications.loadError')
   } finally {
     loadingEdit.value = false
   }
@@ -182,7 +230,7 @@ async function save() {
   try {
     if (editingId.value === null) {
       const created = (await createApplication(payload)).data.data
-      records.value.unshift(created)
+      records.value.unshift(toSummary(created))
     } else {
       const existing = records.value.find(record => record.id === editingId.value)
       const updated = (await updateApplication(editingId.value, {
@@ -190,8 +238,10 @@ async function save() {
         status: existing?.status ?? 'DRAFT',
         version: existing?.version,
       })).data.data
-      records.value = records.value.map(record => record.id === updated.id ? updated : record)
+      records.value = records.value.map(record => record.id === updated.id ? toSummary(updated) : record)
     }
+    // 草稿可能已改动：清空按需缓存，避免展开卡片显示旧文本
+    draftTexts.value = {}
     resetForm()
     await load()
   } catch {
@@ -229,11 +279,11 @@ function jobFor(id: number) {
   return jobs.value.find(job => job.id === id)
 }
 
-function recordTitle(record: ApplicationRecord) {
+function recordTitle(record: ApplicationSummary) {
   return jobFor(record.jobDescriptionId)?.title || `${t('applications.jobRef')} #${record.jobDescriptionId}`
 }
 
-function recordCompany(record: ApplicationRecord) {
+function recordCompany(record: ApplicationSummary) {
   return jobFor(record.jobDescriptionId)?.companyName || t('applications.jobRef')
 }
 
@@ -247,21 +297,17 @@ function formatFollowUp(value: string | null) {
   return new Intl.DateTimeFormat(locale.value, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }
 
-function isOverdue(record: ApplicationRecord) {
+function isOverdue(record: ApplicationSummary) {
   if (!record.nextFollowUpAt) return false
   if (terminalStatuses.includes(record.status)) return false
   return new Date(record.nextFollowUpAt).getTime() < Date.now()
 }
 
-function showFollowUp(record: ApplicationRecord) {
+function showFollowUp(record: ApplicationSummary) {
   return record.nextFollowUpAt && !terminalStatuses.includes(record.status)
 }
 
-function messageCount(record: ApplicationRecord) {
-  return [record.coverLetterText, record.emailBodyText, record.openingMessageText].filter(Boolean).length
-}
-
-async function changeStatus(record: ApplicationRecord, status: ApplicationStatus) {
+async function changeStatus(record: ApplicationSummary, status: ApplicationStatus) {
   try {
     const updated = (await updateApplicationStatus(
       record.id,
@@ -269,7 +315,7 @@ async function changeStatus(record: ApplicationRecord, status: ApplicationStatus
       record.version,
       feedbackDraft.value[record.id] ?? record.feedbackText ?? undefined,
     )).data.data
-    Object.assign(record, updated)
+    Object.assign(record, toSummary(updated))
     feedbackDraft.value[record.id] = record.feedbackText ?? ''
   } catch (cause: any) {
     if (cause?.response?.data?.code === 40901) {
@@ -283,7 +329,7 @@ async function changeStatus(record: ApplicationRecord, status: ApplicationStatus
 
 // ==================== 原生 HTML5 拖拽 ====================
 
-function onCardDragStart(record: ApplicationRecord, event: DragEvent) {
+function onCardDragStart(record: ApplicationSummary, event: DragEvent) {
   draggingRecordId.value = record.id
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
@@ -325,7 +371,7 @@ async function onLaneDrop(status: ApplicationStatus, event: DragEvent) {
       record.version,
       feedbackDraft.value[record.id] ?? record.feedbackText ?? undefined,
     )).data.data
-    records.value = records.value.map(item => item.id === updated.id ? updated : item)
+    records.value = records.value.map(item => item.id === updated.id ? toSummary(updated) : item)
     feedbackDraft.value[updated.id] = updated.feedbackText ?? ''
     toastSuccess(t('toast.applicationMoved'))
   } catch (cause: any) {
@@ -351,11 +397,12 @@ function formatDays(value: number | null) {
   return value === null ? '—' : `${value}${t('applications.daysUnit')}`
 }
 
-async function remove(record: ApplicationRecord) {
+async function remove(record: ApplicationSummary) {
   if (!window.confirm(t('applications.confirmDelete'))) return
   try {
     await deleteApplication(record.id)
     records.value = records.value.filter(item => item.id !== record.id)
+    delete draftTexts.value[record.id]
     if (editingId.value === record.id) resetForm()
   } catch {
     error.value = t('applications.deleteError')
@@ -452,16 +499,16 @@ onMounted(async () => {
             <div class="ticket-lineage">
               <span><FileText :size="13" />{{ t('applications.versionRef') }} #{{ record.resumeVersionId }}</span>
               <ArrowRight :size="13" />
-              <span><MailCheck :size="13" />{{ messageCount(record) }}/3</span>
+              <span><MailCheck :size="13" />{{ record.draftCount }}/3</span>
             </div>
             <div class="ticket-date"><CalendarDays :size="13" />{{ formatDate(record.appliedAt || record.updatedAt) }}</div>
             <div v-if="showFollowUp(record)" class="ticket-follow-up" :class="{ overdue: isOverdue(record) }"><CalendarDays :size="13" />{{ t('applications.nextFollowUp') }}: {{ formatFollowUp(record.nextFollowUpAt) }}</div>
             <label class="stage-control"><span>{{ t('applications.status') }}</span><select :value="record.status" :aria-label="t('applications.status')" @change="changeStatus(record, ($event.target as HTMLSelectElement).value as ApplicationStatus)"><option v-for="status in allowedStatuses(record.status)" :key="status" :value="status">{{ statusLabel(status) }}</option></select></label>
-            <button class="ticket-expand" type="button" :aria-expanded="expandedRecordId === record.id" @click="expandedRecordId = expandedRecordId === record.id ? null : record.id"><span>{{ t('applications.feedback') }}</span><ChevronDown :size="15" /></button>
+            <button class="ticket-expand" type="button" :aria-expanded="expandedRecordId === record.id" @click="toggleDetails(record)"><span>{{ t('applications.feedback') }}</span><ChevronDown :size="15" /></button>
             <div v-if="expandedRecordId === record.id" class="ticket-details">
               <label>{{ t('applications.feedback') }}<textarea :value="feedbackDraft[record.id] ?? record.feedbackText ?? ''" rows="3" @input="feedbackDraft[record.id] = ($event.target as HTMLTextAreaElement).value" /></label>
               <button class="btn-neon btn-secondary" type="button" @click="changeStatus(record, record.status)">{{ t('applications.saveFeedback') }}</button>
-              <div class="application-drafts"><p v-if="record.coverLetterText"><strong>{{ t('applications.cover') }}</strong>{{ record.coverLetterText }}</p><p v-if="record.emailBodyText"><strong>{{ t('applications.email') }}</strong>{{ record.emailBodyText }}</p><p v-if="record.openingMessageText"><strong>{{ t('applications.opening') }}</strong>{{ record.openingMessageText }}</p></div>
+              <div class="application-drafts"><p v-if="draftTexts[record.id]?.coverLetterText"><strong>{{ t('applications.cover') }}</strong>{{ draftTexts[record.id]?.coverLetterText }}</p><p v-if="draftTexts[record.id]?.emailBodyText"><strong>{{ t('applications.email') }}</strong>{{ draftTexts[record.id]?.emailBodyText }}</p><p v-if="draftTexts[record.id]?.openingMessageText"><strong>{{ t('applications.opening') }}</strong>{{ draftTexts[record.id]?.openingMessageText }}</p></div>
               <button class="danger-action" type="button" :title="t('applications.delete')" @click="remove(record)"><Trash2 :size="14" />{{ t('applications.delete') }}</button>
             </div>
           </article>

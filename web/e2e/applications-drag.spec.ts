@@ -21,8 +21,8 @@ const versions = [
 const jobs = [{ id: 20, title: 'Backend Engineer', companyName: 'Example Systems', jdText: 'Java and Spring Boot', parsedKeywordsJson: null, parsedAt: null, parsedVersion: null, createdAt: now, updatedAt: now }]
 
 const record = (id: number, status: string, version: number) => ({
-  id, jobDescriptionId: 20, resumeVersionId: 11, status, coverLetterText: null, emailBodyText: null,
-  openingMessageText: null, feedbackText: null, appliedAt: status === 'APPLIED' ? now : null,
+  id, jobDescriptionId: 20, resumeVersionId: 11, status, feedbackText: null, draftCount: 0,
+  appliedAt: status === 'APPLIED' ? now : null,
   nextFollowUpAt: null, version, createdAt: now, updatedAt: now,
 })
 

@@ -95,12 +95,7 @@ public class ResumeImportService {
      * 且 multipart 的 5MB 上限管不到解析耗时）。超时按业务错误返回，不暴露解析器细节。
      */
     private String extractWithTimeout(String extension, MultipartFile file) throws Exception {
-        Future<String> future = extractExecutor.submit(() -> switch (extension) {
-            case "txt" -> new String(file.getBytes(), StandardCharsets.UTF_8);
-            case "pdf" -> extractPdf(file);
-            case "docx" -> extractDocx(file);
-            default -> throw new IllegalStateException();
-        });
+        Future<String> future = extractExecutor.submit(() -> extract(extension, file));
         try {
             return future.get(extractTimeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException timeout) {
@@ -111,6 +106,19 @@ public class ResumeImportService {
             if (cause instanceof Exception exception) throw exception;
             throw new IllegalStateException(cause);
         }
+    }
+
+    /**
+     * 实际抽取实现。独立成 protected 方法是为了让超时用例能确定性触发
+     * （真实文件在快机器上可能在毫秒级完成，靠耗时碰运气的测试会不稳定）。
+     */
+    protected String extract(String extension, MultipartFile file) throws Exception {
+        return switch (extension) {
+            case "txt" -> new String(file.getBytes(), StandardCharsets.UTF_8);
+            case "pdf" -> extractPdf(file);
+            case "docx" -> extractDocx(file);
+            default -> throw new IllegalStateException();
+        };
     }
 
     private String extractPdf(MultipartFile file) throws IOException {

@@ -45,7 +45,7 @@ class ApplicationControllerIT {
 
     @Test
     @Order(2)
-    void createAndListReturnCompleteOwnedRecord() throws Exception {
+    void createReturnsCompleteRecordAndListReturnsSummary() throws Exception {
         MvcResult created = mockMvc.perform(post("/api/applications")
                         .header("Authorization", "Bearer " + tokenA)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -61,12 +61,26 @@ class ApplicationControllerIT {
                 .andReturn();
         applicationId = objectMapper.readTree(created.getResponse().getContentAsString()).path("data").path("id").asLong();
 
+        // #50：列表为摘要——不返回草稿长文本（按需走详情），改为 draftCount 标记；
+        // feedbackText 仍在摘要里（状态迁移接口按请求值覆盖备注，需携带现值避免拖拽清空）
         mockMvc.perform(get("/api/applications").header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].id").value(applicationId));
+                .andExpect(jsonPath("$.data[0].id").value(applicationId))
+                .andExpect(jsonPath("$.data[0].draftCount").value(1))
+                .andExpect(jsonPath("$.data[0].coverLetterText").doesNotExist())
+                .andExpect(jsonPath("$.data[0].emailBodyText").doesNotExist())
+                .andExpect(jsonPath("$.data[0].openingMessageText").doesNotExist());
         mockMvc.perform(get("/api/applications").header("Authorization", "Bearer " + tokenB))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").isEmpty());
+
+        // #50：详情接口按需返回草稿长文本；跨用户不可见
+        mockMvc.perform(get("/api/applications/" + applicationId).header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.coverLetterText").value("Hello"))
+                .andExpect(jsonPath("$.data.draftCount").doesNotExist());
+        mockMvc.perform(get("/api/applications/" + applicationId).header("Authorization", "Bearer " + tokenB))
+                .andExpect(status().isNotFound());
     }
 
     @Test
