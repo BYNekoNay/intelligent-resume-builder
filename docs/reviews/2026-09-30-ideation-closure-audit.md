@@ -175,6 +175,13 @@
 26. ✅ #89 INTERVIEW_COACH 未知 operation 显式失败：不再静默落 `executeDefault`（避免按任意 input 直调模型）；错误信息不回显 operation 取值；新增 worker 路由单测
 27. ✅ #70 个人资料首次 upsert 并发：先锁用户行串行化「查后插」（唯一键冲突仍由全局 handler 兜底 40901）
 
+**第五批 C · 前端竞态保护 — ✅ 已执行（2026-09-30）**
+28. ✅ #58 简历/JD 选择器请求世代：`useResumeJobOptions` 的 `load`/`loadVersions` 加 epoch，连续切换时旧响应不再覆盖新选择；版本列表在请求发起时快照 resumeId
+29. ✅ #63 版本对比去重 + 陈旧保护：`loadDiffs` 加 epoch；删除 `watch`/`onMounted`/`@change`/`switchSides` 的重复触发路径——一次版本选择只发一次 diff 请求（e2e 断言：初始每版本恰好 1 次、切回后恰好 2 次，且延迟返回的旧 diff 不覆盖新选择）
+30. ✅ #64 模板列表/预览世代：场景筛选快速切换与连续点开预览时，慢响应不再覆盖最新列表/最新预览；关闭预览使在途请求失效
+31. ✅ #65 章节关联资产世代：`ResumeEditorView` 与 `ResumeDetailView` 中旧章节的响应不再写入新章节的关联资产（含素材标题映射）
+32. ✅ #61 会话初始化断网重试：`initialize` 失败后可再次调用（在途 Promise 合并并发调用，避免并发 refresh 触发服务端复用检测撤族），页头新增网络恢复重试横幅（zh/en 文案 + 样式）；新增 e2e「断网 → 横幅出现 → 页内重试恢复会话、不整页刷新」
+
 **需产品/环境决策后再定**
 - #26 ai_task 留存与清理策略（保留多久、是否提供用户删除入口）
 - #7 账号数据导出/删除前端入口（隐私治理口径）
@@ -191,4 +198,5 @@
 | 2026-09-30 | **第三批（功能与性能）执行完成**：#2 搜索覆盖 contentJson（`@Formula` 只读文本投影 + `lower(contentJsonText) LIKE`；H2 2.2.224 与 MySQL 5.7.24 双端探针定案匹配策略；新增 IT 用例）；PA-2 `ActiveUserCache` 30s 短 TTL（删号路径事务提交后清除，保住 #6「删号即失效」；新增 4 个可变时钟单测 + AuthServiceTest 断言）；#66 六个视图 13 处错误码映射收尾（web build 通过）。回归：全量 **753 测试 0 失败**（新增 5），web `npm run build` 通过 |
 | 2026-09-30 | **第四批（小项收口）执行完成**：#75 面试记录排序改 `round_no ASC, id ASC`（新增 `InterviewRecordOrderingIT` 倒序写入断言 + 评分投影 JPQL 执行验证；删除未调用的旧排序方法）；#72 搜索词 100 字符上限（40001）；#43 限流分桶硬上限（容量耗尽新 key fail-closed 429 + 单测）；#21 发布就绪脚本复合命令拆分（仓库内已无其它复合写法）。回归：全量 **756 测试 0 失败**（新增 3）；CI + Functional Regression 双绿 |
 | 2026-09-30 | **第五批 A（读模型与性能）部分执行完成**：#1 职业资料列表投影（新增 `CareerMaterialListRow`，不读 MEDIUMTEXT 原文、类型过滤下推 SQL）；#52 续办列表 metadata-only（`AiTaskContinuationResponse` + 投影，去掉 resultJson/输入快照派生字段）；#50 面试历史列表投影（不读 external_resume_text/current_question，新增 `InterviewSessionSummaryProjectionIT`）；#3 投递统计计数改 SQL group by、时长行只取三态。#50 其余三项暂缓（见 §4 第 21 条）。回归：全量 **758 测试 0 失败**（新增 2），web `npm run build` 通过；CI + Functional Regression 双绿 |
-| 2026-09-30 | **第五批 B（并发一致性与 AI 韧性）执行完成**：#24 面试资产并发幂等（记录行锁 + V28 唯一索引 + `InterviewAssetConcurrencyIT` 双线程断言）；#73 沟通模板 `@Version` + V29 迁移（陈旧副本保存被拒）；#25 使用计数原子自增 + `@DynamicUpdate`（与 #73 联动，防计数自增触发伪冲突）；#85 ATS prompt/schema 版本单一来源（统一取自 prompt builder，消除 v1.0.0/v1.0.1 默认值漂移）；#89 未知 INTERVIEW_COACH operation 显式失败（不再静默落通用路径）；#70 个人资料 upsert 加用户行锁。回归：全量 **762 测试 0 失败**（新增 4） |
+| 2026-09-30 | **第五批 B（并发一致性与 AI 韧性）执行完成**：#24 面试资产并发幂等（记录行锁 + V28 唯一索引 + `InterviewAssetConcurrencyIT` 双线程断言）；#73 沟通模板 `@Version` + V29 迁移（陈旧副本保存被拒）；#25 使用计数原子自增 + `@DynamicUpdate`（与 #73 联动，防计数自增触发伪冲突）；#85 ATS prompt/schema 版本单一来源（统一取自 prompt builder，消除 v1.0.0/v1.0.1 默认值漂移）；#89 未知 INTERVIEW_COACH operation 显式失败（不再静默落通用路径）；#70 个人资料 upsert 加用户行锁。回归：全量 **762 测试 0 失败**（新增 4）；CI + Functional Regression 双绿 |
+| 2026-09-30 | **第五批 C（前端竞态保护）执行完成**：#58 选择器请求世代；#63 版本对比去重（一次选择一次请求）+ 陈旧 diff 保护；#64 模板列表/预览世代；#65 章节关联资产世代（编辑器 + 详情页）；#61 会话初始化断网后页内重试（在途 Promise 合并并发 + 页头横幅）。回归：web `npm run build`（i18n/draft-fields 门禁 + vue-tsc）通过；Playwright 全量 **139 passed / 6 skipped / 0 failed**（新增 2 个回归用例） |

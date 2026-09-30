@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { FilePenLine, LogIn, LogOut, Menu, Sparkles, UserRound, UserRoundPlus, X } from 'lucide-vue-next'
+import { AlertTriangle, FilePenLine, LogIn, LogOut, Menu, Sparkles, UserRound, UserRoundPlus, X } from 'lucide-vue-next'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
@@ -30,6 +30,17 @@ watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
 async function signOut() {
   await auth.signOut()
   await router.push({ name: 'home' })
+}
+
+// #61：断网导致会话校验失败时，提供页内重试入口，而不是等用户整页刷新。
+const retryingSession = ref(false)
+async function retrySession() {
+  retryingSession.value = true
+  try {
+    await auth.initialize()
+  } finally {
+    retryingSession.value = false
+  }
 }
 </script>
 
@@ -95,6 +106,12 @@ async function signOut() {
         <Menu v-else :size="20" />
       </button>
     </header>
+
+    <div v-if="auth.initializationError === 'NETWORK'" class="session-retry-banner" role="alert">
+      <AlertTriangle :size="16" />
+      <span>{{ t('auth.sessionCheckFailed') }}</span>
+      <button type="button" :disabled="retryingSession" @click="retrySession">{{ t('common.retry') }}</button>
+    </div>
 
     <div v-if="mobileMenuOpen" id="mobile-navigation" class="mobile-navigation-panel">
       <nav :aria-label="t('navigation.label')">

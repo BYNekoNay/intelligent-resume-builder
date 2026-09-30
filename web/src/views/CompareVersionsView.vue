@@ -84,8 +84,13 @@ async function loadJson(versionId: number): Promise<Record<string, unknown>> {
   return (response.data.data.resumeJson ?? {}) as Record<string, unknown>
 }
 
+// #63：选版本会触发多次加载，旧响应可能晚于新响应返回并覆盖最新 diff。
+// diffEpoch 保证只有最新一次请求可以写入 baseJson/compareJson 与展开状态。
+let diffEpoch = 0
+
 async function loadDiffs() {
   if (baseVersionId.value === null || compareVersionId.value === null) return
+  const epoch = ++diffEpoch
   loading.value = true
   error.value = ''
   try {
@@ -93,30 +98,26 @@ async function loadDiffs() {
       loadJson(baseVersionId.value),
       loadJson(compareVersionId.value),
     ])
+    if (epoch !== diffEpoch) return
     baseJson.value = base
     compareJson.value = compare
     expandedSections.value = new Set(
       diffResumeVersions(base, compare).filter((d) => d.type !== 'UNCHANGED').map((d) => d.sectionKey),
     )
   } catch {
+    if (epoch !== diffEpoch) return
     error.value = t('resumeCompare.loadError')
   } finally {
-    loading.value = false
+    if (epoch === diffEpoch) loading.value = false
   }
 }
 
-async function onBaseChange() {
-  await loadDiffs()
-}
-async function onCompareChange() {
-  await loadDiffs()
-}
-
 function switchSides() {
+  // #63：交换后由 watch([baseVersionId, compareVersionId]) 统一触发一次加载，
+  // 不再在此重复调用 loadDiffs（此前会发出两次等价请求）。
   const tmp = baseVersionId.value
   baseVersionId.value = compareVersionId.value
   compareVersionId.value = tmp
-  void loadDiffs()
 }
 
 async function restoreVersion(versionId: number) {
@@ -192,12 +193,13 @@ onMounted(async () => {
     compareVersionId.value = Number.isInteger(requestedCompare) && versions.value.some((v) => v.id === requestedCompare)
       ? requestedCompare
       : versions.value.find((v) => v.id !== baseVersionId.value)?.id ?? baseVersionId.value
-    await loadDiffs()
+    // #63：初始 diff 由下方 watch 统一触发一次（此前此处与 watch 各发一次请求，共 2 次）。
   } catch {
     error.value = t('resumeCompare.loadError')
   }
 })
 
+// 版本选择/交换的唯一加载入口：任一 id 变化只需一次 diff 请求。
 watch([baseVersionId, compareVersionId], () => {
   if (baseVersionId.value !== null && compareVersionId.value !== null) {
     void loadDiffs()
@@ -224,12 +226,12 @@ watch([baseVersionId, compareVersionId], () => {
 
     <form v-if="versions.length" class="compare-selectors" @submit.prevent>
       <label>{{ t('resumeCompare.baseVersion') }}
-        <select :value="baseVersionId ?? ''" @change="baseVersionId = Number(($event.target as HTMLSelectElement).value); onBaseChange()">
+        <select :value="baseVersionId ?? ''" @change="baseVersionId = Number(($event.target as HTMLSelectElement).value)">
           <option v-for="v in versions" :key="v.id" :value="v.id">v{{ v.versionNo }} · {{ sourceLabel(v.sourceType) }} · {{ formatDate(v.createdAt) }}</option>
         </select>
       </label>
       <label>{{ t('resumeCompare.compareVersion') }}
-        <select :value="compareVersionId ?? ''" @change="compareVersionId = Number(($event.target as HTMLSelectElement).value); onCompareChange()">
+        <select :value="compareVersionId ?? ''" @change="compareVersionId = Number(($event.target as HTMLSelectElement).value)">
           <option v-for="v in versions" :key="v.id" :value="v.id">v{{ v.versionNo }} · {{ sourceLabel(v.sourceType) }} · {{ formatDate(v.createdAt) }}</option>
         </select>
       </label>

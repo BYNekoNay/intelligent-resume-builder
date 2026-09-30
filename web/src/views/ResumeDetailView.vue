@@ -113,16 +113,24 @@ onMounted(async () => {
   } catch { error.value = t('resumeDetail.loadError') }
 })
 
+// #65：章节筛选请求世代。快速切换筛选时旧章节的响应可能晚到，
+// 只有最新一次请求可以写入关联资产与素材标题映射。
+let relatedAssetsEpoch = 0
+
 async function loadRelatedAssets() {
+  const epoch = ++relatedAssetsEpoch
+  const sectionKey = relatedSectionKey.value
   try {
     // 与 ResumeEditorView 对齐：选中章节时后端按 sectionKey 过滤，避免全量拉取后再前端筛选
     const [assetResponse, materialResponse] = await Promise.all([
-      listInterviewAssets(relatedSectionKey.value ? { sectionKey: relatedSectionKey.value } : undefined),
+      listInterviewAssets(sectionKey ? { sectionKey } : undefined),
       listMaterials(),
     ])
+    if (epoch !== relatedAssetsEpoch) return
     relatedAssets.value = assetResponse.data.data
     materialTitles.value = Object.fromEntries(materialResponse.data.data.map((material) => [material.id, material.title]))
   } catch {
+    if (epoch !== relatedAssetsEpoch) return
     relatedAssets.value = []
     materialTitles.value = {}
   }

@@ -71,16 +71,24 @@ type SortableSection = ContentSectionKey
 const activeSection = ref<SectionKey>('basics')
 const relatedSectionAssets = ref<InterviewAsset[]>([])
 const relatedAssetsLoading = ref(false)
+// #65：章节关联资产请求世代。快速切换章节时，旧章节的响应可能晚到，
+// 只有最新一次请求可以写入列表/加载态，避免关联资产与当前章节不匹配。
+let relatedAssetsEpoch = 0
 watch(activeSection, () => { void loadRelatedSectionAssets() }, { immediate: true })
 async function loadRelatedSectionAssets() {
-  if (!activeSection.value) return
+  const epoch = ++relatedAssetsEpoch
+  const sectionKey = activeSection.value
+  if (!sectionKey) return
   relatedAssetsLoading.value = true
   try {
-    relatedSectionAssets.value = (await listInterviewAssets({ sectionKey: activeSection.value })).data.data
+    const response = (await listInterviewAssets({ sectionKey })).data.data
+    if (epoch !== relatedAssetsEpoch) return
+    relatedSectionAssets.value = response
   } catch {
+    if (epoch !== relatedAssetsEpoch) return
     relatedSectionAssets.value = []
   } finally {
-    relatedAssetsLoading.value = false
+    if (epoch === relatedAssetsEpoch) relatedAssetsLoading.value = false
   }
 }
 type DragLocation = { section: SortableSection; index: number; after: boolean }

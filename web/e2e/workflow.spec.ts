@@ -2118,6 +2118,33 @@ test('restores an authenticated session after a page refresh', async ({ page }) 
   await expect.poll(() => refreshCount).toBe(2)
 })
 
+/**
+ * #61 回归：断网导致会话初始化失败后，页面此前永久停留在「未登录且不跳转」状态；
+ * 现在页头提供页内重试入口，网络恢复后无需整页刷新即可恢复会话。
+ */
+test('retries an offline session bootstrap from the in-page banner', async ({ page }) => {
+  let refreshCount = 0
+  await page.route('**/api/auth/refresh', (route) => {
+    refreshCount += 1
+    if (refreshCount === 1) return route.abort('failed')
+    return route.fulfill({ json: response({ accessToken: 'recovered-token' }) })
+  })
+  await page.route('**/api/auth/me', route => route.fulfill({ json: response({ id: 99, username: 'e2e-user', email: 'e2e@example.com' }) }))
+  await page.route('**/api/resumes', route => route.fulfill({ json: response([resume]) }))
+
+  await page.goto('/resumes')
+  // 断网时不跳登录页，保留当前页面，并显示重试入口
+  await expect(page).toHaveURL(/\/resumes$/)
+  const banner = page.locator('.session-retry-banner')
+  await expect(banner).toBeVisible()
+  await expect(page.locator('.header-user')).toHaveCount(0)
+
+  await banner.getByRole('button').click()
+  await expect(page.locator('.header-user')).toContainText('e2e-user')
+  await expect(banner).toHaveCount(0)
+  await expect.poll(() => refreshCount).toBe(2)
+})
+
 test('archives a historical version and restores it to the visible history', async ({ page }) => {
   const activeVersions = [
     version,

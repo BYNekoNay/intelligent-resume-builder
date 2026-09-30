@@ -93,3 +93,60 @@ test('shows the diff summary, field-level highlights, and the changed-only filte
   await page.getByRole('checkbox').uncheck()
   await expect(page.locator('.compare-section')).toHaveCount(14)
 })
+
+/**
+ * #63 回归：每次版本选择只发一次 diff 请求；连续切换时旧响应不得覆盖最新选择。
+ */
+test('deduplicates version fetches per selection and ignores a stale diff response', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.addInitScript(() => localStorage.setItem('intelligent-resume.locale', 'en-US'))
+
+  const thirdVersion = {
+    id: 12, resumeId: 1, versionNo: 3, sourceType: 'MANUAL', resumeJson: null, optimizationSummary: null,
+    createdAt: '2026-08-12T09:00:00Z', archivedAt: null, restoredFromVersionId: null, generationContext: null,
+  }
+  const staleJson = { basics: { name: 'POISON-STALE-V12', email: 'stale@example.com' } }
+  const versionRequests: Record<string, number> = {}
+  let releaseStale: () => void = () => {}
+  const staleServed = new Promise<void>((resolve) => { releaseStale = resolve })
+
+  await page.route('**/api/auth/refresh', route => route.fulfill({ json: response({ accessToken: 'compare-token' }) }))
+  await page.route('**/api/auth/me', route => route.fulfill({ json: response({ id: 1, username: 'compare-user', email: 'compare@example.com' }) }))
+  await page.route('**/api/resumes/1', route => route.fulfill({ json: response(resume) }))
+  await page.route('**/api/resumes/1/versions**', route => route.fulfill({ json: response([...versions, thirdVersion]) }))
+  await page.route('**/api/resume-versions/*', async (route) => {
+    const versionId = route.request().url().split('/').pop() ?? ''
+    versionRequests[versionId] = (versionRequests[versionId] ?? 0) + 1
+    if (versionId === '12') {
+      // v12 的响应被延迟，模拟「旧请求晚于新请求返回」
+      await new Promise(resolve => setTimeout(resolve, 400))
+      await route.fulfill({ json: response({ ...thirdVersion, resumeJson: staleJson }) })
+      releaseStale()
+      return
+    }
+    const fixture = versionId === '10' ? versions[0] : versions[1]
+    const json = versionId === '10' ? baseJson : compareJson
+    await route.fulfill({ json: response({ ...fixture, resumeJson: json }) })
+  })
+
+  await page.goto('/resumes/1/compare')
+  await expect(page.locator('.diff-summary')).toBeVisible()
+  // 初始加载每个版本只请求一次（此前 onMounted 与 watch 各触发一次，共 2 次）
+  expect(versionRequests['10']).toBe(1)
+  expect(versionRequests['11']).toBe(1)
+
+  // 连续切换比较版本：先选 12（慢），再切回 11（快）
+  const compareSelect = page.locator('.compare-selectors select').nth(1)
+  await compareSelect.selectOption('12')
+  await compareSelect.selectOption('11')
+  const nameCompareSide = page.locator('.field-diff-row.field-modified').filter({ hasText: 'Name' }).locator('.field-side.compare')
+  await expect(nameCompareSide).toContainText('Compare Candidate')
+
+  // 等延迟的 v12 响应真正返回后再断言：旧 diff 不得覆盖最新选择
+  await staleServed
+  await page.waitForTimeout(150)
+  await expect(page.getByText('POISON-STALE-V12')).toHaveCount(0)
+  await expect(nameCompareSide).toContainText('Compare Candidate')
+  expect(versionRequests['12']).toBe(1)
+  expect(versionRequests['11']).toBe(2)
+})

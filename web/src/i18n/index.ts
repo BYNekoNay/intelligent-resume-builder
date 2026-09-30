@@ -64,6 +64,7 @@ const messages: Record<Locale, MessageTree> = {
       loginIntro: '输入账户信息，继续上次的工作。', registerIntro: '创建账户后，从职业资料或已有简历开始。',
       usernameHint: '可使用字母、数字、句点、下划线和连字符。', passwordHint: '至少 8 位字符。',
       showPassword: '显示密码', hidePassword: '隐藏密码', credentialChanged: '账户凭据已更新，请重新登录。',
+      sessionCheckFailed: '无法连接服务器，登录状态尚未校验。网络恢复后请重试。',
     },
     assets: {
       eyebrow: '答案库', title: '面试答案资产', subtitle: '保留你的原始回答与 AI 建议，便于诚实复盘面试表现。',
@@ -559,6 +560,7 @@ const messages: Record<Locale, MessageTree> = {
       loginIntro: 'Enter your account details to continue where you stopped.', registerIntro: 'After creating an account, start from career evidence or an existing resume.',
       usernameHint: 'Use letters, numbers, periods, underscores, and hyphens.', passwordHint: 'Use at least 8 characters.',
       showPassword: 'Show password', hidePassword: 'Hide password', credentialChanged: 'Account credentials updated. Sign in again.',
+      sessionCheckFailed: 'Cannot reach the server, so your sign-in state has not been verified. Retry once your network is back.',
     },
     assets: {
       eyebrow: 'Answer library', title: 'Interview Answer Assets', subtitle: 'Keep your original response and AI suggestion separate for honest interview review.',

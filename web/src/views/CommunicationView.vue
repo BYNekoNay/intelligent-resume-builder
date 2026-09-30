@@ -262,18 +262,27 @@ async function useInApplication() {
 
 // ==================== 模板库 ====================
 
+// #64：模板列表/预览请求世代。场景筛选快速切换、连续点开不同模板时，
+// 旧响应可能晚到并覆盖最新列表或最新预览内容。
+let templateRequestEpoch = 0
+let previewRequestEpoch = 0
+
 async function loadTemplates() {
+  const epoch = ++templateRequestEpoch
   templatesLoading.value = true
   error.value = ''
   try {
-    templates.value = (await listTemplates({
+    const response = await listTemplates({
       scene: sceneFilter.value || undefined,
       outputLanguage: outputLanguage.value,
-    })).data.data
+    })
+    if (epoch !== templateRequestEpoch) return
+    templates.value = response.data.data
   } catch {
+    if (epoch !== templateRequestEpoch) return
     error.value = t('communication.templateLoadError')
   } finally {
-    templatesLoading.value = false
+    if (epoch === templateRequestEpoch) templatesLoading.value = false
   }
 }
 
@@ -286,6 +295,7 @@ async function openPreview(template: CommunicationTemplateSummary) {
     error.value = t('communication.selectError')
     return
   }
+  const epoch = ++previewRequestEpoch
   previewing.value = template
   previewResult.value = null
   previewDraft.value = ''
@@ -293,16 +303,19 @@ async function openPreview(template: CommunicationTemplateSummary) {
   error.value = ''
   try {
     const result = (await previewTemplate(template.id, Number(resumeVersionId.value), Number(jobId.value))).data.data
+    if (epoch !== previewRequestEpoch) return
     previewResult.value = result
     previewDraft.value = result.filledBody
   } catch {
+    if (epoch !== previewRequestEpoch) return
     error.value = t('communication.previewError')
   } finally {
-    previewLoading.value = false
+    if (epoch === previewRequestEpoch) previewLoading.value = false
   }
 }
 
 function closePreview() {
+  previewRequestEpoch += 1
   previewing.value = null
   previewResult.value = null
   previewDraft.value = ''
