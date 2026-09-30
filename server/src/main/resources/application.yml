@@ -56,6 +56,16 @@ server:
     # 远大于该值的流式请求仍会被连接级中断（无界 swallow 会让任意大请求占带宽），
     # 生产由 nginx 的 client_max_body_size 6m（= 上方 max-request-size）先行拒绝。
     max-swallow-size: 8MB
+  # 响应压缩：JSON 响应重复度高，实测账号导出（200 条 63KB 散文式文本）单次响应
+  # 12.77MB → gzip 2.14MB（约 6×），列表类 JSON 更高；同一份数据在慢网络下也不再
+  # 触达客户端读超时。只声明文本类 mime（图片/PDF 等已压缩内容不重复压缩）；
+  # min-response-size 取 2KB——小响应压了反而更大。安全口径：响应体只含调用方自己的
+  # 数据、不放任何机密令牌（令牌在 Authorization 头），不构成 BREACH 的自反条件；
+  # 应用侧压缩先于反代 TLS 终止，也不涉及 CRIME。反代层无需再压缩同一响应。
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/plain,text/css,application/javascript,text/javascript
+    min-response-size: 2048
 
 management:
   defaults:

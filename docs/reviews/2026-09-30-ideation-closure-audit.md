@@ -335,6 +335,23 @@
 
 > 仍留观（需要产品/架构口径，非当前缺陷）：导出把整份 JSON 先构造为 `String` 再编码（12MB 响应约 2~3 份副本的瞬时堆占用），改流式写出可把单请求堆占用降到常数级；以及导出文档本身无体积上限（是否给账号数据或导出文档设上限/分片）。两者都取决于「导出文档格式与上限」的产品决策。
 
+### 2.27 响应压缩缺失（2026-10-01 第三十四批扫描，已随本批修复）
+
+方法：核对「传输层是否利用了响应体的可压缩性」——全仓扫描 `gzip` / `compression` / `Content-Encoding` 的任何声明，再用真实 HTTP 探针在**同一账号同一数据**上做「带/不带 `Accept-Encoding: gzip`」的对照。
+
+| 项 | 取证 | 结论 |
+| --- | --- | --- |
+| 应用与反代都没有任何响应压缩配置 | 全仓（nginx conf / `application.yml` / 前端）扫描 `gzip|compression|Content-Encoding` **零命中**；真实 HTTP 探针（本机 H2，200 条 62KB 职业资料）：带 `Accept-Encoding: gzip` 请求账号导出，响应**既无 `Content-Encoding` 也无 `Vary: accept-encoding`**，`Content-Length: 12499897` 原样 12.5MB | **存在缺陷 → 修复**：应用层开启响应压缩 |
+| 收益量级（避免合成数据虚高） | 首轮探针用「同一句话重复 2300 次」的合成文本，gzip 假高到 175×；改用**散文式词表**（200 条 63KB，条内无重复）复测：**12,773,702 → 2,144,823 字节（≈6×）**，响应头为 `Content-Encoding: gzip` + `Transfer-Encoding: chunked`；列表类 JSON（100 条摘要 16.7KB → 1.1KB）更高 | 收益确定，且与 §2.26 的下载死线互补（同一份数据在慢网络下更快、更不易触达 60s 超时） |
+
+修复动作：`application.yml` 的 `server` 段新增 `compression`（`enabled: true`、文本类 mime 列表含 `application/json`、`min-response-size: 2048`）；新增静态门禁 `ResponseCompressionContractTest`——该契约只由 yml 承载，且 **MockMvc 不经过 Tomcat、任何既有测试都不会因它缺失而变红**，故必须显式固化（配置被关/被删/json 被移出 mime 列表/阈值被设为 0 都会让收益静默消失）；`docs/08` 补「响应压缩契约」。
+
+安全口径（同时写入 yml 注释与 `docs/08`）：响应体只含调用方自己的数据、不放任何机密令牌（令牌在 `Authorization` 头），不构成 BREACH 的自反条件；应用侧压缩先于反代 TLS 终止，也不涉及 CRIME。
+
+验证：门禁**修复前红**（临时把 `enabled` 置 false → 断言失败）→ 恢复后绿；真实 HTTP 探针体积对照如上（唯一变量是 `Accept-Encoding`）；server 全量 **852 测试 0 失败**（新增 1 门禁，5 skipped 为环境门控）。
+
+> 留观：静态资源（SPA 产物）由 web 容器经 Nginx 直接提供、不经应用，其压缩需在 Nginx 侧单独开启——本批不动反代配置（接口响应已在应用层压缩，反代无需重复处理）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
