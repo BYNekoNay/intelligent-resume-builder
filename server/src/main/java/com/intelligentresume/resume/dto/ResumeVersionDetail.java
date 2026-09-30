@@ -7,6 +7,7 @@ import java.util.Map;
 
 public record ResumeVersionDetail(
         Long id,
+        Long resumeId,
         Integer versionNo,
         ResumeSourceType sourceType,
         Map<String, Object> resumeJson,

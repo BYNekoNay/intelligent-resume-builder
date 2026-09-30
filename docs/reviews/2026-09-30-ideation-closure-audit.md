@@ -203,6 +203,10 @@
 46. ✅ #78 规则评分重放幂等：`POST /api/scoring/match` 在「同一（版本, JD, 规则版本）且 JD 在评分后未被修改」时复用既有结果；JD 修改（含重新解析）后照常重算——不再重复追加等价行；新增 2 个单测 + 1 个 IT
 47. ✅ #28 配额/跟进查询组合索引：V31 新增 `idx_ai_task_user_type_created`（AI 每日配额）、`idx_iai_user_created`（面试每日配额）、`idx_application_user_followup`（跟进筛选）；`resume(user_id, job_description_id)` 经核对已由 V12 的 `idx_resume_user_jd` 覆盖。**首版 V31 重复建了 `idx_resume_user_jd`，被更新后的 5.7 门禁当场拦下（Error 1061）并修正——门禁有效性的实证**
 
+**第八批 · AI 输入边界与前端请求收敛 — ✅ 已执行（2026-09-30）**
+48. ✅ #36 资料文本统一 prompt 字节预算：新增 `MaterialPromptTextBudget`，单条额度 = min(`app.ai.prompt.max-material-bytes` 65536, `app.ai.prompt.max-materials-total-bytes` 262144 / 条数)——因此 n 条资料的原始文本总量恒不超总量上限；「资料选择（≤60 候选）」与「岗位定制生成」两条链路共用同一预算（此前 sourceText 无准入上限、只有条数限制）。**裁剪而不是丢弃**：materialId 恒保留在提示词中，不新增需前端映射的 unselectedReasons 原因码（`DraftSectionReview.vue` 按原样展示该字段）；sourceText 按 UTF-8 字符边界截断并追加 `[truncated]` 标记；contentJson 超限按顶层条目整条保留/省略并置 `_truncated`，序列化仍是合法 JSON（模型据此走 `_pending` 而不是编造）。新增 9 个用例（预算单测 7 + 生成构建器 1 + 选择构建器 1）
+49. ✅ #33 投递编辑页版本定位去扇出：`GET /api/resume-versions/{id}` 详情新增 `resumeId`（服务端本就以该字段做归属校验），`ApplicationsView` 的「版本 → 所属简历」定位由「按简历数并行扇出各简历版本列表」改为单请求 + 仅重载目标简历的版本列表；新增服务端断言 + e2e（断言单次 lookup、编辑期间仅 1 次版本列表请求、最终选中被引用的旧版本）
+
 **需产品/环境决策后再定**
 - #26 ai_task 留存与清理策略（保留多久、是否提供用户删除入口）
 - #7 账号数据导出/删除前端入口（隐私治理口径）
@@ -223,4 +227,5 @@
 | 2026-09-30 | **第五批 C（前端竞态保护）执行完成**：#58 选择器请求世代；#63 版本对比去重（一次选择一次请求）+ 陈旧 diff 保护；#64 模板列表/预览世代；#65 章节关联资产世代（编辑器 + 详情页）；#61 会话初始化断网后页内重试（在途 Promise 合并并发 + 页头横幅）。回归：web `npm run build`（i18n/draft-fields 门禁 + vue-tsc）通过；Playwright 全量 **139 passed / 6 skipped / 0 failed**（新增 2 个回归用例）；CI 绿 |
 | 2026-09-30 | **第五批 D（测试补齐与门禁更新）执行完成**：TC-5 通用端点白名单拒绝 IT（40001 + 不落库）；TC-6 confirm 乐观锁 IT（过期时间戳 40901、刷新后同一请求成功）；TC-7 AI 模式回答重放 IT（同键不新增 attempt、异答 40901）；TC-4 ATS 降级 7 码前端文案映射（不再透传服务端中文 message，e2e 断言）；#4 证据边界 2 个 e2e（资料库标注 + 选材禁用与「无可用资料」）；#22 MySQL 5.7 门禁更新至 V20~V29 并用本机 5.7.24 实跑通过。回归：server 全量 **765 测试 0 失败**（新增 3，5 skipped 为环境门控）；web `npm run build` 通过；Playwright 全量 **141 passed / 6 skipped / 0 failed**（新增 2） |
 | 2026-09-30 | **第六批（资源边界与交付链）执行完成**：#44 通用 AI 端点 input 大小上限（序列化字节数 262144，超限 40001 不落库）；#17 导入解析页数/文本长度/耗时上限（默认 60 页、200000 字符、15s，超时中断并按业务错误返回）；#29 沟通草稿与任务结果同事务落库（租约被接管时不再留孤儿草稿）；#30 PDF 导出 stale 结果立即清理孤儿文件；#54 导出过期判定条件化（并发推进时回读最新状态，不误报 EXPIRED）；#14 PDF 导出结果复用（未过期的在途/成功任务直接复用，过期才重渲染）。回归：server 全量 **779 测试 0 失败**（新增 14，5 skipped 为环境门控）；`docs/05` §7.8/§11.1 契约同步 |
-| 2026-09-30 | **第七批（并发与幂等续）执行完成**：#38 `Resume` `@Version` + V30 迁移（陈旧副本不再回写并发推进的版本指针，冲突 40901）；#78 规则评分结果复用（同版本+JD+规则版本且 JD 未改 → 复用既有行；JD 改动后重算）；#28 V31 三个组合索引（AI/面试每日配额、跟进筛选；`resume` 相关已由 V12 覆盖）。回归：server 全量 **783 测试 0 失败**（新增 4，5 skipped 为环境门控）；MySQL 5.7 门禁重跑到 V31 通过（首版 V31 的重复索引由门禁拦下并修正） |
+| 2026-09-30 | **第七批（并发与幂等续）执行完成**：#38 `Resume` `@Version` + V30 迁移（陈旧副本不再回写并发推进的版本指针，冲突 40901）；#78 规则评分结果复用（同版本+JD+规则版本且 JD 未改 → 复用既有行；JD 改动后重算）；#28 V31 三个组合索引（AI/面试每日配额、跟进筛选；`resume` 相关已由 V12 覆盖）。回归：server 全量 **783 测试 0 失败**（新增 4，5 skipped 为环境门控）；MySQL 5.7 门禁重跑到 V31 通过（首版 V31 的重复索引由门禁拦下并修正）；CI + Functional Regression 双绿（workflow run 36722127408 / 36722127392，head 3134ecd，复核结论 success） |
+| 2026-09-30 | **第八批（AI 输入边界与前端请求收敛）执行完成**：#36 资料文本统一 prompt 字节预算（`MaterialPromptTextBudget`：单条额度 = min(单条上限 64KB, 总量 256KB/条数)，n 条文本总量恒不超上限；选择/生成两条链路共用；UTF-8 字符边界截断 + `[truncated]` 标记；contentJson 超限按顶层条目保留并置 `_truncated`（保持 JSON 合法）；不丢弃资料、不新增前端需映射的原因码）；#33 投递编辑页版本定位去扇出（`ResumeVersionDetail` 暴露 `resumeId`，单请求定位 + 仅重载目标简历的版本列表）。回归：server 全量 **792 测试 0 失败**（新增 9，5 skipped 为环境门控）；web `npm run build` 通过；Playwright 全量 **142 passed / 6 skipped / 0 failed**（新增 1） |

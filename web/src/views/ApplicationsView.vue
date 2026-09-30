@@ -30,7 +30,7 @@ import {
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
-import { listVersions, type ResumeSummary } from '@/api/resume'
+import { getResumeVersion } from '@/api/resume'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const records = ref<ApplicationRecord[]>([])
@@ -128,30 +128,24 @@ function openComposer() {
 
 async function selectResumeVersion(versionId: number) {
   const currentResume = resumes.value.find(resume => resume.currentVersionId === versionId)
-  if (currentResume) {
-    selectedResumeId.value = currentResume.id
+  const resumeId = currentResume?.id ?? (await locateResumeIdByVersion(versionId))
+  if (resumeId != null) {
+    selectedResumeId.value = resumeId
     await loadVersions()
-  } else {
-    const owningResume = await findResumeByVersionId(versionId)
-    if (owningResume) {
-      selectedResumeId.value = owningResume.id
-      await loadVersions()
-    }
   }
   resumeVersionId.value = String(versionId)
 }
 
-/** 并行加载所有简历的版本并定位 versionId 所属简历，避免逐个串行请求（消除循环 N+1）。 */
-async function findResumeByVersionId(versionId: number): Promise<ResumeSummary | null> {
-  const candidates = await Promise.all(resumes.value.map(async (resume) => {
-    try {
-      const list = (await listVersions(resume.id)).data.data
-      return list.some(version => version.id === versionId) ? resume : null
-    } catch {
-      return null
-    }
-  }))
-  return candidates.find(resume => resume !== null) ?? null
+/**
+ * #33：版本 → 所属简历定位改为单请求（详情返回 resumeId），
+ * 不再按简历数对每个简历的版本列表做并行扇出。
+ */
+async function locateResumeIdByVersion(versionId: number): Promise<number | null> {
+  try {
+    return (await getResumeVersion(versionId)).data.data.resumeId ?? null
+  } catch {
+    return null
+  }
 }
 
 async function edit(record: ApplicationRecord) {

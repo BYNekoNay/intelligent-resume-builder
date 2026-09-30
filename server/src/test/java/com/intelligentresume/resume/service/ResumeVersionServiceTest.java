@@ -67,6 +67,8 @@ class ResumeVersionServiceTest {
 
         assertEquals(1, detail.versionNo());
         assertEquals(ResumeSourceType.MANUAL, detail.sourceType());
+        // #33：详情携带 resumeId，前端可单请求完成「版本 → 所属简历」定位
+        assertEquals(1L, detail.resumeId());
         // 第一个版本自动设为当前版本
         assertEquals(10L, resume.getCurrentVersionId());
     }

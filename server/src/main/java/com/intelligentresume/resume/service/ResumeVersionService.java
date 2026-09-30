@@ -250,7 +250,7 @@ public class ResumeVersionService {
     }
 
     private ResumeVersionDetail toDetail(ResumeVersion v) {
-        return new ResumeVersionDetail(v.getId(), v.getVersionNo(), v.getSourceType(),
+        return new ResumeVersionDetail(v.getId(), v.getResumeId(), v.getVersionNo(), v.getSourceType(),
                 v.getResumeJson(), v.getOptimizationSummary(), v.getGenerationContext(),
                 v.getCreatedAt(), v.getDeletedAt(), v.getRestoredFromVersionId());
     }

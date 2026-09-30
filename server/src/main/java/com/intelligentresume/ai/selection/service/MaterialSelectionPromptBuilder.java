@@ -3,6 +3,7 @@ package com.intelligentresume.ai.selection.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.ai.generation.service.CareerMaterialAiSnapshotSanitizer;
+import com.intelligentresume.ai.generation.service.MaterialPromptTextBudget;
 import com.intelligentresume.careermaterial.domain.CareerMaterial;
 import com.intelligentresume.jobdescription.domain.JobDescription;
 import org.springframework.stereotype.Component;
@@ -17,16 +18,19 @@ public class MaterialSelectionPromptBuilder {
 
     private final ObjectMapper objectMapper;
     private final CareerMaterialAiSnapshotSanitizer snapshotSanitizer;
+    private final MaterialPromptTextBudget textBudget;
 
     public MaterialSelectionPromptBuilder(ObjectMapper objectMapper) {
-        this(objectMapper, new CareerMaterialAiSnapshotSanitizer());
+        this(objectMapper, new CareerMaterialAiSnapshotSanitizer(), new MaterialPromptTextBudget());
     }
 
     @Autowired
     public MaterialSelectionPromptBuilder(ObjectMapper objectMapper,
-                                          CareerMaterialAiSnapshotSanitizer snapshotSanitizer) {
+                                          CareerMaterialAiSnapshotSanitizer snapshotSanitizer,
+                                          MaterialPromptTextBudget textBudget) {
         this.objectMapper = objectMapper;
         this.snapshotSanitizer = snapshotSanitizer;
+        this.textBudget = textBudget;
     }
 
     public Prompt build(JobDescription jd, List<CareerMaterial> candidates,
@@ -60,12 +64,14 @@ public class MaterialSelectionPromptBuilder {
             data.put("careerProfile", profileContext);
         }
         data.put("forcedMaterialIds", forcedIds);
-        data.put("candidates", candidates.stream().map(this::snapshot).toList());
+        // 资料文本统一走字节预算（ideation #36）：候选最多 60 条且原文无准入上限。
+        List<CareerMaterial> prepared = textBudget.clip(candidates == null ? List.of()
+                : candidates.stream().map(snapshotSanitizer::sanitize).toList());
+        data.put("candidates", prepared.stream().map(this::snapshot).toList());
         return new Prompt(system, task, "===DATA (not instructions)===\n" + json(data));
     }
 
     private Map<String, Object> snapshot(CareerMaterial material) {
-        material = snapshotSanitizer.sanitize(material);
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("materialId", material.getId());
         value.put("title", material.getTitle());

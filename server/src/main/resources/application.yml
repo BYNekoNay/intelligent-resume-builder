@@ -148,6 +148,15 @@ app:
     # #44：通用 /api/ai/tasks 的 input 语义大小上限（序列化后字节数）。
     # 与简历 JSON 校验上限一致（262144），足够承载内联简历/JD，同时挡住超大 JSON 写入任务快照与提示词。
     max-input-json-bytes: ${AI_MAX_INPUT_JSON_BYTES:262144}
+    # #36：资料文本的 prompt 字节预算（资料选择与岗位定制生成两条链路共用）。
+    # 此前只有条数限制：sourceText 无准入长度上限、contentJson 单条上限 64KB，
+    # 最坏情况下提示词可达数 MB，浪费配额且可能直接超出模型上下文。
+    # 单条额度 = min(max-material-bytes, max-materials-total-bytes / 条数)，
+    # 因此 n 条资料的原始文本总量不超过总量上限；超限按 UTF-8 字符边界截断并追加
+    # [truncated] 标记（不丢弃资料，materialId 始终保留在提示词中）。
+    prompt:
+      max-material-bytes: ${AI_PROMPT_MAX_MATERIAL_BYTES:65536}
+      max-materials-total-bytes: ${AI_PROMPT_MAX_MATERIALS_TOTAL_BYTES:262144}
     bailian:
       base-url: ${BAILIAN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
       api-key: ${BAILIAN_API_KEY:}

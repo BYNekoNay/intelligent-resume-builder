@@ -7,6 +7,7 @@ import com.intelligentresume.jobdescription.domain.JobDescription;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -21,16 +22,19 @@ public class JobGenerationPromptBuilder {
 
     private final ObjectMapper objectMapper;
     private final CareerMaterialAiSnapshotSanitizer snapshotSanitizer;
+    private final MaterialPromptTextBudget textBudget;
 
     public JobGenerationPromptBuilder(ObjectMapper objectMapper) {
-        this(objectMapper, new CareerMaterialAiSnapshotSanitizer());
+        this(objectMapper, new CareerMaterialAiSnapshotSanitizer(), new MaterialPromptTextBudget());
     }
 
     @Autowired
     public JobGenerationPromptBuilder(ObjectMapper objectMapper,
-                                      CareerMaterialAiSnapshotSanitizer snapshotSanitizer) {
+                                      CareerMaterialAiSnapshotSanitizer snapshotSanitizer,
+                                      MaterialPromptTextBudget textBudget) {
         this.objectMapper = objectMapper;
         this.snapshotSanitizer = snapshotSanitizer;
+        this.textBudget = textBudget;
     }
 
     public Prompt build(JobDescription jd,
@@ -135,17 +139,30 @@ public class JobGenerationPromptBuilder {
                     .append(encodeJson(encodeObject(profileContext))).append("\n\n");
         }
 
+        // 资料文本统一走字节预算（ideation #36）：先脱敏、再跨三段共享一份额度裁剪。
+        List<CareerMaterial> fixedSafe = sanitizeAll(fixed);
+        List<CareerMaterial> preferredSafe = sanitizeAll(preferred);
+        List<CareerMaterial> candidateSafe = sanitizeAll(candidates);
+        List<CareerMaterial> combined = new ArrayList<>(fixedSafe);
+        combined.addAll(preferredSafe);
+        combined.addAll(candidateSafe);
+        List<CareerMaterial> budgeted = textBudget.clip(combined);
+
         sb.append("--- Fixed Materials (MUST use) ---\n");
-        appendMaterials(sb, fixed);
+        appendMaterials(sb, budgeted.subList(0, fixedSafe.size()));
 
         sb.append("--- Preferred Materials (prioritize) ---\n");
-        appendMaterials(sb, preferred);
+        appendMaterials(sb, budgeted.subList(fixedSafe.size(), fixedSafe.size() + preferredSafe.size()));
 
         sb.append("--- Candidate Materials ---\n");
-        appendMaterials(sb, candidates);
+        appendMaterials(sb, budgeted.subList(fixedSafe.size() + preferredSafe.size(), budgeted.size()));
 
         sb.append("===END===\n");
         return sb.toString();
+    }
+
+    private List<CareerMaterial> sanitizeAll(List<CareerMaterial> materials) {
+        return materials == null ? List.of() : materials.stream().map(snapshotSanitizer::sanitize).toList();
     }
 
     private void appendMaterials(StringBuilder sb, List<CareerMaterial> materials) {
@@ -154,7 +171,6 @@ public class JobGenerationPromptBuilder {
             return;
         }
         for (CareerMaterial m : materials) {
-            m = snapshotSanitizer.sanitize(m);
             sb.append("[ID=").append(m.getId())
                     .append(" type=").append(m.getMaterialType())
                     .append(" title=").append(m.getTitle())

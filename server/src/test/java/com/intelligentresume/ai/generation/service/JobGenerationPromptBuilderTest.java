@@ -130,4 +130,22 @@ class JobGenerationPromptBuilderTest {
         assertTrue(prompt.data().contains("===DATA==="), "数据段应保留不可信数据边界声明");
         assertTrue(prompt.data().contains("not instructions"), "数据段应声明内容不是指令");
     }
+
+    @Test
+    @DisplayName("超长来源文本按共享字节预算裁剪：materialId 保留、文本带 [truncated] 标记")
+    void dataSection_clipsOversizedSourceTextButKeepsMaterial() {
+        ObjectMapper mapper = new ObjectMapper();
+        JobGenerationPromptBuilder limited = new JobGenerationPromptBuilder(
+                mapper, new CareerMaterialAiSnapshotSanitizer(),
+                new MaterialPromptTextBudget(mapper, 160, 1024));
+        CareerMaterial big = material(7L, MaterialType.WORK_EXPERIENCE, Map.of("company", "星河科技"));
+        big.setSourceText("A".repeat(2000));
+
+        JobGenerationPromptBuilder.Prompt prompt =
+                limited.build(jd("Java后端工程师"), List.of(big), List.of(), List.of(), "v1.0.0");
+
+        assertTrue(prompt.data().contains("ID=7"), "资料不因预算被丢弃，materialId 必须保留");
+        assertTrue(prompt.data().contains("[truncated]"), "截断必须带模型可见标记");
+        assertFalse(prompt.data().contains("A".repeat(300)), "超限文本不应整段进入提示词（避免超出模型上下文）");
+    }
 }
