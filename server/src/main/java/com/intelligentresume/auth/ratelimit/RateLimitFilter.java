@@ -15,6 +15,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,6 +39,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class RateLimitFilter extends OncePerRequestFilter {
+
+    /**
+     * 与 Spring MVC 相同的路径解析语义：解码百分号转义、去掉矩阵参数（;）。
+     *
+     * <p>此前直接用 {@code request.getRequestURI()} 做精确匹配，而 MVC 是**解码后**
+     * 路由：{@code POST /api/auth/%6Cogin}（%6C=小写 l）会命中 login 控制器，却匹配
+     * 不上限流的字面量路径——真实 HTTP 探针实证为**限流绕过**（同一 IP 第 3 次明文
+     * 请求 429，转义路径仍 401 直达控制器）；refresh/register 与两个解析端点同族受险。
+     * 转义/矩阵参数只会被计到同一分桶（fail-closed），不会放宽限流。
+     */
+    private static final UrlPathHelper PATH_HELPER = new UrlPathHelper();
 
     private final int loginPerMinute;
     private final int registerPerMinute;
@@ -72,7 +84,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String path = request.getRequestURI();
+        String path = PATH_HELPER.getPathWithinApplication(request);
         Integer limit = limitFor(path);
         if (limit == null) {
             chain.doFilter(request, response);

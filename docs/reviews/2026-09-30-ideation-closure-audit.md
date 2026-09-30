@@ -219,6 +219,19 @@
 
 修复动作：两处仓库方法改双键 `(updated_at desc, id desc)`；`JobMaterialSelectionService` 候选排序补 id 兜底；`MaterialSelector` Javadoc 增加确定性约束说明；删除死方法。新增 `CareerMaterialOrderingIT`（同一毫秒三条、插入顺序与期望相反 → 必须按 id 降序返回）与 `InterviewAiAttemptOrderingIT`（同一秒两条 FAILED → 必须取 id 更大者，且错误码为后写那条）。
 
+### 2.18 限流路径归一化对账（2026-10-01 第二十六批扫描，已随本批修复）
+
+方法：对「安全过滤器按路径字面量精确匹配」与「Spring MVC **解码后**路由」的语义差做**真实 HTTP 探针**（本机 H2 实例 + curl，登录限流临时降为 2 次/分钟取数）。
+
+| 项 | 取证（修复前） | 结论 |
+| --- | --- | --- |
+| 百分号转义路径绕过登录限流 | 同一 IP：明文第 3 次 → **429**；`POST /api/auth/%6Cogin`（%6C=小写 l，MVC 解码后路由到同一 login 控制器）→ **401「账号或密码错误」** 直达控制器且未计数——限流形同虚设 | **存在缺陷 → 修复**：受限端点的路径解析改用与 MVC 同语义的 `UrlPathHelper.getPathWithinApplication`（解码 + 去矩阵参数） |
+| 同族端点 | `/api/auth/%72efresh` 同样绕过（401 直达）；register、resume-imports/parse、jobs/{id}/parse 与 login 同一实现（`getRequestURI` 字面量匹配） | 同批修复（单点改动覆盖 5 个受限端点） |
+| 矩阵参数（;）等价路径 | `/api/auth/login;x=1` 不计入分桶（字面量匹配未命中） | 修复后计入同一分桶（fail-closed；该形态在真实链路上本就不会到达控制器） |
+| 回归确认（修复后真实 HTTP） | 明文 401/401/429 基线不变；`%6C`、`%6c` 均 **429**；非限流路径的编码形式（`/api/system/h%65alth`）仍 200 | 无误伤 |
+
+修复动作：`RateLimitFilter.doFilterInternal` 的路径来源由 `request.getRequestURI()` 改为 `PATH_HELPER.getPathWithinApplication(request)`（`UrlPathHelper` 默认开启解码与 semicolon 清理），分桶键随之归一——转义路径不可能再落到独立键或漏计。测试：`RateLimitFilterTest` 新增 2 例（`%6C/%6c` 与明文共享分桶；`;` 计入分桶），`AuthRateLimitIT` 新增 1 例（以 `RequestPostProcessor` 强制原始 requestURI 还原真实 Tomcat 形态：明文耗尽后转义路径必须 429——修复前实测红为 401、修复后绿）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）

@@ -145,6 +145,52 @@ class RateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("百分号转义路径与明文路径共享同一分桶（%6C/%6c 编码的 login 不能绕过限流）")
+    void encodedPath_sharesBucketWithPlainPath() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        // 明文用掉 2 次配额
+        for (int i = 0; i < 2; i++) {
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(loginRequest("10.0.0.1"), resp, chain);
+            assertEquals(200, resp.getStatus(), "第 " + (i + 1) + " 次请求应放行");
+        }
+
+        // 明文第 3 次被限流（基线）
+        MockHttpServletResponse plainResp = new MockHttpServletResponse();
+        filter.doFilter(loginRequest("10.0.0.1"), plainResp, chain);
+        assertEquals(429, plainResp.getStatus(), "明文第 3 次应被限流");
+
+        // 等价的百分号转义路径（Spring MVC 会解码后路由到同一 login 控制器）必须同样被限流：
+        // 修复前 /api/auth/%6Cogin 未命中 path 精确匹配 → 直接放行（真实 HTTP 已实证绕过）
+        for (String encoded : new String[]{"/api/auth/%6Cogin", "/api/auth/%6cogin"}) {
+            MockHttpServletRequest req = new MockHttpServletRequest("POST", encoded);
+            req.setRemoteAddr("10.0.0.1");
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(req, resp, chain);
+            assertEquals(429, resp.getStatus(), "转义路径 " + encoded + " 应与明文共享分桶");
+        }
+    }
+
+    @Test
+    @DisplayName("矩阵参数（;）路径同样计入分桶，不回退为无限流")
+    void semicolonPath_countsTowardBucket() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        for (int i = 0; i < 2; i++) {
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(loginRequest("10.0.0.1"), resp, chain);
+            assertEquals(200, resp.getStatus());
+        }
+
+        MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/auth/login;x=1");
+        req.setRemoteAddr("10.0.0.1");
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+        filter.doFilter(req, resp, chain);
+        assertEquals(429, resp.getStatus(), "带矩阵参数的等价路径应被同一分桶限流（fail-closed）");
+    }
+
+    @Test
     @DisplayName("parse 端点不同 IP 分桶独立")
     void parse_differentIps_independentBuckets() throws Exception {
         FilterChain chain = mock(FilterChain.class);
