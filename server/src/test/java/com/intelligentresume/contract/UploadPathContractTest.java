@@ -59,15 +59,38 @@ class UploadPathContractTest {
     }
 
     @Test
-    @DisplayName("生产各层上限 ≥ 应用 multipart 上限：docs/05 §13 承诺的 5MB 必须端到端可达")
+    @DisplayName("生产各层上限 ≥ 应用「整请求」上限：docs/05 §13 承诺的 5MB 文件必须端到端可达")
     void proxyLayersAllowDocumentedUploadSize() throws Exception {
-        long appLimit = yamlMegabytes(read("server/src/main/resources/application.yml"), "max-file-size");
+        String yaml = read("server/src/main/resources/application.yml");
+        long fileLimit = yamlMegabytes(yaml, "max-file-size");
+        long requestLimit = yamlMegabytes(yaml, "max-request-size");
+
+        // 应用刻意给整请求留出高于单文件上限的余量（multipart 边界/头/其它 part）。
+        // nginx 的 client_max_body_size 限制的是**整请求体**，若按单文件上限对齐，
+        // 恰好 5MB 的文件会因这几百字节开销被 nginx 拒——接口文档承诺的边界不可达。
+        assertTrue(requestLimit > fileLimit,
+                "application.yml 的 max-request-size（" + requestLimit + " 字节）必须大于 max-file-size（"
+                        + fileLimit + " 字节），为 multipart 开销留余量");
+
         for (String conf : new String[]{"web/nginx.conf", "deploy/nginx/edge.conf", "deploy/nginx/host.conf"}) {
             long limit = bodyLimitBytes(read(conf), conf);
-            assertTrue(limit >= appLimit,
-                    conf + "（" + limit + " 字节）必须 ≥ 应用 multipart 上限（" + appLimit
-                            + " 字节），否则接口文档承诺的可上传大小实际不可达");
+            assertTrue(limit >= requestLimit,
+                    conf + "（" + limit + " 字节）必须 ≥ 应用「整请求」上限（" + requestLimit
+                            + " 字节 = max-request-size）：本层限制的是整个请求体（含 multipart 开销），"
+                            + "按单文件上限对齐会让 5MB 的文件在边界处被本层 413 拒绝");
         }
+    }
+
+    @Test
+    @DisplayName("导出下载显式放宽超时：响应体上限 10MB，全局 10s 会在慢网络下中断合法下载")
+    void exportDownloadSetsExplicitTimeout() throws Exception {
+        String api = read("web/src/api/export.ts");
+        Matcher download = Pattern.compile("apiClient\\.get<Blob>\\(`/api/exports/files/\\$\\{id\\}`[^)]*\\)")
+                .matcher(api);
+        assertTrue(download.find(), "web/src/api/export.ts 应存在导出文件下载调用（否则本门禁需更新）");
+        assertTrue(Pattern.compile("timeout:\\s*[\\d_]+").matcher(download.group()).find(),
+                "导出下载未显式设置 timeout：会使用全局 10s，而 pdf.max-output-bytes 默认 10485760 字节"
+                        + "（慢网络下合法下载被中断）");
     }
 
     @Test

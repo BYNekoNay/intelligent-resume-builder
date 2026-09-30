@@ -257,6 +257,18 @@
 
 修复动作：两份 web nginx 配置补 `client_max_body_size 5m`；前端上传请求显式 `timeout: 30_000`；新增跨运行时静态门禁 `UploadPathContractTest`（5 条断言：含 `/api/` 反代的配置必须显式声明体积上限；容器内层 web ≥ 外层 edge 与 ip-test 覆盖层；生产各层 ≥ 应用 multipart 上限；镜像内 `web/nginx.conf` 与 `deploy/nginx/web.conf` 取值一致；前端上传超时 > 服务端解析预算）。`docs/05` §13 与 `docs/08` 补代理层体积契约。
 
+### 2.21 上传边界语义与下载死线跟进（2026-10-01 第二十九批扫描，已随本批修复）
+
+方法：第二十八批补上体积上限后，继续核对「该上限与哪一侧的应用上限对应」——`client_max_body_size` 限制的是**整个请求体**，而应用有两个不同口径的上限（单文件 `max-file-size` 与整请求 `max-request-size`），二者不可混同。
+
+| 项 | 取证（修复前） | 结论 |
+| --- | --- | --- |
+| nginx 体积上限按**单文件**口径对齐，导致文档承诺的 5MB 边界不可达 | 应用侧：`max-file-size: 5MB`（文件部分）与 `max-request-size: 6MB`（整个请求，`application.yml` 注释明确写为「预留请求头等余量」）；业务判据 `ResumeImportService.maxBytes = 5242880`（超限 → 40001「文件不能超过 5 MB」）。但 nginx 各层为 `5m`，限制的是含 multipart 边界与头的**整请求体** → 恰好 5MB 的文件（体约 5MB + 数百字节）被 nginx 以 413 拒绝，应用的 5MB 承诺在边界处不可达，且 6MB 余量与「应用 JSON 信封」在 5MB~6MB 区间完全用不上 | **存在缺陷 → 修复**：`client_max_body_size` 由 `5m` 改为 **`6m`**（= 应用整请求上限），4 份配置同步（`edge.conf`、`host.conf`、`web/nginx.conf`、镜像同步副本 `deploy/nginx/web.conf`） |
+| 门禁口径错误 | 第二十八批的门禁断言「各层 ≥ `max-file-size`(5MB)」，正是错误口径——它对本缺陷**不报错** | **已修正**：断言改为「各层 ≥ `max-request-size`(6MB)」，并新增「`max-request-size` 必须 > `max-file-size`」以固化「余量存在」这一前提 |
+| 导出下载未放宽超时 | `web/src/api/export.ts` 的下载走 axios 全局 10s，而响应体上限 `pdf.max-output-bytes` 默认 **10MB**（移动网络 10MB 常需数十秒）→ 合法下载被判超时；与导出数据（30s）、面试步进（60s）的既有放宽惯例不一致 | **存在缺陷 → 修复**：`timeout: 60_000` |
+
+修复动作：4 份 nginx 配置 `client_max_body_size` 5m → 6m（注释写明「整请求 vs 单文件」的语义差与失败模式）；`UploadPathContractTest` 的门禁口径由单文件改为整请求上限，并新增「导出下载必须显式放宽超时」断言（共 6 条）；`application.yml` 中引用 nginx 上限的注释同步为 6m；`docs/05` §13 与 `docs/08` 更新体积契约口径。验证：门禁修复前 **2/6 红**（`web/nginx.conf` 5242880 < 6291456；导出下载无显式超时）、修复后 6/6 绿；web `npm run build` 通过；server 全量回归见 §5。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）

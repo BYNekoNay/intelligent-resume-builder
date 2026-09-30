@@ -27,6 +27,10 @@ export function retryExport(id: number) {
   return apiClient.post<ApiResponse<ExportTask>>(`/api/exports/tasks/${id}/retry`)
 }
 
+/**
+ * 下载导出文件。响应体上限 `app.pdf.max-output-bytes`（默认 10MB），全局 10s 超时会在
+ * 慢网络下中断合法下载（大文件在移动网络需数十秒），故显式放宽。契约由 UploadPathContractTest 守护。
+ */
 export function downloadExport(id: number) {
-  return apiClient.get<Blob>(`/api/exports/files/${id}`, { responseType: 'blob' })
+  return apiClient.get<Blob>(`/api/exports/files/${id}`, { responseType: 'blob', timeout: 60_000 })
 }

@@ -54,7 +54,7 @@ server:
     # CI（Linux + 慢客户端）实测客户端在写完前拿到连接重置（HTTP 0）而不是 413。
     # 8MB 覆盖「6MB 请求上限 + 余量」：被拒请求的剩余字节都能被丢弃，413 稳定送达。
     # 远大于该值的流式请求仍会被连接级中断（无界 swallow 会让任意大请求占带宽），
-    # 生产由 nginx 的 client_max_body_size 5m 先行拒绝。
+    # 生产由 nginx 的 client_max_body_size 6m（= 上方 max-request-size）先行拒绝。
     max-swallow-size: 8MB
 
 management:
