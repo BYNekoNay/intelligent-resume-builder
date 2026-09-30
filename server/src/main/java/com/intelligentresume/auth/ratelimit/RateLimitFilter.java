@@ -27,6 +27,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>按客户端 IP + path 组合分桶,达到阈值时返回 429。覆盖范围：
  * <ul>
  *   <li>认证端点：/api/auth/login、/api/auth/register、/api/auth/refresh</li>
+ *   <li>凭证变更端点：/api/auth/me/password、/api/auth/me/email——两者都校验「当前密码」，
+ *       属口令验证面；不限流时可用被盗 access token 无限试密码（绕过登录的 10/min），
+ *       且两端点共享同一分桶，避免在改密/改邮箱之间交替获得双倍预算</li>
  *   <li>CPU 放大器端点：/api/resume-imports/parse（PDFBox/POI 全内存解析,阈值严格）、
  *       /api/jobs/{id}/parse（JD 本地文本解析,阈值宽松）</li>
  * </ul>
@@ -56,6 +59,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final int refreshPerMinute;
     private final int resumeImportParsePerMinute;
     private final int jdParsePerMinute;
+    private final int changeCredentialPerMinute;
     private final ClientIpResolver clientIpResolver;
     private final int maxBuckets;
     private final ObjectMapper objectMapper;
@@ -67,6 +71,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Value("${app.security.rate-limit.refresh-per-minute}") int refreshPerMinute,
             @Value("${app.security.rate-limit.resume-import-parse-per-minute:6}") int resumeImportParsePerMinute,
             @Value("${app.security.rate-limit.jd-parse-per-minute:15}") int jdParsePerMinute,
+            @Value("${app.security.rate-limit.change-credential-per-minute:5}") int changeCredentialPerMinute,
             ClientIpResolver clientIpResolver,
             @Value("${app.security.rate-limit.max-buckets:10000}") int maxBuckets,
             ObjectMapper objectMapper
@@ -76,6 +81,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.refreshPerMinute = refreshPerMinute;
         this.resumeImportParsePerMinute = resumeImportParsePerMinute;
         this.jdParsePerMinute = jdParsePerMinute;
+        this.changeCredentialPerMinute = changeCredentialPerMinute;
         this.clientIpResolver = clientIpResolver;
         this.maxBuckets = maxBuckets;
         this.objectMapper = objectMapper;
@@ -91,7 +97,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
         String ip = clientIpResolver.resolve(request);
-        String key = path + "|" + ip;
+        String key = bucketGroup(path) + "|" + ip;
         long currentMinute = System.currentTimeMillis() / 60_000L;
         evictStaleBuckets(currentMinute);
         Bucket bucket = buckets.get(key);
@@ -118,11 +124,26 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (path.equals("/api/auth/login")) return loginPerMinute;
         if (path.equals("/api/auth/register")) return registerPerMinute;
         if (path.equals("/api/auth/refresh")) return refreshPerMinute;
+        // 凭证变更是「当前密码」验证面：不限流时可用被盗 access token 无限试密码
+        // （绕过登录的 10/min）。实测（第二十七批）：配置阈值 2 下连续 4 次请求全 401、无 429。
+        if (isCredentialChange(path)) return changeCredentialPerMinute;
         // 简历解析是重 CPU 端点（PDFBox/POI 全内存解析最大 5MB 文件），阈值给最严
         if (path.equals("/api/resume-imports/parse")) return resumeImportParsePerMinute;
         // JD 解析是轻量本地文本解析，阈值宽松；仅匹配 /api/jobs/{id}/parse 形态，不影响 /api/jobs 其它端点
         if (path.startsWith("/api/jobs/") && path.endsWith("/parse")) return jdParsePerMinute;
         return null;
+    }
+
+    private static boolean isCredentialChange(String path) {
+        return path.equals("/api/auth/me/password") || path.equals("/api/auth/me/email");
+    }
+
+    /**
+     * 分桶分组：凭证变更两端点共享一组——若按路径各自分桶，攻击者可在改密/改邮箱之间
+     * 交替请求获得双倍预算；其它端点维持按路径独立分桶（/api/jobs/{id}/parse 等按具体路径隔离）。
+     */
+    private static String bucketGroup(String path) {
+        return isCredentialChange(path) ? "/api/auth/me:credential" : path;
     }
 
     private void evictStaleBuckets(long currentMinute) {

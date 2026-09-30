@@ -25,8 +25,9 @@ class RateLimitFilterTest {
 
     @BeforeEach
     void setUp() {
-        // login=2/min, register=5/min, refresh=30/min, resume-import-parse=6/min, jd-parse=15/min
-        filter = new RateLimitFilter(2, 5, 30, 6, 15, new ClientIpResolver(false), 10000, objectMapper);
+        // login=2/min, register=5/min, refresh=30/min, resume-import-parse=6/min, jd-parse=15/min,
+        // 凭证变更=2/min（本测试内的取值）
+        filter = new RateLimitFilter(2, 5, 30, 6, 15, 2, new ClientIpResolver(false), 10000, objectMapper);
     }
 
     @Test
@@ -191,6 +192,41 @@ class RateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("凭证变更端点受限且共享分桶：改密 2 次后改邮箱同样 429（交替不能获得双倍预算）")
+    void credentialChangeEndpoints_shareBucket() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        for (int i = 0; i < 2; i++) {
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(postRequest("10.0.0.1", "/api/auth/me/password"), resp, chain);
+            assertEquals(200, resp.getStatus(), "第 " + (i + 1) + " 次改密应放行");
+        }
+
+        // 修复前该端点不在限流映射内（真实 HTTP 实测无限 401）；共享分桶后改邮箱必须同被限流
+        MockHttpServletResponse emailResp = new MockHttpServletResponse();
+        filter.doFilter(postRequest("10.0.0.1", "/api/auth/me/email"), emailResp, chain);
+        assertEquals(429, emailResp.getStatus(), "改邮箱应与改密共享分桶");
+        assertTrue(emailResp.getContentAsString().contains("42901"));
+
+        // 不同 IP 分桶独立
+        MockHttpServletResponse otherIpResp = new MockHttpServletResponse();
+        filter.doFilter(postRequest("10.0.0.2", "/api/auth/me/email"), otherIpResp, chain);
+        assertEquals(200, otherIpResp.getStatus(), "不同 IP 不应受他人凭证桶影响");
+    }
+
+    @Test
+    @DisplayName("资料更新（PATCH /api/auth/me）不在限流范围，不受凭证桶影响")
+    void profileUpdate_notLimited() throws Exception {
+        FilterChain chain = mock(FilterChain.class);
+
+        for (int i = 0; i < 3; i++) {
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(postRequest("10.0.0.1", "/api/auth/me"), resp, chain);
+            assertEquals(200, resp.getStatus(), "/api/auth/me 资料更新不应被限流");
+        }
+    }
+
+    @Test
     @DisplayName("parse 端点不同 IP 分桶独立")
     void parse_differentIps_independentBuckets() throws Exception {
         FilterChain chain = mock(FilterChain.class);
@@ -212,7 +248,7 @@ class RateLimitFilterTest {
     @DisplayName("桶数达到 maxBuckets 后新 key 直接被拒（#43：硬上限,防无界增长）")
     void bucketCapacity_rejectsNewKeys() throws Exception {
         // maxBuckets=2：两个 IP 占满容量后，第三个新 key 无法再建桶
-        RateLimitFilter capped = new RateLimitFilter(2, 5, 30, 6, 15, new ClientIpResolver(false), 2, objectMapper);
+        RateLimitFilter capped = new RateLimitFilter(2, 5, 30, 6, 15, 2, new ClientIpResolver(false), 2, objectMapper);
         FilterChain chain = mock(FilterChain.class);
 
         assertEquals(200, statusOf(capped, "10.0.0.1", chain), "第 1 个 IP 首次请求应放行");
@@ -241,7 +277,7 @@ class RateLimitFilterTest {
     @Test
     @DisplayName("信任转发头：按 XFF 最左值分桶，同一代理地址后的不同真实客户端互不影响")
     void trustedForwardedHeaders_bucketsByForwardedClient() throws Exception {
-        RateLimitFilter trusted = new RateLimitFilter(2, 5, 30, 6, 15, new ClientIpResolver(true), 10000, objectMapper);
+        RateLimitFilter trusted = new RateLimitFilter(2, 5, 30, 6, 15, 2, new ClientIpResolver(true), 10000, objectMapper);
         FilterChain chain = mock(FilterChain.class);
 
         // 同一 remoteAddr（代理地址）下，客户端 A 用完 2 次配额
@@ -275,6 +311,13 @@ class RateLimitFilterTest {
     }
 
     private MockHttpServletRequest parseRequest(String ip, String path) {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        request.setRemoteAddr(ip);
+        return request;
+    }
+
+    /** 任意 POST 路径（用于凭证变更/资料更新等用例）。 */
+    private MockHttpServletRequest postRequest(String ip, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
         request.setRemoteAddr(ip);
         return request;

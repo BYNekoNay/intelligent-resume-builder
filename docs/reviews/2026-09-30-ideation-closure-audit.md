@@ -232,6 +232,18 @@
 
 修复动作：`RateLimitFilter.doFilterInternal` 的路径来源由 `request.getRequestURI()` 改为 `PATH_HELPER.getPathWithinApplication(request)`（`UrlPathHelper` 默认开启解码与 semicolon 清理），分桶键随之归一——转义路径不可能再落到独立键或漏计。测试：`RateLimitFilterTest` 新增 2 例（`%6C/%6c` 与明文共享分桶；`;` 计入分桶），`AuthRateLimitIT` 新增 1 例（以 `RequestPostProcessor` 强制原始 requestURI 还原真实 Tomcat 形态：明文耗尽后转义路径必须 429——修复前实测红为 401、修复后绿）。
 
+### 2.19 凭证变更端点限流覆盖对账（2026-10-01 第二十七批扫描，已随本批修复）
+
+方法：对「验证当前密码」的端点做覆盖审计（端点清单 × 验证链 × 限流映射），并以真实 HTTP 探针取证（本机 H2 + curl，凭证限流降为 2/分钟）。
+
+| 项 | 取证（修复前） | 结论 |
+| --- | --- | --- |
+| 改密/改邮箱未被限流 | `POST /api/auth/me/password` 与 `POST /api/auth/me/email` 都调用 `AuthService.requireCurrentPassword`（仅 `passwordEncoder.matches`，无尝试节流），且不在 `RateLimitFilter.limitFor` 的受限路径内——配置阈值 2 下连续 4 次改密 + 1 次改邮箱**全部 401、无 429**；持有被盗 access token 者可绕过登录的 10/min 无限试口令（改密成功即完成账号接管） | **存在缺陷 → 修复**：两端点纳入限流（默认 5/min，`app.security.rate-limit.change-credential-per-minute`），且**共享同一分桶**（按路径各自分桶会给攻击者交替双倍预算） |
+| 其它无口令验证的认证端点 | `/api/auth/me`（资料更新）、`logout`、`logout-all` 不验证密码，无爆破面 | 保持不限流（用例断言 `/api/auth/me` 不受影响） |
+| 修复后真实 HTTP | 第 3 次改密 → **429 + 42901**；随后改邮箱 → **429**（共享分桶生效）；未登录请求也先计数再 401 | **已修复** |
+
+修复动作：`RateLimitFilter` 新增 `change-credential-per-minute`（构造注入，默认 5），`limitFor` 增加两端点映射，`bucketGroup()` 将两端点归为 `/api/auth/me:credential` 一组（其它端点仍按路径独立分桶）；`application.yml` 与 `server/.env.example` 同步 `RATE_LIMIT_CREDENTIAL`；`docs/05` §1.3 受限端点清单更新。测试：`RateLimitFilterTest` +2（共享分桶 / 资料更新不受影响）、`AuthRateLimitIT` +1（真实过滤链：未登录先计数，改密耗尽后改邮箱 429）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）

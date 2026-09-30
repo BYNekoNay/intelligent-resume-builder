@@ -27,7 +27,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = {
         "app.security.rate-limit.login-per-minute=2",
         "app.security.rate-limit.register-per-minute=1000",
-        "app.security.rate-limit.refresh-per-minute=1000"
+        "app.security.rate-limit.refresh-per-minute=1000",
+        "app.security.rate-limit.change-credential-per-minute=2"
 })
 class AuthRateLimitIT {
 
@@ -103,6 +104,33 @@ class AuthRateLimitIT {
         mockMvc.perform(post("/api/auth/login").with(rawUri("/api/auth/%6Cogin")).with(remoteAddr(ip))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value(42901));
+    }
+
+    @Test
+    @DisplayName("凭证变更端点受限且共享分桶（改密/改邮箱交替不能获得双倍预算）")
+    void credentialChangeEndpoints_rateLimited() throws Exception {
+        // 独立 IP：凭证桶 key 为 group|ip，与其它用例路径不同，但保持隔离更稳健
+        String ip = "198.51.100.8";
+        String passwordBody = """
+                {"currentPassword":"guess-guess-guess","newPassword":"new-password-123"}
+                """;
+
+        // 未登录请求也会先经限流器计数，再因未认证返回 401（防口令爆破的第一道闸）
+        for (int i = 0; i < 2; i++) {
+            mockMvc.perform(post("/api/auth/me/password").with(remoteAddr(ip))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(passwordBody))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        // 第 3 次改邮箱与改密共享分桶 → 429（修复前两个端点均不在限流映射内，真实 HTTP 实测无限 401）
+        mockMvc.perform(post("/api/auth/me/email").with(remoteAddr(ip))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"takeover@example.test","currentPassword":"guess-guess-guess"}
+                                """))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value(42901));
     }

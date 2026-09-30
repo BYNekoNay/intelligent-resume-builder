@@ -159,6 +159,9 @@ app:
       resume-import-parse-per-minute: ${RATE_LIMIT_RESUME_IMPORT_PARSE:6}
       # JD 解析（本地轻量文本解析）阈值宽松
       jd-parse-per-minute: ${RATE_LIMIT_JD_PARSE:15}
+      # 凭证变更（/api/auth/me/password、/api/auth/me/email）：两者均校验「当前密码」，
+      # 属口令验证面；共享同一分桶，防止在两端点间交替获得双倍预算
+      change-credential-per-minute: ${RATE_LIMIT_CREDENTIAL:5}
       # 客户端 IP 解析（限流分桶 + 会话审计）：仅在可信反代之后开启。
       # 开启时取 X-Forwarded-For 最左值，要求最外层代理**覆写**该头
       # （deploy/nginx/edge.conf、host.conf 均用 $remote_addr 覆写，内层 web 继续追加）。
