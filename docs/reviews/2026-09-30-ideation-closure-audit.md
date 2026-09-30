@@ -352,6 +352,23 @@
 
 > 留观：静态资源（SPA 产物）由 web 容器经 Nginx 直接提供、不经应用，其压缩需在 Nginx 侧单独开启——本批不动反代配置（接口响应已在应用层压缩，反代无需重复处理）。
 
+### 2.28 静态资源交付缺失（2026-10-01 第三十五批扫描，已随本批修复）
+
+方法：核对「静态产物的传输与缓存」——把构建产物（`web/dist`，含 `index.html` 引用关系）与三份服务静态资源的 nginx 配置逐项对照（哈希命名 / gzip / 缓存头），压缩比用本机 gzip 对同一份产物实测。
+
+| 项 | 取证 | 结论 |
+| --- | --- | --- |
+| 三份配置都无 gzip | `web/nginx.conf`（`web/Dockerfile:12` COPY 进镜像、容器拓扑真正生效的一份）、`deploy/nginx/web.conf`、`deploy/nginx/host.conf` 均无任何 `gzip` 指令；对构建产物本机实测：64 个 js/css/svg **1001.1KB → gzip 285.5KB（3.51×）**，首屏入口 5 个文件（`index-<hash>.js` 179KB、`vue-vendor` 107KB、`axios` 46KB、`lucide`、CSS 87KB）**457.4KB → 139.8KB** | **存在缺陷 → 修复**：三层开启 gzip |
+| 容器版缺「哈希产物长缓存」，与宿主机版漂移 | `deploy/nginx/host.conf:65-70` 早有 `location ~* \.(js\|css\|…)$ { expires 30d; add_header Cache-Control "public, immutable"; }`，而容器版两份（镜像内 + 部署侧同步副本）**都缺该块**：60+ 个哈希产物落进 `location /` 的 `no-cache`，每次导航逐个回源校验。既有门禁 `UploadPathContractTest.mirroredWebConfStaysInSync` 只比对 `client_max_body_size`，**对本漂移不报错** | **存在缺陷 → 修复**：容器版两份补齐该块 |
+
+修复动作：三份配置新增 gzip 块（`gzip on` / `gzip_vary on` / `min_length 1024` / `comp_level 5` / `gzip_types` 含 js、css、json、svg）；`web/nginx.conf` 与 `deploy/nginx/web.conf` 补哈希产物缓存块（与 `host.conf` 同形，`expires 30d` + `public, immutable`），`location /` 保持 `no-cache`；新增静态门禁 `StaticAssetDeliveryContractTest`（对三份配置断言：gzip 开启且覆盖 js/css、`gzip_vary`、哈希产物块含 `immutable` 且有效期 ≥ 30 天、SPA 回退入口仍 `no-cache`）；`docs/08` 补「静态资源交付契约」。
+
+层级边界（与 §2.27 互补、不重叠）：`gzip_proxied` 保持 nginx 默认 `off`，本层不给 `/api/` 反代响应做二次压缩——接口响应在应用层压缩，静态产物在 nginx 层压缩，两层各管一段。
+
+验证：门禁**修复前红**（2/2 失败：三份配置无 gzip；容器版两份无哈希产物块）→ 修复后 **10/10** 绿（含既有体积门禁与压缩门禁）；压缩比为本机对同一份 `web/dist` 实测；server 全量 **854 测试 0 失败**（新增 2，5 skipped 为环境门控）。
+
+> 本批顺带核实的既存差异（未改，登记留观）：镜像内 `web/nginx.conf` 不含 `security-headers.conf` 片段（镜像构建上下文是 `web/`，片段在 `deploy/nginx/`），故镜像自身不注入 4 条安全响应头——容器拓扑下由最外层 `edge` 统一下发，**公网响应不受影响**；但 `deploy/nginx/web.conf` 自称「与镜像内配置保持一致」，实际多出 4 处 `include`（本次 diff 确认差异仅为 include 与注释）。彻底消除需决定片段的单一来源（把片段纳入 `web/` 构建上下文，或把镜像构建上下文改为仓库根），属设计取舍故不在本批动。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -470,7 +487,7 @@
   2. **架构方向类**（§2.10 与 §2.11 归并）：投递状态机 / 模板 / 沟通 / 导入 / 模式 / 资料类型多 runtime 登记、ATS/面试 schema 重复维护、全量类型化配置、跨运行时时间契约、AI 任务恢复收件箱、导入来源追溯、PDF 对象存储、AI 提供者路由、投递流水线契约——当前规模属过度工程边界，留待真实需求。
   3. **两项证据化留观**：a) JD 解析平铺 `contains` 的误命中（有真实案例再评估）；b) DOCX 展开量上限（POI 防护 + 5MB 入口 + 15s 超时已覆盖）。
   4. **失败消息「公开文案接缝」**（对客户端只暴露稳定文案，而非 provider 原文）——需要产品文案层，未做。
-  5. **第三十二~三十四批新增留观**：a) 账号导出仍把整份 JSON 先构造为 `String` 再编码（12MB 响应约 2~3 份副本的瞬时堆占用），改流式写出可把单请求堆占用降到常数级；b) 导出文档本身无体积上限（是否给账号数据/导出文档设上限或分片，属产品口径）；c) 静态资源（SPA 产物，构建后 JS 约 700KB、gzip 约 1/3）由 web 容器经 Nginx 直接提供，其压缩需在 Nginx 侧单独开启——接口响应已在应用层压缩（第三十四批），本批不动反代配置。
+  5. **第三十二~三十五批新增留观**：a) 账号导出仍把整份 JSON 先构造为 `String` 再编码（12MB 响应约 2~3 份副本的瞬时堆占用），改流式写出可把单请求堆占用降到常数级；b) 导出文档本身无体积上限（是否给账号数据/导出文档设上限或分片，属产品口径）；c) ~~静态资源压缩~~ → **第三十五批已完成**（三份 nginx 配置开启 gzip 并补哈希产物长缓存，见 §2.28）；d) 镜像内 `web/nginx.conf` 不含 `security-headers.conf` 片段（构建上下文为 `web/`），其与部署侧「同步副本」多出 4 处 include —— 公网响应由 `edge` 统一下发安全头，故无影响，但片段的单一来源需一次设计取舍（见 §2.28 末段）。
 - 持续留观：`web/e2e/ats-ai.spec.ts` 在第十三批出现过 1 次偶发失败（尚无第二次复现，继续留观）。
 - ~~`web/e2e/applications-edit.spec.ts`（「编辑投递时只发 1 次版本列表请求」）偶发失败~~ → **第二十九批已按登记口径排查并修复**（第二次复现于纯文档提交的 CI run 36768442619，head 900f5c1）：根因是真实前端竞态（非测试问题），详见 §2.22；同时把该用例的竞态窗口用「延迟选项响应」固化，修复前稳定失败、修复后稳定通过。
 - **CI runner 迁移预检（2026-10-01）**：GitHub 公告 `ubuntu-latest` 将于 **10/19–11/19 渐进迁移到 Ubuntu 26.04**（默认 JDK 17→25、Node 22→24、MySQL 8.0→8.4，并移除若干工具；官方建议先在 `ubuntu-26.04` 上显式验证）。已用临时探针分支（`workflow_dispatch` 显式触发，**验证后已删除**）把 5 个 job 全部切到 `ubuntu-26.04` 实跑：**CI 与功能回归双绿**（server 测试 / web 构建 + Playwright Chromium / MySQL 8.0 容器 / CJK 字体 apt / pdf-service Puppeteer 渲染全部通过）——结论：**本次迁移对本仓无破坏，无需 pin 到 24.04**；顺带把 `actions/setup-python` 由 v5 升到 v7（v5 基于已被 GitHub 移除的 Node 20，运行时被强制替换并产生弃用告警）。
