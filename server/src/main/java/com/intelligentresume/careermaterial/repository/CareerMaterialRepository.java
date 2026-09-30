@@ -18,7 +18,13 @@ public interface CareerMaterialRepository extends JpaRepository<CareerMaterial, 
 
     Optional<CareerMaterial> findByIdAndUserId(Long id, Long userId);
 
-    List<CareerMaterial> findByUserIdOrderByUpdatedAtDesc(Long userId);
+    /**
+     * 用户全部资料按 (updated_at, id) 双键降序。career_material.updated_at 为毫秒
+     * 精度，批量确认可在同一毫秒写入多条；MaterialSelector 对 normal 的截断按传入
+     * 顺序进行，单键排序在并列时会让「被丢弃的素材集合」run-to-run 变化，必须由
+     * 自增 id 兜底。AI 生成/选材/导出中需要确定性的读路径均应使用本方法。
+     */
+    List<CareerMaterial> findByUserIdOrderByUpdatedAtDescIdDesc(Long userId);
 
     /**
      * 列表读模型（ideation #1）：只投影摘要列 + contentJson + 「原文非空」标志，

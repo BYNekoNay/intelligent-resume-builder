@@ -89,7 +89,7 @@ class JobGenerationServiceTest {
 
         // 资料
         CareerMaterial m1 = material(1L, MaterialType.WORK_EXPERIENCE);
-        when(materialRepository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of(m1));
+        when(materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(100L)).thenReturn(List.of(m1));
 
         MaterialSelector.SelectionResult selection = new MaterialSelector.SelectionResult(
                 List.of(m1), List.of(), List.of(), List.of(), Map.of());
@@ -141,7 +141,7 @@ class JobGenerationServiceTest {
         when(jdRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(jd(1L, 100L)));
         when(injectionDetector.detect(anyString(), anyList()))
                 .thenReturn(new PromptInjectionDetector.DetectionResult(false, List.of()));
-        when(materialRepository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of());
+        when(materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(100L)).thenReturn(List.of());
         when(materialSelector.select(eq(100L), anyList(), any()))
                 .thenReturn(new MaterialSelector.SelectionResult(List.of(), List.of(), List.of(), List.of(), Map.of()));
 
@@ -167,7 +167,7 @@ class JobGenerationServiceTest {
         when(jdRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(jd(1L, 100L)));
         when(injectionDetector.detect(anyString(), anyList()))
                 .thenReturn(new PromptInjectionDetector.DetectionResult(false, List.of()));
-        when(materialRepository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of());
+        when(materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(100L)).thenReturn(List.of());
 
         MaterialSelector.SelectionResult emptySelection = new MaterialSelector.SelectionResult(
                 List.of(), List.of(), List.of(), List.of(), Map.of());
@@ -206,7 +206,7 @@ class JobGenerationServiceTest {
                         List.of("(?i)ignore (?:all )?(?:previous|above|system) (?:rules|instructions)")));
 
         CareerMaterial m1 = material(1L, MaterialType.WORK_EXPERIENCE);
-        when(materialRepository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of(m1));
+        when(materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(100L)).thenReturn(List.of(m1));
         when(materialSelector.select(eq(100L), anyList(), any()))
                 .thenReturn(new MaterialSelector.SelectionResult(
                         List.of(m1), List.of(), List.of(), List.of(), Map.of()));
@@ -242,7 +242,7 @@ class JobGenerationServiceTest {
                 .thenReturn(new PromptInjectionDetector.DetectionResult(false, List.of()));
 
         CareerMaterial m1 = material(1L, MaterialType.WORK_EXPERIENCE);
-        when(materialRepository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of(m1));
+        when(materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(100L)).thenReturn(List.of(m1));
         when(materialSelector.select(eq(100L), anyList(), any()))
                 .thenReturn(new MaterialSelector.SelectionResult(
                         List.of(m1), List.of(), List.of(), List.of(), Map.of()));
@@ -278,7 +278,7 @@ class JobGenerationServiceTest {
                 .thenReturn(new PromptInjectionDetector.DetectionResult(false, List.of()));
 
         CareerMaterial material = material(1L, MaterialType.LEADERSHIP_EXPERIENCE);
-        when(materialRepository.findByUserIdOrderByUpdatedAtDesc(100L)).thenReturn(List.of(material));
+        when(materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(100L)).thenReturn(List.of(material));
         when(materialSelector.select(eq(100L), anyList(), any()))
                 .thenReturn(new MaterialSelector.SelectionResult(
                         List.of(material), List.of(), List.of(), List.of(), Map.of()));

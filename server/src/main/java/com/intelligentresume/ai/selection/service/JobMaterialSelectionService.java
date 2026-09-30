@@ -65,7 +65,7 @@ public class JobMaterialSelectionService {
         Set<Long> preferred = longSet(input.get("preferredMaterialIds"));
         preferred.removeAll(manuallyExcluded);
 
-        List<CareerMaterial> all = materialRepository.findByUserIdOrderByUpdatedAtDesc(task.getUserId());
+        List<CareerMaterial> all = materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(task.getUserId());
         Map<Long, CareerMaterial> byId = all.stream().collect(Collectors.toMap(CareerMaterial::getId, m -> m));
         validateOwned(forced, byId);
         validateOwned(preferred, byId);
@@ -90,7 +90,8 @@ public class JobMaterialSelectionService {
                 .filter(m -> !manuallyExcluded.contains(m.getId()))
                 .filter(m -> m.getUsagePreference() != UsagePreference.EXCLUDED || forced.contains(m.getId()))
                 .sorted(Comparator.<CareerMaterial>comparingInt(m -> score(m, jobTokens, forced, preferred)).reversed()
-                        .thenComparing(CareerMaterial::getUpdatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                        .thenComparing(CareerMaterial::getUpdatedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(CareerMaterial::getId, Comparator.reverseOrder()))
                 .limit(MAX_CANDIDATES)
                 .toList();
         Set<Long> candidateIds = candidates.stream().map(CareerMaterial::getId).collect(Collectors.toSet());

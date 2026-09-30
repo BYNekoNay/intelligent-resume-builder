@@ -206,6 +206,19 @@
 
 修复动作：`GlobalExceptionHandler` 新增协议级 handler（405/415/406、413、非法 multipart 400），响应显式 JSON 内容类型；`server.tomcat.max-swallow-size: 8MB`（保证 413 送达）；`docs/05` §1.3 错误码表与 §13 导入契约同步；新增 `HttpSemanticsIT`（MockMvc 405/415/406）+ 5 个 handler 单测 + `functional-tests/suite_core.py` 超限上传真实 HTTP 断言（本地整套件 28/28 通过；CI 功能回归复跑通过）。
 
+### 2.17 顺序确定性对账（2026-10-01 第二十五批扫描，已随本批修复）
+
+方法：对「取最近一条 / 按时间截断」这类**顺序敏感**的读路径做全仓扫描，逐条核对是否存在并列时无稳定契约的单键排序（与已修复的 consent #71、面试记录 #75 同族）。
+
+| 项 | 取证（修复前） | 结论 |
+| --- | --- | --- |
+| 面试「最近失败/处理中尝试」 | `interview_ai_attempt.updated_at` 是全库**唯一**秒级 `DATETIME`（V20 L39-40；其余表均 DATETIME(3)）；`findFirstBySessionIdAndStatusOrderByUpdatedAtDesc` 无 tie-break——同一秒内不同 round/operation 可各写入一条 FAILED，取哪条无契约 → aiFailure 的 stage/messageCode/retryable 可能展示较早那条（误导用户）；`getState` 的 PROCESSING 超时判定同样受影响 | **存在缺陷 → 修复**：`findFirstBySessionIdAndStatusOrderByUpdatedAtDescIdDesc`（2 个调用点同步） |
+| 资料选择的「normal 截断」与候选排序 | `career_material.updated_at` 为 DATETIME(3)，批量确认可同毫秒插入多条；`MaterialSelector.select` 按仓库返回顺序 `subList(0, limit)` 截断 → 并列时**被丢弃的素材集合** run-to-run 变化；`JobMaterialSelectionService` 候选排序 `score desc → updatedAt desc` 亦无 id tie-break——进入提示词的 60 条候选集不稳定 | **存在缺陷 → 修复**：仓库方法改 `findByUserIdOrderByUpdatedAtDescIdDesc`（5 个调用点 + 4 个测试文件 11 处引用同步）；候选比较器补 `.thenComparing(id desc)`；`MaterialSelector` Javadoc 注明确定性依赖 |
+| 死代码 | `AiConsentRepository.findFirstByUserIdAndEventTypeOrderByCreatedAtDesc` 全仓无调用（#71 改造残留） | **已删除**（含未使用导入） |
+| 其余 `OrderBy...Desc` 展示列表（resume/JD/application/communicationTemplate/communicationDraft） | 均为 DATETIME(3)、并列概率低且仅影响展示顺序 | 保持现状（仅报告口径） |
+
+修复动作：两处仓库方法改双键 `(updated_at desc, id desc)`；`JobMaterialSelectionService` 候选排序补 id 兜底；`MaterialSelector` Javadoc 增加确定性约束说明；删除死方法。新增 `CareerMaterialOrderingIT`（同一毫秒三条、插入顺序与期望相反 → 必须按 id 降序返回）与 `InterviewAiAttemptOrderingIT`（同一秒两条 FAILED → 必须取 id 更大者，且错误码为后写那条）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）

@@ -122,7 +122,7 @@ public class InterviewStateAssembler {
     }
 
     public Optional<InterviewAiAttempt> latestFailedAttempt(Long sessionId) {
-        return attemptRepository.findFirstBySessionIdAndStatusOrderByUpdatedAtDesc(
+        return attemptRepository.findFirstBySessionIdAndStatusOrderByUpdatedAtDescIdDesc(
                 sessionId, com.intelligentresume.interview.domain.AiAttemptStatus.FAILED);
     }
 

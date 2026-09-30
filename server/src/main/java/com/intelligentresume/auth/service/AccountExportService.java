@@ -121,7 +121,7 @@ public class AccountExportService {
         payload.put("account", accountInfo(user));
         payload.put("personalProfile", personalProfileRepository.findByUserId(userId).orElse(null));
         payload.put("resumes", resumeNodes(userId));
-        payload.put("careerMaterials", careerMaterialRepository.findByUserIdOrderByUpdatedAtDesc(userId));
+        payload.put("careerMaterials", careerMaterialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(userId));
         payload.put("jobDescriptions", jobDescriptionRepository.findByUserIdOrderByUpdatedAtDesc(userId));
         payload.put("applications", applicationRecordRepository.findByUserIdOrderByUpdatedAtDesc(userId));
         payload.put("interviewSessions", interviewSessionNodes(userId));

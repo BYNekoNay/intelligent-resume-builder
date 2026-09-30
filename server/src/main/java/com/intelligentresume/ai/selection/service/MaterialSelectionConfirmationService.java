@@ -92,7 +92,7 @@ public class MaterialSelectionConfirmationService {
         Long jobId = longValue(selection.getInputSnapshotJson().get("jobDescriptionId"));
         JobDescription job = jobRepository.findByIdAndUserId(jobId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Job description not found"));
-        Map<Long, CareerMaterial> owned = materialRepository.findByUserIdOrderByUpdatedAtDesc(userId).stream()
+        Map<Long, CareerMaterial> owned = materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(userId).stream()
                 .collect(Collectors.toMap(CareerMaterial::getId, material -> material));
         if (!owned.keySet().containsAll(selectedIds)) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "Career material not found");

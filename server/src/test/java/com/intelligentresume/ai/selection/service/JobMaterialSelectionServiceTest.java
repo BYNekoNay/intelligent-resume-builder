@@ -33,7 +33,7 @@ class JobMaterialSelectionServiceTest {
         CareerMaterial globallyExcluded = fixture.material(99L, "Internal award");
         globallyExcluded.setUsagePreference(UsagePreference.EXCLUDED);
         materials.add(globallyExcluded);
-        when(fixture.materialRepository.findByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(materials);
+        when(fixture.materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(7L)).thenReturn(materials);
         when(fixture.provider.call(any())).thenReturn(AiCallResult.ok(Map.of(
                 "recommended", List.of(Map.of("materialId", 14, "relevanceScore", 80,
                         "reason", "Matches Java", "matchedRequirements", List.of("Java"))),
@@ -56,7 +56,7 @@ class JobMaterialSelectionServiceTest {
         Fixture fixture = new Fixture();
         CareerMaterial irrelevant = fixture.material(1L, "视觉设计与品牌内容");
         CareerMaterial relevant = fixture.material(2L, "高并发微服务架构与团队协作");
-        when(fixture.materialRepository.findByUserIdOrderByUpdatedAtDesc(7L))
+        when(fixture.materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(7L))
                 .thenReturn(List.of(irrelevant, relevant));
         when(fixture.provider.call(any())).thenReturn(AiCallResult.ok(Map.of(
                 "recommended", List.of(Map.of("materialId", 2, "relevanceScore", 90,
@@ -78,7 +78,7 @@ class JobMaterialSelectionServiceTest {
         CareerMaterial titleOnly = fixture.material(2L, "临时资料校验");
         titleOnly.setSourceText(null);
         titleOnly.setContentJson(Map.of("title", "临时资料校验", "sourceText", ""));
-        when(fixture.materialRepository.findByUserIdOrderByUpdatedAtDesc(7L))
+        when(fixture.materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(7L))
                 .thenReturn(List.of(valid, titleOnly));
         when(fixture.provider.call(any())).thenReturn(AiCallResult.ok(Map.of(
                 "recommended", List.of(Map.of("materialId", 1, "relevanceScore", 80,

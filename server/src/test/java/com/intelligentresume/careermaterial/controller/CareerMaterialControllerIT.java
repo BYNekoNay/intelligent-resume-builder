@@ -464,7 +464,7 @@ class CareerMaterialControllerIT {
     @DisplayName("乐观锁: 并发写入后的陈旧保存被拒绝（@Version,不再是最后写入覆盖 → 40901）")
     void staleWrite_isRejectedByOptimisticLock() {
         Long userId = userRepository.findByUsername("cm_user").orElseThrow().getId();
-        CareerMaterial stale = materialRepository.findByUserIdOrderByUpdatedAtDesc(userId).stream()
+        CareerMaterial stale = materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(userId).stream()
                 .findFirst().orElseThrow();
 
         // 模拟另一并发事务已成功更新同一资料（version 前进一格）

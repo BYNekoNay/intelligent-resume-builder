@@ -83,7 +83,7 @@ class MaterialSelectionConfirmationServiceTest {
         job.setJdText("Java Spring Boot");
         when(jobRepository.findByIdAndUserId(8L, 7L)).thenReturn(Optional.of(job));
         when(profileRepository.findByUserId(7L)).thenReturn(Optional.empty());
-        when(materialRepository.findByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(List.of(
+        when(materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(7L)).thenReturn(List.of(
                 material(1L, UsagePreference.NORMAL),
                 material(2L, UsagePreference.NORMAL),
                 material(3L, UsagePreference.EXCLUDED),

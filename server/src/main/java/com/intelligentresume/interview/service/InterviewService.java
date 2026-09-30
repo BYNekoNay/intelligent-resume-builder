@@ -114,7 +114,7 @@ public class InterviewService {
                     .orElseThrow(() -> stateAssembler.notFound("面试会话不存在"));
             if (session.getStatus() == InterviewStatus.GENERATING_QUESTION
                     || session.getStatus() == InterviewStatus.EVALUATING_ANSWER) {
-                attemptRepository.findFirstBySessionIdAndStatusOrderByUpdatedAtDesc(
+                attemptRepository.findFirstBySessionIdAndStatusOrderByUpdatedAtDescIdDesc(
                                 id, AiAttemptStatus.PROCESSING)
                         .filter(attempt -> operationSupport.isStale(attempt, LocalDateTime.now()))
                         .ifPresent(attempt -> operationSupport.markAttemptFailed(session, attempt,

@@ -18,6 +18,10 @@ import java.util.stream.Collectors;
  * <p>按用户指定的 INCLUDED/PREFERRED/EXCLUDED 以及资料自身的
  * usagePreference 进行分类。跨用户或不存在的 included/preferred ID
  * 抛 NOT_FOUND(不泄露存在性)。
+ *
+ * <p>确定性约束：{@code normal} 的截断（subList 取前 limit 条）按传入的
+ * {@code allMaterials} 顺序进行，调用方必须按 (updated_at desc, id desc)
+ * 传入资料；同毫秒并列时单键排序会让被截断丢弃的素材集合 run-to-run 变化。
  */
 @Service
 public class MaterialSelector {

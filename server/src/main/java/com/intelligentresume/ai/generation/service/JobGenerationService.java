@@ -66,7 +66,7 @@ public class JobGenerationService {
 
     public void validateMaterialIds(Long userId, List<Long> includedIds,
                                     List<Long> preferredIds, List<Long> excludedIds) {
-        List<CareerMaterial> ownedMaterials = materialRepository.findByUserIdOrderByUpdatedAtDesc(userId);
+        List<CareerMaterial> ownedMaterials = materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(userId);
         Set<Long> ownedIds = ownedMaterials.stream().map(CareerMaterial::getId).collect(Collectors.toSet());
         validateOwned(includedIds, ownedIds);
         validateOwned(preferredIds, ownedIds);
@@ -185,7 +185,7 @@ public class JobGenerationService {
         JobGenerationRequest request = new JobGenerationRequest(resumeId, jobId,
                 longList(input.get("includedMaterialIds")), longList(input.get("preferredMaterialIds")),
                 longList(input.get("excludedMaterialIds")));
-        List<CareerMaterial> allMaterials = materialRepository.findByUserIdOrderByUpdatedAtDesc(task.getUserId());
+        List<CareerMaterial> allMaterials = materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(task.getUserId());
         MaterialSelector.SelectionResult selection = materialSelector.select(task.getUserId(), allMaterials, request);
         List<CareerMaterial> materials = new ArrayList<>();
         materials.addAll(selection.fixed());
