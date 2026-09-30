@@ -17,10 +17,13 @@ import com.intelligentresume.interview.repository.InterviewRecordRepository;
 import com.intelligentresume.interview.repository.InterviewSessionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * AI 重试流程：两阶段短事务 + 事务外 AI。
@@ -41,6 +44,8 @@ public class InterviewRetryService {
     private final InterviewStateAssembler stateAssembler;
     private final InterviewPromptContextAssembler promptContextAssembler;
     private final InterviewOperationSupport operationSupport;
+    /** 承载事务外的 AI 重试；生产为有界线程池，测试可注入同步/可控执行器以保证确定性。 */
+    private final Executor evaluationExecutor;
 
     public InterviewRetryService(InterviewSessionRepository sessionRepository,
                                  InterviewRecordRepository recordRepository,
@@ -49,7 +54,8 @@ public class InterviewRetryService {
                                  TransactionTemplate tx,
                                  InterviewStateAssembler stateAssembler,
                                  InterviewPromptContextAssembler promptContextAssembler,
-                                 InterviewOperationSupport operationSupport) {
+                                 InterviewOperationSupport operationSupport,
+                                 @Qualifier("interviewEvaluationExecutor") Executor evaluationExecutor) {
         this.sessionRepository = sessionRepository;
         this.recordRepository = recordRepository;
         this.attemptRepository = attemptRepository;
@@ -58,6 +64,7 @@ public class InterviewRetryService {
         this.stateAssembler = stateAssembler;
         this.promptContextAssembler = promptContextAssembler;
         this.operationSupport = operationSupport;
+        this.evaluationExecutor = evaluationExecutor;
     }
 
     public InterviewStateResponse retryAi(Long id, Long userId) {
@@ -115,7 +122,7 @@ public class InterviewRetryService {
         Long attemptId = phase1Result[1];
         int roundNo = (int) phase1Result[2];
         long opType = phase1Result[3];
-        int[] retryGeneration = {(int) phase1Result[4]};
+        int retryGeneration = (int) phase1Result[4];
 
         // 配额失败
         InterviewSession checkSession = sessionRepository.findById(sessionId).orElseThrow();
@@ -129,21 +136,50 @@ public class InterviewRetryService {
             }
         }
 
-        // Phase 2: 事务外调用 AI
+        // 事务外：把 AI 重试**提交到后台执行器**，本请求立即返回 PROCESSING 状态。
+        // 前端在 EVALUATING_ANSWER / GENERATING_QUESTION 下会轮询 GET /interviews/{id}
+        // （InterviewView.scheduleStatePoll），故无需改前端即可从「同步等待 108s」变为「秒回 + 轮询取终态」。
         try {
+            evaluationExecutor.execute(() -> runRetry(sessionId, userId, attemptId, roundNo, opType, retryGeneration));
+        } catch (RejectedExecutionException rejected) {
+            // 队列已满：快速失败并标记为**可重试**，而不是让会话静默停在 PROCESSING
+            log.warn("interview AI retry rejected (queue full): sessionId={} attemptId={}", sessionId, attemptId);
+            markRetryFailed(sessionId, userId, attemptId, opType, retryGeneration,
+                    "QUEUE_REJECTED", "AI 重试队列繁忙，请稍后重试", true, null);
+            InterviewSession rejectedSession = sessionRepository.findById(sessionId).orElseThrow();
+            InterviewAiAttempt rejectedAttempt = attemptRepository.findById(attemptId).orElseThrow();
+            return stateAssembler.buildStateResponse(rejectedSession, null,
+                    stateAssembler.buildAiFailure(rejectedAttempt));
+        }
+
+        return stateAssembler.buildStateResponse(checkSession, null, null);
+    }
+
+    /**
+     * 后台执行 AI 重试（首题生成或回答评估），不向调用方返回状态，终态由前端轮询获取。
+     *
+     * <p>原实现在请求线程内同步等待 AI：与 {@code /answer} 修复前同源，实测评估平均 108.7s，
+     * 而前端该接口超时 60s ⇒ 用户点「重试」必然超时、服务端仍在评估。此处与
+     * {@code InterviewAnswerService.runEvaluation} 保持同一形态：任何异常都必须落到 attempt 上，
+     * 否则会话会一直停在 PROCESSING（虽有陈旧超时兜底，但不该依赖它）。
+     */
+    private void runRetry(Long sessionId, Long userId, Long attemptId, int roundNo, long opType, int generation) {
+        int[] retryGeneration = {generation};
+        try {
+            InterviewSession session = sessionRepository.findById(sessionId).orElseThrow();
             if (opType == 0) {
                 // 首题重试
-                var initialCall = operationSupport.callAiForFirstQuestion(checkSession, userId);
+                var initialCall = operationSupport.callAiForFirstQuestion(session, userId);
                 String question = initialCall.value().getQuestion();
 
                 tx.executeWithoutResult(s -> {
-                    InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(id, userId).orElseThrow();
+                    InterviewSession locked = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId).orElseThrow();
                     InterviewAiAttempt attempt = attemptRepository.findById(attemptId).orElseThrow();
-                    operationSupport.assertRetryStillCurrent(session, attempt, retryGeneration[0],
+                    operationSupport.assertRetryStillCurrent(locked, attempt, retryGeneration[0],
                             InterviewStatus.GENERATING_QUESTION);
-                    session.setCurrentQuestion(question);
-                    session.setStatus(InterviewStatus.AWAITING_ANSWER);
-                    sessionRepository.save(session);
+                    locked.setCurrentQuestion(question);
+                    locked.setStatus(InterviewStatus.AWAITING_ANSWER);
+                    sessionRepository.save(locked);
 
                     attempt.setStatus(AiAttemptStatus.SUCCESS);
                     attempt.setResultJson(Map.of("question", question));
@@ -159,29 +195,29 @@ public class InterviewRetryService {
                     throw new BusinessException(ErrorCode.AI_FAILURE, "缺少待评估的回答");
                 }
                 var evaluationCall = interviewAiService.evaluateAnswer(
-                        promptContextAssembler.buildEvaluationContext(checkSession, pendingAnswer, userId),
-                        checkSession.getOutputLanguage(),
+                        promptContextAssembler.buildEvaluationContext(session, pendingAnswer, userId),
+                        session.getOutputLanguage(),
                         () -> {
                             operationSupport.reserveRepairCall(userId, attemptId);
                             retryGeneration[0] += 1;
                         });
                 var evaluation = evaluationCall.value();
-                operationSupport.validateEvaluationProgress(checkSession, roundNo, evaluation,
+                operationSupport.validateEvaluationProgress(session, roundNo, evaluation,
                         evaluationCall.providerRequestId());
 
                 tx.executeWithoutResult(s -> {
-                    InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(id, userId).orElseThrow();
+                    InterviewSession locked = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId).orElseThrow();
                     InterviewAiAttempt att = attemptRepository.findById(attemptId).orElseThrow();
-                    operationSupport.assertRetryStillCurrent(session, att, retryGeneration[0],
+                    operationSupport.assertRetryStillCurrent(locked, att, retryGeneration[0],
                             InterviewStatus.EVALUATING_ANSWER);
 
                     int totalScore = evaluation.getDimensionScores().total();
                     int actualRoundNo = roundNo;
 
                     InterviewRecord record = new InterviewRecord();
-                    record.setSessionId(session.getId());
+                    record.setSessionId(locked.getId());
                     record.setRoundNo(actualRoundNo);
-                    record.setQuestionText(session.getCurrentQuestion());
+                    record.setQuestionText(locked.getCurrentQuestion());
                     record.setAnswerText(pendingAnswer);
                     record.setRoundScore(totalScore);
                     record.setEvaluationSource(EvaluationSource.AI);
@@ -195,31 +231,47 @@ public class InterviewRetryService {
                     att.setProviderRequestId(evaluationCall.providerRequestId());
                     attemptRepository.save(att);
 
-                    operationSupport.applyEvaluationOutcome(session, actualRoundNo, evaluation);
-                    sessionRepository.save(session);
+                    operationSupport.applyEvaluationOutcome(locked, actualRoundNo, evaluation);
+                    sessionRepository.save(locked);
                 });
             }
         } catch (BusinessException e) {
+            log.warn("interview AI retry failed: sessionId={} attemptId={} code={} msg={}",
+                    sessionId, attemptId, e.getErrorCode(), e.getMessage());
+            markRetryFailed(sessionId, userId, attemptId, opType, retryGeneration[0],
+                    e.getErrorCode().name(), e.getMessage(), operationSupport.isRetryable(e),
+                    operationSupport.providerRequestId(e));
+        } catch (RuntimeException unexpected) {
+            // 兜底：未预期异常也必须落到 attempt，避免会话永久停在 PROCESSING
+            log.error("interview AI retry crashed: sessionId={} attemptId={}", sessionId, attemptId, unexpected);
+            markRetryFailed(sessionId, userId, attemptId, opType, retryGeneration[0],
+                    "UNEXPECTED", "AI 重试失败，请重试", true, null);
+        }
+    }
+
+    /**
+     * 把重试失败落到 attempt（含 stale 丢弃判定：被更新的重试/动作取代时只记日志，不覆盖新状态）。
+     */
+    private void markRetryFailed(Long sessionId, Long userId, Long attemptId, long opType, int generation,
+                                 String errorCode, String errorMessage, boolean retryable, String providerRequestId) {
+        try {
             tx.executeWithoutResult(s -> {
-                InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(id, userId).orElseThrow();
+                InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId).orElseThrow();
                 InterviewAiAttempt attempt = attemptRepository.findById(attemptId).orElseThrow();
                 InterviewStatus expectedStatus = opType == 0
                         ? InterviewStatus.GENERATING_QUESTION : InterviewStatus.EVALUATING_ANSWER;
-                if (operationSupport.isCurrentRetry(session, attempt, retryGeneration[0], expectedStatus)) {
-                    operationSupport.markAttemptFailed(session, attempt, e.getErrorCode().name(), e.getMessage(),
-                            operationSupport.isRetryable(e), operationSupport.providerRequestId(e));
+                if (operationSupport.isCurrentRetry(session, attempt, generation, expectedStatus)) {
+                    operationSupport.markAttemptFailed(session, attempt, errorCode, errorMessage,
+                            retryable, providerRequestId);
                 } else {
                     log.info("Discarded stale interview AI retry result: sessionId={}, attemptId={}, generation={}",
-                            id, attemptId, retryGeneration[0]);
+                            sessionId, attemptId, generation);
                 }
             });
-            InterviewSession failed = sessionRepository.findById(sessionId).orElseThrow();
-            InterviewStateResponse.AiFailureInfo failure = failed.getStatus() == InterviewStatus.AI_ACTION_REQUIRED
-                    ? stateAssembler.latestFailedAttempt(sessionId).map(stateAssembler::buildAiFailure).orElse(null) : null;
-            return stateAssembler.buildStateResponse(failed, null, failure);
+        } catch (RuntimeException fallbackFailure) {
+            // 连「标记失败」都失败时只能记日志：会话最终由 getState 的陈旧超时兜底
+            log.error("failed to mark interview AI retry as failed: sessionId={} attemptId={}",
+                    sessionId, attemptId, fallbackFailure);
         }
-
-        InterviewSession session = sessionRepository.findById(sessionId).orElseThrow();
-        return stateAssembler.buildStateResponse(session, null, null);
     }
 }

@@ -416,13 +416,19 @@ class InterviewControllerIT {
         attempt.setRetryable(true);
         attemptRepository.saveAndFlush(attempt);
 
+        // 异步契约：重试立即返回 PROCESSING（首题重试为 GENERATING_QUESTION），AI 由后台执行器承载，
+        // 配额校验仍在 TX1 内完成——第 60 次调用已被消费
         mockMvc.perform(post("/api/interviews/" + sid + "/ai/retry")
                         .header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("AI_ACTION_REQUIRED"));
+                .andExpect(jsonPath("$.data.status").value("GENERATING_QUESTION"));
         Assertions.assertEquals(60, attemptRepository.sumAttemptCountByUserIdAndCreatedAtAfter(
                 attempt.getUserId(), LocalDate.now().atStartOfDay()));
+
+        // 测试环境无 AI provider ⇒ 后台重试确定性地失败，会话回到 AI_ACTION_REQUIRED（终态由轮询获取）
+        awaitSessionStatus(sid, "AI_ACTION_REQUIRED");
         var retryableAttempt = attemptRepository.findById(attempt.getId()).orElseThrow();
+        Assertions.assertEquals("FAILED", retryableAttempt.getStatus().name());
         retryableAttempt.setRetryable(true);
         attemptRepository.saveAndFlush(retryableAttempt);
 
@@ -432,6 +438,19 @@ class InterviewControllerIT {
                 .andExpect(jsonPath("$.data.aiFailure.messageCode").value("RATE_LIMITED"));
         Assertions.assertEquals(60, attemptRepository.sumAttemptCountByUserIdAndCreatedAtAfter(
                 attempt.getUserId(), LocalDate.now().atStartOfDay()));
+    }
+
+    /** 有界等待会话进入目标状态（后台 AI 在测试环境确定性地快速失败）。 */
+    private void awaitSessionStatus(long sid, String expected) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 10_000;
+        String status = null;
+        while (System.currentTimeMillis() < deadline) {
+            status = jdbcTemplate.queryForObject(
+                    "select status from interview_session where id = ?", String.class, sid);
+            if (expected.equals(status)) return;
+            Thread.sleep(25);
+        }
+        Assertions.fail("会话未在预期时间内进入 " + expected + "，当前=" + status);
     }
 
     @Test @Order(18)

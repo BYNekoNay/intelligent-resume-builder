@@ -41,11 +41,12 @@ public class InterviewEvaluationConfig {
     private static final int QUEUE_CAPACITY = 50;
 
     /**
-     * 供 {@link InterviewAnswerService} 注入（`@Qualifier("interviewEvaluationExecutor")`）。
+     * 供 {@link InterviewAnswerService} 与 {@link InterviewRetryService} 注入
+     * （`@Qualifier("interviewEvaluationExecutor")`）。
      *
      * <p>声明为 {@link ExecutorService} 以便 Spring 在关闭时调用 {@code shutdown}；
      * 线程为 daemon 且允许核心线程超时回收，空闲时不占资源。
-     * 测试可注入同步执行器（{@code Runnable::run}）以获得确定性。
+     * 测试可注入同步/可控执行器以获得确定性。
      */
     @Bean(name = "interviewEvaluationExecutor", destroyMethod = "shutdown")
     public ExecutorService interviewEvaluationExecutor() {

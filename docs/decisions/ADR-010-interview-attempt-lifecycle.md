@@ -4,7 +4,7 @@
 
 ## Background
 
-AI 面试与 `ai_task` 的异步模型不同：它是**服务端持状态的同步交互**——用户提交回答后同步等待 AI 评估并返回下一题（`InterviewController.answer`），AI 调用耗时可达数十秒。这带来专属的一致性风险：
+AI 面试与 `ai_task` 的异步模型不同：它是**服务端持状态的交互**——AI 段（首题生成、回答评估）在请求线程外的后台执行器运行；`POST /api/interviews/{id}/answer` 与 `POST /api/interviews/{id}/ai/retry` 只做状态校验与占位即返回 PROCESSING（`EVALUATING_ANSWER` / `GENERATING_QUESTION`），终态由客户端轮询 `GET /api/interviews/{id}` 获取。这带来专属的一致性风险：
 
 1. **同一轮回答被重复评估**：网络超时重试或用户刷新重发，会让一轮回答产生两次评估、两条记录，轮次与报告失真。
 2. **回答丢失**：若 AI 调用失败后回答只留在请求里，用户必须重新输入（长答案体验极差）。
