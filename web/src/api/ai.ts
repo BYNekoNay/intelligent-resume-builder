@@ -186,6 +186,11 @@ export function listTaskContinuations() {
   return apiClient.get<ApiResponse<AiTaskContinuation[]>>('/api/ai/tasks/continuations')
 }
 
+/** #26：清空本人的 AI 任务历史（只删终态且非待确认任务）；返回实际删除条数。 */
+export function clearAiTaskHistory() {
+  return apiClient.delete<ApiResponse<number>>('/api/ai/tasks/history')
+}
+
 export function retryTask(id: number) {
   return apiClient.post<ApiResponse<AiTask>>(`/api/ai/tasks/${id}/retry`)
 }

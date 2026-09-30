@@ -313,6 +313,36 @@ class AiTaskControllerIT {
                 "超大 input 的请求不得落库");
     }
 
+    @Test
+    @Order(13)
+    @DisplayName("#26：清空任务历史只删本人终态任务（进行中/待确认/他人任务保留）")
+    void clearHistory_deletesOnlyOwnTerminalTasks() throws Exception {
+        String tokenC = registerAndGetToken("ai_user_c", "ai_user_c@example.com", "correcthorse");
+        Long userC = userRepository.findByUsername("ai_user_c").orElseThrow().getId();
+        Long userA = userRepository.findByUsername("ai_user_a").orElseThrow().getId();
+        saveTask(userC, "history-terminal-success", AiTaskType.RESUME_OPTIMIZE, AiTaskStatus.SUCCESS, null);
+        saveTask(userC, "history-terminal-failed", AiTaskType.INLINE_OPTIMIZE, AiTaskStatus.FAILED, null);
+        saveTask(userC, "history-pending-confirm", AiTaskType.RESUME_OPTIMIZE, AiTaskStatus.SUCCESS,
+                ConfirmationStatus.PENDING);
+        saveTask(userC, "history-running", AiTaskType.RESUME_OPTIMIZE, AiTaskStatus.RUNNING, null);
+        saveTask(userA, "history-other-user", AiTaskType.RESUME_OPTIMIZE, AiTaskStatus.SUCCESS, null);
+
+        mockMvc.perform(delete("/api/ai/tasks/history").header("Authorization", "Bearer " + tokenC))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(2));
+
+        assertTrue(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                userC, AiTaskType.RESUME_OPTIMIZE, "history-terminal-success").isEmpty(), "终态成功任务应被删除");
+        assertTrue(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                userC, AiTaskType.INLINE_OPTIMIZE, "history-terminal-failed").isEmpty(), "终态失败任务应被删除");
+        assertTrue(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                userC, AiTaskType.RESUME_OPTIMIZE, "history-pending-confirm").isPresent(), "待确认任务必须保留");
+        assertTrue(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                userC, AiTaskType.RESUME_OPTIMIZE, "history-running").isPresent(), "进行中任务必须保留");
+        assertTrue(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                userA, AiTaskType.RESUME_OPTIMIZE, "history-other-user").isPresent(), "不得删除他人任务");
+    }
+
     private AiTask saveTask(Long userId, String key, AiTaskType type, AiTaskStatus status,
                             ConfirmationStatus confirmationStatus) {
         AiTask task = new AiTask();

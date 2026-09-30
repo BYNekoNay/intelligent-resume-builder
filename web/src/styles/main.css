@@ -1736,6 +1736,15 @@ h3 { font-size: 15px; font-weight: 600; color: var(--text-primary); }
   font-size: 11px;
 }
 
+/* #26：AI 任务历史清理的动作行（按钮 + 结果提示） */
+.consent-history-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
 .account-dialog-overlay {
   position: fixed;
   inset: 0;

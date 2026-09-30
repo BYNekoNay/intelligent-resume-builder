@@ -195,6 +195,13 @@ app:
       # 分组并发额度:重任务(分钟级)与轻任务(秒级)各自独立,防止长任务饿死短任务
       heavy-concurrency: ${AI_WORKER_HEAVY_CONCURRENCY:2}
       light-concurrency: ${AI_WORKER_LIGHT_CONCURRENCY:2}
+    # #26：AI 任务留存清理。终态任务超期后压缩内联快照（input_snapshot_json）与结果
+    # （result_json）为元数据；待确认与进行中的任务不压缩；用户侧另有
+    # DELETE /api/ai/tasks/history 可立即清空自己的任务历史。
+    task:
+      retention-days: ${AI_TASK_RETENTION_DAYS:90}
+      cleanup-interval-ms: ${AI_TASK_CLEANUP_INTERVAL_MS:86400000}
+      cleanup-batch-size: ${AI_TASK_CLEANUP_BATCH_SIZE:200}
     consent:
       policy-version: "v1.2.0"
     quota:

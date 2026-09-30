@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { IdCard, KeyRound, Mail, ShieldCheck, UserRound, X } from 'lucide-vue-next'
+import { IdCard, KeyRound, Mail, ShieldCheck, Trash2, UserRound, X } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { changeEmail, changePassword } from '@/api/auth'
+import { clearAiTaskHistory } from '@/api/ai'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
 
@@ -20,6 +21,9 @@ const newPassword = ref('')
 const confirmPassword = ref('')
 const credentialMessage = ref('')
 const changingCredential = ref(false)
+/** #26：清空 AI 任务历史的进行态与结果提示。 */
+const clearingHistory = ref(false)
+const historyMessage = ref('')
 const activeCredentialPanel = ref<'email' | 'password' | null>(null)
 const emailChangeButton = ref<HTMLButtonElement | null>(null)
 const passwordChangeButton = ref<HTMLButtonElement | null>(null)
@@ -100,6 +104,21 @@ async function closeCredentialPanel() {
   await nextTick()
   ;(panel === 'email' ? emailChangeButton.value : passwordChangeButton.value)?.focus()
 }
+
+/** #26：清空本人已完成的 AI 任务历史（进行中与待确认任务由服务端保留）。 */
+async function clearAiHistory() {
+  if (!window.confirm(t('account.clearAiHistoryConfirm'))) return
+  clearingHistory.value = true
+  historyMessage.value = ''
+  try {
+    const response = await clearAiTaskHistory()
+    historyMessage.value = t('account.clearAiHistoryDone').replace('{count}', String(response.data.data ?? 0))
+  } catch (error) {
+    historyMessage.value = resolveApiError(error, 'account.clearAiHistoryError')
+  } finally {
+    clearingHistory.value = false
+  }
+}
 </script>
 
 <template>
@@ -176,7 +195,16 @@ async function closeCredentialPanel() {
 
     <article class="account-consent-band">
       <span><ShieldCheck :size="20" /></span>
-      <div><h2>{{ t('account.privacyTitle') }}</h2><p>{{ t('account.privacyDescription') }}</p></div>
+      <div>
+        <h2>{{ t('account.privacyTitle') }}</h2>
+        <p>{{ t('account.privacyDescription') }}</p>
+        <p class="consent-history-action">
+          <button class="btn-neon btn-ghost" type="button" :disabled="clearingHistory" @click="clearAiHistory">
+            <Trash2 :size="15" /> {{ clearingHistory ? t('account.clearingAiHistory') : t('account.clearAiHistory') }}
+          </button>
+          <span v-if="historyMessage" role="status">{{ historyMessage }}</span>
+        </p>
+      </div>
       <RouterLink class="btn-neon btn-ghost" to="/ai-consent"><ShieldCheck :size="16" /> {{ t('account.manageAiConsent') }}</RouterLink>
     </article>
   </section>

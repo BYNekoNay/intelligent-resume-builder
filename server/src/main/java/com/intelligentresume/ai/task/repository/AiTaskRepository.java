@@ -5,6 +5,7 @@ import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
 import com.intelligentresume.ai.task.domain.ConfirmationStatus;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -83,6 +84,41 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
                                                            @Param("after") LocalDateTime after);
 
     long countByTaskTypeAndCreatedAtAfter(AiTaskType taskType, LocalDateTime after);
+
+    /**
+     * 保留期清理候选（ideation #26）：终态、非待确认、尚未压缩过的老任务。
+     *
+     * <p>待确认（SUCCESS + confirmationStatus=PENDING）任务属于「用户还没处理完」的工作，
+     * 即使超期也不压缩，否则确认页会读到空结果。
+     */
+    @Query("""
+            SELECT t FROM AiTask t
+            WHERE t.snapshotPurged = false
+              AND t.status IN (com.intelligentresume.ai.task.domain.AiTaskStatus.SUCCESS,
+                               com.intelligentresume.ai.task.domain.AiTaskStatus.FAILED,
+                               com.intelligentresume.ai.task.domain.AiTaskStatus.CANCELLED)
+              AND (t.confirmationStatus IS NULL
+                   OR t.confirmationStatus <> com.intelligentresume.ai.task.domain.ConfirmationStatus.PENDING)
+              AND t.updatedAt < :cutoff
+            ORDER BY t.id ASC
+            """)
+    List<AiTask> findPurgeableForRetention(@Param("cutoff") LocalDateTime cutoff, Pageable pageable);
+
+    /**
+     * 用户侧「清空 AI 任务历史」（ideation #26）：只删终态且非待确认的任务；
+     * 进行中（PENDING/RUNNING）与待确认任务保留，避免影响工作器与确认流程。
+     */
+    @Modifying
+    @Query("""
+            DELETE FROM AiTask t
+            WHERE t.userId = :userId
+              AND t.status IN (com.intelligentresume.ai.task.domain.AiTaskStatus.SUCCESS,
+                               com.intelligentresume.ai.task.domain.AiTaskStatus.FAILED,
+                               com.intelligentresume.ai.task.domain.AiTaskStatus.CANCELLED)
+              AND (t.confirmationStatus IS NULL
+                   OR t.confirmationStatus <> com.intelligentresume.ai.task.domain.ConfirmationStatus.PENDING)
+            """)
+    int deleteTerminalHistoryByUserId(@Param("userId") Long userId);
 
     long countByStatus(AiTaskStatus status);
 

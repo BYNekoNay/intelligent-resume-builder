@@ -17,6 +17,7 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -76,6 +77,16 @@ public class AiTaskController {
     @GetMapping("/tasks/continuations")
     public ApiResponse<List<AiTaskContinuationResponse>> listContinuations(HttpServletRequest request) {
         return ApiResponse.success(taskService.listContinuations(currentUserId(request)),
+                (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
+    }
+
+    /**
+     * 清空本人的 AI 任务历史（ideation #26）。只删终态且非待确认的任务，
+     * 返回实际删除条数；进行中的任务与待确认任务保留。
+     */
+    @DeleteMapping("/tasks/history")
+    public ApiResponse<Integer> clearHistory(HttpServletRequest request) {
+        return ApiResponse.success(taskService.deleteHistory(currentUserId(request)),
                 (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
     }
 

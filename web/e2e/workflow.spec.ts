@@ -608,6 +608,17 @@ test('organizes account identity, security, and AI consent without hiding action
   await expect(dialog.getByLabel('新邮箱')).toHaveValue('e2e@example.com')
   await dialog.getByRole('button', { name: '关闭' }).click()
   await expect(dialog).toHaveCount(0)
+
+  // #26：清空 AI 任务历史（window.confirm 二次确认 + 服务端返回删除条数）
+  let clearHistoryRequests = 0
+  await page.route('**/api/ai/tasks/history', route => {
+    clearHistoryRequests += 1
+    return route.fulfill({ json: response(4) })
+  })
+  page.on('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '清空 AI 任务历史' }).click()
+  await expect(page.getByText('已清空 4 条任务历史')).toBeVisible()
+  expect(clearHistoryRequests).toBe(1)
 })
 
 test('gives resume creation, import, and saved resumes a clear action hierarchy', async ({ page }) => {

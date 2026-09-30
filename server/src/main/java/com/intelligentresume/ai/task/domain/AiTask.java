@@ -71,6 +71,13 @@ public class AiTask {
     @Column(name = "retry_count", nullable = false)
     private Integer retryCount = 0;
 
+    /**
+     * #26：内联快照与结果是否已按保留期压缩为元数据。
+     * 置位后清理作业不再重复处理该行（快照占位 JSON 无 SQL 可判定特征）。
+     */
+    @Column(name = "snapshot_purged", nullable = false)
+    private boolean snapshotPurged;
+
     @Column(name = "lease_owner", length = 64)
     private String leaseOwner;
 
@@ -123,6 +130,8 @@ public class AiTask {
     public void setResultResumeVersionId(Long resultResumeVersionId) { this.resultResumeVersionId = resultResumeVersionId; }
     public Integer getRetryCount() { return retryCount; }
     public void setRetryCount(Integer retryCount) { this.retryCount = retryCount; }
+    public boolean isSnapshotPurged() { return snapshotPurged; }
+    public void setSnapshotPurged(boolean snapshotPurged) { this.snapshotPurged = snapshotPurged; }
     public String getLeaseOwner() { return leaseOwner; }
     public void setLeaseOwner(String leaseOwner) { this.leaseOwner = leaseOwner; }
     public LocalDateTime getLeaseExpiresAt() { return leaseExpiresAt; }

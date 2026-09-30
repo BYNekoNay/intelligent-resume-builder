@@ -235,4 +235,15 @@ public class AiTaskService {
         return toResponse(task);
     }
 
+    /**
+     * 用户侧「清空 AI 任务历史」（ideation #26）：删除本人的终态任务，返回删除条数。
+     *
+     * <p>进行中与待确认任务保留——前者仍被工作器处理，后者用户还没在确认页处理完。
+     * 超过保留期的任务另由 {@link AiTaskRetentionService} 压缩为元数据（不删除行）。
+     */
+    @Transactional
+    public int deleteHistory(Long userId) {
+        return taskRepository.deleteTerminalHistoryByUserId(userId);
+    }
+
 }
