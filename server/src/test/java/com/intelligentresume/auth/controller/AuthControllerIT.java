@@ -217,6 +217,54 @@ class AuthControllerIT {
                 .andExpect(jsonPath("$.code").value(40101));
     }
 
+    // ---- 全端登出 ----
+
+    /** 一次登录产出的凭据对：access token（请求头）与 refresh cookie。 */
+    private record Device(String accessToken, Cookie refreshCookie) {}
+
+    private Device loginDevice() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON).content(LOGIN_BODY))
+                .andExpect(status().isOk()).andReturn();
+        String accessToken = objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data").path("accessToken").asText();
+        return new Device(accessToken, result.getResponse().getCookie("irt_refresh"));
+    }
+
+    @Test
+    @Order(11)
+    @DisplayName("POST /api/auth/logout-all：撤销全部设备的刷新会话并作废当前 cookie")
+    void postLogoutAll_revokesEveryDeviceRefreshSession() throws Exception {
+        // 三台设备各登录一次，各自持有独立会话（本用例此前无任何覆盖：AuthServiceTest 只校验行字段）
+        Device deviceA = loginDevice();
+        Device deviceB = loginDevice();
+        Device deviceC = loginDevice();
+        assertNotNull(deviceA.refreshCookie());
+        assertNotNull(deviceB.refreshCookie());
+
+        MockHttpServletResponse response = mockMvc.perform(post("/api/auth/logout-all")
+                        .header("Authorization", "Bearer " + deviceA.accessToken())
+                        .cookie(deviceA.refreshCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn().getResponse();
+
+        // 当前设备的刷新 cookie 被作废
+        String setCookie = response.getHeader(HttpHeaders.SET_COOKIE);
+        assertNotNull(setCookie, "logout-all 应下发失效 cookie");
+        assertTrue(setCookie.contains("irt_refresh="), "失效 cookie 名应为 irt_refresh");
+
+        // 全部设备的 refresh 均不可再续期（docs/05 §5.2 的「撤销全部刷新会话」）
+        // 注：access token 是无状态 JWT 且不携带会话标识，撤销会话无法使其立即失效——
+        // 该边界已在 docs/05 §5.2 写明（≤ access-token-ttl-seconds，默认 3600s），
+        // 「立即失效 access token」作为待决策项登记在 docs/decisions/OPEN-DECISIONS.md。
+        for (Cookie cookie : List.of(deviceA.refreshCookie(), deviceB.refreshCookie(), deviceC.refreshCookie())) {
+            mockMvc.perform(post("/api/auth/refresh").cookie(cookie))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value(40101));
+        }
+    }
+
     // ---- 当前用户 ----
 
     @Test
