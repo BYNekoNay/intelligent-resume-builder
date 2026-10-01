@@ -350,7 +350,8 @@ bash scripts/deploy-direct.sh
 draft-fields 两道静态门禁）→ **PDF 依赖 `PUPPETEER_SKIP_DOWNLOAD=true npm ci` + 预置 Chromium +
 真实启动一次 Chromium 自检** → 原子替换产物 → **同步 nginx 站点配置**（`deploy/nginx/host.conf` +
 `security-headers.conf` 片段；先落位片段再覆盖站点文件，`nginx -t` 校验通过才 reload）→
-重启服务 → 等待 readiness → 输出健康检查。
+重启服务 → 等待 readiness → **部署后探针**（12 项：行为断言 + 生效配置与仓库的一致性）→
+输出健康检查。
 
 > **nginx 配置已纳入脚本（2026-10-01 第六十一批）**。此前它**只存在于 §4.5 的手工流程**里，
 > 于是仓库中的 nginx 改动不会随部署生效 —— 实测代价有两条：① 静态资源 gzip（第三十五批）
@@ -392,6 +393,31 @@ draft-fields 两道静态门禁）→ **PDF 依赖 `PUPPETEER_SKIP_DOWNLOAD=true
 
 > 服务器侧逻辑在 `scripts/deploy-direct.remote.sh`，可单独在服务器上执行：
 > `bash /opt/intelligent-resume/deploy-direct.remote.sh`
+
+---
+
+### 5.2 部署后探针（2026-10-01 第六十二批新增）
+
+`scripts/probe-deployment.sh` 是部署流程的**最后一步**（部署脚本自动调用），也可单独运行：
+
+```bash
+bash scripts/probe-deployment.sh                       # 默认打当前测试环境
+bash scripts/probe-deployment.sh http://host:port      # 指定入口
+SSH_HOST= bash scripts/probe-deployment.sh             # 跳过配置一致性对比（无 SSH 时）
+```
+
+两类断言，缺一不可：
+
+| 类别 | 内容 |
+| --- | --- |
+| **A. 行为断言**（HTTP 可观察） | 首页 200 · 安全头 4 条 · 匿名 health 收敛（无 `checks`）· `health/detail` 401 · **静态资源 gzip** · **5.5MB 上传已穿过 nginx** · 哈希资源长缓存 |
+| **B. 配置一致性** | 把**服务器生效的 nginx 配置**与**仓库 `deploy/nginx/host.conf`** 归一化后逐行比对 —— 通用地发现任何「配置改了但没随部署生效」的漂移 |
+
+探针**失败不掩盖「部署已完成」这一事实**，但以非零退出码结束 —— 避免「部署成功」的假阳性。
+
+> B 类断言的存在理由：第六十一批实测到两条 nginx 配置改动（`client_max_body_size` 5m→6m、
+> 静态资源 gzip）在仓库早已改好、CI 全绿，却因部署链路不含 `deploy/` 而**从未生效**。
+> 行为断言能抓到它们**造成的结果**，配置一致性断言则能**通用地**抓到这一类（不限于已知的两条）。
 
 ---
 

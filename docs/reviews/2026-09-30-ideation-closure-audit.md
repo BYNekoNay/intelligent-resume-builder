@@ -775,6 +775,32 @@
 
 **同批探过但零缺陷的两个面**：① `@Transactional(readOnly = true)` 方法中无写操作（粗扫疑似 3 处，逐行核对**全部落在写事务方法内**，属窗口误报）；② 后端与前端代码中**零 TODO / FIXME / XXX / HACK**。
 
+### 2.54 部署链路有洞 → 把「部署后探针」固化为部署流程最后一步（2026-10-01 第六十二批）
+
+背景（见 `docs/reviews/2026-10-01-cloud-e2e-verification.md` §4）：第六十一批云端实测抓到两条 nginx 配置改动「仓库已改、CI 全绿、真实环境**从未生效**」——单测 / e2e / 静态契约门禁**全都看不见**这类缺陷（它们只能验证「仓库里的东西自洽」）。
+
+方法：把当时**手工**的排查探针固化成 `scripts/probe-deployment.sh`，并作为部署流程最后一步自动执行。刻意设计两类断言：
+
+| 类别 | 内容 | 能抓什么 |
+| --- | --- | --- |
+| **A. 行为断言**（HTTP 可观察） | 首页 200 · 安全头 4 条 · 匿名 health 收敛 · `health/detail` 401 · **静态资源 gzip** · **5.5MB 上传穿过 nginx** · 哈希资源长缓存 | 配置失效**造成的结果** |
+| **B. 配置一致性** | 服务器生效的 nginx 配置 vs 仓库 `deploy/nginx/host.conf`（归一化后逐行 diff） | **通用地**抓到任何「配置改了但没部署」的漂移（不限于已知两条） |
+
+探针失败**不掩盖「部署已完成」这一事实**，但以非零退出码结束（由部署脚本透传），避免「部署成功」的假阳性。
+
+验证（**四轮，含红判定**）：
+
+| 轮次 | 状态 | 探针结果 |
+| --- | --- | --- |
+| 正常 | 服务器配置已与仓库一致 | **12/12 PASS**，exit 0 |
+| **红判定** | 服务器 `gzip on` → `gzip off` + reload | **2 项 FAIL**：① 行为断言「静态资源返回 gzip」失败；② 配置一致性**精确指出差异** `7c7  < gzip off;  ---  > gzip on;`；exit 1 |
+| 恢复 | 改回 `gzip on` + reload | **12/12 PASS**，exit 0 |
+| 集成 | 真跑一次 `deploy-direct.sh` | 探针作为最后一步被自动调用，**12/12 PASS**，`DEPLOY_EXIT=0` |
+
+同批修掉一个 Git Bash 陷阱：`mktemp -d` 可能返回含盘符的 Windows 路径，`trap ... rm -rf` 会触发安全删除拦截（`[safe-delete][SAFE_DELETE_INVALID_PATH]`）—— 非 POSIX 绝对路径时统一退回 `/tmp`（与 `deploy-direct.sh` 对 `TMPDIR` 的既有处理一致）。
+
+产物：`scripts/probe-deployment.sh`（新增）、`scripts/deploy-direct.sh`（末尾集成 + 透传退出码）、`docs/DEPLOYMENT_DIRECT.md` §5 / §5.2。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -973,3 +999,5 @@
 | 2026-10-01 | **第五十八批（同一组取值多处维护对账：前端 `AiTask.taskType` 漏 `RESUME_OPTIMIZE`，改为单一来源并立枚举门禁；§2.51 扫描新增项）执行完成**：把「后端 Java 枚举 ↔ 前端 TS 联合类型/常量数组」逐组对账。**发现 1 处** —— `web/src/api/ai.ts` **同一文件内两处清单不一致**：`AI_CONSENT_TASK_SCOPES` 9 个值（与 `AiTaskType` 一致）而 `AiTask.taskType` 只有 8 个、漏 `RESUME_OPTIMIZE`；`AiTaskContinuation.taskType` 继承该类型，后端返回该类型时前端不承认（TS 不报错）。修复：新增 `type AiTaskType = (typeof AI_CONSENT_TASK_SCOPES)[number]`、`AiTask.taskType` 改用之 —— **单一来源**，结构上消除漂移可能。其余 3 组（`AiTaskStatus` / `ApplicationStatus` / `ConfirmationStatus`）已一致。**新增 `FrontendEnumContractTest`**（4 组映射，断言集合相等，失败信息区分「仅后端有/仅前端有」；解析处理单行枚举 + 末位无分隔符 + 剥离注释）。验证：**红判定已做**（前端去掉 `CANCELLED` → 1 红并精确指出差异，md5 校验恢复）；server 全量 **905 测试 0 失败**（本批 +1，5 skipped）；web `npm run build` 通过；CI + Functional Regression 双绿（workflow run 36853658365 / 36853658230，head 9c9a6bb，复核结论 success） |
 | 2026-10-01 | **第五十九批（业务错误码三处维护对账：`docs/05` §1.3 表补 `40302` + 立三处一致性门禁；§2.52 扫描新增项）执行完成**：错误码在**三处**维护 —— 后端 `ErrorCode` 枚举（11）、`docs/05` §1.3 表（**10，漏 `40302`**）、前端 `errorCodes.ts`（11）。`40302`（AI 数据处理未授权或已撤回）是 AI 能力的**前置**码，文档漏写会让照文档实现的调用方漏掉该分支。修复：§1.3 补 40302 行（含义 + 前端处置）；**新增 `ErrorCodeContractTest`**（三处集合一致性断言，失败信息区分「仅 X 有/仅 Y 有」，文档侧只取 §1.3 小节表格行 + 解析规模自检）。验证：**红判定已做**（文档删 42901 → 1 红并精确指出差异，md5 校验恢复）；server 全量 **906 测试 0 失败**（本批 +1，5 skipped）；CI + Functional Regression 双绿（workflow run 36854846059 / 36854846075，head 7ff2f80，复核结论 success）。**同批发现未修**：`docs/DEPLOYMENT_DIRECT.md` §5 未说明 nginx 站点配置**不在** `deploy-direct.sh` 覆盖内（部署脚本改动无法本机验证服务器效果，留待后续单独成批） |
 | 2026-10-01 | **第六十批（简历模板代码四处一致性门禁；§2.53 扫描新增项）执行完成**：模板代码在**四处**维护 —— 后端 `ResumeTemplateCodes.SUPPORTED`（7）、`pdf-service` 的 `TEMPLATE_STYLES`（7）、前端 `ResumeTemplateCode` 联合类型（7）、前端 `templateOptions`（7），取值 `classic/modern/minimal/ats/executive/compact/academic`，**四处完全一致（零缺陷）**。其中 pdf-service 漏实现最危险：**不会**在编译期或既有测试中暴露，只在用户点导出时以「不支持的简历模板」失败。故**新增 `TemplateCodeContractTest`** 固化结论防漂移（失败信息点明该后果；处理 `Set.of(DEFAULT, ...)` 常量引用；四处规模自检）。验证：**红判定已做**（改 pdf-service 样式键 → 1 红并精确指出差异，md5 校验恢复）；server 全量 **907 测试 0 失败**（本批 +1，5 skipped）；CI + Functional Regression 双绿（workflow run 36855988936 / 36855988975，head 9fe996a，复核结论 success）。**同批零缺陷记录**：只读事务中无写操作（3 处疑似均为窗口误报）、代码零 TODO/FIXME |
+| 2026-10-01 | **第六十一批（云端端到端验证 + nginx 配置纳入部署流程）执行完成**：把 9-30 14:18 之后累积的全部改动部署到测试环境（`deploy-direct.sh`，**2m30s**；Chromium 自检真实渲染 PDF 8285 字节），并用黑盒套件做真实链路回归 → **AI 全链路 PASS、全功能扩展 PASS、安全与边界 PASS、基础链路 27/28 FAIL**。失败项 `oversized-upload-413` 实测暴露：5.5MB 上传返回 **nginx 自带 HTML 413**（非统一信封）—— 根因是**部署链路不含 `deploy/`**，nginx 站点配置一直是 **Sep 25 手工安装的旧版**（`client_max_body_size 5m`、**无 gzip 块**），于是**第二十九批的 6m 与第三十五批的静态资源 gzip 从未生效**（后者 3.5× 收益实测为 0）。修复：打包/解压范围加 `deploy`；`remote.sh` 新增 nginx 配置同步（幂等：先落位 security-headers 片段 → 覆盖站点文件 + 建软链 → **`nginx -t` 通过才 reload**，校验失败则中止不 reload）。**云端复验**：服务器配置变 `6m`+gzip（Oct 1 19:55）、静态资源返回 `Content-Encoding: gzip`、5.5MB 已穿过 nginx（401 而非 413）、`suite_core` **28/28**、完整回归 **3 套件全 PASS 0 失败**。报告：`docs/reviews/2026-10-01-cloud-e2e-verification.md` |
+| 2026-10-01 | **第六十二批（部署后探针固化为部署流程最后一步；§2.54 扫描新增项）执行完成**：起因是第六十一批实测到两条 nginx 配置改动「仓库已改、CI 全绿、真实环境从未生效」—— 单测/e2e/静态门禁都看不见这类缺陷。固化 `scripts/probe-deployment.sh`，含**两类断言**：A 行为断言（首页 200 / 安全头 4 条 / health 收敛 / detail 401 / **静态资源 gzip** / **5.5MB 上传穿过 nginx** / 长缓存）—— 抓配置失效**后果**；B **配置一致性**（服务器生效 nginx 配置 vs 仓库 `host.conf` 归一化逐行 diff）—— **通用**抓「配置改了没部署」的漂移。失败不掩盖「部署已完成」，但以非零码结束。验证（四轮含红判定）：正常 **12/12 PASS** → 把服务器 `gzip on` 改 `off` 后 **2 项 FAIL**（行为项 + 配置一致性精确指出 `7c7 < gzip off / > gzip on`）+ exit 1 → 恢复后 **12/12 PASS** → 真跑 `deploy-direct.sh` 确认探针作为最后一步自动执行且 **12/12 PASS、DEPLOY_EXIT=0**。同批修掉 Git Bash 下 `mktemp` 返回盘符路径导致 `trap rm` 触发安全删除拦截的陷阱（退回 `/tmp`）。`docs/DEPLOYMENT_DIRECT.md` 新增 §5.2 |

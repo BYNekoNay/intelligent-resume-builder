@@ -105,3 +105,13 @@
   2. `deploy/nginx/web.conf`（容器版）与 `edge.conf` 未纳入同步（容器拓扑未在生产使用，且 `edge` 端口由
      同机另一项目占用）；当前只同步宿主机直连版 `host.conf`
   3. 回滚点 `app/api/rollback-20261001-193901.jar` 保留在服务器上，确认稳定后可删
+
+## 6. 后续：探针已固化为部署流程的一部分（第六十二批）
+
+本轮排查用的探针当时是**手工**逐条执行的（curl / ssh），下次部署很容易被跳过 —— 那两条失效就会再次潜伏。
+已在第六十二批固化为 `scripts/probe-deployment.sh`，作为 `deploy-direct.sh` 的**最后一步**自动执行；
+探针失败时部署脚本以非零退出码结束，避免「部署成功」的假阳性。
+
+- 用法与断言清单：`docs/DEPLOYMENT_DIRECT.md` §5.2
+- 批次记录与红判定证据：`docs/reviews/2026-09-30-ideation-closure-audit.md` §2.54
+

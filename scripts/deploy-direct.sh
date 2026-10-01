@@ -92,13 +92,23 @@ echo "解压完成"
 step "4/5 服务器侧构建与发布（首次约 3-5 分钟，含 Chromium 下载）"
 ssh "${SSH_OPTS[@]}" "$REMOTE" "bash $REMOTE_ROOT/deploy-direct.remote.sh"
 
-step "5/5 公网入口自检"
-# ⚠ 必须带端口：本机 80/443 属于同机另一个项目（Docker + Caddy），
-# 打 127.0.0.1:80 会打到对方站点并返回 200，形成"部署成功"的假阳性。
+step "5/5 部署后探针（行为断言 + 配置一致性）"
+# 第六十一批教训：CI 双绿 ≠ 真实环境生效 —— nginx 的两条配置改动曾因部署链路不含 deploy/
+# 而**从未生效**（5.5MB 上传被 nginx 拦成 HTML 413、静态资源无 gzip），而单测 / e2e /
+# 静态契约门禁全都看不见。探针把这类"链路洞"纳入部署流程。
+# 失败时不掩盖"部署已完成"这一事实，但以非零退出码结束，避免"部署成功"的假阳性。
+probe_rc=0
+SSH_HOST="$REMOTE" SSH_KEY="${SSH_KEY:-}" REMOTE_ROOT="$REMOTE_ROOT" \
+  bash "$REPO_ROOT/scripts/probe-deployment.sh" "http://$SERVER:$PUBLIC_PORT" || probe_rc=1
+
+# 服务器侧服务状态（探针是从公网侧验证行为，这里补一条服务器视角）
 ssh "${SSH_OPTS[@]}" "$REMOTE" \
-  "curl -s -o /dev/null -w 'nginx(127.0.0.1:$PUBLIC_PORT) HTTP -> %{http_code}\n' http://127.0.0.1:$PUBLIC_PORT/ ; \
-   systemctl is-active nginx mysql intelligent-resume-api intelligent-resume-pdf"
+  "systemctl is-active nginx mysql intelligent-resume-api intelligent-resume-pdf"
 
 printf '\n部署流程已结束。\n'
 printf '浏览器访问：http://%s:%s/\n' "$SERVER" "$PUBLIC_PORT"
 printf '查看日志：ssh %s "journalctl -u intelligent-resume-api -f"\n' "$REMOTE"
+if [ "$probe_rc" -ne 0 ]; then
+  printf '\n⚠ 部署后探针**未通过**（见上）：构建与重启已完成，但复核未过 —— 在探针转绿前不得判定"部署成功"。\n'
+  exit "$probe_rc"
+fi
