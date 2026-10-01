@@ -16,7 +16,7 @@
 > | D2 数据生命周期 | B（分档承诺） | ⏳ **已决策、实现待排期** —— 属新增功能（清扫作业 + 引用判定 + 跨表护栏 + 文档改写），未实现即不标 RESOLVED |
 > | D3 短 JD 语义 | A（视为无有效内容） | ✅ **已落地并验证** —— `JdKeywordParser` 真正消费该键；测试 7→9（覆盖阈值两侧边界）；**红判定已做** |
 > | D4 `confirmation.*` | B（移除三键） | ✅ **已落地** —— yml 与白名单均已移除，白名单**现为空** |
-> | D5 ATS 600s 超时口径 | — | ⏳ **待决策** —— 请选 A / B / C（见下文 D5） |
+> | D5 ATS 600s 超时口径 | C（固化现状） | ✅ **已落地** —— `docs/05` §8.3 增「AI 超时/失败时的用户可见行为」口径（三态对照表 + 前端处置）；核实发现**选项 A 的行为本就已实现**（`analysisStatus=RULES_FALLBACK` + `fallback{retryable, consentRequired}`），C 即把它写死 |
 >
 > 前四条已在 `docs/decisions/OPEN-DECISIONS.md` 中更新为 **RESOLVED**（D1/D3/D4）与
 > **DECIDED · 实现待排期**（D2）。
