@@ -6,7 +6,6 @@ export interface ResumeSummary {
   title: string
   currentVersionId: number | null
   jobDescriptionId: number | null
-  createdAt: string
   updatedAt: string
 }
 
