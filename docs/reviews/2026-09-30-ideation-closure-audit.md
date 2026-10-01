@@ -801,6 +801,42 @@
 
 产物：`scripts/probe-deployment.sh`（新增）、`scripts/deploy-direct.sh`（末尾集成 + 透传退出码）、`docs/DEPLOYMENT_DIRECT.md` §5 / §5.2。
 
+### 2.55 决策 D2 阶段 1 落地：数据生命周期分档清扫作业（A 档「无引用者」硬删）（2026-10-01 第六十四批）
+
+起因：第四十九批对账发现「软删 30 天后 7 天内硬删」**全仓无任何实现**，登记进 `OPEN-DECISIONS`；决策 D2 选定 **B（分档承诺）**，设计见 `docs/plans/2026-10-01-001-data-retention-tiered-purge.md`。
+
+**为什么必须分档（实测，非偏好）**：`resume_version` 被 **11 处**外键引用（`resume.current_version_id`、`resume_material_reference`、`match_result`、`ai_task.result_resume_version_id`、`export_task`、`resume_version.restored_from_version_id`〔**自引用**〕、`inline_optimization_record`、`ats_check_result`、`application_record`、`communication_draft`、`interview_session`），`career_material` 被 2 处 —— 直接硬删必撞外键。
+
+**实现（阶段 1，仅两个资源）**：新增 `RetentionPurgeService`（`@Scheduled`）、`RetentionPurgeRepository`（候选查询用**逐条 `NOT EXISTS`** 排除引用者；删除语句带 `deleted_at IS NOT NULL` 二次保护）、`RetentionPurgeProperties`（`@ConfigurationProperties`）+ `application.yml` 的 `app.retention.purge.*`。
+
+**接手时纠正的两处在途偏差**（该批此前为未提交实现）：
+
+| # | 偏差 | 依据 | 纠正 |
+| --- | --- | --- | --- |
+| 1 | 实现「循环到候选耗尽」 | 与方案 §6 G3「单轮每表最多 batch-size 行」及 §8.6 用例矛盾 | 改为**一次调度只处理一批**（`LIMIT batch-size`，整批一个事务）——破坏性操作的规模有界、可预期 |
+| 2 | 单测 `assertEquals(0, service.purgeExpiredSoftDeleted() - 0 - 0, …)` | **重复调用**而非对上次结果的断言（弱断言） | 改为对返回值的直接断言 |
+
+**护栏 G1–G7 全部落地**：G1 默认关闭、G2 默认 dry-run、G3 单轮一批、G4 外键冲突降级跳过（TOCTOU 兜底）、G5 不碰 `user`、**G6 指标**（`retention_purge_scanned/purged/skipped`，计数为 0 不注册序列）、**G7 数值校验**（四键接入 `NumericConfigurationValidator`，该表受校验键 14 → **18**）。
+
+**守卫设计**：手写 SQL 的主要风险是「**漏判引用 → 误删被引用行**」（不可逆），故守卫放在**真实 schema 上的元数据反查**，而非「造 FK 完整 fixture 的端到端用例」：
+
+| 守卫 | 位置 | 抓什么 |
+| --- | --- | --- |
+| 引用清单完整性 | `RetentionPurgeRepositorySchemaTest`：从 `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` 反查所有指向该资源的外键，与 SQL 中出现的表逐一比对 | **漏一项即红**（含「元数据查不到 → 显式失败」防门禁空转） |
+| 候选 SQL 可执行 | 同上（真实 schema 上跑两条候选查询） | 表名/列名写错 |
+| 删除语句二次保护 | 同上：断言两条 `DELETE` 恒带 `deleted_at IS NOT NULL` | 候选查询被改坏时不误删**活数据** |
+| 编排与护栏 | `RetentionPurgeServiceTest`（Mockito，6 例） | G1/G2/G3/G4 + A 档真删 + cutoff 计算 |
+| 配置一致性 | `NumericConfigurationValidatorTest`（按 `minimums()` 自动覆盖新键）+ 四个门禁 | 非法值拒启动；样例/兜底/消费点一致 |
+| 文档契约 | `RetentionPolicyContractTest`（按档位**双向**断言） | A 档不得再标计划中、B 档与未覆盖资源必须标 |
+
+**红判定（实测）**：① 从候选 SQL 删去 `ats_check_result` 一处 `NOT EXISTS` → `purgeSqlCoversEveryForeignKey` **红**（报出缺失表名）；② 把 `RetentionPurgeProperties.dryRun` 默认值 `true`→`false` → `dryRun_doesNotDelete` **红**；两处均以 `md5` 校验完整恢复。
+
+**验证**：定向 22/22 绿；server 全量 **919 测试 0 失败**（本批 +10，5 skipped 为环境门控）；日志 ASCII 化（顺带修：本项目 log 语句一律保持 ASCII，新加的破折号已改为 `-`）。
+
+**残留（已登记，不隐瞒）**：① 本阶段**没有**「造真实行 → 断言被真删」的端到端用例（fixture 成本高），代价是「删除语句本身写错」只由静态断言间接覆盖；② B 档快照化与账户侧（阶段 2/3）未实现，文档仍按分档标注。
+
+产物：`server/src/main/java/com/intelligentresume/retention/*`（3 类，新增）、`RetentionPurgeServiceTest` / `RetentionPurgeRepositorySchemaTest`（新增）、`AppObservability`（+`recordRetentionPurge`）、`NumericConfigurationValidator`（+4 键）、`application.yml`、`server/.env.example`；文档 `docs/04` §7.1/§7.2、`docs/07` §5.10、`docs/08` §9.6/§10、`docs/decisions/OPEN-DECISIONS.md`、`docs/decisions/DECISION-BRIEF.md`、设计文档 `docs/plans/2026-10-01-001-data-retention-tiered-purge.md`。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1001,3 +1037,5 @@
 | 2026-10-01 | **第六十批（简历模板代码四处一致性门禁；§2.53 扫描新增项）执行完成**：模板代码在**四处**维护 —— 后端 `ResumeTemplateCodes.SUPPORTED`（7）、`pdf-service` 的 `TEMPLATE_STYLES`（7）、前端 `ResumeTemplateCode` 联合类型（7）、前端 `templateOptions`（7），取值 `classic/modern/minimal/ats/executive/compact/academic`，**四处完全一致（零缺陷）**。其中 pdf-service 漏实现最危险：**不会**在编译期或既有测试中暴露，只在用户点导出时以「不支持的简历模板」失败。故**新增 `TemplateCodeContractTest`** 固化结论防漂移（失败信息点明该后果；处理 `Set.of(DEFAULT, ...)` 常量引用；四处规模自检）。验证：**红判定已做**（改 pdf-service 样式键 → 1 红并精确指出差异，md5 校验恢复）；server 全量 **907 测试 0 失败**（本批 +1，5 skipped）；CI + Functional Regression 双绿（workflow run 36855988936 / 36855988975，head 9fe996a，复核结论 success）。**同批零缺陷记录**：只读事务中无写操作（3 处疑似均为窗口误报）、代码零 TODO/FIXME |
 | 2026-10-01 | **第六十一批（云端端到端验证 + nginx 配置纳入部署流程）执行完成**：把 9-30 14:18 之后累积的全部改动部署到测试环境（`deploy-direct.sh`，**2m30s**；Chromium 自检真实渲染 PDF 8285 字节），并用黑盒套件做真实链路回归 → **AI 全链路 PASS、全功能扩展 PASS、安全与边界 PASS、基础链路 27/28 FAIL**。失败项 `oversized-upload-413` 实测暴露：5.5MB 上传返回 **nginx 自带 HTML 413**（非统一信封）—— 根因是**部署链路不含 `deploy/`**，nginx 站点配置一直是 **Sep 25 手工安装的旧版**（`client_max_body_size 5m`、**无 gzip 块**），于是**第二十九批的 6m 与第三十五批的静态资源 gzip 从未生效**（后者 3.5× 收益实测为 0）。修复：打包/解压范围加 `deploy`；`remote.sh` 新增 nginx 配置同步（幂等：先落位 security-headers 片段 → 覆盖站点文件 + 建软链 → **`nginx -t` 通过才 reload**，校验失败则中止不 reload）。**云端复验**：服务器配置变 `6m`+gzip（Oct 1 19:55）、静态资源返回 `Content-Encoding: gzip`、5.5MB 已穿过 nginx（401 而非 413）、`suite_core` **28/28**、完整回归 **3 套件全 PASS 0 失败**。报告：`docs/reviews/2026-10-01-cloud-e2e-verification.md` |
 | 2026-10-01 | **第六十二批（部署后探针固化为部署流程最后一步；§2.54 扫描新增项）执行完成**：起因是第六十一批实测到两条 nginx 配置改动「仓库已改、CI 全绿、真实环境从未生效」—— 单测/e2e/静态门禁都看不见这类缺陷。固化 `scripts/probe-deployment.sh`，含**两类断言**：A 行为断言（首页 200 / 安全头 4 条 / health 收敛 / detail 401 / **静态资源 gzip** / **5.5MB 上传穿过 nginx** / 长缓存）—— 抓配置失效**后果**；B **配置一致性**（服务器生效 nginx 配置 vs 仓库 `host.conf` 归一化逐行 diff）—— **通用**抓「配置改了没部署」的漂移。失败不掩盖「部署已完成」，但以非零码结束。验证（四轮含红判定）：正常 **12/12 PASS** → 把服务器 `gzip on` 改 `off` 后 **2 项 FAIL**（行为项 + 配置一致性精确指出 `7c7 < gzip off / > gzip on`）+ exit 1 → 恢复后 **12/12 PASS** → 真跑 `deploy-direct.sh` 确认探针作为最后一步自动执行且 **12/12 PASS、DEPLOY_EXIT=0**。同批修掉 Git Bash 下 `mktemp` 返回盘符路径导致 `trap rm` 触发安全删除拦截的陷阱（退回 `/tmp`）。`docs/DEPLOYMENT_DIRECT.md` 新增 §5.2 |
+| 2026-10-01 | **第六十三批（决策落地 D1/D3/D4/D5，无 §2.x 新扫描）执行完成**：把 `OPEN-DECISIONS` 的 9 条 OPEN 整理成 `docs/decisions/DECISION-BRIEF.md`（可逐条拍板的清单），用户拍板 4 条且**全部按推荐项**（D1 A+C、D2 B、D3 A、D4 B）。落地：**D3** `app.job.jd-text.min-length` 由「声明无消费点」改为**真正生效**（`JdKeywordParser` 构造注入阈值；`parse` 在 `null/isBlank` 之外新增「`trim().length() < minLength` → role/keywords/requirements 全空」，**不**拒绝入参——「招 Java 工程师」是合法短 JD；测试 7→**9** 覆盖阈值两侧边界；**红判定已做**；该键从 `ConfigConsumerContractTest` 白名单移出）；**D4** 移除 `app.ai.confirmation.*` 三键（行为已由 `ConfirmRequest` 的 `@Size(max = 200)` 承载）→ 白名单**现为空**；**D1** `docs/05` §2.9 改写为明确结论（维持现状 + 删号兜底，无代码改动）；**D2** 登记为 `DECIDED · 实现待排期`（属新增功能，未实现不标 RESOLVED）；**D5** 核实「降级为规则分 + 失败原因暴露」**本就已实现**（`analysisStatus=RULES_FALLBACK` + `analysisSource=RULES` + `AtsFallbackInfo{code,message,retryable,consentRequired}`），在 `docs/05` §8.3 写成三态口径（注意 `aiFailure` 是**面试**字段，ATS 用 `fallback`）。回归：定向 32 项全绿；server 全量 **909 测试 0 失败**（本批 +2，5 skipped）；提交 `9561f73 → dd3f703`（决策落地，9 文件）→ `737c5a0`（D5，3 文件）；CI 双绿（`dd3f703` 含 Functional Regression #36869221528） |
+| 2026-10-01 | **第六十四批（决策 D2 阶段 1 落地：数据生命周期分档清扫作业；§2.55 扫描新增项）执行完成**：实现 A 档「无引用者」按期物理删除，仅覆盖 `career_material` 与 `resume_version`（`resume_version` 被 **11 处**外键引用含自引用 —— 直接硬删必撞外键，这是「必须分档」的硬理由）。新增 `RetentionPurgeService`（`@Scheduled`）、`RetentionPurgeRepository`（候选查询逐条 `NOT EXISTS` 排除引用者；删除语句带 `deleted_at IS NOT NULL` 二次保护）、`RetentionPurgeProperties` 与 `app.retention.purge.*` 配置。**纠正两处在途偏差**：① 原「循环到候选耗尽」与方案 §6 G3「单轮每表最多 batch-size 行」矛盾 → 改为**一次调度只处理一批**；② 单测 `assertEquals(0, purgeExpiredSoftDeleted() - 0 - 0, …)` 是**重复调用**而非断言上次结果 → 改为直接断言。护栏 **G1–G7 全落地**（含新增 G6 指标 `retention_purge_scanned/purged/skipped` 与 G7 四键接入 `NumericConfigurationValidator`，受校验键 14→**18**）。守卫用**元数据反查**而非 fixture 端到端：`RetentionPurgeRepositorySchemaTest` 从 `INFORMATION_SCHEMA` 反查所有指向该资源的外键与 SQL 比对（**漏一项即红**）+ 断言删除语句恒带软删限定。**红判定已做**：删去 `ats_check_result` 一处 `NOT EXISTS` → 完整性用例红；`dryRun` 默认值 `true`→`false` → 护栏用例红；md5 校验完整恢复。回归：定向 22/22 绿；server 全量 **919 测试 0 失败**（本批 +10，5 skipped 为环境门控）。文档按**分档**改写（`docs/04` §7.1/§7.2、`docs/07` §5.10、`docs/08` §9.6/§10），`RetentionPolicyContractTest` 改为**按档位双向断言**，`OPEN-DECISIONS` D2 状态更新为「阶段 1 已实现、阶段 2/3 待排期」。**残留**：无 fixture 级端到端删除用例；B 档快照化与账户侧未实现 |
