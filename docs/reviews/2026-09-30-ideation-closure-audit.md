@@ -754,6 +754,27 @@
 
 **本批扫描同时发现（未修，仅记录）**：`docs/DEPLOYMENT_DIRECT.md` §5「日常迭代」未说明 **nginx 站点配置不在 `deploy-direct.sh` 覆盖范围内** —— 改 `deploy/nginx/*.conf` 后跑脚本不会更新服务器上的 nginx（历史上多次为手工安装）。**未在本批修复**是因为部署脚本的改动无法在本机验证服务器端效果，不符合本项目「证据化 + 云端验证」的纪律；已记入工作日志，待后续单独成批。
 
+### 2.53 简历模板代码四处维护：对账一致（7 个），结论固化为门禁（2026-10-01 第六十批扫描）
+
+方法：同一组模板代码在**四处**分别维护，逐处比对取值集合：
+
+| 处 | 内容 | 数量 |
+| --- | --- | --- |
+| 后端 `ResumeTemplateCodes.SUPPORTED` | 白名单，决定接受哪些 `templateCode` | 7 |
+| `pdf-service/src/templates/classic.js` 的 `TEMPLATE_STYLES` | **真正实现渲染**的样式 | 7 |
+| 前端 `ResumeTemplateCode`（`web/src/api/export.ts`） | TS 允许的取值 | 7 |
+| 前端 `ResumeEditorView.vue` 的 `templateOptions` | 用户**能选到**的模板 | 7 |
+
+取值 `classic / modern / minimal / ats / executive / compact / academic` —— **四处完全一致**。
+
+**这是正面结论**（无缺陷），但该面值得固化：其中 pdf-service 漏实现最危险 —— **不会**在编译期或既有测试中暴露（后端白名单校验通过、前端类型也齐），只会在用户点导出时以「不支持的简历模板」失败。故新增门禁 `TemplateCodeContractTest` 把结论固化，防将来加模板时漏改。
+
+门禁要点：四处集合一致性断言，失败信息区分「仅 X 有 / 仅 Y 有」并在文案中点明「pdf-service 漏实现只在导出时炸」；含四处规模自检（各 ≥5）；后端侧需处理 `Set.of(DEFAULT, "modern", ...)` 里的**常量引用**（把 `DEFAULT` 解析为其字面量）。
+
+验证：**红判定已做**——把 pdf-service 的 `academic` 样式键改名后门禁 1 红并给出「后端 SUPPORTED ←→ pdf-service 样式：仅后端 SUPPORTED 有 academic；仅 pdf-service 样式有（无）」，随后按 md5 校验完整恢复；门禁绿；server 全量 **907 测试 0 失败**（本批 +1，5 skipped）；CI + Functional Regression 双绿（workflow run 36855988936 / 36855988975，head 9fe996a，复核结论 success）。
+
+**同批探过但零缺陷的两个面**：① `@Transactional(readOnly = true)` 方法中无写操作（粗扫疑似 3 处，逐行核对**全部落在写事务方法内**，属窗口误报）；② 后端与前端代码中**零 TODO / FIXME / XXX / HACK**。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -951,3 +972,4 @@
 | 2026-10-01 | **第五十七批（前端 TS 类型 ↔ 后端 DTO 字段对账：修 ResumeSummary.createdAt，并立字段门禁；§2.50 扫描新增项）执行完成**：前端多声明后端不返回的字段会让运行期取到 `undefined`（界面空白 / `Invalid Date`），而 TS 编译与 e2e 都可能不报错。对账（同名 20 对 + 显式映射 8 对）：**发现 1 处** —— `ResumeSummary.createdAt`（后端 `ResumeSummary` 仅 5 字段、UI 未使用；`ResumeDetailView` 的 `v.createdAt` 是**版本**不是简历）→ 前端移除该声明；其余 27 对**逐字段一致**，含 `ResumeVersion`↔`ResumeVersionDetail`（10 字段吻合，而非 `Summary`）。**新增 `DtoFieldContractTest`**：后端字段＝record 组件（顶层逗号切分）+ class `private` 字段；前端字段＝接口字段 + 同文件内 `extends` **递归展开**；断言前端 ⊆ 后端（反向不约束）；同名自动配对 + `NAME_MAPPING` 登记命名不同的 8 对；自检四项（DTO ≥60 / 类型 ≥40 / 比对对 ≥20 / 后端字段总数 ≥300）。验证：**红判定已做**（给 `SystemHealth` 加 `bogusField` → 1 红并打印后端实际字段，md5 校验恢复）；server 全量 **904 测试 0 失败**（本批 +1，5 skipped）；web `npm run build`（含 vue-tsc）通过；CI + Functional Regression 双绿（workflow run 36852426172 / 36852426250，head a22579e，复核结论 success） |
 | 2026-10-01 | **第五十八批（同一组取值多处维护对账：前端 `AiTask.taskType` 漏 `RESUME_OPTIMIZE`，改为单一来源并立枚举门禁；§2.51 扫描新增项）执行完成**：把「后端 Java 枚举 ↔ 前端 TS 联合类型/常量数组」逐组对账。**发现 1 处** —— `web/src/api/ai.ts` **同一文件内两处清单不一致**：`AI_CONSENT_TASK_SCOPES` 9 个值（与 `AiTaskType` 一致）而 `AiTask.taskType` 只有 8 个、漏 `RESUME_OPTIMIZE`；`AiTaskContinuation.taskType` 继承该类型，后端返回该类型时前端不承认（TS 不报错）。修复：新增 `type AiTaskType = (typeof AI_CONSENT_TASK_SCOPES)[number]`、`AiTask.taskType` 改用之 —— **单一来源**，结构上消除漂移可能。其余 3 组（`AiTaskStatus` / `ApplicationStatus` / `ConfirmationStatus`）已一致。**新增 `FrontendEnumContractTest`**（4 组映射，断言集合相等，失败信息区分「仅后端有/仅前端有」；解析处理单行枚举 + 末位无分隔符 + 剥离注释）。验证：**红判定已做**（前端去掉 `CANCELLED` → 1 红并精确指出差异，md5 校验恢复）；server 全量 **905 测试 0 失败**（本批 +1，5 skipped）；web `npm run build` 通过；CI + Functional Regression 双绿（workflow run 36853658365 / 36853658230，head 9c9a6bb，复核结论 success） |
 | 2026-10-01 | **第五十九批（业务错误码三处维护对账：`docs/05` §1.3 表补 `40302` + 立三处一致性门禁；§2.52 扫描新增项）执行完成**：错误码在**三处**维护 —— 后端 `ErrorCode` 枚举（11）、`docs/05` §1.3 表（**10，漏 `40302`**）、前端 `errorCodes.ts`（11）。`40302`（AI 数据处理未授权或已撤回）是 AI 能力的**前置**码，文档漏写会让照文档实现的调用方漏掉该分支。修复：§1.3 补 40302 行（含义 + 前端处置）；**新增 `ErrorCodeContractTest`**（三处集合一致性断言，失败信息区分「仅 X 有/仅 Y 有」，文档侧只取 §1.3 小节表格行 + 解析规模自检）。验证：**红判定已做**（文档删 42901 → 1 红并精确指出差异，md5 校验恢复）；server 全量 **906 测试 0 失败**（本批 +1，5 skipped）；CI + Functional Regression 双绿（workflow run 36854846059 / 36854846075，head 7ff2f80，复核结论 success）。**同批发现未修**：`docs/DEPLOYMENT_DIRECT.md` §5 未说明 nginx 站点配置**不在** `deploy-direct.sh` 覆盖内（部署脚本改动无法本机验证服务器效果，留待后续单独成批） |
+| 2026-10-01 | **第六十批（简历模板代码四处一致性门禁；§2.53 扫描新增项）执行完成**：模板代码在**四处**维护 —— 后端 `ResumeTemplateCodes.SUPPORTED`（7）、`pdf-service` 的 `TEMPLATE_STYLES`（7）、前端 `ResumeTemplateCode` 联合类型（7）、前端 `templateOptions`（7），取值 `classic/modern/minimal/ats/executive/compact/academic`，**四处完全一致（零缺陷）**。其中 pdf-service 漏实现最危险：**不会**在编译期或既有测试中暴露，只在用户点导出时以「不支持的简历模板」失败。故**新增 `TemplateCodeContractTest`** 固化结论防漂移（失败信息点明该后果；处理 `Set.of(DEFAULT, ...)` 常量引用；四处规模自检）。验证：**红判定已做**（改 pdf-service 样式键 → 1 红并精确指出差异，md5 校验恢复）；server 全量 **907 测试 0 失败**（本批 +1，5 skipped）；CI + Functional Regression 双绿（workflow run 36855988936 / 36855988975，head 9fe996a，复核结论 success）。**同批零缺陷记录**：只读事务中无写操作（3 处疑似均为窗口误报）、代码零 TODO/FIXME |
