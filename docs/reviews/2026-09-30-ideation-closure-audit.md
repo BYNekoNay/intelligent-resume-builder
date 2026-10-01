@@ -700,6 +700,22 @@
 
 验证：**红判定已做** —— 在 `system.ts` 临时加入 `GET /api/does-not-exist` 与 `PATCH /api/system/health` 后，门禁 1 红并**逐条标注** 404 / 405，随后按 md5 校验完整恢复；修复后门禁绿；server 全量 **903 测试 0 失败**（本批 +1，5 skipped 为环境门控）；`docs/05` §15 补「前端契约一致性」约定；CI + Functional Regression 双绿（workflow run 36849142363 / 36849142250，head c503f9f，复核结论 success）。
 
+### 2.50 前端 TS 类型 ↔ 后端 DTO 字段对账：修 `ResumeSummary.createdAt`，其余 27 对一致（2026-10-01 第五十七批扫描，已随本批修复）
+
+方法：把「前端接口**声明的**字段」与「后端 DTO **返回的**字段」分开看。前端多声明一个后端不返回的字段，**运行期取到 `undefined`**（界面空白 / `Invalid Date`），而 TS 编译与 e2e 都可能不报错（新增字段往往还没接 UI）。
+
+| 项 | 取证 | 结论 |
+| --- | --- | --- |
+| 前端多声明字段 | `ResumeSummary.createdAt`（`web/src/api/resume.ts`）—— 后端 `ResumeSummary` 只有 `id/title/currentVersionId/jobDescriptionId/updatedAt` 五个字段；UI 亦**未使用**它（`ResumeDetailView.vue:277` 的 `v.createdAt` 是**版本**不是简历） | **存在缺陷 → 修复**（移除该声明） |
+| 其余 27 对 | 同名类型 20 对 + 显式映射 8 对中的 7 对，**逐字段一致** | 无缺陷 |
+| 命名不同的映射逐一验证 | `ResumeVersion` 的前端字段含 `resumeId`/`resumeJson`/`generationContext` —— 对应后端 **`ResumeVersionDetail`**（10 字段全吻合），而非 `ResumeVersionSummary`（恰好去掉这三个，正是 ideation #50 的读模型精简） | 映射关系已确认并登记 |
+
+修复动作：移除前端 `ResumeSummary.createdAt`。新增门禁 `DtoFieldContractTest`：① 后端字段＝record 组件（**按顶层逗号切分**，忽略泛型里的逗号）+ class 的 `private` 字段；② 前端字段＝接口自身字段 + **同文件内 `extends` 基接口递归展开**；③ 断言前端字段 ⊆ 后端字段（反向不约束 —— 前端可按需少声明，如 `InterviewStateResponse` 只声明 17/37）；④ 覆盖＝同名自动配对 + `NAME_MAPPING` 显式登记命名不同的 8 对；⑤ 自检四项（后端 DTO ≥60 / 前端类型 ≥40 / 比对对 ≥20 / 后端字段总数 ≥300）。
+
+验证：**红判定已做**——给 `SystemHealth` 加 `bogusField` 后门禁 1 红并给出「前端多出 [bogusField]；后端实际解析到=[service, status, version, capabilities, checks]」，随后按 md5 校验完整恢复；修复后门禁绿；server 全量 **904 测试 0 失败**（本批 +1，5 skipped）；web `npm run build`（含 `vue-tsc` 类型检查）通过；CI + Functional Regression 双绿（workflow run 36852426172 / 36852426250，head a22579e，复核结论 success）。
+
+> 过程记录：本门禁首版有**两个自造缺陷**——(a) 后端 record 组件切分后**漏了「取末位 token 作字段名」**，把整段文本当成字段名（表现：每个前端类型都报「多出全部字段」）；(b) 首轮用括号配对法提取 record 体失败。两者都靠**自检断言**（后端字段总数 ≥300）与**诊断输出**（把「后端实际解析到」打进失败信息）定位。→ 门禁必须能「发现自己解析失败」，否则解析失效会伪装成「大量违规」而被误当成真缺陷。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -894,3 +910,4 @@
 | 2026-10-01 | **第五十四批（环境变量样例对账：修样例值漂移与死键，并立样例门禁；§2.47 扫描新增项）执行完成**：`server/.env.example` 是配置的**第三个来源**（前两个是代码 `@Value` 兜底与 yml 默认值），此前不在任何门禁覆盖内。① **值漂移**：`AI_WORKER_LEASE_S=60` 而 yml 是 `${AI_WORKER_LEASE_S:660}` —— 照抄样例即把租约压到链总预算 600s 之下、长任务被接管重跑（第一批 #60 只改了 yml）；② **死键**：`AI_MOCK_FAIL_RATE` / `AI_MOCK_LATENCY_MS` 全仓零消费点（Mock 模型已非正常功能路径）。修复：样例 60→660（注明须与 yml 一致）、移除两个 Mock 键；**新增 `EnvExampleContractTest`**（① 样例键必须在 yml 有 `${}` 占位符，② 标量值须与 yml 默认一致、列表型含逗号则跳过；含规模自检）；`docs/08` 补「第三个来源」条目。验证：**红判定已做**（恢复 60 + 加回 Mock 键 → 两用例各 1 红并点明键名，md5 校验恢复）；定向 2/2 绿；server 全量 **900 测试 0 失败**（本批 +2，5 skipped 为环境门控）；CI + Functional Regression 双绿（workflow run 36846635376 / 36846635360，head 04cecb6，复核结论 success） |
 | 2026-10-01 | **第五十五批（数据字典 ↔ Flyway 迁移双向对账：补 6 张表章节、更正命名漂移、标注未实现表，并立双向门禁；§2.48 扫描新增项）执行完成**：`docs/04` §3「表结构设计」是评审/答辩用的 schema 契约，此前无任何门禁保证它与 `V1~V34` 一致。① **文档漏写 6 张已实现表**：`personal_profile`(V13+V15)、`communication_draft`(V17)、`communication_template`(V23+V29)、`inline_optimization_record`(V3)、`interview_ai_attempt`(V20)、`interview_asset_section`(V23+V25)；② **文档虚构 1 张表**：§3.12 `application_status_history` 无 `CREATE TABLE`、零代码引用（状态迁移由 `application_record.status` + `stage_entered_at`(V26) 承载）；③ **命名漂移**：§3.9 `material_resume_task` → 迁移真名 `material_resume_generation`(V6)。修复：新增 §3.17~§3.22 六章节（按 DDL 提取，含 V15/V25/V29 ALTER）、§3.9 更名、§3.12 标注「设计草案，未实现」、§2.2 补「状态」列、§8 建表顺序更正；**新增 `SchemaDocContractTest`**（双向断言：迁移表必须在 §3 有章节；§3 章节须对应迁移表或显式标注未实现）。验证：**红判定已做**（改回旧名 + 去掉标注 → 两用例各 1 红并分别点出漏写与虚构，md5 校验恢复）；门禁 2/2 绿；server 全量 **902 测试 0 失败**（本批 +2，5 skipped 为环境门控）；CI + Functional Regression 双绿（workflow run 36847869352 / 36847869373，head e444dcc，复核结论 success） |
 | 2026-10-01 | **第五十六批（前端 API 契约对账：93 调用 × 95 端点双向零缺陷，结论固化为门禁；§2.49 扫描新增项）执行完成**：把前端 `web/src/api/*.ts` 的 **93** 个 `(method, path)` 与后端 19 个控制器的 **95** 个端点做全量对账（路径变量归一 `{}`，**含 HTTP 动词** —— 路径对但动词错同样是 405）。结果：**前端 → 后端零缺失**；后端 → 前端仅 2 个无 UI 调用且有据（`GET /api/system/health/detail` 运维端点、`POST /api/auth/logout-all` 无前端入口）；字段级抽样 `AiTask` 前后端 12 字段**逐字段一致**。该面为**正面结论**（无缺陷），故新增静态门禁 `FrontendApiContractTest` 防漂移：断言前端每个 `(method, path)` 在后端存在，失败信息区分 **404**（路径不存在）/ **405**（动词不同）；反向**不断言**（后端有前端无属合理）；含规模自检。解析踩坑固化：泛型可能嵌套或含引号（`ApiResponse<import('./ai').AiTask>`），**不能**用「动词与路径之间的字符」匹配动词，否则漏掉 `interview.ts` 的 follow-up 调用 → 改为「先定位路径字面量、再向前回溯最近动词」。验证：**红判定已做**（加 `GET /api/does-not-exist` + `PATCH /api/system/health` → 门禁 1 红并逐条标注 404/405，md5 校验恢复）；server 全量 **903 测试 0 失败**（本批 +1，5 skipped 为环境门控）；`docs/05` §15 补前端契约一致性约定；CI + Functional Regression 双绿（workflow run 36849142363 / 36849142250，head c503f9f，复核结论 success） |
+| 2026-10-01 | **第五十七批（前端 TS 类型 ↔ 后端 DTO 字段对账：修 ResumeSummary.createdAt，并立字段门禁；§2.50 扫描新增项）执行完成**：前端多声明后端不返回的字段会让运行期取到 `undefined`（界面空白 / `Invalid Date`），而 TS 编译与 e2e 都可能不报错。对账（同名 20 对 + 显式映射 8 对）：**发现 1 处** —— `ResumeSummary.createdAt`（后端 `ResumeSummary` 仅 5 字段、UI 未使用；`ResumeDetailView` 的 `v.createdAt` 是**版本**不是简历）→ 前端移除该声明；其余 27 对**逐字段一致**，含 `ResumeVersion`↔`ResumeVersionDetail`（10 字段吻合，而非 `Summary`）。**新增 `DtoFieldContractTest`**：后端字段＝record 组件（顶层逗号切分）+ class `private` 字段；前端字段＝接口字段 + 同文件内 `extends` **递归展开**；断言前端 ⊆ 后端（反向不约束）；同名自动配对 + `NAME_MAPPING` 登记命名不同的 8 对；自检四项（DTO ≥60 / 类型 ≥40 / 比对对 ≥20 / 后端字段总数 ≥300）。验证：**红判定已做**（给 `SystemHealth` 加 `bogusField` → 1 红并打印后端实际字段，md5 校验恢复）；server 全量 **904 测试 0 失败**（本批 +1，5 skipped）；web `npm run build`（含 vue-tsc）通过；CI + Functional Regression 双绿（workflow run 36852426172 / 36852426250，head a22579e，复核结论 success） |
