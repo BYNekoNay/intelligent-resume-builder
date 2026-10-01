@@ -833,6 +833,10 @@
 
 **验证**：定向 22/22 绿；server 全量 **919 测试 0 失败**（本批 +10，5 skipped 为环境门控）；日志 ASCII 化（顺带修：本项目 log 语句一律保持 ASCII，新加的破折号已改为 `-`）。
 
+> **补正（第六十五批）**：上述「919 全绿」对 `RetentionPurgeRepositorySchemaTest` 是**假阳性** ——
+> 该类漏了 `@ActiveProfiles("test")`，实际连的是**本机默认 MySQL 数据源**；CI 上该作业因此失败。
+> 详见 §2.57。**教训：本地"全绿"不等于环境无关**——只要测试碰了真实外部依赖，本地通过就可能是巧合。
+
 **残留（已登记，不隐瞒）**：① 本阶段**没有**「造真实行 → 断言被真删」的端到端用例（fixture 成本高），代价是「删除语句本身写错」只由静态断言间接覆盖；② B 档快照化与账户侧（阶段 2/3）未实现，文档仍按分档标注。
 
 产物：`server/src/main/java/com/intelligentresume/retention/*`（3 类，新增）、`RetentionPurgeServiceTest` / `RetentionPurgeRepositorySchemaTest`（新增）、`AppObservability`（+`recordRetentionPurge`）、`NumericConfigurationValidator`（+4 键）、`application.yml`、`server/.env.example`；文档 `docs/04` §7.1/§7.2、`docs/07` §5.10、`docs/08` §9.6/§10、`docs/decisions/OPEN-DECISIONS.md`、`docs/decisions/DECISION-BRIEF.md`、设计文档 `docs/plans/2026-10-01-001-data-retention-tiered-purge.md`。
@@ -874,6 +878,48 @@ api 单元**未被重写**（mtime 仍 2026-09-25）→ 证明「仅在变化时
 产物：`scripts/deploy-direct.remote.sh`（systemd 同步）、`scripts/probe-deployment.sh`（+2 节共 16 项、
 `normalize` 去 CR）、`docs/DEPLOYMENT_DIRECT.md`（§4.5/§5/§5.2/§8）、
 `docs/reviews/2026-10-01-cloud-e2e-verification.md` §7。
+
+### 2.57 CI 抓到「本地永远绿」的门禁：测试依赖了本机 MySQL（2026-10-01 第六十五批）
+
+**现象**：第六十四批推送后 CI（run `36882146555`）Server tests **失败**，Functional Regression 与
+Web/PDF 作业均通过。失败的全是 `RetentionPurgeRepositorySchemaTest` 的 3 个用例，报
+`Failed to load ApplicationContext`。
+
+**根因（两层，第二层更值得记）**：
+
+1. 该类用了 `@SpringBootTest` 却**漏了 `@ActiveProfiles("test")`** ⇒ 连的是 `application.yml` 的
+   默认数据源（MySQL）。`Caused by: java.net.ConnectException: Connection refused` —— CI 没有 MySQL。
+   **本机恰好装有 MySQL，于是该类"全绿"，全量 919 也全绿**：一次典型的**假阳性**
+   （征兆其实有：该用例耗时 25.9s / 13.4s，而同类 H2 用例是几十到几百毫秒）。
+2. 即便补上 `test` profile 也不够：该用例的元数据查询
+   `SELECT ... FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME = ?`
+   —— **`REFERENCED_TABLE_NAME` 只存在于 MySQL**，H2 2.2 没有该列（实测
+   `JdbcSQLSyntaxErrorException: Column "REFERENCED_TABLE_NAME" not found`）。
+   即这个"守卫"从设计上就只能跑在真实 MySQL 上。
+
+**修复**：
+
+| 项 | 内容 |
+| --- | --- |
+| 补 profile | 加 `@ActiveProfiles("test")`（与其余 37 个 `@SpringBootTest` 一致） |
+| 引用完整性检查改为**静态** | 解析 `db/migration/*.sql`：语句主角表 = `CREATE/ALTER TABLE` 名，外键 = `REFERENCES <table>(`；统计"引用该资源的表"，断言它们都出现在候选 SQL 里。Flyway 是本仓库 schema 的唯一来源（`ddl-auto: none`），结果**与运行环境无关**，且"漏一项即红"的能力不变 |
+| 保留的两条 | 「候选 SQL 在真实 schema 上可执行」（H2/test profile）、「删除语句带 `deleted_at IS NOT NULL`」（纯字符串断言） |
+| 新增门禁 | `SpringBootTestProfileContractTest`：每个 `@SpringBootTest` 必须声明 `@ActiveProfiles`（含规模自检 ≥30），把这条不成文约定变成可检查断言 |
+
+**红判定（两轮，第二轮抓出了假门禁）**：
+
+| 轮次 | 对象 | 结果 |
+| --- | --- | --- |
+| 1 | 静态解析的引用完整性 | 从候选 SQL 删去 `ats_check_result` 一处 `NOT EXISTS` → **1 红**且**点名** `ats_check_result`；md5 校验恢复 |
+| 2 | 新门禁 `SpringBootTestProfileContractTest` | **首版是假绿**：用整文件 `contains("@ActiveProfiles")` 判据，而被检查文件的 **javadoc 里正好写了该注解名** ⇒ 去掉注解后门禁**依然通过**。改为「先剥块注释/行注释 + 只认行首注解」后，去掉注解 → **1 红并点名文件**；md5 校验恢复，正常态复绿 |
+
+> 这正是项目铁律「新增任何门禁前，必须先用**已知的坏样本**验证它会失败」的价值所在：
+> 一个 `contains` 判据就能造出"永远通过"的门禁，且它看起来完全合理。
+
+**验证**：全量 **920 测试 0 失败**（本批 +1 门禁，5 skipped 为环境门控）；CI 待复核（本批推送后）。
+
+产物：`RetentionPurgeRepositorySchemaTest`（改写为静态解析 + `@ActiveProfiles`）、
+`SpringBootTestProfileContractTest`（新增）。
 
 ## 3. 已闭环（不再重复提报）
 
@@ -1078,3 +1124,4 @@ api 单元**未被重写**（mtime 仍 2026-09-25）→ 证明「仅在变化时
 | 2026-10-01 | **第六十三批（决策落地 D1/D3/D4/D5，无 §2.x 新扫描）执行完成**：把 `OPEN-DECISIONS` 的 9 条 OPEN 整理成 `docs/decisions/DECISION-BRIEF.md`（可逐条拍板的清单），用户拍板 4 条且**全部按推荐项**（D1 A+C、D2 B、D3 A、D4 B）。落地：**D3** `app.job.jd-text.min-length` 由「声明无消费点」改为**真正生效**（`JdKeywordParser` 构造注入阈值；`parse` 在 `null/isBlank` 之外新增「`trim().length() < minLength` → role/keywords/requirements 全空」，**不**拒绝入参——「招 Java 工程师」是合法短 JD；测试 7→**9** 覆盖阈值两侧边界；**红判定已做**；该键从 `ConfigConsumerContractTest` 白名单移出）；**D4** 移除 `app.ai.confirmation.*` 三键（行为已由 `ConfirmRequest` 的 `@Size(max = 200)` 承载）→ 白名单**现为空**；**D1** `docs/05` §2.9 改写为明确结论（维持现状 + 删号兜底，无代码改动）；**D2** 登记为 `DECIDED · 实现待排期`（属新增功能，未实现不标 RESOLVED）；**D5** 核实「降级为规则分 + 失败原因暴露」**本就已实现**（`analysisStatus=RULES_FALLBACK` + `analysisSource=RULES` + `AtsFallbackInfo{code,message,retryable,consentRequired}`），在 `docs/05` §8.3 写成三态口径（注意 `aiFailure` 是**面试**字段，ATS 用 `fallback`）。回归：定向 32 项全绿；server 全量 **909 测试 0 失败**（本批 +2，5 skipped）；提交 `9561f73 → dd3f703`（决策落地，9 文件）→ `737c5a0`（D5，3 文件）；CI 双绿（`dd3f703` 含 Functional Regression #36869221528） |
 | 2026-10-01 | **第六十四批（决策 D2 阶段 1 落地：数据生命周期分档清扫作业；§2.55 扫描新增项）执行完成**：实现 A 档「无引用者」按期物理删除，仅覆盖 `career_material` 与 `resume_version`（`resume_version` 被 **11 处**外键引用含自引用 —— 直接硬删必撞外键，这是「必须分档」的硬理由）。新增 `RetentionPurgeService`（`@Scheduled`）、`RetentionPurgeRepository`（候选查询逐条 `NOT EXISTS` 排除引用者；删除语句带 `deleted_at IS NOT NULL` 二次保护）、`RetentionPurgeProperties` 与 `app.retention.purge.*` 配置。**纠正两处在途偏差**：① 原「循环到候选耗尽」与方案 §6 G3「单轮每表最多 batch-size 行」矛盾 → 改为**一次调度只处理一批**；② 单测 `assertEquals(0, purgeExpiredSoftDeleted() - 0 - 0, …)` 是**重复调用**而非断言上次结果 → 改为直接断言。护栏 **G1–G7 全落地**（含新增 G6 指标 `retention_purge_scanned/purged/skipped` 与 G7 四键接入 `NumericConfigurationValidator`，受校验键 14→**18**）。守卫用**元数据反查**而非 fixture 端到端：`RetentionPurgeRepositorySchemaTest` 从 `INFORMATION_SCHEMA` 反查所有指向该资源的外键与 SQL 比对（**漏一项即红**）+ 断言删除语句恒带软删限定。**红判定已做**：删去 `ats_check_result` 一处 `NOT EXISTS` → 完整性用例红；`dryRun` 默认值 `true`→`false` → 护栏用例红；md5 校验完整恢复。回归：定向 22/22 绿；server 全量 **919 测试 0 失败**（本批 +10，5 skipped 为环境门控）。文档按**分档**改写（`docs/04` §7.1/§7.2、`docs/07` §5.10、`docs/08` §9.6/§10），`RetentionPolicyContractTest` 改为**按档位双向断言**，`OPEN-DECISIONS` D2 状态更新为「阶段 1 已实现、阶段 2/3 待排期」。**残留**：无 fixture 级端到端删除用例；B 档快照化与账户侧未实现 |
 | 2026-10-01 | **第六十五批（云端复验第六十四批 + 修复 systemd 单元不随部署同步；§2.56 扫描新增项）执行完成**：因第六十四批新增 `@Scheduled` 作业与 4 个接入 fail-closed 校验的配置键（受校验键 14→18，校验失败会让应用**起不来**），按铁律跑「部署 + 真实链路复验」。**第一轮部署全绿**：探针 12/12、`journalctl` 抓到 `Retention purge disabled (app.retention.purge.enabled=false); skipped`（作业已装载且默认不删）、无「数值型配置未解析」报错（4 个新键在真实 `Environment` 解析成功）、`Started … in 11.911 seconds` 无 OOM。但 `ss -lntp` 暴露 pdf-service 监听 **`*:3001`** —— 与文档不符。**取证三条**：服务器 pdf 单元 mtime = **2026-09-25**、无 `PDF_SERVICE_HOST`；仓库单元 `:25` 早有该行；`deploy-direct.remote.sh` 对 systemd **零命中**。→ 与第六十一批 nginx **同源**，**第四十批的 PDF 回环收敛从未生效**。**修复**：`remote.sh` 新增 systemd 单元**幂等**同步（内容变化才 `install` + `daemon-reload`，装前剥离 CR）；探针 **12→16 项**（第 6 节 B 类：生效单元 vs 仓库单元归一化比对；第 7 节 A 类：**在服务器上**断言 8080/3001 **仅绑回环** —— 从外部探测会因安全组假阳性）。**验证（红→绿）**：新断言先跑得 **14/16、exit 1**（**精确指出** `> Environment=PDF_SERVICE_HOST=127.0.0.1` 与 `PDF 3001 监听在非回环地址：*:3001`）→ 重新部署（1 分 47 秒）→ **16/16 PASS、`DEPLOY_EXIT=0`**，`ss -lntp` = `127.0.0.1:3001`；api 单元**未被重写**（mtime 仍 09-25）证明幂等生效。黑盒回归第三轮 **4 套件全 PASS、0 失败 0 跳过**（含 AI 全链路，15 分 28 秒）。同批更正 `docs/DEPLOYMENT_DIRECT.md` §4.5「`deploy/` 需手工上传」的过期表述。报告：`docs/reviews/2026-10-01-cloud-e2e-verification.md` §7 |
+| 2026-10-01 | **第六十五批（CI 修复：门禁依赖本机 MySQL，「本地永远绿」；§2.57 扫描新增项）执行完成**：第六十四批推送后 **CI Server tests 失败**（run 36882146555），失败的全是 `RetentionPurgeRepositorySchemaTest` 3 用例（`Failed to load ApplicationContext`）。**根因两层**：① 该类漏 `@ActiveProfiles("test")` ⇒ 连 `application.yml` 默认数据源（MySQL），`Caused by: ConnectException: Connection refused` —— **本机有 MySQL 故本地全量 919"全绿"是假阳性**（征兆：该用例耗时 25.9s，同类 H2 用例仅几十~几百毫秒）；② 其元数据查询用 `INFORMATION_SCHEMA.KEY_COLUMN_USAGE.REFERENCED_TABLE_NAME`，该列**只存在于 MySQL**（H2 2.2 实测 `Column "REFERENCED_TABLE_NAME" not found`）⇒ 该守卫从设计上只能跑在真实 MySQL 上。**修复**：补 `@ActiveProfiles("test")`；把「引用清单完整性」改为**静态解析 Flyway 迁移**（`db/migration/*.sql`：语句主角表 = `CREATE/ALTER TABLE` 名，外键 = `REFERENCES <table>(`），结果与运行环境无关而"漏一项即红"不变；「候选 SQL 可执行」（H2）与「删除语句带软删限定」保留。**新增门禁 `SpringBootTestProfileContractTest`**（每个 `@SpringBootTest` 必须声明 `@ActiveProfiles`，含规模自检 ≥30）。**红判定两轮**：① 删去 `ats_check_result` 一处 `NOT EXISTS` → 1 红且点名；② **首版门禁是假绿** —— 用整文件 `contains("@ActiveProfiles")` 判据，而被检查文件的 **javadoc 里正好写了该注解名**，去掉注解后门禁**仍通过**；改为「剥注释 + 只认行首注解」后 1 红并点名文件；两轮均 md5 校验恢复。验证：全量 **920 测试 0 失败**（本批 +1，5 skipped 为环境门控）。同批在 §2.55 加**补正**说明此前「919 全绿」对该类为假阳性 |
