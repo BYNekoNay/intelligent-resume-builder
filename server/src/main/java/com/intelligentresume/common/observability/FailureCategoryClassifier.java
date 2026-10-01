@@ -59,6 +59,10 @@ public class FailureCategoryClassifier {
 
     public PdfFailureCategory pdfMessage(String message) {
         if (contains(message, "storage", "store")) return PdfFailureCategory.STORAGE;
+        // 体积上限的中文文案（PdfServiceClient 在调用前后各自的判据）：输入＝导出数据，
+        // 输出＝导出文件。不依赖英文 "too large" 是因为失败原因以中文原文落库并展示。
+        if (contains(message, "导出数据超出最大允许大小")) return PdfFailureCategory.INPUT_TOO_LARGE;
+        if (contains(message, "导出文件超出最大允许大小")) return PdfFailureCategory.OUTPUT_TOO_LARGE;
         if (contains(message, "input", "too large", "413")) return PdfFailureCategory.INPUT_TOO_LARGE;
         if (contains(message, "auth", "401", "403")) return PdfFailureCategory.AUTH;
         // 容量/drain 拒绝（pdf-service 503 的可读文案，中文或英文）

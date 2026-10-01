@@ -105,7 +105,7 @@ class PdfServiceClientHealthCacheTest {
                 mock(AiTaskRepository.class), mock(ExportTaskRepository.class));
         return new PdfServiceClient(
                 "http://127.0.0.1:" + server.getAddress().getPort(),
-                "test-token", 5, 524288L, healthCacheTtlMs,
+                "test-token", 5, 524288L, 10485760L, healthCacheTtlMs,
                 observability, new FailureCategoryClassifier());
     }
 }

@@ -38,6 +38,7 @@ public class PdfServiceClient {
     private final RestClient healthRestClient;
     private final String serviceToken;
     private final long maxInputBytes;
+    private final long maxOutputBytes;
     private final long healthCacheTtlMs;
     private final AppObservability observability;
     private final FailureCategoryClassifier failureCategoryClassifier;
@@ -52,11 +53,13 @@ public class PdfServiceClient {
             @Value("${app.pdf.service-token:dev-pdf-token-change-me}") String serviceToken,
             @Value("${app.pdf.render-timeout-seconds:50}") int timeoutSeconds,
             @Value("${app.pdf.max-input-bytes:524288}") long maxInputBytes,
+            @Value("${app.pdf.max-output-bytes:10485760}") long maxOutputBytes,
             @Value("${app.pdf.health-cache-ttl-ms:5000}") long healthCacheTtlMs,
             AppObservability observability,
             FailureCategoryClassifier failureCategoryClassifier) {
         this.serviceToken = serviceToken;
         this.maxInputBytes = maxInputBytes;
+        this.maxOutputBytes = maxOutputBytes;
         this.healthCacheTtlMs = healthCacheTtlMs;
         this.observability = observability;
         this.failureCategoryClassifier = failureCategoryClassifier;
@@ -116,6 +119,17 @@ public class PdfServiceClient {
 
             if (pdfBytes == null || pdfBytes.length == 0) {
                 throw new BusinessException(ErrorCode.PDF_FAILURE, "PDF 服务返回空响应");
+            }
+
+            // 输出上限：此前 app.pdf.max-output-bytes 在四处配置声明却无消费点（声明即虚构），
+            // 渲染返回多大就落盘多大。超限文件不该进入私有存储、也不该被用户下载，
+            // 故在落盘前拒绝（docs/03 §9.7「每个任务设置…最大输入和输出大小」）。
+            if (pdfBytes.length > maxOutputBytes) {
+                log.warn("PDF render output too large: {} bytes > limit {}", pdfBytes.length, maxOutputBytes);
+                observability.recordPdfRender(templateCode, false, PdfFailureCategory.OUTPUT_TOO_LARGE,
+                        Duration.ofNanos(System.nanoTime() - startedAt));
+                throw new BusinessException(ErrorCode.PDF_FAILURE,
+                        "导出文件超出最大允许大小 (" + pdfBytes.length + " > " + maxOutputBytes + " bytes)");
             }
 
             log.debug("PDF render success: {} bytes", pdfBytes.length);

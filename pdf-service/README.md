@@ -13,6 +13,7 @@
 
 - 同时最多 `PDF_SERVICE_MAX_CONCURRENT_PAGES`（默认 4）个页面在渲染，超出的请求进入 FIFO 等待队列；队列上限 `PDF_SERVICE_MAX_QUEUE_SIZE`（默认 16，0 = 不排队），队满即返回 503，请求不会无限堆积。
 - 排队等待上限 `PDF_SERVICE_QUEUE_TIMEOUT_MS`（默认 15000ms）：排队超时的请求以可重试 503 拒绝，服务端总耗时上界 = 排队上限 + `2 × PDF_SERVICE_RENDER_TIMEOUT_MS`（默认 15000ms，覆盖 `setContent` 与 `pdf` 两次页面操作）。
+- **体积上限**：请求体（输入）≤1MB；单次渲染输出 ≤ `PDF_SERVICE_MAX_OUTPUT_BYTES`（默认 10485760 = 10MB，超限以 `500` + `50003` 返回、不写回结果）。API 侧另有 `app.pdf.max-input-bytes`（默认 512KB，调用前）与 `app.pdf.max-output-bytes`（默认 10MB，落盘前）两道判据；两层输出上限的关系（服务侧不得低于 API 侧，否则 API 声明的允许区间不可达）由 server 侧静态门禁 `PdfOutputBoundContractTest` 守护。
 - **死线链**：服务端上界（默认 45s）必须小于 API 侧读超时（`app.pdf.render-timeout-seconds`，默认 50s），该值又必须小于导出任务租约（`app.pdf.worker.lease-seconds`，默认 90s，且租约须覆盖 `batch-size × 读超时`）。内层死线先触发，服务端的 503/失败路径才能正常到达调用方，不会出现「客户端先断开、服务端后渲染成功」的浪费与误判。链条由 `server` 侧静态门禁 `PdfDeadlineContractTest` 守护。
 - 收到 `SIGTERM`/`SIGINT` 后进入 drain：拒绝新请求、清空等待队列，in-flight 渲染继续跑完；最多等待 `PDF_SERVICE_DRAIN_TIMEOUT_MS`（默认 10000ms）后关闭浏览器与监听。
 - 容器部署需保证宽限期大于 drain 超时（`deploy/docker-compose.prod.yml` 已设 `stop_grace_period: 30s`）。
@@ -29,6 +30,7 @@
 | `PDF_SERVICE_QUEUE_TIMEOUT_MS` | 15000 | 排队等待上限，超时返回可重试 503（整数 ≥1） |
 | `PDF_SERVICE_RENDER_TIMEOUT_MS` | 15000 | 单次页面操作（`setContent` / `pdf`）预算（整数 ≥1） |
 | `PDF_SERVICE_DRAIN_TIMEOUT_MS` | 10000 | 关闭时等待 in-flight 渲染的上限（整数 ≥1） |
+| `PDF_SERVICE_MAX_OUTPUT_BYTES` | 10485760 | 单次渲染输出上限，超限返回 500 + 50003（整数 ≥1；不得低于 API 侧 `app.pdf.max-output-bytes`） |
 
 非法取值会在启动时直接以退出码 1 失败。
 

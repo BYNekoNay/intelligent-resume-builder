@@ -56,3 +56,17 @@ test('startup rejects a non-numeric render timeout configuration', () => {
   assert.equal(result.status, 1)
   assert.match(result.stderr, /PDF_SERVICE_RENDER_TIMEOUT_MS must be an integer >= 1/)
 })
+
+test('startup rejects an invalid render output bound configuration', () => {
+  const result = spawnSync(process.execPath, ['src/server.js', '--port=3105'], {
+    cwd: process.cwd(),
+    env: { ...process.env, PDF_SERVICE_MAX_OUTPUT_BYTES: '0' },
+    encoding: 'utf8',
+    // 非法取值必须**启动即失败**。若校验缺失，服务会正常监听、spawnSync 将一直等下去，
+    // 故设超时：超时（status=null）同样判失败，不会把「未校验」伪装成通过。
+    timeout: 15_000,
+  })
+
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /PDF_SERVICE_MAX_OUTPUT_BYTES must be an integer >= 1/)
+})

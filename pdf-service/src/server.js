@@ -36,6 +36,11 @@ const queueTimeoutMs = positiveInteger('PDF_SERVICE_QUEUE_TIMEOUT_MS', 15_000, 1
 // server 侧静态门禁 PdfDeadlineContractTest 守护。
 const renderTimeoutMs = positiveInteger('PDF_SERVICE_RENDER_TIMEOUT_MS', 15_000, 1)
 const drainTimeoutMs = positiveInteger('PDF_SERVICE_DRAIN_TIMEOUT_MS', 10_000, 1)
+// 单次渲染的**输出**上限（第二道闸）：API 侧 app.pdf.max-output-bytes（默认同名 10MB）在
+// 收到响应后判定并拒绝落盘；服务侧的先判定避免把超限结果经 HTTP 全量回传（内存与带宽都被浪费），
+// 也覆盖「调用方把 API 上限调高」的情况。取值不得低于 API 上限——契约由
+// server 侧静态门禁 PdfOutputBoundContractTest 守护。
+const maxOutputBytes = positiveInteger('PDF_SERVICE_MAX_OUTPUT_BYTES', 10_485_760, 1)
 const browserPool = createBrowserPool(undefined, { maxConcurrentPages, maxQueueSize, queueTimeoutMs })
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -106,6 +111,12 @@ app.post('/render', requireServiceToken, async (request, response) => {
       await page.setContent(renderResumeHtml(templateCode, payload), { waitUntil: 'load' })
       return page.pdf({ format: 'A4', printBackground: true, margin: { top: '0', right: '0', bottom: '0', left: '0' } })
     })
+    // 输出上限：超限结果不写回（视为服务端条件，走 500/50003 而非请求体语义的 413）
+    if (pdf.length > maxOutputBytes) {
+      const error = new Error(`PDF 输出超出最大允许大小（${pdf.length} > ${maxOutputBytes} bytes）`)
+      error.status = 500
+      throw error
+    }
     response.type('application/pdf').send(Buffer.from(pdf))
   } catch (error) {
     // 容量/drain 拒绝：显式可重试语义（503 + Retry-After），与 API 侧「失败可重试」一致

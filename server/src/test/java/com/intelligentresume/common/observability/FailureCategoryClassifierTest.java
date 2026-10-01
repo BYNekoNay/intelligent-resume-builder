@@ -34,6 +34,12 @@ class FailureCategoryClassifierTest {
                 classifier.pdf(new ResourceAccessException("connection refused")));
         assertEquals(PdfFailureCategory.AUTH, classifier.pdfMessage("PDF service auth failed"));
         assertEquals(PdfFailureCategory.INPUT_TOO_LARGE, classifier.pdfMessage("input too large"));
+        // 体积上限的两条中文文案分别对应输入/输出判据（失败原因以中文原文落库并展示，
+        // 不依赖英文 "too large" 才能命中；此前中文输入超限会被误标为 RENDER）
+        assertEquals(PdfFailureCategory.INPUT_TOO_LARGE,
+                classifier.pdfMessage("导出数据超出最大允许大小 (524288 bytes)"));
+        assertEquals(PdfFailureCategory.OUTPUT_TOO_LARGE,
+                classifier.pdfMessage("导出文件超出最大允许大小 (11534336 > 10485760 bytes)"));
         assertEquals(PdfFailureCategory.STORAGE, classifier.pdfMessage("storage write failed"));
         // 容量/drain 拒绝（pdf-service 503 → 可重试类别）
         assertEquals(PdfFailureCategory.OVERLOADED,
