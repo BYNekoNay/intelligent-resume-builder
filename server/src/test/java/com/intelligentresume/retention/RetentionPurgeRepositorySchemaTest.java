@@ -4,14 +4,17 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.test.context.ActiveProfiles;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -19,30 +22,47 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 分档清扫**手写 SQL** 的真实 schema 校验（决策 D2 阶段 1）。
+ * 分档清扫**手写 SQL** 的 schema 守卫（决策 D2 阶段 1）。
  *
  * <p>三条用例针对手写 SQL 的三种失败模式：
  * <ol>
  *   <li><b>列名/表名写错</b> —— 编译期无保护，只在运行时炸 → {@link #purgeCandidateQueriesRunAgainstRealSchema()}；</li>
  *   <li><b>引用清单漏项</b> —— 更危险：漏掉一个引用者，就会把**被引用的行**当无引用者物理删除，
- *       造成不可逆的数据损坏 → {@link #purgeSqlCoversEveryForeignKey()} 从 schema 元数据
- *       反查所有指向该资源的外键，与 SQL 里出现过的表逐一比对；</li>
+ *       造成不可逆的数据损坏 → {@link #purgeSqlCoversEveryForeignKey()}；</li>
  *   <li><b>删除语句丢掉软删限定</b> —— 候选查询被改坏时会删到**未软删的活数据** →
- *       {@link #deleteStatementsNeverTouchLiveRows()} 断言删除语句恒带 {@code deleted_at IS NOT NULL}。</li>
+ *       {@link #deleteStatementsNeverTouchLiveRows()}。</li>
  * </ol>
+ *
+ * <p><b>为什么第 2 条用「静态解析迁移」而不是数据库元数据</b>（实测教训）：
+ * 初版用 `SELECT DISTINCT TABLE_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+ * WHERE REFERENCED_TABLE_NAME = ?`。该列**只存在于 MySQL**，H2 2.2 没有它，而且
+ * 这个类当时**漏了 `@ActiveProfiles("test")`** ⇒ 它连的是默认 MySQL 数据源：
+ * **本机恰好有 MySQL，于是"全绿"；CI 没有 MySQL，直接 `Communications link failure`。**
+ * 也就是说，一个"永远通过"的门禁只在有本地数据库时才为真 —— 正是最危险的那种。
+ * 现在改为解析 `db/migration/*.sql`（Flyway 是本仓库 schema 的唯一来源，
+ * `ddl-auto: none`）：结果与运行环境**完全无关**，且"漏一项即红"的能力不变。
+ * 同时保留第 1 条在真实 schema（`test` profile 的 H2）上执行候选 SQL —— 那条验的是
+ * 「表名/列名与引用清单一致」的运行期事实，与第 2 条的静态完整性互补。
  */
 @SpringBootTest
+@ActiveProfiles("test")
 class RetentionPurgeRepositorySchemaTest {
 
-    /** 从 SQL 中提取被提及的表名（本仓库的候选 SQL 一律写成 {@code FROM <table> t}）。 */
+    /** 从候选 SQL 中提取被提及的表名（本仓库的候选 SQL 一律写成 {@code FROM <table> t}）。 */
     private static final Pattern MENTIONED_TABLE =
             Pattern.compile("FROM\\s+([a-z_]+)\\s+t\\b", Pattern.CASE_INSENSITIVE);
 
-    @Autowired
-    private RetentionPurgeRepository repository;
+    /** 迁移语句里被引用的目标表：{@code REFERENCES <table> (}。 */
+    private static final Pattern FK_REFERENCE =
+            Pattern.compile("REFERENCES\\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\\s*\\(", Pattern.CASE_INSENSITIVE);
+
+    /** 迁移语句的主角表：{@code CREATE TABLE <name>} / {@code ALTER TABLE <name>}。 */
+    private static final Pattern STATEMENT_TABLE =
+            Pattern.compile("(?:CREATE|ALTER)\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?`?([A-Za-z_][A-Za-z0-9_]*)`?",
+                    Pattern.CASE_INSENSITIVE);
 
     @Autowired
-    private JdbcTemplate jdbc;
+    private RetentionPurgeRepository repository;
 
     @Test
     @DisplayName("候选 SQL 能在真实 schema 上执行（表名/列名与引用清单一致）")
@@ -56,8 +76,8 @@ class RetentionPurgeRepositorySchemaTest {
     }
 
     @Test
-    @DisplayName("引用清单完整性：候选 SQL 覆盖所有指向该资源的外键（漏判会误删，不可逆）")
-    void purgeSqlCoversEveryForeignKey() {
+    @DisplayName("引用清单完整性：候选 SQL 覆盖迁移里所有指向该资源的外键（漏判会误删，不可逆）")
+    void purgeSqlCoversEveryForeignKey() throws Exception {
         assertCoverage("resume_version", RetentionPurgeRepository.PURGEABLE_RESUME_VERSIONS);
         assertCoverage("career_material", RetentionPurgeRepository.PURGEABLE_CAREER_MATERIALS);
     }
@@ -69,29 +89,11 @@ class RetentionPurgeRepositorySchemaTest {
         assertGuardedDelete("career_material", RetentionPurgeRepository.DELETE_CAREER_MATERIAL);
     }
 
-    /** 删除语句必须形如 {@code DELETE FROM <table> WHERE id = ? AND deleted_at IS NOT NULL}。 */
-    private void assertGuardedDelete(String table, String sql) {
-        Pattern guarded = Pattern.compile(
-                "DELETE\\s+FROM\\s+" + Pattern.quote(table)
-                        + "\\s+WHERE\\s+id\\s*=\\s*\\?\\s+AND\\s+deleted_at\\s+IS\\s+NOT\\s+NULL",
-                Pattern.CASE_INSENSITIVE);
-        assertTrue(guarded.matcher(sql.trim()).matches(),
-                "删除 " + table + " 的语句必须同时限定 id 与 deleted_at IS NOT NULL——"
-                        + "这是候选查询被改坏时**不误删活数据**的最后一道保护，缺失即不可逆：\n" + sql);
-    }
-
-    /** schema 中所有引用 {@code resource} 的表，必须在 SQL 里出现过（作为 NOT EXISTS 的子查询）。 */
-    private void assertCoverage(String resource, String sql) {
-        Set<String> referencing = jdbc.queryForList(
-                        "SELECT DISTINCT TABLE_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE "
-                                + "WHERE REFERENCED_TABLE_NAME = ?",
-                        String.class, resource.toUpperCase())
-                .stream()
-                .map(String::toLowerCase)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-
+    /** 候选 SQL 必须提及（作为 {@code NOT EXISTS} 子查询）迁移里每一个引用 {@code resource} 的表。 */
+    private void assertCoverage(String resource, String sql) throws Exception {
+        Set<String> referencing = tablesReferencing(resource);
         assertFalse(referencing.isEmpty(),
-                "schema 元数据里查不到任何引用 " + resource + " 的外键 —— 本用例的查询方式可能不适用于当前数据库，"
+                "解析迁移后查不到任何引用 " + resource + " 的外键 —— 本用例的解析方式可能已失效，"
                         + "此时它会永远通过（比失败更危险），故显式失败");
 
         Set<String> mentioned = new LinkedHashSet<>();
@@ -106,6 +108,47 @@ class RetentionPurgeRepositorySchemaTest {
         assertTrue(missing.isEmpty(),
                 "候选 SQL 没有把以下引用表纳入 NOT EXISTS —— 它们的外键指向 " + resource
                         + "，漏判会让**被引用的行**被当作无引用者物理删除（不可逆）：" + missing
-                        + "（SQL 中已出现：" + mentioned + "）");
+                        + "（SQL 中已出现：" + mentioned + "；迁移中引用者：" + referencing + "）");
+    }
+
+    /** 扫全部 Flyway 迁移，返回所有「语句主角表」中通过 FOREIGN KEY 引用 {@code resource} 的表名。 */
+    private Set<String> tablesReferencing(String resource) throws Exception {
+        Set<String> referencing = new LinkedHashSet<>();
+        Resource[] migrations = new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration/*.sql");
+        assertTrue(migrations.length > 0, "找不到 db/migration/*.sql —— 门禁必须在仓库内运行");
+
+        for (Resource migration : migrations) {
+            String sql;
+            try (InputStream in = migration.getInputStream()) {
+                sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            // 去行注释后再按语句切分：FK 与被引用的表名可能不在同一条语句里（CREATE 与 ALTER 都有）
+            for (String statement : sql.replaceAll("(?m)--[^\\n]*", "").split(";")) {
+                Matcher table = STATEMENT_TABLE.matcher(statement);
+                if (!table.find()) {
+                    continue;
+                }
+                String referencingTable = table.group(1).toLowerCase();
+                Matcher fk = FK_REFERENCE.matcher(statement);
+                while (fk.find()) {
+                    if (fk.group(1).equalsIgnoreCase(resource)) {
+                        referencing.add(referencingTable);
+                    }
+                }
+            }
+        }
+        return referencing;
+    }
+
+    /** 删除语句必须形如 {@code DELETE FROM <table> WHERE id = ? AND deleted_at IS NOT NULL}。 */
+    private void assertGuardedDelete(String table, String sql) {
+        Pattern guarded = Pattern.compile(
+                "DELETE\\s+FROM\\s+" + Pattern.quote(table)
+                        + "\\s+WHERE\\s+id\\s*=\\s*\\?\\s+AND\\s+deleted_at\\s+IS\\s+NOT\\s+NULL",
+                Pattern.CASE_INSENSITIVE);
+        assertTrue(guarded.matcher(sql.trim()).matches(),
+                "删除 " + table + " 的语句必须同时限定 id 与 deleted_at IS NOT NULL——"
+                        + "这是候选查询被改坏时**不误删活数据**的最后一道保护，缺失即不可逆：\n" + sql);
     }
 }
