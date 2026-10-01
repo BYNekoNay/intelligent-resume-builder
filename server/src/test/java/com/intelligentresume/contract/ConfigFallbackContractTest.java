@@ -74,6 +74,61 @@ class ConfigFallbackContractTest {
                         + "须统一（任选一侧为准，但要一致）：\n" + String.join("\n", mismatches));
     }
 
+    /** {@code @ConfigurationProperties(prefix = "P")} 类声明。 */
+    private static final Pattern CONFIG_PROPERTIES_CLASS =
+            Pattern.compile("@ConfigurationProperties\\(prefix\\s*=\\s*\"([^\"]+)\"\\)");
+
+    /** 数值/布尔字段及其字面量初始值（String/集合字段跳过：转义与字面差异会误报）。 */
+    private static final Pattern NUMERIC_FIELD =
+            Pattern.compile("private\\s+(int|long|boolean)\\s+([a-zA-Z][A-Za-z0-9_]*)\\s*=\\s*([0-9]+|true|false)\\s*;");
+
+    /**
+     * 与 {@code @Value} 兜底同理：{@code @ConfigurationProperties} 的数值/布尔字段默认值也必须与
+     * yml 默认值一致。第五十三批补 —— 此前本门禁只扫 {@code @Value}，绑定路径**完全无守护**，
+     * 因此 {@code AiTaskWorkerProperties.leaseSeconds} 的字段默认值停留在 180，
+     * 而 yml 早已是 {@code ${AI_WORKER_LEASE_S:660}}（第一批 #60 把租约 180→660 时漏改此处）。
+     */
+    @Test
+    @DisplayName("@ConfigurationProperties 的数值/布尔字段默认值与 application.yml 默认值一致")
+    void configurationPropertiesDefaultsMatchYaml() throws Exception {
+        Map<String, Object> yaml = loadYaml("server/src/main/resources/application.yml");
+
+        List<String> mismatches = new ArrayList<>();
+        int compared = 0;
+        for (Path file : javaSources("server/src/main/java")) {
+            String source = Files.readString(file, StandardCharsets.UTF_8);
+            Matcher classMatcher = CONFIG_PROPERTIES_CLASS.matcher(source);
+            if (!classMatcher.find()) continue;
+            String prefix = classMatcher.group(1);
+            Matcher fieldMatcher = NUMERIC_FIELD.matcher(source);
+            while (fieldMatcher.find()) {
+                String field = fieldMatcher.group(2);
+                String initial = fieldMatcher.group(3);
+                String key = prefix + "." + kebab(field);
+                Object yamlValue = resolve(yaml, key);
+                if (yamlValue == null) continue;
+                String yamlDefault = scalarDefault(yamlValue);
+                if (yamlDefault == null) continue;
+                compared++;
+                if (!normalize(initial).equals(normalize(yamlDefault))) {
+                    mismatches.add("  " + key + " → 字段默认 [" + initial + "] vs yml 默认 [" + yamlDefault + "]");
+                }
+            }
+        }
+
+        assertTrue(compared >= 5,
+                "可比对的 @ConfigurationProperties 数值字段过少（" + compared + "），门禁可能失效");
+        assertTrue(mismatches.isEmpty(),
+                "以下 @ConfigurationProperties 字段默认值与 application.yml 不一致：该键在 yml 存在时以 yml 为准，"
+                        + "仅当 yml 缺键时才用字段默认值 —— 两处不一致即「配置缺省时静默采用另一个值」的陷阱：\n"
+                        + String.join("\n", mismatches));
+    }
+
+    /** camelCase → kebab-case（字段名反推配置键）。 */
+    private String kebab(String camel) {
+        return camel.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase();
+    }
+
     private Map<String, Object> loadYaml(String relative) throws Exception {
         Path target = repoFile(relative);
         try (InputStream input = Files.newInputStream(target)) {

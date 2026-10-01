@@ -120,7 +120,9 @@ app:
       max-length: ${JD_TEXT_MAX_LENGTH:5000}
       min-length: ${JD_TEXT_MIN_LENGTH:20}
     parser:
-      rule-version: "v1.0.0"
+      # 无 rule-version：解析结果（ParsedKeywordsResponse）不含版本字段、JdParserProperties
+      # 也无该属性（Spring 会忽略未知键，所以它一直"看着像生效"）。曾声明的
+      # `rule-version: "v1.0.0"` 是死键，第五十三批移除。
       keyword-dictionary:
         - "Java"
         - "Spring Boot"
@@ -248,8 +250,12 @@ app:
       cleanup-max-rows-per-run: ${AI_TASK_CLEANUP_MAX_ROWS_PER_RUN:20000}
     consent:
       policy-version: "v1.2.0"
+    # 配额按任务类型（键名 = AiTaskType 枚举名）。
+    # ⚠ JOB_MATERIAL_SELECTION（岗位选材）与 JOB_GENERATION **共用**同一额度：AiQuotaService
+    #   把两者都映射到 JOB_GENERATION 的值（选材是生成的前置步骤，两步各扣一次会让一次岗位
+    #   定制消耗双倍配额）。故此处**不单列** JOB_MATERIAL_SELECTION —— 曾单列的
+    #   `JOB_MATERIAL_SELECTION: 30` 是死键（改它不生效），第五十三批移除。
     quota:
-      JOB_MATERIAL_SELECTION: 30
       JOB_GENERATION: 30
       RESUME_OPTIMIZE: 30
       INLINE_OPTIMIZE: 60
