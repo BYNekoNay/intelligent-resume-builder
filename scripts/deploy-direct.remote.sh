@@ -115,6 +115,31 @@ else
   echo "警告：$APP/pdf-service/.env 不存在，PDF 服务将无法启动（需先手工创建）" >&2
 fi
 
+# nginx 站点配置同步（幂等）。
+# 此前这一步**只存在于部署手册的手工流程**里，仓库中的 nginx 配置改动不会随部署生效。
+# 实测代价：第三十五批给 host.conf 加的静态资源 gzip 从未在真实环境生效 —— 服务器仍是
+# nginx 自带的 `gzip on;`（只压 text/html），`curl -I -H 'Accept-Encoding: gzip' /assets/*.js`
+# 看不到 Content-Encoding，第三十五批声称的 3.5× 压缩收益实际为 0。见第六十一批报告。
+# 约定：仓库 deploy/nginx/ 是唯一来源。先落位安全头片段（host.conf 的 include 依赖它，
+# 缺了会让 nginx -t 失败），再覆盖站点文件；最后**先校验后 reload** —— 校验不过则中止，
+# 正在运行的 nginx 不受影响（配置坏了也不会把站点搞崩）。
+if [ -d "$SRC/deploy/nginx" ]; then
+  $SUDO install -d /etc/nginx/snippets
+  $SUDO cp "$SRC/deploy/nginx/security-headers.conf" /etc/nginx/snippets/security-headers.conf
+  $SUDO cp "$SRC/deploy/nginx/host.conf" /etc/nginx/sites-available/intelligent-resume
+  $SUDO ln -sfn /etc/nginx/sites-available/intelligent-resume /etc/nginx/sites-enabled/intelligent-resume
+  if $SUDO nginx -t >/dev/null 2>&1; then
+    $SUDO systemctl reload nginx
+    echo "nginx 站点配置已同步（含安全头片段）并 reload"
+  else
+    echo "错误：nginx -t 校验失败 —— 站点文件已覆盖但**未** reload，正在运行的 nginx 不受影响；请人工检查" >&2
+    $SUDO nginx -t || true
+    exit 1
+  fi
+else
+  echo "警告：源码包缺少 deploy/nginx/，跳过 nginx 配置同步（旧配置继续生效）" >&2
+fi
+
 log "5/7 重启服务"
 $SUDO systemctl restart intelligent-resume-pdf
 sleep 5

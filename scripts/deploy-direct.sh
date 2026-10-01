@@ -62,7 +62,7 @@ cd "$REPO_ROOT"
 tar czf "$TARBALL" \
   --exclude='*/node_modules' --exclude='*/target' --exclude='*/dist' \
   --exclude='*/.env' --exclude='*.env.local' --exclude='*.env.live-ai' \
-  server web pdf-service test-fixtures
+  server web pdf-service test-fixtures deploy
 echo "源码包：$TARBALL（$(du -h "$TARBALL" | cut -f1)）"
 
 # 安全检查：确认没有把依赖或环境文件打进去
@@ -85,7 +85,7 @@ echo "上传完成"
 
 step "3/5 解压源码"
 ssh "${SSH_OPTS[@]}" "$REMOTE" \
-  "cd $REMOTE_ROOT/src && rm -rf server web pdf-service test-fixtures && tar xzf ../resume-src.tar.gz \
+  "cd $REMOTE_ROOT/src && rm -rf server web pdf-service test-fixtures deploy && tar xzf ../resume-src.tar.gz \
    && chmod +x $REMOTE_ROOT/deploy-direct.remote.sh && du -sh ."
 echo "解压完成"
 

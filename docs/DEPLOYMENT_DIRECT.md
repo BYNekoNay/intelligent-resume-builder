@@ -348,7 +348,17 @@ bash scripts/deploy-direct.sh
 脚本做的事：本机打包源码（排除 `node_modules` / `target` / `dist` / `.env`，并做泄露校验）→ 上传 →
 解压 → 服务器端 `mvn clean package`（aliyun 镜像）+ `npm ci && npm run build`（含 i18n 与
 draft-fields 两道静态门禁）→ **PDF 依赖 `PUPPETEER_SKIP_DOWNLOAD=true npm ci` + 预置 Chromium +
-真实启动一次 Chromium 自检** → 原子替换产物 → 重启服务 → 等待 readiness → 输出健康检查。
+真实启动一次 Chromium 自检** → 原子替换产物 → **同步 nginx 站点配置**（`deploy/nginx/host.conf` +
+`security-headers.conf` 片段；先落位片段再覆盖站点文件，`nginx -t` 校验通过才 reload）→
+重启服务 → 等待 readiness → 输出健康检查。
+
+> **nginx 配置已纳入脚本（2026-10-01 第六十一批）**。此前它**只存在于 §4.5 的手工流程**里，
+> 于是仓库中的 nginx 改动不会随部署生效 —— 实测代价有两条：① 静态资源 gzip（第三十五批）
+> 从未生效（服务器仍是 nginx 自带的 `gzip on;`，只压 `text/html`、不压 js/css，
+> `curl -I -H 'Accept-Encoding: gzip' /assets/*.js` 看不到 `Content-Encoding`）；
+> ② `client_max_body_size` 停留在 **5m**（第二十九批已改为 6m），导致 5.5MB 上传被 nginx 以
+> **HTML 错误页** 413 拒绝、而非应用的统一信封。两条都在 2026-10-01 的云端回归中被实测抓到，
+> 现已随本脚本同步并复验通过（`suite_core` 28/28）。
 
 默认值已对应当前环境：`SERVER=101.35.239.218`、`SSH_USER=ubuntu`、`PUBLIC_PORT=8088`。
 可用环境变量覆盖：`SERVER`、`SSH_USER`、`SSH_KEY`、`REMOTE_ROOT`、`PUBLIC_PORT`、`PUPPETEER_CACHE_DIR`。
