@@ -678,6 +678,28 @@
 
 验证：**红判定已做**（两方向）—— 把 §3.9 标题改回 `material_resume_task` 并去掉 §3.12 的未实现标注后，两用例**各 1 红**且分别点出 `material_resume_generation`（文档漏写）与 `application_status_history` + `material_resume_task`（文档虚构），随后按 md5 校验完整恢复；修复后门禁 2/2 绿；server 全量 **902 测试 0 失败**（本批 +2，5 skipped 为环境门控）；CI + Functional Regression 双绿（workflow run 36847869352 / 36847869373，head e444dcc，复核结论 success）。
 
+### 2.49 前端 API 契约对账：93 调用 × 95 端点，**双向一致、零缺陷**（2026-10-01 第五十六批扫描，结论固化）
+
+方法：把「前端实际调用的端点」与「后端控制器端点」做全量对账 —— 不只比路径，还比 **HTTP 动词**（路径对但动词错同样返回 405，对用户一样不可用）。
+
+| 项 | 结果 |
+| --- | --- |
+| 前端 `(method, path)` | **93** 个（`web/src/api/*.ts`；路径变量 `${id}` 归一为 `{}`） |
+| 后端 `(method, path)` | **95** 个（19 个控制器，含 `@RequestMapping(method=…)` 与多路径映射） |
+| **前端 → 后端** | **零缺失** —— 没有调用不存在的端点，也没有动词不匹配 |
+| 后端 → 前端 | 2 个无 UI 调用，均有据：`GET /api/system/health/detail`（运维端点）、`POST /api/auth/logout-all`（第四十八批已确认无前端入口） |
+| 字段级抽样 | `AiTask`（前端 TS 接口 12 字段）与 `AiTaskStatusResponse`（后端 record 12 字段）**逐字段一致**；前端未误用 `taskId`（仅 `AiTaskTimeoutError` 用作参数名） |
+
+**这是正面结论**：该面此前无缺陷（本仓已有 151 个 e2e + 各契约门禁，前后端一致性维持得很好）。为避免「以为有问题」的重复投入、并把结论固化为**防漂移**能力，新增静态门禁 `FrontendApiContractTest`：
+
+- 断言前端每个 `(method, path)` 在后端存在，失败信息**区分**「路径不存在 → 404」与「路径存在但动词不同 → 405」；
+- 只做**单向**断言：后端有、前端未调用属合理（运维端点、分批实现），不断言，避免误报；
+- 含扫描规模自检（后端端点 ≥80、前端调用 ≥80）。
+
+解析要点（本次踩到**两次同源误报**，已固化进门禁注释）：泛型可能嵌套（`ApiResponse<Paginated<X>>`）甚至含引号（`ApiResponse<import('./ai').AiTask>`），因此**不能**用「动词与路径之间的字符」去匹配动词 —— 否则 `web/src/api/interview.ts` 的 `follow-up` 调用会被漏掉、进而误判为「后端端点无人调用」。正确做法：**先定位路径字面量，再向前回溯最近的动词**。
+
+验证：**红判定已做** —— 在 `system.ts` 临时加入 `GET /api/does-not-exist` 与 `PATCH /api/system/health` 后，门禁 1 红并**逐条标注** 404 / 405，随后按 md5 校验完整恢复；修复后门禁绿；server 全量 **903 测试 0 失败**（本批 +1，5 skipped 为环境门控）；`docs/05` §15 补「前端契约一致性」约定；CI + Functional Regression 双绿（workflow run 36849142363 / 36849142250，head c503f9f，复核结论 success）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -871,3 +893,4 @@
 | 2026-10-01 | **第五十三批（配置声明↔消费点对账：修 @ConfigurationProperties 兜底漂移与死键，并立消费点门禁；§2.46 扫描新增项）执行完成**：把 `application.yml` 全部 **97 个** `app.*` 叶子键与代码消费点做全量对账，发现三类问题——① **绑定类字段默认值漂移**：`AiTaskWorkerProperties.leaseSeconds` 字段默认 **180** 而 yml 是 `${AI_WORKER_LEASE_S:660}`（第一批 #60 只改 yml、漏改绑定类；该键 yml 缺省时用字段默认值 ⇒ 租约减半 → 长任务被接管重跑、重复调用 provider）；② **死键**：`app.ai.quota.JOB_MATERIAL_SELECTION`（选材与生成共用 `JOB_GENERATION` 额度）、`app.job.parser.rule-version`（解析结果不含版本、绑定类无该属性）；③ **门禁盲区**：既有 `ConfigFallbackContractTest` 只扫 `@Value`，绑定路径零覆盖。修复：`leaseSeconds` 字段默认 180 → **660**（附「必须 > 链总预算 600s」注释）；移除两个死键并在 yml 留注释；`ConfigFallbackContractTest` 新增 `configurationPropertiesDefaultsMatchYaml`（扫 `@ConfigurationProperties` 数值/布尔字段 vs yml 默认值）；**新增 `ConfigConsumerContractTest`**（`app.*` 标量键必须有消费点：点号路径字面量 或 绑定前缀字段〔含 Map 元素按首段 camel 化〕；未实现项须显式登记 `KNOWN_UNCONSUMED` 并附理由，获得消费点后须移出白名单防腐化；含扫描规模自检）；`docs/08` 配置原则补「三种失效形态」条目；`app.job.jd-text.min-length` 与 `app.ai.confirmation.*`（3 项，其中 `max-confirmed-items` 的 200 已由 DTO `@Size` 承载）登记 `OPEN-DECISIONS`。验证：**红判定已做**（恢复 180 + 加回死键 → 两门禁各 1 红并点明键名，md5 校验恢复）；定向 3/3 绿；server 全量 **898 测试 0 失败**（本批 +2，5 skipped 为环境门控）；CI + Functional Regression 双绿（workflow run 36844601848 / 36844601794，head 16edcb6，复核结论 success） |
 | 2026-10-01 | **第五十四批（环境变量样例对账：修样例值漂移与死键，并立样例门禁；§2.47 扫描新增项）执行完成**：`server/.env.example` 是配置的**第三个来源**（前两个是代码 `@Value` 兜底与 yml 默认值），此前不在任何门禁覆盖内。① **值漂移**：`AI_WORKER_LEASE_S=60` 而 yml 是 `${AI_WORKER_LEASE_S:660}` —— 照抄样例即把租约压到链总预算 600s 之下、长任务被接管重跑（第一批 #60 只改了 yml）；② **死键**：`AI_MOCK_FAIL_RATE` / `AI_MOCK_LATENCY_MS` 全仓零消费点（Mock 模型已非正常功能路径）。修复：样例 60→660（注明须与 yml 一致）、移除两个 Mock 键；**新增 `EnvExampleContractTest`**（① 样例键必须在 yml 有 `${}` 占位符，② 标量值须与 yml 默认一致、列表型含逗号则跳过；含规模自检）；`docs/08` 补「第三个来源」条目。验证：**红判定已做**（恢复 60 + 加回 Mock 键 → 两用例各 1 红并点明键名，md5 校验恢复）；定向 2/2 绿；server 全量 **900 测试 0 失败**（本批 +2，5 skipped 为环境门控）；CI + Functional Regression 双绿（workflow run 36846635376 / 36846635360，head 04cecb6，复核结论 success） |
 | 2026-10-01 | **第五十五批（数据字典 ↔ Flyway 迁移双向对账：补 6 张表章节、更正命名漂移、标注未实现表，并立双向门禁；§2.48 扫描新增项）执行完成**：`docs/04` §3「表结构设计」是评审/答辩用的 schema 契约，此前无任何门禁保证它与 `V1~V34` 一致。① **文档漏写 6 张已实现表**：`personal_profile`(V13+V15)、`communication_draft`(V17)、`communication_template`(V23+V29)、`inline_optimization_record`(V3)、`interview_ai_attempt`(V20)、`interview_asset_section`(V23+V25)；② **文档虚构 1 张表**：§3.12 `application_status_history` 无 `CREATE TABLE`、零代码引用（状态迁移由 `application_record.status` + `stage_entered_at`(V26) 承载）；③ **命名漂移**：§3.9 `material_resume_task` → 迁移真名 `material_resume_generation`(V6)。修复：新增 §3.17~§3.22 六章节（按 DDL 提取，含 V15/V25/V29 ALTER）、§3.9 更名、§3.12 标注「设计草案，未实现」、§2.2 补「状态」列、§8 建表顺序更正；**新增 `SchemaDocContractTest`**（双向断言：迁移表必须在 §3 有章节；§3 章节须对应迁移表或显式标注未实现）。验证：**红判定已做**（改回旧名 + 去掉标注 → 两用例各 1 红并分别点出漏写与虚构，md5 校验恢复）；门禁 2/2 绿；server 全量 **902 测试 0 失败**（本批 +2，5 skipped 为环境门控）；CI + Functional Regression 双绿（workflow run 36847869352 / 36847869373，head e444dcc，复核结论 success） |
+| 2026-10-01 | **第五十六批（前端 API 契约对账：93 调用 × 95 端点双向零缺陷，结论固化为门禁；§2.49 扫描新增项）执行完成**：把前端 `web/src/api/*.ts` 的 **93** 个 `(method, path)` 与后端 19 个控制器的 **95** 个端点做全量对账（路径变量归一 `{}`，**含 HTTP 动词** —— 路径对但动词错同样是 405）。结果：**前端 → 后端零缺失**；后端 → 前端仅 2 个无 UI 调用且有据（`GET /api/system/health/detail` 运维端点、`POST /api/auth/logout-all` 无前端入口）；字段级抽样 `AiTask` 前后端 12 字段**逐字段一致**。该面为**正面结论**（无缺陷），故新增静态门禁 `FrontendApiContractTest` 防漂移：断言前端每个 `(method, path)` 在后端存在，失败信息区分 **404**（路径不存在）/ **405**（动词不同）；反向**不断言**（后端有前端无属合理）；含规模自检。解析踩坑固化：泛型可能嵌套或含引号（`ApiResponse<import('./ai').AiTask>`），**不能**用「动词与路径之间的字符」匹配动词，否则漏掉 `interview.ts` 的 follow-up 调用 → 改为「先定位路径字面量、再向前回溯最近动词」。验证：**红判定已做**（加 `GET /api/does-not-exist` + `PATCH /api/system/health` → 门禁 1 红并逐条标注 404/405，md5 校验恢复）；server 全量 **903 测试 0 失败**（本批 +1，5 skipped 为环境门控）；`docs/05` §15 补前端契约一致性约定；CI + Functional Regression 双绿（workflow run 36849142363 / 36849142250，head c503f9f，复核结论 success） |
