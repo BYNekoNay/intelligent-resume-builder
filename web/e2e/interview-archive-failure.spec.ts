@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * 归档版本导致 AI 评估失败时的专属指引 E2E（第四十九批）。
+ * 归档版本导致 AI 评估失败时的专属指引 E2E（第五十批）。
  *
  * 覆盖诊断盲区：服务端对「归档版本被消费」返回专属业务码 `40902`
  * （`VERSION_ARCHIVED`），可操作处置是「先恢复该版本再重试」，与通用 AI 失败的

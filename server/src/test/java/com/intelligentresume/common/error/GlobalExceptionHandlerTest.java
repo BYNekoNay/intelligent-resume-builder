@@ -123,7 +123,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("每个业务码都必须映射到非 5xx 的 HTTP 状态（新码漏登记会返回 500）")
     void everyErrorCodeMapsAwayFromServerError() {
-        // 第四十九批实测：新增 VERSION_ARCHIVED 时漏改 statusFor 的 switch，归档消费接口
+        // 第五十批实测：新增 VERSION_ARCHIVED 时漏改 statusFor 的 switch，归档消费接口
         // 从 409 变成 500；该 switch 现已去掉 default 做编译期穷尽检查，本用例再从行为侧兜一层。
         List<ErrorCode> intentionalServerErrors =
                 List.of(ErrorCode.INTERNAL, ErrorCode.AI_FAILURE, ErrorCode.PDF_FAILURE);
