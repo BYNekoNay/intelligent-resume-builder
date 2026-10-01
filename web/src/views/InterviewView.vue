@@ -84,6 +84,9 @@ const canFinish = computed(() => {
 })
 const lastEval = computed<LastEvaluation | null>(() => sessionState.value?.lastEvaluation ?? null)
 const aiFailure = computed<AiFailureInfo | null>(() => sessionState.value?.aiFailure ?? null)
+// 归档版本被消费时服务端回专属码 40902（VERSION_ARCHIVED）：处置动作是「先恢复该版本再重试」，
+// 与通用 AI 失败的「重试/降级」不同——前端不透传服务端 message（双语设计），故按码给出专属指引。
+const isArchiveBlocked = computed(() => aiFailure.value?.messageCode === 'VERSION_ARCHIVED')
 const executionModeLabel = computed(() => {
   if (!sessionState.value) return ''
   return sessionState.value.executionMode === 'AI' ? t('interview.modeAi') : t('interview.modeRule')
@@ -515,6 +518,7 @@ onBeforeUnmount(() => {
             <h2>{{ t('interview.aiFailedDescription') }}</h2>
           </div>
         </header>
+        <p v-if="isArchiveBlocked" class="ai-failure-archive-hint">{{ t('interview.aiFailedArchivedHint') }}</p>
         <div class="ai-failure-actions">
           <button v-if="aiFailure?.retryable" class="btn-neon btn-secondary" type="button" :disabled="retrying" @click="retry">
             <RefreshCw :size="16" />{{ retrying ? t('interview.retrying') : t('interview.retryAi') }}
@@ -722,6 +726,7 @@ onBeforeUnmount(() => {
 .ai-failure-header { display: flex; align-items: flex-start; gap: 14px; }
 .ai-failure-header > svg { color: var(--error, #ef4444); flex-shrink: 0; margin-top: 2px; }
 .ai-failure-header h2 { font-size: 14px; margin: 2px 0 0; color: var(--text-primary); }
+.ai-failure-archive-hint { margin: 14px 0 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-md); background: var(--bg-page); color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 .ai-failure-actions { display: flex; gap: 10px; margin-top: 18px; justify-content: flex-end; }
 /* Feedback */
 .feedback-panel > header, .interview-report > header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--border-soft); }

@@ -245,7 +245,7 @@ public class ApplicationService {
         }
         // 归档是可逆状态：与 ATS/评分/导出/沟通/面试一致用 409 + 可操作文案
         if (version.getDeletedAt() != null) {
-            throw new BusinessException(ErrorCode.CONFLICT, "该简历版本已归档，请先恢复后再发起投递");
+            throw new BusinessException(ErrorCode.VERSION_ARCHIVED, "该简历版本已归档，请先恢复后再发起投递");
         }
     }
 

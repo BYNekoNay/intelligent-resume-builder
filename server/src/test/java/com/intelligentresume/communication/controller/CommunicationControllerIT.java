@@ -191,7 +191,7 @@ class CommunicationControllerIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"type\":\"EMAIL\"}".formatted(first, jobId)))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(40901))
+                .andExpect(jsonPath("$.code").value(40902))
                 .andExpect(jsonPath("$.message").value("该简历版本已归档，请先恢复后再发起沟通"));
 
         // AI 沟通任务：同一消费口径
@@ -200,7 +200,7 @@ class CommunicationControllerIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"type\":\"EMAIL\"}".formatted(first, jobId)))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(40901));
+                .andExpect(jsonPath("$.code").value(40902));
 
         // 模板预览同为「沟通」消费方：归档版本一律 409，不回落为「不存在」
         long templateId = id(postJson("/api/communications/templates", tokenA, """
@@ -212,7 +212,7 @@ class CommunicationControllerIT {
                         .param("resumeVersionId", String.valueOf(first))
                         .param("jobDescriptionId", String.valueOf(jobId)))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(40901))
+                .andExpect(jsonPath("$.code").value(40902))
                 .andExpect(jsonPath("$.message").value("该简历版本已归档，请先恢复后再发起沟通"));
     }
 

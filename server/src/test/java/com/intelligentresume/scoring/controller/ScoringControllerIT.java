@@ -207,7 +207,7 @@ class ScoringControllerIT {
                                     {"resumeVersionId": %d, "jobDescriptionId": %d}
                                     """.formatted(versionId, jdId)))
                     .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.code").value(40901));
+                    .andExpect(jsonPath("$.code").value(40902));
         } finally {
             version.setDeletedAt(null);
             resumeVersionRepository.save(version);

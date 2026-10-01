@@ -16,6 +16,7 @@ export const ERROR_CODE_KEYS: Readonly<Record<number, string>> = {
   40302: 'errors.consentRequired',
   40401: 'errors.notFound',
   40901: 'errors.conflict',
+  40902: 'errors.versionArchived',
   42901: 'errors.rateLimited',
   50001: 'errors.internal',
   50002: 'errors.aiFailure',

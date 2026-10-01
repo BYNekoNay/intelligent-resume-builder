@@ -166,6 +166,11 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.failure(ErrorCode.INTERNAL.code(), ErrorCode.INTERNAL.message(), traceId(request)));
     }
 
+    /**
+     * 业务码 → HTTP 状态。**刻意不写 default**：switch 表达式对枚举做穷尽检查，
+     * 新增 {@link ErrorCode} 时若忘记在此登记会**编译失败**，而不是静默降级为 500
+     * （第四十九批实测：新码漏登记时接口返回 500 而非 409）。
+     */
     private HttpStatus statusFor(ErrorCode errorCode) {
         return switch (errorCode) {
             case VALIDATION -> HttpStatus.BAD_REQUEST;
@@ -173,8 +178,8 @@ public class GlobalExceptionHandler {
             case FORBIDDEN, CONSENT_REQUIRED -> HttpStatus.FORBIDDEN;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
-            case CONFLICT -> HttpStatus.CONFLICT;
-            default -> HttpStatus.INTERNAL_SERVER_ERROR;
+            case CONFLICT, VERSION_ARCHIVED -> HttpStatus.CONFLICT;
+            case INTERNAL, AI_FAILURE, PDF_FAILURE -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
     }
 

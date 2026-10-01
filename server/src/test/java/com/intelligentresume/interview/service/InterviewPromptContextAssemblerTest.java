@@ -225,7 +225,7 @@ class InterviewPromptContextAssemblerTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> assembler.findOwnedResumeVersion(20L, USER_ID));
 
-        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals(ErrorCode.VERSION_ARCHIVED, ex.getErrorCode());
         assertEquals("该简历版本已归档，请先恢复后再继续", ex.getMessage());
     }
 
@@ -254,7 +254,7 @@ class InterviewPromptContextAssemblerTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> assembler.appendResumeContext(new StringBuilder(), session, USER_ID));
 
-        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals(ErrorCode.VERSION_ARCHIVED, ex.getErrorCode());
         assertEquals("该简历版本已归档，请先恢复后再继续", ex.getMessage());
     }
 

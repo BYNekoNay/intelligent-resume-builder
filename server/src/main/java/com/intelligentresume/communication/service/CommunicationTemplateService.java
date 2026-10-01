@@ -138,7 +138,7 @@ public class CommunicationTemplateService {
         }
         // 归档是可逆状态：与其它消费方一致用 409 + 可操作文案
         if (version.getDeletedAt() != null) {
-            throw new BusinessException(ErrorCode.CONFLICT, "该简历版本已归档，请先恢复后再发起沟通");
+            throw new BusinessException(ErrorCode.VERSION_ARCHIVED, "该简历版本已归档，请先恢复后再发起沟通");
         }
         return version;
     }

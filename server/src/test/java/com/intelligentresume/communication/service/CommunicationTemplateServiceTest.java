@@ -128,7 +128,7 @@ class CommunicationTemplateServiceTest {
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.preview(TEMPLATE_ID, VERSION_ID, JOB_ID, USER_ID));
-        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals(ErrorCode.VERSION_ARCHIVED, ex.getErrorCode());
         assertEquals("该简历版本已归档，请先恢复后再发起沟通", ex.getMessage());
     }
 

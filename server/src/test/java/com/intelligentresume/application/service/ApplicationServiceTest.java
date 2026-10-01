@@ -332,7 +332,7 @@ class ApplicationServiceTest {
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.create(request, USER_ID));
 
-        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals(ErrorCode.VERSION_ARCHIVED, ex.getErrorCode());
         assertEquals("该简历版本已归档，请先恢复后再发起投递", ex.getMessage());
     }
 

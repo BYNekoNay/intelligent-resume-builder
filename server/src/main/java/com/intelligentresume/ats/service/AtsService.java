@@ -235,7 +235,7 @@ public class AtsService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在"));
         if (version.getDeletedAt() != null) {
             // 已归档的版本资源本身存在,与"不存在"(404)区分:归档是可逆状态,用 409 提示先恢复
-            throw new BusinessException(ErrorCode.CONFLICT, "该简历版本已归档，请先恢复后再发起检查");
+            throw new BusinessException(ErrorCode.VERSION_ARCHIVED, "该简历版本已归档，请先恢复后再发起检查");
         }
         if (resumeRepository.findByIdAndUserId(version.getResumeId(), userId).isEmpty()) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在");

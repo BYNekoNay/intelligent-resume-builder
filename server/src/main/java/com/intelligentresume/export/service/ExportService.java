@@ -73,7 +73,7 @@ public class ExportService {
         }
         // 归档是可逆状态：与 ATS/评分/投递/沟通/面试一致用 409 + 可操作文案（归属校验在前，不泄露归档状态）
         if (version.getDeletedAt() != null) {
-            throw new BusinessException(ErrorCode.CONFLICT, "该简历版本已归档，请先恢复后再发起导出");
+            throw new BusinessException(ErrorCode.VERSION_ARCHIVED, "该简历版本已归档，请先恢复后再发起导出");
         }
 
         // 3. 结果复用（#14）：同一用户 + 同一版本 + 同一模板 已有未过期的在途/成功任务时直接复用，

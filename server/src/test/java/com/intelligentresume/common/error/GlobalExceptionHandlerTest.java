@@ -119,4 +119,24 @@ class GlobalExceptionHandlerTest {
         assertNotNull(response.getBody());
         assertEquals("上传表单不合法", response.getBody().message());
     }
+
+    @Test
+    @DisplayName("每个业务码都必须映射到非 5xx 的 HTTP 状态（新码漏登记会返回 500）")
+    void everyErrorCodeMapsAwayFromServerError() {
+        // 第四十九批实测：新增 VERSION_ARCHIVED 时漏改 statusFor 的 switch，归档消费接口
+        // 从 409 变成 500；该 switch 现已去掉 default 做编译期穷尽检查，本用例再从行为侧兜一层。
+        List<ErrorCode> intentionalServerErrors =
+                List.of(ErrorCode.INTERNAL, ErrorCode.AI_FAILURE, ErrorCode.PDF_FAILURE);
+        for (ErrorCode code : ErrorCode.values()) {
+            BusinessException exception = new BusinessException(code, "test");
+            org.springframework.http.HttpStatusCode status = handler.handleBusiness(exception, mock(HttpServletRequest.class))
+                    .getStatusCode();
+            if (intentionalServerErrors.contains(code)) {
+                continue;
+            }
+            assertNotNull(status, code + " 应有 HTTP 状态映射");
+            assertEquals(false, status.is5xxServerError(),
+                    code + "（" + code.code() + "）映射到了 " + status + "，会掩盖真实语义");
+        }
+    }
 }

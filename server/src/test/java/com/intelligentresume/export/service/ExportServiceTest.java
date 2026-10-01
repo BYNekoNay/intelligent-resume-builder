@@ -305,7 +305,7 @@ class ExportServiceTest {
         CreateExportRequest req = new CreateExportRequest(1L, "classic");
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.create(req, 100L));
-        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals(ErrorCode.VERSION_ARCHIVED, ex.getErrorCode());
         assertEquals("该简历版本已归档，请先恢复后再发起导出", ex.getMessage());
     }
 
