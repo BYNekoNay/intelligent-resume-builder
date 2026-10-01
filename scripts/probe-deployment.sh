@@ -11,9 +11,11 @@
 #   单测 / e2e / 静态契约门禁**全都看不见**这类问题，只能实测。本脚本把当时手工排查用的探针固化。
 #
 # 两类断言：
-#   A. 行为断言   —— 从 HTTP 可观察的事实反推配置是否生效（gzip / 体积 / 安全头 / 收敛）；
-#   B. 配置一致性 —— 把**服务器生效的 nginx 配置**与**仓库里的 host.conf** 归一化后逐行对比，
-#                    能通用地发现任何"配置改了但没部署"的漂移（不限于已知的两条）。
+#   A. 行为断言   —— 从 HTTP 可观察的事实反推配置是否生效（gzip / 体积 / 安全头 / 收敛），
+#                    以及**在服务器上**直接看监听地址（服务是否只绑回环）；
+#   B. 配置一致性 —— 把**服务器生效的 nginx 配置**与仓库 `deploy/nginx/host.conf`、
+#                    以及**生效的 systemd 单元**与仓库 `deploy/systemd/*.service` 归一化后逐行对比，
+#                    能通用地发现任何"配置改了但没部署"的漂移（不限于已知的几条）。
 #
 # 用法：
 #   bash scripts/probe-deployment.sh                      # 默认打当前测试环境
@@ -43,6 +45,10 @@ expect_has() { if printf '%s' "$2" | grep -qi -- "$3"; then pass "$1"; else fail
 # 本机有全局代理时，探公网必须绕过；否则拿到的是代理造成的假象。
 curlq() { curl -s --noproxy '*' -m 25 "$@"; }
 sshq() { ssh "${SSH_OPTS[@]}" "$SSH_HOST" "$@"; }
+
+# 归一化：去注释、压缩空白、去空行、去 CR —— 只比较语义内容。
+# （CR 也要去：本机工作区可能被 git 转成 CRLF，直接 diff 会得到整文件差异的假象。）
+normalize() { sed -e 's/\r$//' -e 's/#.*$//' -e 's/[[:space:]]\+/ /g' -e 's/^ //' -e 's/ $//' -e '/^$/d'; }
 
 printf '部署后探针 → %s\n' "$BASE"
 printf '（配置一致性对比：%s）\n\n' "${SSH_HOST:-已跳过}"
@@ -112,8 +118,7 @@ printf '\n=== 5. 配置一致性（生效 nginx 配置 vs 仓库 host.conf）===
 if [ -z "${SSH_HOST:-}" ]; then
   printf '  [SKIP] 未提供 SSH_HOST，跳过\n'
 else
-  # 归一化：去注释、压缩空白、去空行 —— 只比较语义内容
-  normalize() { sed -e 's/#.*$//' -e 's/[[:space:]]\+/ /g' -e 's/^ //' -e 's/ $//' -e '/^$/d'; }
+  # 归一化：去注释、压缩空白、去空行、去 CR —— 只比较语义内容
   if sshq "sudo cat $NGINX_SITE" > "$TMP/remote.conf" 2>"$TMP/ssh.err"; then
     normalize < "$TMP/remote.conf" > "$TMP/remote.norm"
     normalize < "$REPO_ROOT/deploy/nginx/host.conf" > "$TMP/local.norm"
@@ -126,6 +131,60 @@ else
   else
     fail "读取服务器配置失败：$(head -c 120 "$TMP/ssh.err" 2>/dev/null)"
   fi
+fi
+
+# ---------- 6. systemd 单元一致（同 B 类：抓"配置改了但没部署"）----------
+# 第六十五批：此前部署链路只脚本化了 nginx，systemd 单元改动**不会**生效 ——
+# 第四十批的 PDF_SERVICE_HOST 从未落地（服务器单元停在 2026-09-25）。与第六十一批同源，
+# 故把这条也纳入通用漂移检测（不限于已知的那一行）。
+printf '\n=== 6. systemd 单元一致性（生效单元 vs 仓库 deploy/systemd/）===\n'
+if [ -z "${SSH_HOST:-}" ]; then
+  printf '  [SKIP] 未提供 SSH_HOST，跳过\n'
+else
+  for unit_src in "$REPO_ROOT"/deploy/systemd/*.service; do
+    [ -f "$unit_src" ] || continue
+    unit_name="$(basename "$unit_src")"
+    if sshq "sudo cat /etc/systemd/system/$unit_name" > "$TMP/unit.remote" 2>/dev/null; then
+      normalize < "$unit_src" > "$TMP/unit.local.norm"
+      normalize < "$TMP/unit.remote" > "$TMP/unit.remote.norm"
+      if diff -q "$TMP/unit.remote.norm" "$TMP/unit.local.norm" >/dev/null 2>&1; then
+        pass "$unit_name 生效内容与仓库一致"
+      else
+        fail "$unit_name 生效内容与仓库不一致（单元改了但没随部署生效）—— 差异："
+        diff "$TMP/unit.remote.norm" "$TMP/unit.local.norm" | sed 's/^/         /' | head -20
+      fi
+    else
+      fail "读取 /etc/systemd/system/$unit_name 失败（单元可能未安装）"
+    fi
+  done
+fi
+
+# ---------- 7. 监听范围（A 类行为断言：服务只绑回环，不对外暴露）----------
+# API 的 `SERVER_ADDRESS` 与 PDF 的 `PDF_SERVICE_HOST` 都只写在 systemd 单元里，若未生效
+# 进程会按默认绑**所有接口**。该暴露面此前只由云侧安全组兜底，而安全组规则在服务器内部
+# 看不见 —— 所以必须在服务器上直接看监听地址，而不是从外部探测（外部通不通取决于安全组）。
+printf '\n=== 7. 监听范围 ===\n'
+if [ -z "${SSH_HOST:-}" ]; then
+  printf '  [SKIP] 未提供 SSH_HOST，跳过\n'
+else
+  listeners="$(sshq "sudo ss -lntp" 2>/dev/null || true)"
+  check_loopback_only() {
+    label="$1"
+    port="$2"
+    addrs="$(printf '%s\n' "$listeners" | awk -v p=":${port}\$" '$4 ~ p {print $4}')"
+    if [ -z "$addrs" ]; then
+      fail "$label：未找到监听 :$port 的进程（服务未启动？）"
+      return
+    fi
+    bad="$(printf '%s\n' "$addrs" | grep -Ev '^(127\.0\.0\.1|\[::1\]|\[::ffff:127\.0\.0\.1\]):' || true)"
+    if [ -z "$bad" ]; then
+      pass "$label 仅绑回环（$(printf '%s' "$addrs" | tr '\n' ' ')）"
+    else
+      fail "$label 监听在非回环地址：$bad —— 绑定参数未生效（该端口对同网段/公网可见，仅靠安全组兜底）"
+    fi
+  }
+  check_loopback_only "API 8080" 8080
+  check_loopback_only "PDF 3001" 3001
 fi
 
 # ---------- 汇总 ----------

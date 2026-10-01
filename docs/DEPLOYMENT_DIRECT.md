@@ -292,14 +292,17 @@ rm -f /etc/nginx/sites-enabled/default      # ⚠ 必须删：默认站点监听
 nginx -t && systemctl reload nginx
 ```
 
-> 补充：`deploy/` 下的 nginx / systemd 资产需要**手工上传**（一键脚本只打包 `server/`、`web/`、`pdf-service/`，
-> 不含 `deploy/`）。`.gitattributes` 已把 `*.conf` / `*.service` / `*.sh` 声明为 `eol=lf`，
-> **实测工作区确为纯 LF**（`tr -cd '\r' < file | wc -c` = 0），可以直接 scp。
-> 直接 scp 到 Linux 会让 nginx 报 "unexpected \"{\""、systemd 报 "Unknown key name"。
+> 补充（**第六十一 / 六十五批后已过时**）：上述 `install` 步骤现在只用于**首次**安装。
+> 日常迭代由 `scripts/deploy-direct.sh` 完成 —— 它已把 `deploy/` 纳入打包，并由
+> `deploy-direct.remote.sh` **幂等同步** nginx 站点配置（第六十一批）与 **systemd 单元**
+> （第六十五批：仅在内容变化时 `install` + `daemon-reload`）。故改 `deploy/` 后跑一次脚本即可生效，
+> 不需要手工上传。
+> `.gitattributes` 已把 `*.conf` / `*.service` / `*.sh` 声明为 `eol=lf`，
+> **实测工作区确为纯 LF**（`tr -cd '\r' < file | wc -c` = 0）；脚本侧另做一次 `sed 's/\r$//'` 兜底
+> —— CR 落进单元会让 systemd 报 "Unknown key name"、落进 nginx 配置会报 "unexpected \"{\""。
 > ⚠ **不要用 `grep -c $'\r' 文件` 判断 CRLF**：该写法在本机 Git Bash 下会匹配到**每一行**
 > （实测把一个纯 LF 的新脚本报成"121 行含 CR"），据此会误判"部署资产是 CRLF、需要转码"。
 > 可靠判据：`tr -cd '\r' < 文件 | wc -c`（为 0 即无 CR）或 `git ls-files --eol 文件`。
-> 脚本里对 `*.sh` 的 `sed` 转码属历史保险，不是必需步骤。
 >
 > ⚠ **首次安装 nginx 时它会因 80 端口被占而启动失败**（`systemctl is-active nginx` = failed）。
 > 这是预期现象：先按上面装好站点、删掉 default，再 `systemctl reset-failed nginx && systemctl enable --now nginx` 即可。
@@ -350,7 +353,8 @@ bash scripts/deploy-direct.sh
 draft-fields 两道静态门禁）→ **PDF 依赖 `PUPPETEER_SKIP_DOWNLOAD=true npm ci` + 预置 Chromium +
 真实启动一次 Chromium 自检** → 原子替换产物 → **同步 nginx 站点配置**（`deploy/nginx/host.conf` +
 `security-headers.conf` 片段；先落位片段再覆盖站点文件，`nginx -t` 校验通过才 reload）→
-重启服务 → 等待 readiness → **部署后探针**（12 项：行为断言 + 生效配置与仓库的一致性）→
+**同步 systemd 单元**（`deploy/systemd/*.service`；仅在内容变化时安装 + `daemon-reload`）→
+重启服务 → 等待 readiness → **部署后探针**（16 项：行为断言 + 生效配置与仓库的一致性）→
 输出健康检查。
 
 > **nginx 配置已纳入脚本（2026-10-01 第六十一批）**。此前它**只存在于 §4.5 的手工流程**里，
@@ -360,6 +364,14 @@ draft-fields 两道静态门禁）→ **PDF 依赖 `PUPPETEER_SKIP_DOWNLOAD=true
 > ② `client_max_body_size` 停留在 **5m**（第二十九批已改为 6m），导致 5.5MB 上传被 nginx 以
 > **HTML 错误页** 413 拒绝、而非应用的统一信封。两条都在 2026-10-01 的云端回归中被实测抓到，
 > 现已随本脚本同步并复验通过（`suite_core` 28/28）。
+
+> **systemd 单元已纳入脚本（2026-10-01 第六十五批）**。这是**同源的链路洞**：单元同步此前
+> 也只在 §4.5 的手工流程里，于是 **第四十批给 pdf 单元加的 `Environment=PDF_SERVICE_HOST=127.0.0.1`
+> 从未在真实环境生效** —— 服务器单元一直停留在 2026-09-25 的版本，PDF 服务实际监听 `*:3001`。
+> 该暴露面**只剩云安全组兜底**，而安全组是云侧规则、在服务器内部看不见，所以从外部探测
+> 「通不通」并不能证明绑定参数生效。本轮部署时被新增的探针断言（§5.2 第 6/7 节）实测抓到：
+> 修复前探针 **14/16**（精确指出单元差异 `> Environment=PDF_SERVICE_HOST=127.0.0.1` 与
+> `PDF 3001 监听在非回环地址：*:3001`），修复后 **16/16**、`ss -lntp` 为 `127.0.0.1:3001`。
 
 默认值已对应当前环境：`SERVER=101.35.239.218`、`SSH_USER=ubuntu`、`PUBLIC_PORT=8088`。
 可用环境变量覆盖：`SERVER`、`SSH_USER`、`SSH_KEY`、`REMOTE_ROOT`、`PUBLIC_PORT`、`PUPPETEER_CACHE_DIR`。
@@ -410,14 +422,18 @@ SSH_HOST= bash scripts/probe-deployment.sh             # 跳过配置一致性�
 
 | 类别 | 内容 |
 | --- | --- |
-| **A. 行为断言**（HTTP 可观察） | 首页 200 · 安全头 4 条 · 匿名 health 收敛（无 `checks`）· `health/detail` 401 · **静态资源 gzip** · **5.5MB 上传已穿过 nginx** · 哈希资源长缓存 |
-| **B. 配置一致性** | 把**服务器生效的 nginx 配置**与**仓库 `deploy/nginx/host.conf`** 归一化后逐行比对 —— 通用地发现任何「配置改了但没随部署生效」的漂移 |
+| **A. 行为断言** | HTTP 可观察：首页 200 · 安全头 4 条 · 匿名 health 收敛（无 `checks`）· `health/detail` 401 · **静态资源 gzip** · **5.5MB 上传已穿过 nginx** · 哈希资源长缓存。**在服务器上**直接观察：API `8080` 与 PDF `3001` 的监听地址必须**仅绑回环**（第六十五批新增） |
+| **B. 配置一致性** | ① 服务器生效的 **nginx 配置** vs 仓库 `deploy/nginx/host.conf`；② 服务器生效的 **systemd 单元** vs 仓库 `deploy/systemd/*.service`（第六十五批新增）—— 归一化后逐行比对，**通用地**发现任何「配置改了但没随部署生效」的漂移 |
 
 探针**失败不掩盖「部署已完成」这一事实**，但以非零退出码结束 —— 避免「部署成功」的假阳性。
 
 > B 类断言的存在理由：第六十一批实测到两条 nginx 配置改动（`client_max_body_size` 5m→6m、
 > 静态资源 gzip）在仓库早已改好、CI 全绿，却因部署链路不含 `deploy/` 而**从未生效**。
 > 行为断言能抓到它们**造成的结果**，配置一致性断言则能**通用地**抓到这一类（不限于已知的两条）。
+>
+> 第六十五批把同一手法扩到 systemd：**行为断言是「服务器上的监听地址」而不是「从外部能否连通」**
+> —— 因为该端口此前只由云安全组拦截，外部探测会因为安全组而"看起来正常"，形成假阳性；
+> 只有 `ss -lntp` 才能证明绑定参数真的生效。
 
 ---
 
@@ -529,7 +545,7 @@ HTTP 403  (0.14s)
 | **MySQL 8.4 认证插件** | `mysql_native_password` 在 8.4 已不加载，照旧手册建用户会 `ERROR 1524` | 用默认 `caching_sha2_password`；连接串保留 `allowPublicKeyRetrieval=true&useSSL=false` |
 | **Ubuntu 26.04 包名** | `libasound2` / `libatk1.0-0` / `libcups2` / `libatspi2.0-0` → 均带 `t64` 后缀 | 见 §4.1 清单；`libu2f-udev` 已不存在 |
 | Node 路径 | 本环境 Node 来自发行版包，位于 `/usr/bin/node`（旧环境为 `/usr/local/bin/node`） | 单元里已改为 `/usr/bin/node`；更换 Node 安装方式必须同步改单元，否则 `status=203/EXEC` |
-| pdf-service 绑定 | 应用原用 `app.listen(port)` 未指定 host，实际监听 `0.0.0.0:3001`，是否可达只取决于安全组 | **已收敛（第四十批）**：`src/server.js` 支持 `PDF_SERVICE_HOST`，pdf 单元注入 `Environment=PDF_SERVICE_HOST=127.0.0.1`（与 api 单元的 `SERVER_ADDRESS` 同口径）。核对方式：启动日志的绑定地址与 `ss -lntp`（应为 `127.0.0.1:3001`）。容器路径刻意不设置该变量（API 容器需经 `pdf-service:3001` 访问）。门禁：`PdfServiceBindScopeContractTest` |
+| pdf-service 绑定 | 应用原用 `app.listen(port)` 未指定 host，实际监听 `0.0.0.0:3001`，是否可达只取决于安全组 | **已收敛（第四十批）**：`src/server.js` 支持 `PDF_SERVICE_HOST`，pdf 单元注入 `Environment=PDF_SERVICE_HOST=127.0.0.1`（与 api 单元的 `SERVER_ADDRESS` 同口径）。核对方式：启动日志的绑定地址与 `ss -lntp`（应为 `127.0.0.1:3001`）。容器路径刻意不设置该变量（API 容器需经 `pdf-service:3001` 访问）。门禁：`PdfServiceBindScopeContractTest`。⚠ **代码与单元都对了，但真实环境直到第六十五批才生效** —— 单元同步此前不在部署脚本内（同第六十一批的 nginx 洞），服务器实际监听 `*:3001` 直到本轮修复；见 §5 与 §5.2 第 6/7 节 |
 | 默认 profile 兜底值 | 默认 profile 保留了开发兜底值，若 `.env` 加载失败会静默回退 | 已通过运行期端到端验证补偿（CORS 生效 → 浏览器可跨源；PDF Token 生效 → 导出成功）；这两项任一失败会立即暴露 |
 | **内存偏紧** | 总 3.6 GiB：艺培通 ~935MiB + 系统 ~740MiB，剩余可用约 2 GiB；智历需 JVM(768m) + MySQL(256m buffer pool) + Chromium | JVM 堆已从 1024m 降到 `-Xmx768m`、MySQL buffer pool 降到 256M、2 GiB swap 兜底；**构建与运行不要同时进行**，也不要两侧同时跑重负载 |
 | 时区 | 主机时区须为 `Asia/Shanghai`，与 JDBC `serverTimezone` 对齐 | 本环境安装时已是 Asia/Shanghai |

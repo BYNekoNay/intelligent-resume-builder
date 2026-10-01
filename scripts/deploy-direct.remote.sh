@@ -140,6 +140,39 @@ else
   echo "警告：源码包缺少 deploy/nginx/，跳过 nginx 配置同步（旧配置继续生效）" >&2
 fi
 
+# systemd 单元同步（幂等）。
+# 与 nginx 同类问题、同一处链路洞：此前该步**只存在于部署手册的手工流程**里，
+# 仓库 `deploy/systemd/*.service` 的改动不会随部署生效。实测代价：第四十批给 pdf 单元
+# 加的 `Environment=PDF_SERVICE_HOST=127.0.0.1` **从未在真实环境落地** —— 服务器单元停留在
+# 2026-09-25 的版本，PDF 服务至今监听 `*:3001`（该暴露面只剩云安全组兜底）。见第六十五批报告。
+# 约定：仓库 `deploy/systemd/` 是唯一来源；**仅在内容变化时**安装 + `daemon-reload`，
+# 避免每次部署都重启造成抖动。安装前剥离 CR（防工作区 CRLF 落进单元导致 systemd 解析异常）。
+if [ -d "$SRC/deploy/systemd" ]; then
+  UNITS_CHANGED=0
+  for unit_src in "$SRC"/deploy/systemd/*.service; do
+    [ -f "$unit_src" ] || continue
+    unit_name="$(basename "$unit_src")"
+    unit_tmp="/tmp/$unit_name.$$"
+    sed 's/\r$//' "$unit_src" > "$unit_tmp"
+    if [ -f "/etc/systemd/system/$unit_name" ] && cmp -s "$unit_tmp" "/etc/systemd/system/$unit_name"; then
+      rm -f "$unit_tmp"
+      continue
+    fi
+    $SUDO install -m 644 "$unit_tmp" "/etc/systemd/system/$unit_name"
+    rm -f "$unit_tmp"
+    UNITS_CHANGED=1
+    echo "systemd 单元已更新：$unit_name"
+  done
+  if [ "$UNITS_CHANGED" -eq 1 ]; then
+    $SUDO systemctl daemon-reload
+    echo "systemd daemon-reload 完成（单元有变化）"
+  else
+    echo "systemd 单元已是最新，无需变更"
+  fi
+else
+  echo "警告：源码包缺少 deploy/systemd/，跳过单元同步（旧单元继续生效）" >&2
+fi
+
 log "5/7 重启服务"
 $SUDO systemctl restart intelligent-resume-pdf
 sleep 5
