@@ -19,14 +19,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 留存期口径一致性门禁（静态）：规范文档里写明的**留存天数**必须与
- * {@code application.yml} 的实际默认值一致。
+ * {@code application.yml} 的实际默认值一致；生命周期表里的「硬删」承诺必须按**档位**
+ * 标注实现状态（A 档已实施者不得再标计划中；B 档与未覆盖资源必须保留「计划中」）。
  *
  * <p>背景（第四十九批取证）：AI 任务留存在第十三代按用户确认定为「90 天压缩快照」并落地
  * （{@code app.ai.task.retention-days: ${AI_TASK_RETENTION_DAYS:90}}），但 docs/04 §7.1 生命周期
  * 表、docs/07、docs/08 §9.6 三处仍写 **30 天** —— 同一事实在「记忆、决策、执行」三个环节
- * 呈现三种数值（报告把 90 天记为已确认、规范文档写 30 天、实现是 90 天）。规范的留存期是
- * 面向用户与合规的承诺，漂移即虚假承诺，且此前的门禁（{@code ConfigFallbackContractTest}）
- * 只覆盖「代码兜底 vs yml 默认」，不覆盖「文档 vs yml」。
+ * 呈现三种数值。规范的留存期是面向用户与合规的承诺，漂移即虚假承诺。
+ *
+ * <p>背景（第六十四批）：决策 D2 把「软删 30 天后 7 天内硬删」拆成两档 —— A 档「无引用者」
+ * 已对 {@code career_material} / {@code resume_version} 落地清扫作业，B 档「被引用者转最小快照」
+ * 与账户侧仍属计划中。故「必须含计划中」的旧断言按档位细分：**A 档不得再被标为计划中，
+ * B 档与未覆盖资源必须仍标**。双向断言保证「未实现时不许去掉标注」与「已实现后不许继续标
+ * 计划中」两个方向都会被门禁抓到。
  *
  * <p>比对方式：对每个（文档，正则）对，正则**必须**命中并捕获天数，再与 yml 默认值比对。
  * 刻意要求「必须命中」——文档被改写/删除该句时门禁报红，迫使维护者显式维护该承诺，
@@ -44,6 +49,14 @@ class RetentionPolicyContractTest {
                     Pattern.compile("AI 任务原始输入和结果\\s*(\\d+)\\s*天后删除非必要内容")),
             new DocClaim("docs/08-部署与运维说明书.md",
                     Pattern.compile("AI 任务原始输入和结果完成\\s*(\\d+)\\s*天后删除非必要内容")));
+
+    /** A 档已实施、B 档仍计划中的生命周期行（行首标记）。 */
+    private static final List<String> PARTIALLY_IMPLEMENTED_ROWS = List.of(
+            "职业资料", "简历版本");
+
+    /** 硬删承诺完全未实现的生命周期行（行首标记）。 */
+    private static final List<String> PENDING_ROWS = List.of(
+            "JD、简历主记录", "投递与面试数据", "账户");
 
     private record DocClaim(String relativePath, Pattern pattern) {}
 
@@ -74,18 +87,40 @@ class RetentionPolicyContractTest {
     }
 
     @Test
-    @DisplayName("软删资源的「硬删」承诺必须显式标注为未实现或已实现，不得留作已兑现")
-    void softDeleteHardPurgeClaimIsExplicit() throws Exception {
-        // docs/04 §7.1 生命周期表声称「职业资料、JD、简历主记录 / 投递与面试数据」软删恢复期
-        // 30 天后「恢复期结束后 7 天内」硬删，但全仓无任何硬删实现（无清扫作业、无 repository
-        // 方法、无配置；@Scheduled 只有 AI 留存 / PDF 过期 / 导出过期三处）。该承诺必须带
-        // 「计划中」标记，避免被读成已兑现；本断言在实现落地时由维护者改标记，门禁随之报红提醒。
+    @DisplayName("A 档（无引用者硬删）已实施：对应行必须标「已实施」，且 B 档仍标「计划中」")
+    void implementedTierIsNoLongerMarkedPending() throws Exception {
         String lifecycle = read("docs/04-数据库设计说明书.md");
-        Matcher row = Pattern.compile("\\|\\s*职业资料、JD、简历主记录\\s*\\|[^\\n]*").matcher(lifecycle);
-        assertTrue(row.find(), "docs/04 §7.1 生命周期表应保留「职业资料、JD、简历主记录」行");
-        String line = row.group();
-        assertTrue(line.contains("计划中") || line.contains("未实现"),
-                "该行的硬删承诺尚无实现，必须显式标注「计划中」或「未实现」，否则读者会当作已兑现：\n" + line);
+        assertTrue(!PARTIALLY_IMPLEMENTED_ROWS.isEmpty(), "A 档已实施行清单不得为空（否则本门禁空转）");
+
+        for (String marker : PARTIALLY_IMPLEMENTED_ROWS) {
+            String row = lifecycleRow(lifecycle, marker);
+            assertTrue(row.contains("已实施"),
+                    "该行对应资源的「无引用者硬删」已在决策 D2 阶段 1 落地（清扫作业 + 数值配置校验），"
+                            + "必须显式标注「已实施」，不得继续被读作未兑现：\n" + row);
+            assertTrue(row.contains("计划中"),
+                    "该行的 B 档「被引用者转最小快照」尚未实现，必须保留「计划中」标注，否则会被读作已兑现：\n" + row);
+        }
+    }
+
+    @Test
+    @DisplayName("未覆盖资源的硬删承诺仍显式标注「计划中/尚未实现」，不得留作已兑现")
+    void pendingRowsStayExplicit() throws Exception {
+        String lifecycle = read("docs/04-数据库设计说明书.md");
+        assertTrue(!PENDING_ROWS.isEmpty(), "未实现行清单不得为空（否则本门禁空转）");
+
+        for (String marker : PENDING_ROWS) {
+            String row = lifecycleRow(lifecycle, marker);
+            assertTrue(row.contains("计划中") || row.contains("尚未实现"),
+                    "该资源的硬删/匿名化承诺尚无实现（决策 D2 阶段 1 未覆盖），必须显式标注「计划中」或"
+                            + "「尚未实现」，否则读者会当作已兑现：\n" + row);
+        }
+    }
+
+    /** 取 docs/04 §7.1 生命周期表中以 {@code marker} 开头的整行。 */
+    private String lifecycleRow(String lifecycle, String marker) {
+        Matcher row = Pattern.compile("(?m)^\\|\\s*" + Pattern.quote(marker) + "[^\\n]*").matcher(lifecycle);
+        assertTrue(row.find(), "docs/04 §7.1 生命周期表应保留以「" + marker + "」开头的行");
+        return row.group();
     }
 
     /** 从 application.yml 取 {@code app.ai.task.retention-days} 的默认值（支持 {@code ${ENV:default}}）。 */

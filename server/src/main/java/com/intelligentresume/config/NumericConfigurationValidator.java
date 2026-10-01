@@ -88,6 +88,13 @@ public class NumericConfigurationValidator {
         // PDF 导出过期清理：与 AI 留存同形（PageRequest 批量 + fixedDelay 间隔）
         minimums.put("app.pdf.cleanup-batch-size", 1);
         minimums.put("app.pdf.cleanup-interval-ms", 1000);
+        // 数据生命周期分档清扫（决策 D2，第 64 批）：批量 0 → 一个候选都取不回来（守卫生效但清扫静默停摆）；
+        // 周期 0 → 连轴转的热循环。恢复期/宽限期下限为 0（合法但激进）：取负值会让 cutoff 落到未来、
+        // 把**尚未超过保留期**的软删行提前纳入删除候选 —— 保留期语义反转。
+        minimums.put("app.retention.purge.batch-size", 1);
+        minimums.put("app.retention.purge.recovery-days", 0);
+        minimums.put("app.retention.purge.grace-days", 0);
+        minimums.put("app.retention.purge.interval-ms", 1000);
         return Collections.unmodifiableMap(minimums);
     }
 }

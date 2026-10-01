@@ -13,13 +13,13 @@
 > | 项 | 决策 | 状态 |
 > | --- | --- | --- |
 > | D1 `logout-all` | A+C（维持现状 + 删号兜底） | ✅ **已落地** —— `docs/05` §2.9 改写为明确结论（无代码改动） |
-> | D2 数据生命周期 | B（分档承诺） | ⏳ **已决策、实现待排期** —— 属新增功能（清扫作业 + 引用判定 + 跨表护栏 + 文档改写），未实现即不标 RESOLVED |
+> | D2 数据生命周期 | B（分档承诺） | 🟡 **阶段 1 已落地（A 档）；阶段 2/3 待排期** —— A 档「无引用者」清扫作业已实现（`career_material` / `resume_version`，默认关闭 + dry-run）；B 档「被引用者转最小快照」与账户侧未实现，故不标 RESOLVED |
 > | D3 短 JD 语义 | A（视为无有效内容） | ✅ **已落地并验证** —— `JdKeywordParser` 真正消费该键；测试 7→9（覆盖阈值两侧边界）；**红判定已做** |
 > | D4 `confirmation.*` | B（移除三键） | ✅ **已落地** —— yml 与白名单均已移除，白名单**现为空** |
 > | D5 ATS 600s 超时口径 | C（固化现状） | ✅ **已落地** —— `docs/05` §8.3 增「AI 超时/失败时的用户可见行为」口径（三态对照表 + 前端处置）；核实发现**选项 A 的行为本就已实现**（`analysisStatus=RULES_FALLBACK` + `fallback{retryable, consentRequired}`），C 即把它写死 |
 >
 > 前四条已在 `docs/decisions/OPEN-DECISIONS.md` 中更新为 **RESOLVED**（D1/D3/D4）与
-> **DECIDED · 实现待排期**（D2）。
+> **DECIDED · 阶段 1 已实现、阶段 2/3 待排期**（D2）。
 
 ---
 
@@ -62,6 +62,14 @@
 理由：A 的级联硬删会破坏历史可读性与审计（评分/ATS/面试/投递都引用版本）；
 C 则让"删除权"名存实亡。B 是**可实现 + 可解释**的中间态。
 **前置**：需要你确认"**被引用数据允不允许保留**"——这是合规口径，不是技术选择。
+
+> **落地进展（2026-10-01，第六十四批）**：**阶段 1（A 档「无引用者」物理删除）已实现** ——
+> `RetentionPurgeService` 按 `app.retention.purge.*` 周期清扫，覆盖 `career_material` 与
+> `resume_version`（引用判定用逐条 `NOT EXISTS` 排除全部引用者；删除语句带 `deleted_at IS NOT NULL`
+> 二次保护；默认 `enabled=false` + `dry-run=true`；护栏 G1–G7 全实现）。**阶段 2**（被引用者转最小
+> 快照 + 匿名化）仍需你先确认快照口径（尤其 `career_material`「只留键名」是否够）；**阶段 3**（账户侧
+> 可撤销窗口）需求本身待定，不建议现在做。设计与测试计划见
+> `docs/plans/2026-10-01-001-data-retention-tiered-purge.md`。
 
 ---
 

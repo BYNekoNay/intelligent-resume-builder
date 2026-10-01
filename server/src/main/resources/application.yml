@@ -310,6 +310,19 @@ app:
     user-disclaimer: "本结果为 JD 规则覆盖度，非企业 ATS 结果、非录用概率"
 
   # T10 PDF
+  # 数据生命周期分档清扫（决策 D2 阶段 1；方案 docs/plans/2026-10-01-001-data-retention-tiered-purge.md）
+  # ⚠ 两条护栏都落在「安全侧」：enabled=false + dry-run=true —— 部署后**不会**删除任何数据；
+  #    需显式解除才会真正物理删除。阶段 1 只覆盖 resume_version / career_material 的「无引用者」，
+  #    被引用者转最小快照属阶段 2（未实现，docs 承诺仍标「计划中」）。
+  retention:
+    purge:
+      enabled: ${RETENTION_PURGE_ENABLED:false}
+      dry-run: ${RETENTION_PURGE_DRY_RUN:true}
+      batch-size: ${RETENTION_PURGE_BATCH_SIZE:100}
+      recovery-days: ${RETENTION_RECOVERY_DAYS:30}
+      grace-days: ${RETENTION_GRACE_DAYS:7}
+      interval-ms: ${RETENTION_PURGE_INTERVAL_MS:21600000}
+
   pdf:
     worker:
       poll-interval-ms: ${PDF_WORKER_POLL_MS:1000}
