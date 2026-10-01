@@ -56,16 +56,10 @@ class ConfigConsumerContractTest {
     private static final Map<String, String> KNOWN_UNCONSUMED = new LinkedHashMap<>();
 
     static {
-        KNOWN_UNCONSUMED.put("app.job.jd-text.min-length",
-                "T05 设计意图为「JD 文本短于该值视为空、允许解析但关键词为空」，解析器未实现；"
-                        + "是否实施属产品口径，见 docs/decisions/OPEN-DECISIONS.md（第五十三批登记）");
-        KNOWN_UNCONSUMED.put("app.ai.confirmation.require-explicit-source",
-                "T08 设计项未实现（当前行为由 DTO/服务固化），见 OPEN-DECISIONS.md（第五十三批登记）");
-        KNOWN_UNCONSUMED.put("app.ai.confirmation.allow-user-new-fact",
-                "T08 设计项未实现，见 OPEN-DECISIONS.md（第五十三批登记）");
-        KNOWN_UNCONSUMED.put("app.ai.confirmation.max-confirmed-items",
-                "上限已由 ConfirmRequest 的 @Size(max = 200) 硬编码实现，配置化未实现，"
-                        + "见 OPEN-DECISIONS.md（第五十三批登记）");
+        // 2026-10-01（决策 D3/D4 落地后）：
+        //  - `app.job.jd-text.min-length` 已由 D3 接入消费点（JdKeywordParser 的「短文本视为无有效内容」），
+        //    故从本白名单移除；
+        //  - `app.ai.confirmation.*` 三键由 D4 直接**移除**（连同 yml 声明），不必再登记。
     }
 
     private static final Pattern CONFIG_PROPERTIES =

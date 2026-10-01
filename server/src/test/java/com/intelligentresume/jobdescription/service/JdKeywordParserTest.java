@@ -49,7 +49,8 @@ class JdKeywordParserTest {
     @Test
     @DisplayName("正常路径: 教育关键词命中 '本科及以上'")
     void educationKeywordHit() {
-        ParsedKeywordsResponse result = parser.parse("学历要求本科及以上,硕士优先");
+        // 样本加长到 ≥ app.job.jd-text.min-length(20)，否则会命中「短文本视为无有效内容」分支
+        ParsedKeywordsResponse result = parser.parse("学历要求本科及以上,硕士优先,计算机相关专业");
 
         assertTrue(result.requirements().contains("本科"));
         assertTrue(result.requirements().contains("硕士"));
@@ -68,9 +69,33 @@ class JdKeywordParserTest {
     @Test
     @DisplayName("边界路径: 没有命中关键词的文本返回空 keywords")
     void noHit_returnsEmptyKeywords() {
-        ParsedKeywordsResponse result = parser.parse("负责日常行政事务处理");
+        // 同上：需 ≥ 20 字符，才是在验证「无命中」而非「太短」
+        ParsedKeywordsResponse result = parser.parse("负责日常行政事务处理与文件归档,不含技术岗要求");
 
         assertTrue(result.keywords().isEmpty());
+    }
+
+    @Test
+    @DisplayName("阈值: 短于 min-length 时视为无有效内容（即使含关键词也全空）")
+    void shorterThanMinLength_returnsEmpty() {
+        // 该文本含 Java 与 MySQL，但仅 15 字符 < 20 → 应整体视为无有效内容
+        ParsedKeywordsResponse result = parser.parse("Java 与 MySQL 开发");
+
+        assertNull(result.role(), "短文本不应给出 role");
+        assertTrue(result.keywords().isEmpty(), "短文本不应给出 keywords");
+        assertTrue(result.requirements().isEmpty());
+    }
+
+    @Test
+    @DisplayName("阈值: 恰好等于 min-length 时正常解析（边界含等号）")
+    void exactlyAtMinLength_parses() {
+        String text = "Java".repeat(5);   // 恰好 20 字符
+        assertEquals(20, text.length(), "样本长度前提");
+
+        ParsedKeywordsResponse result = parser.parse(text);
+
+        assertNotNull(result.role(), "等于阈值应正常解析，而非视为无有效内容");
+        assertFalse(result.keywords().isEmpty(), "应命中 Java");
     }
 
     @Test

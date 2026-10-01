@@ -95,6 +95,8 @@ app:
     jd-text:
       max-length: 5000           # 字符数上限
       min-length: 20             # 太短视为空,允许解析但关键词为空
+                                 # ✅ 已实施（2026-10-01 决策 D3）：JdKeywordParser 真正消费该键，
+                                 #    短于阈值 → role/keywords/requirements 全空（**不**拒绝入参）
     parser:
       rule-version: "v1.0.0"
       keyword-dictionary:

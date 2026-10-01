@@ -280,11 +280,10 @@ app:
           - "(?i)system prompt"
           - "(?i)developer mode"
           - "(?i)\\bjailbreak\\b"
-    # T08 来源确认与版本落地
-    confirmation:
-      require-explicit-source: true
-      allow-user-new-fact: true
-      max-confirmed-items: 200
+    # T08 来源确认与版本落地：
+    # 原 `confirmation.*` 三键（require-explicit-source / allow-user-new-fact / max-confirmed-items）
+    # 于 2026-10-01 决策 D4 **移除** —— 三者从未被消费，其行为已由 DTO/服务固化
+    # （条数上限即 `ConfirmRequest` 的 `@Size(max = 200)`），保留只会造成「改了不生效」的困惑。
 
   # T09 JD 规则覆盖度
   scoring:
