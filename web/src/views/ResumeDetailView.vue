@@ -10,6 +10,7 @@ import { SECTION_KEYS, type SectionKey } from '@/resume/sectionRegistry'
 import { scoreMatch } from '@/api/scoring'
 import { createExport, type ResumeTemplateCode } from '@/api/export'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const { locale, t } = useLocale()
@@ -230,7 +231,7 @@ async function exportPdf(version: ResumeVersionSummary) {
   try {
     const response = await createExport(version.id, versionTemplate(version))
     await router.push({ name: 'export', params: { exportTaskId: response.data.data.taskId } })
-  } catch { error.value = t('resumeDetail.exportError') }
+  } catch (cause) { error.value = resolveApiError(cause, 'resumeDetail.exportError') }
   finally { runningAction.value = null }
 }
 </script>

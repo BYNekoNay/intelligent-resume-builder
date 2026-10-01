@@ -32,6 +32,7 @@ import {
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 import { getResumeVersion } from '@/api/resume'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
@@ -245,8 +246,9 @@ async function save() {
     draftTexts.value = {}
     resetForm()
     await load()
-  } catch {
-    error.value = t('applications.saveError')
+  } catch (cause) {
+    // 已登记业务码优先（如 40902 归档版本 → 「先在版本历史恢复」），无码才用本页兜底串
+    error.value = resolveApiError(cause, 'applications.saveError')
   } finally {
     saving.value = false
   }

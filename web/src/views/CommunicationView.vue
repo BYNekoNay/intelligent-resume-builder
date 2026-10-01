@@ -28,6 +28,7 @@ import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useTaskPolling, TASK_POLL_DEFAULT_INTERVAL_MS, TASK_POLL_DEFAULT_MAX_ATTEMPTS } from '@/composables/useTaskPolling'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
+import { resolveApiError } from '@/utils/errorMessage'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const route = useRoute()
@@ -122,9 +123,10 @@ function errorCode(cause: unknown) {
 function handleCreateError(cause: unknown) {
   const code = errorCode(cause)
   failureKind.value = code === 40302 ? 'CONSENT' : code === 42901 ? 'QUOTA' : 'FAILED'
-  error.value = code === 40302
-    ? t('communication.consentRequired')
-    : code === 42901 ? t('communication.quotaExceeded') : t('communication.aiGenerateError')
+  if (code === 40302) { error.value = t('communication.consentRequired'); return }
+  if (code === 42901) { error.value = t('communication.quotaExceeded'); return }
+  // 其余码走登记表（如 40902 归档版本 → 「先在版本历史恢复」），无码才用本页兜底串
+  error.value = resolveApiError(cause, 'communication.aiGenerateError')
 }
 
 async function rememberTask(taskId: number | null) {
@@ -215,8 +217,8 @@ async function generateTemplate() {
       Number(resumeVersionId.value), Number(jobId.value), type.value, outputLanguage.value,
     )).data.data
     setDraft(result.draft, 'TEMPLATE')
-  } catch {
-    error.value = t('communication.templateGenerateError')
+  } catch (cause) {
+    error.value = resolveApiError(cause, 'communication.templateGenerateError')
   } finally {
     loadingMode.value = null
   }
@@ -306,9 +308,9 @@ async function openPreview(template: CommunicationTemplateSummary) {
     if (epoch !== previewRequestEpoch) return
     previewResult.value = result
     previewDraft.value = result.filledBody
-  } catch {
+  } catch (cause) {
     if (epoch !== previewRequestEpoch) return
-    error.value = t('communication.previewError')
+    error.value = resolveApiError(cause, 'communication.previewError')
   } finally {
     if (epoch === previewRequestEpoch) previewLoading.value = false
   }
