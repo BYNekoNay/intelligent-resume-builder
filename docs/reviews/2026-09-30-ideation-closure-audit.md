@@ -716,6 +716,26 @@
 
 > 过程记录：本门禁首版有**两个自造缺陷**——(a) 后端 record 组件切分后**漏了「取末位 token 作字段名」**，把整段文本当成字段名（表现：每个前端类型都报「多出全部字段」）；(b) 首轮用括号配对法提取 record 体失败。两者都靠**自检断言**（后端字段总数 ≥300）与**诊断输出**（把「后端实际解析到」打进失败信息）定位。→ 门禁必须能「发现自己解析失败」，否则解析失效会伪装成「大量违规」而被误当成真缺陷。
 
+### 2.51 同一组取值在多处手工维护：前端 `AiTask.taskType` 漏 `RESUME_OPTIMIZE`（2026-10-01 第五十八批扫描，已随本批修复）
+
+方法：把「同一组取值在多处登记」的面单独扫一遍 —— 后端 Java 枚举 vs 前端 TS 联合类型 / 常量数组。两处手工维护，任一处漏改都静默漂移（TS 不报错，e2e 也覆盖不到）。
+
+| 组 | 后端枚举 | 前端清单 | 结果 |
+| --- | --- | --- | --- |
+| AI 任务类型 | `AiTaskType`（9） | `AI_CONSENT_TASK_SCOPES`（9） | 一致 |
+| AI 任务类型 | `AiTaskType`（9） | **`AiTask.taskType`（8）** | **不一致 → 漏 `RESUME_OPTIMIZE`** |
+| AI 任务状态 | `AiTaskStatus`（5） | `TaskStatus`（5） | 一致 |
+| 投递状态 | `ApplicationStatus`（6） | `ApplicationStatus`（6） | 一致 |
+| 确认状态 | `ConfirmationStatus`（4） | `ConfirmationStatus`（4） | 一致 |
+
+`AiTask.taskType` 与 `AI_CONSENT_TASK_SCOPES` **在同一个文件里**却不一致；`AiTaskContinuation.taskType` 继承了这个 8 值类型，而后端可能返回 `RESUME_OPTIMIZE`（通用端点白名单内的类型）—— 前端类型不承认它，TS 编译与既有多数 e2e 都不报错。
+
+修复动作（**结构性**，而非「把漏的补上」）：新增 `export type AiTaskType = (typeof AI_CONSENT_TASK_SCOPES)[number]`，并把 `AiTask.taskType` 改为 `AiTaskType` —— 前端**单一来源**，此后结构上不可能再漂移。
+
+新增门禁 `FrontendEnumContractTest`（4 组映射）：后端枚举取值 vs 前端清单取值，断言**集合相等**，失败信息区分「仅后端有」/「仅前端有」。解析要点：枚举常量可能写在同一行（`DRAFT, APPLIED, ...`）且**末位常量后无分隔符**，故按 `,`/`;` 切段后取段内**最后一个**大写标识符；并先剥离 `//` 与 `/* */` 注释，避免注释里的大写词被当成常量。
+
+验证：**红判定已做**——从前端 `TaskStatus` 去掉 `CANCELLED` 后门禁 1 红并给出「`AiTaskStatus` ←→ `TaskStatus`：仅后端有 `CANCELLED`；仅前端有（无）」，随后按 md5 校验完整恢复；修复后门禁绿；server 全量 **905 测试 0 失败**（本批 +1，5 skipped）；web `npm run build`（含 `vue-tsc`）通过；CI + Functional Regression 双绿（workflow run 36853658365 / 36853658230，head 9c9a6bb，复核结论 success）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -911,3 +931,4 @@
 | 2026-10-01 | **第五十五批（数据字典 ↔ Flyway 迁移双向对账：补 6 张表章节、更正命名漂移、标注未实现表，并立双向门禁；§2.48 扫描新增项）执行完成**：`docs/04` §3「表结构设计」是评审/答辩用的 schema 契约，此前无任何门禁保证它与 `V1~V34` 一致。① **文档漏写 6 张已实现表**：`personal_profile`(V13+V15)、`communication_draft`(V17)、`communication_template`(V23+V29)、`inline_optimization_record`(V3)、`interview_ai_attempt`(V20)、`interview_asset_section`(V23+V25)；② **文档虚构 1 张表**：§3.12 `application_status_history` 无 `CREATE TABLE`、零代码引用（状态迁移由 `application_record.status` + `stage_entered_at`(V26) 承载）；③ **命名漂移**：§3.9 `material_resume_task` → 迁移真名 `material_resume_generation`(V6)。修复：新增 §3.17~§3.22 六章节（按 DDL 提取，含 V15/V25/V29 ALTER）、§3.9 更名、§3.12 标注「设计草案，未实现」、§2.2 补「状态」列、§8 建表顺序更正；**新增 `SchemaDocContractTest`**（双向断言：迁移表必须在 §3 有章节；§3 章节须对应迁移表或显式标注未实现）。验证：**红判定已做**（改回旧名 + 去掉标注 → 两用例各 1 红并分别点出漏写与虚构，md5 校验恢复）；门禁 2/2 绿；server 全量 **902 测试 0 失败**（本批 +2，5 skipped 为环境门控）；CI + Functional Regression 双绿（workflow run 36847869352 / 36847869373，head e444dcc，复核结论 success） |
 | 2026-10-01 | **第五十六批（前端 API 契约对账：93 调用 × 95 端点双向零缺陷，结论固化为门禁；§2.49 扫描新增项）执行完成**：把前端 `web/src/api/*.ts` 的 **93** 个 `(method, path)` 与后端 19 个控制器的 **95** 个端点做全量对账（路径变量归一 `{}`，**含 HTTP 动词** —— 路径对但动词错同样是 405）。结果：**前端 → 后端零缺失**；后端 → 前端仅 2 个无 UI 调用且有据（`GET /api/system/health/detail` 运维端点、`POST /api/auth/logout-all` 无前端入口）；字段级抽样 `AiTask` 前后端 12 字段**逐字段一致**。该面为**正面结论**（无缺陷），故新增静态门禁 `FrontendApiContractTest` 防漂移：断言前端每个 `(method, path)` 在后端存在，失败信息区分 **404**（路径不存在）/ **405**（动词不同）；反向**不断言**（后端有前端无属合理）；含规模自检。解析踩坑固化：泛型可能嵌套或含引号（`ApiResponse<import('./ai').AiTask>`），**不能**用「动词与路径之间的字符」匹配动词，否则漏掉 `interview.ts` 的 follow-up 调用 → 改为「先定位路径字面量、再向前回溯最近动词」。验证：**红判定已做**（加 `GET /api/does-not-exist` + `PATCH /api/system/health` → 门禁 1 红并逐条标注 404/405，md5 校验恢复）；server 全量 **903 测试 0 失败**（本批 +1，5 skipped 为环境门控）；`docs/05` §15 补前端契约一致性约定；CI + Functional Regression 双绿（workflow run 36849142363 / 36849142250，head c503f9f，复核结论 success） |
 | 2026-10-01 | **第五十七批（前端 TS 类型 ↔ 后端 DTO 字段对账：修 ResumeSummary.createdAt，并立字段门禁；§2.50 扫描新增项）执行完成**：前端多声明后端不返回的字段会让运行期取到 `undefined`（界面空白 / `Invalid Date`），而 TS 编译与 e2e 都可能不报错。对账（同名 20 对 + 显式映射 8 对）：**发现 1 处** —— `ResumeSummary.createdAt`（后端 `ResumeSummary` 仅 5 字段、UI 未使用；`ResumeDetailView` 的 `v.createdAt` 是**版本**不是简历）→ 前端移除该声明；其余 27 对**逐字段一致**，含 `ResumeVersion`↔`ResumeVersionDetail`（10 字段吻合，而非 `Summary`）。**新增 `DtoFieldContractTest`**：后端字段＝record 组件（顶层逗号切分）+ class `private` 字段；前端字段＝接口字段 + 同文件内 `extends` **递归展开**；断言前端 ⊆ 后端（反向不约束）；同名自动配对 + `NAME_MAPPING` 登记命名不同的 8 对；自检四项（DTO ≥60 / 类型 ≥40 / 比对对 ≥20 / 后端字段总数 ≥300）。验证：**红判定已做**（给 `SystemHealth` 加 `bogusField` → 1 红并打印后端实际字段，md5 校验恢复）；server 全量 **904 测试 0 失败**（本批 +1，5 skipped）；web `npm run build`（含 vue-tsc）通过；CI + Functional Regression 双绿（workflow run 36852426172 / 36852426250，head a22579e，复核结论 success） |
+| 2026-10-01 | **第五十八批（同一组取值多处维护对账：前端 `AiTask.taskType` 漏 `RESUME_OPTIMIZE`，改为单一来源并立枚举门禁；§2.51 扫描新增项）执行完成**：把「后端 Java 枚举 ↔ 前端 TS 联合类型/常量数组」逐组对账。**发现 1 处** —— `web/src/api/ai.ts` **同一文件内两处清单不一致**：`AI_CONSENT_TASK_SCOPES` 9 个值（与 `AiTaskType` 一致）而 `AiTask.taskType` 只有 8 个、漏 `RESUME_OPTIMIZE`；`AiTaskContinuation.taskType` 继承该类型，后端返回该类型时前端不承认（TS 不报错）。修复：新增 `type AiTaskType = (typeof AI_CONSENT_TASK_SCOPES)[number]`、`AiTask.taskType` 改用之 —— **单一来源**，结构上消除漂移可能。其余 3 组（`AiTaskStatus` / `ApplicationStatus` / `ConfirmationStatus`）已一致。**新增 `FrontendEnumContractTest`**（4 组映射，断言集合相等，失败信息区分「仅后端有/仅前端有」；解析处理单行枚举 + 末位无分隔符 + 剥离注释）。验证：**红判定已做**（前端去掉 `CANCELLED` → 1 红并精确指出差异，md5 校验恢复）；server 全量 **905 测试 0 失败**（本批 +1，5 skipped）；web `npm run build` 通过；CI + Functional Regression 双绿（workflow run 36853658365 / 36853658230，head 9c9a6bb，复核结论 success） |
