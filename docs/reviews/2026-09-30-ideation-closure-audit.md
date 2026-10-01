@@ -736,6 +736,24 @@
 
 验证：**红判定已做**——从前端 `TaskStatus` 去掉 `CANCELLED` 后门禁 1 红并给出「`AiTaskStatus` ←→ `TaskStatus`：仅后端有 `CANCELLED`；仅前端有（无）」，随后按 md5 校验完整恢复；修复后门禁绿；server 全量 **905 测试 0 失败**（本批 +1，5 skipped）；web `npm run build`（含 `vue-tsc`）通过；CI + Functional Regression 双绿（workflow run 36853658365 / 36853658230，head 9c9a6bb，复核结论 success）。
 
+### 2.52 业务错误码三处维护，`docs/05` §1.3 表漏 `40302`（2026-10-01 第五十九批扫描，已随本批修复）
+
+方法：同一批取值可能在**三处**分别维护 —— 后端 `ErrorCode` 枚举（唯一来源）、`docs/05` §1.3 通用错误码表（集成方/评审据此实现）、前端 `errorCodes.ts` 码→文案键映射（用户可见提示）。逐处比对集合。
+
+| 处 | 码数 | 结果 |
+| --- | --- | --- |
+| 后端 `ErrorCode` 枚举 | 11 | 基准 |
+| `docs/05` §1.3 表 | **10** | **漏 `40302`（AI 数据处理未授权或已撤回）→ 修复** |
+| 前端 `errorCodes.ts` | 11 | 一致 |
+
+`40302` 是 AI 能力的**前置**错误码（未授权/已撤回时返回）—— 文档漏写会让照文档实现的调用方直接漏掉该分支，而前端与后端都登记了它。
+
+修复动作：`docs/05` §1.3 补 40302 行（含义 + 前端处置）。新增门禁 `ErrorCodeContractTest`：断言三处码集合一致，失败信息区分「仅 X 有 / 仅 Y 有」；文档侧**只取 §1.3 小节内的表格行**（避免误收其它章节数字），含解析规模自检。
+
+验证：**红判定已做**——从文档表删掉 42901 后门禁 1 红并给出「后端枚举 ←→ docs/05 §1.3 表：仅后端枚举有 42901；仅 docs/05 §1.3 表有（无）」，随后按 md5 校验完整恢复；修复后门禁绿；server 全量 **906 测试 0 失败**（本批 +1，5 skipped）；CI + Functional Regression 双绿（workflow run 36854846059 / 36854846075，head 7ff2f80，复核结论 success）。
+
+**本批扫描同时发现（未修，仅记录）**：`docs/DEPLOYMENT_DIRECT.md` §5「日常迭代」未说明 **nginx 站点配置不在 `deploy-direct.sh` 覆盖范围内** —— 改 `deploy/nginx/*.conf` 后跑脚本不会更新服务器上的 nginx（历史上多次为手工安装）。**未在本批修复**是因为部署脚本的改动无法在本机验证服务器端效果，不符合本项目「证据化 + 云端验证」的纪律；已记入工作日志，待后续单独成批。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -932,3 +950,4 @@
 | 2026-10-01 | **第五十六批（前端 API 契约对账：93 调用 × 95 端点双向零缺陷，结论固化为门禁；§2.49 扫描新增项）执行完成**：把前端 `web/src/api/*.ts` 的 **93** 个 `(method, path)` 与后端 19 个控制器的 **95** 个端点做全量对账（路径变量归一 `{}`，**含 HTTP 动词** —— 路径对但动词错同样是 405）。结果：**前端 → 后端零缺失**；后端 → 前端仅 2 个无 UI 调用且有据（`GET /api/system/health/detail` 运维端点、`POST /api/auth/logout-all` 无前端入口）；字段级抽样 `AiTask` 前后端 12 字段**逐字段一致**。该面为**正面结论**（无缺陷），故新增静态门禁 `FrontendApiContractTest` 防漂移：断言前端每个 `(method, path)` 在后端存在，失败信息区分 **404**（路径不存在）/ **405**（动词不同）；反向**不断言**（后端有前端无属合理）；含规模自检。解析踩坑固化：泛型可能嵌套或含引号（`ApiResponse<import('./ai').AiTask>`），**不能**用「动词与路径之间的字符」匹配动词，否则漏掉 `interview.ts` 的 follow-up 调用 → 改为「先定位路径字面量、再向前回溯最近动词」。验证：**红判定已做**（加 `GET /api/does-not-exist` + `PATCH /api/system/health` → 门禁 1 红并逐条标注 404/405，md5 校验恢复）；server 全量 **903 测试 0 失败**（本批 +1，5 skipped 为环境门控）；`docs/05` §15 补前端契约一致性约定；CI + Functional Regression 双绿（workflow run 36849142363 / 36849142250，head c503f9f，复核结论 success） |
 | 2026-10-01 | **第五十七批（前端 TS 类型 ↔ 后端 DTO 字段对账：修 ResumeSummary.createdAt，并立字段门禁；§2.50 扫描新增项）执行完成**：前端多声明后端不返回的字段会让运行期取到 `undefined`（界面空白 / `Invalid Date`），而 TS 编译与 e2e 都可能不报错。对账（同名 20 对 + 显式映射 8 对）：**发现 1 处** —— `ResumeSummary.createdAt`（后端 `ResumeSummary` 仅 5 字段、UI 未使用；`ResumeDetailView` 的 `v.createdAt` 是**版本**不是简历）→ 前端移除该声明；其余 27 对**逐字段一致**，含 `ResumeVersion`↔`ResumeVersionDetail`（10 字段吻合，而非 `Summary`）。**新增 `DtoFieldContractTest`**：后端字段＝record 组件（顶层逗号切分）+ class `private` 字段；前端字段＝接口字段 + 同文件内 `extends` **递归展开**；断言前端 ⊆ 后端（反向不约束）；同名自动配对 + `NAME_MAPPING` 登记命名不同的 8 对；自检四项（DTO ≥60 / 类型 ≥40 / 比对对 ≥20 / 后端字段总数 ≥300）。验证：**红判定已做**（给 `SystemHealth` 加 `bogusField` → 1 红并打印后端实际字段，md5 校验恢复）；server 全量 **904 测试 0 失败**（本批 +1，5 skipped）；web `npm run build`（含 vue-tsc）通过；CI + Functional Regression 双绿（workflow run 36852426172 / 36852426250，head a22579e，复核结论 success） |
 | 2026-10-01 | **第五十八批（同一组取值多处维护对账：前端 `AiTask.taskType` 漏 `RESUME_OPTIMIZE`，改为单一来源并立枚举门禁；§2.51 扫描新增项）执行完成**：把「后端 Java 枚举 ↔ 前端 TS 联合类型/常量数组」逐组对账。**发现 1 处** —— `web/src/api/ai.ts` **同一文件内两处清单不一致**：`AI_CONSENT_TASK_SCOPES` 9 个值（与 `AiTaskType` 一致）而 `AiTask.taskType` 只有 8 个、漏 `RESUME_OPTIMIZE`；`AiTaskContinuation.taskType` 继承该类型，后端返回该类型时前端不承认（TS 不报错）。修复：新增 `type AiTaskType = (typeof AI_CONSENT_TASK_SCOPES)[number]`、`AiTask.taskType` 改用之 —— **单一来源**，结构上消除漂移可能。其余 3 组（`AiTaskStatus` / `ApplicationStatus` / `ConfirmationStatus`）已一致。**新增 `FrontendEnumContractTest`**（4 组映射，断言集合相等，失败信息区分「仅后端有/仅前端有」；解析处理单行枚举 + 末位无分隔符 + 剥离注释）。验证：**红判定已做**（前端去掉 `CANCELLED` → 1 红并精确指出差异，md5 校验恢复）；server 全量 **905 测试 0 失败**（本批 +1，5 skipped）；web `npm run build` 通过；CI + Functional Regression 双绿（workflow run 36853658365 / 36853658230，head 9c9a6bb，复核结论 success） |
+| 2026-10-01 | **第五十九批（业务错误码三处维护对账：`docs/05` §1.3 表补 `40302` + 立三处一致性门禁；§2.52 扫描新增项）执行完成**：错误码在**三处**维护 —— 后端 `ErrorCode` 枚举（11）、`docs/05` §1.3 表（**10，漏 `40302`**）、前端 `errorCodes.ts`（11）。`40302`（AI 数据处理未授权或已撤回）是 AI 能力的**前置**码，文档漏写会让照文档实现的调用方漏掉该分支。修复：§1.3 补 40302 行（含义 + 前端处置）；**新增 `ErrorCodeContractTest`**（三处集合一致性断言，失败信息区分「仅 X 有/仅 Y 有」，文档侧只取 §1.3 小节表格行 + 解析规模自检）。验证：**红判定已做**（文档删 42901 → 1 红并精确指出差异，md5 校验恢复）；server 全量 **906 测试 0 失败**（本批 +1，5 skipped）；CI + Functional Regression 双绿（workflow run 36854846059 / 36854846075，head 7ff2f80，复核结论 success）。**同批发现未修**：`docs/DEPLOYMENT_DIRECT.md` §5 未说明 nginx 站点配置**不在** `deploy-direct.sh` 覆盖内（部署脚本改动无法本机验证服务器效果，留待后续单独成批） |
