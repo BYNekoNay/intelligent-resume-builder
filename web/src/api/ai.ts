@@ -37,6 +37,14 @@ export interface GenerateTaskRequest {
 export const JOB_GENERATION_POLICY_VERSION = 'v1.2.0'
 export const JOB_GENERATION_DATA_CATEGORIES = ['CAREER_MATERIAL', 'JOB_DESCRIPTION', 'PERSONAL_PROFILE'] as const
 export const AI_CONSENT_TASK_SCOPES = ['JOB_MATERIAL_SELECTION', 'JOB_GENERATION', 'RESUME_OPTIMIZE', 'ACHIEVEMENT_GUIDANCE', 'COMMUNICATION_GENERATE', 'MATERIAL_IMPORT', 'INLINE_OPTIMIZE', 'INTERVIEW_COACH', 'ATS_ANALYSIS'] as const
+
+/**
+ * AI 任务类型。与后端 `AiTaskType` 枚举一一对应。
+ *
+ * 从 {@link AI_CONSENT_TASK_SCOPES} **派生**而非另写一份联合类型：此前这里与上面那份清单是两份手写清单，
+ * 结果 `AiTask.taskType` 漏了 `RESUME_OPTIMIZE`（第五十八批修复）。单一来源后结构上不可能再漂移。
+ */
+export type AiTaskType = (typeof AI_CONSENT_TASK_SCOPES)[number]
 export const AI_CONSENT_DATA_CATEGORIES = ['RESUME', 'INTERVIEW_ANSWER', ...JOB_GENERATION_DATA_CATEGORIES] as const
 
 export function hasJobGenerationConsent(consent: ConsentResponse | null | undefined) {
@@ -79,7 +87,7 @@ export type ConfirmationStatus = 'NOT_REQUIRED' | 'PENDING' | 'CONFIRMED' | 'REJ
 
 export interface AiTask {
   id: number
-  taskType: 'JOB_MATERIAL_SELECTION' | 'JOB_GENERATION' | 'INLINE_OPTIMIZE' | 'ACHIEVEMENT_GUIDANCE' | 'MATERIAL_IMPORT' | 'ATS_ANALYSIS' | 'COMMUNICATION_GENERATE' | 'INTERVIEW_COACH'
+  taskType: AiTaskType
   parentTaskId?: number | null
   jobDescriptionId: number | null
   status: TaskStatus
