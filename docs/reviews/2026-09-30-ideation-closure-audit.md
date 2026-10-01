@@ -837,6 +837,44 @@
 
 产物：`server/src/main/java/com/intelligentresume/retention/*`（3 类，新增）、`RetentionPurgeServiceTest` / `RetentionPurgeRepositorySchemaTest`（新增）、`AppObservability`（+`recordRetentionPurge`）、`NumericConfigurationValidator`（+4 键）、`application.yml`、`server/.env.example`；文档 `docs/04` §7.1/§7.2、`docs/07` §5.10、`docs/08` §9.6/§10、`docs/decisions/OPEN-DECISIONS.md`、`docs/decisions/DECISION-BRIEF.md`、设计文档 `docs/plans/2026-10-01-001-data-retention-tiered-purge.md`。
 
+### 2.56 部署链路第二处洞：`deploy/systemd/*.service` 从不随部署同步（2026-10-01 第六十五批）
+
+第六十四批落地后做了惯例的「**部署 + 真实链路复验**」（动因：本批新增 `@Scheduled` 作业与 4 个接入
+fail-closed 校验的配置键 —— 校验失败会让应用**直接起不来**，而单测看不见真实 `Environment`）。
+第一轮部署本身全绿（探针 12/12、作业按默认 `disabled` 执行、无配置解析报错、全量黑盒回归 PASS），
+但 `ss -lntp` 暴露一处**与文档不符**：pdf-service 监听 `*:3001`。
+
+**取证（三条独立证据）**：① 服务器 `/etc/systemd/system/intelligent-resume-pdf.service` mtime =
+**2026-09-25 15:46**，`grep` 不到 `PDF_SERVICE_HOST`；② 仓库
+`deploy/systemd/intelligent-resume-pdf.service:25` **早已有** `Environment=PDF_SERVICE_HOST=127.0.0.1`；
+③ `scripts/deploy-direct.remote.sh` 对 `systemd` / `daemon-reload` **零命中**（只同步 nginx）。
+
+→ 与 §2.54（第六十一批 nginx）**同源**：`deploy/` 里除 nginx 之外的资产同样只存在于部署手册的
+手工流程 —— **第四十批的「PDF 回环收敛」从未在真实环境生效**。该暴露面只剩云安全组兜底，
+而安全组是云侧规则、服务器内部看不见。
+
+修复 + 守卫（沿用第六十一 / 六十二批的手法）：
+
+| 项 | 内容 |
+| --- | --- |
+| 部署脚本 | `remote.sh` 新增 systemd 单元**幂等**同步（内容变化才 `install` + `daemon-reload`；装前剥离 CR） |
+| 探针 B 类 | 第 6 节：生效单元 vs 仓库 `deploy/systemd/*.service` 归一化逐行比对（**通用**抓漂移） |
+| 探针 A 类 | 第 7 节：**在服务器上**断言 8080 / 3001 **仅绑回环** —— 关键设计：从外部探测会因安全组而**假阳性**，必须看 `ss -lntp` |
+| 探针项数 | 12 → **16** |
+
+验证（**红 → 绿，全部实测**）：新断言写完立即跑 → **14/16、exit 1**（第 6 节**精确指出**差异
+`> Environment=PDF_SERVICE_HOST=127.0.0.1`；第 7 节 `PDF 3001 监听在非回环地址：*:3001`）→
+重新部署（1 分 47 秒）→ **16/16 PASS、`DEPLOY_EXIT=0`**，`ss -lntp` = `127.0.0.1:3001`；
+api 单元**未被重写**（mtime 仍 2026-09-25）→ 证明「仅在变化时安装」的幂等生效，不会每次部署都 `daemon-reload`。
+黑盒回归第三轮 **4 套件全 PASS、0 失败 0 跳过**（含 AI 全链路，15 分 28 秒）。
+
+同批更正的文档：`docs/DEPLOYMENT_DIRECT.md` §4.5 曾称「`deploy/` 下的 nginx / systemd 资产需要
+**手工上传**（一键脚本不含 `deploy/`）」—— 自第六十一批起该句已过时，本轮一并更正；§5 / §5.2 / §8 同步。
+
+产物：`scripts/deploy-direct.remote.sh`（systemd 同步）、`scripts/probe-deployment.sh`（+2 节共 16 项、
+`normalize` 去 CR）、`docs/DEPLOYMENT_DIRECT.md`（§4.5/§5/§5.2/§8）、
+`docs/reviews/2026-10-01-cloud-e2e-verification.md` §7。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1039,3 +1077,4 @@
 | 2026-10-01 | **第六十二批（部署后探针固化为部署流程最后一步；§2.54 扫描新增项）执行完成**：起因是第六十一批实测到两条 nginx 配置改动「仓库已改、CI 全绿、真实环境从未生效」—— 单测/e2e/静态门禁都看不见这类缺陷。固化 `scripts/probe-deployment.sh`，含**两类断言**：A 行为断言（首页 200 / 安全头 4 条 / health 收敛 / detail 401 / **静态资源 gzip** / **5.5MB 上传穿过 nginx** / 长缓存）—— 抓配置失效**后果**；B **配置一致性**（服务器生效 nginx 配置 vs 仓库 `host.conf` 归一化逐行 diff）—— **通用**抓「配置改了没部署」的漂移。失败不掩盖「部署已完成」，但以非零码结束。验证（四轮含红判定）：正常 **12/12 PASS** → 把服务器 `gzip on` 改 `off` 后 **2 项 FAIL**（行为项 + 配置一致性精确指出 `7c7 < gzip off / > gzip on`）+ exit 1 → 恢复后 **12/12 PASS** → 真跑 `deploy-direct.sh` 确认探针作为最后一步自动执行且 **12/12 PASS、DEPLOY_EXIT=0**。同批修掉 Git Bash 下 `mktemp` 返回盘符路径导致 `trap rm` 触发安全删除拦截的陷阱（退回 `/tmp`）。`docs/DEPLOYMENT_DIRECT.md` 新增 §5.2 |
 | 2026-10-01 | **第六十三批（决策落地 D1/D3/D4/D5，无 §2.x 新扫描）执行完成**：把 `OPEN-DECISIONS` 的 9 条 OPEN 整理成 `docs/decisions/DECISION-BRIEF.md`（可逐条拍板的清单），用户拍板 4 条且**全部按推荐项**（D1 A+C、D2 B、D3 A、D4 B）。落地：**D3** `app.job.jd-text.min-length` 由「声明无消费点」改为**真正生效**（`JdKeywordParser` 构造注入阈值；`parse` 在 `null/isBlank` 之外新增「`trim().length() < minLength` → role/keywords/requirements 全空」，**不**拒绝入参——「招 Java 工程师」是合法短 JD；测试 7→**9** 覆盖阈值两侧边界；**红判定已做**；该键从 `ConfigConsumerContractTest` 白名单移出）；**D4** 移除 `app.ai.confirmation.*` 三键（行为已由 `ConfirmRequest` 的 `@Size(max = 200)` 承载）→ 白名单**现为空**；**D1** `docs/05` §2.9 改写为明确结论（维持现状 + 删号兜底，无代码改动）；**D2** 登记为 `DECIDED · 实现待排期`（属新增功能，未实现不标 RESOLVED）；**D5** 核实「降级为规则分 + 失败原因暴露」**本就已实现**（`analysisStatus=RULES_FALLBACK` + `analysisSource=RULES` + `AtsFallbackInfo{code,message,retryable,consentRequired}`），在 `docs/05` §8.3 写成三态口径（注意 `aiFailure` 是**面试**字段，ATS 用 `fallback`）。回归：定向 32 项全绿；server 全量 **909 测试 0 失败**（本批 +2，5 skipped）；提交 `9561f73 → dd3f703`（决策落地，9 文件）→ `737c5a0`（D5，3 文件）；CI 双绿（`dd3f703` 含 Functional Regression #36869221528） |
 | 2026-10-01 | **第六十四批（决策 D2 阶段 1 落地：数据生命周期分档清扫作业；§2.55 扫描新增项）执行完成**：实现 A 档「无引用者」按期物理删除，仅覆盖 `career_material` 与 `resume_version`（`resume_version` 被 **11 处**外键引用含自引用 —— 直接硬删必撞外键，这是「必须分档」的硬理由）。新增 `RetentionPurgeService`（`@Scheduled`）、`RetentionPurgeRepository`（候选查询逐条 `NOT EXISTS` 排除引用者；删除语句带 `deleted_at IS NOT NULL` 二次保护）、`RetentionPurgeProperties` 与 `app.retention.purge.*` 配置。**纠正两处在途偏差**：① 原「循环到候选耗尽」与方案 §6 G3「单轮每表最多 batch-size 行」矛盾 → 改为**一次调度只处理一批**；② 单测 `assertEquals(0, purgeExpiredSoftDeleted() - 0 - 0, …)` 是**重复调用**而非断言上次结果 → 改为直接断言。护栏 **G1–G7 全落地**（含新增 G6 指标 `retention_purge_scanned/purged/skipped` 与 G7 四键接入 `NumericConfigurationValidator`，受校验键 14→**18**）。守卫用**元数据反查**而非 fixture 端到端：`RetentionPurgeRepositorySchemaTest` 从 `INFORMATION_SCHEMA` 反查所有指向该资源的外键与 SQL 比对（**漏一项即红**）+ 断言删除语句恒带软删限定。**红判定已做**：删去 `ats_check_result` 一处 `NOT EXISTS` → 完整性用例红；`dryRun` 默认值 `true`→`false` → 护栏用例红；md5 校验完整恢复。回归：定向 22/22 绿；server 全量 **919 测试 0 失败**（本批 +10，5 skipped 为环境门控）。文档按**分档**改写（`docs/04` §7.1/§7.2、`docs/07` §5.10、`docs/08` §9.6/§10），`RetentionPolicyContractTest` 改为**按档位双向断言**，`OPEN-DECISIONS` D2 状态更新为「阶段 1 已实现、阶段 2/3 待排期」。**残留**：无 fixture 级端到端删除用例；B 档快照化与账户侧未实现 |
+| 2026-10-01 | **第六十五批（云端复验第六十四批 + 修复 systemd 单元不随部署同步；§2.56 扫描新增项）执行完成**：因第六十四批新增 `@Scheduled` 作业与 4 个接入 fail-closed 校验的配置键（受校验键 14→18，校验失败会让应用**起不来**），按铁律跑「部署 + 真实链路复验」。**第一轮部署全绿**：探针 12/12、`journalctl` 抓到 `Retention purge disabled (app.retention.purge.enabled=false); skipped`（作业已装载且默认不删）、无「数值型配置未解析」报错（4 个新键在真实 `Environment` 解析成功）、`Started … in 11.911 seconds` 无 OOM。但 `ss -lntp` 暴露 pdf-service 监听 **`*:3001`** —— 与文档不符。**取证三条**：服务器 pdf 单元 mtime = **2026-09-25**、无 `PDF_SERVICE_HOST`；仓库单元 `:25` 早有该行；`deploy-direct.remote.sh` 对 systemd **零命中**。→ 与第六十一批 nginx **同源**，**第四十批的 PDF 回环收敛从未生效**。**修复**：`remote.sh` 新增 systemd 单元**幂等**同步（内容变化才 `install` + `daemon-reload`，装前剥离 CR）；探针 **12→16 项**（第 6 节 B 类：生效单元 vs 仓库单元归一化比对；第 7 节 A 类：**在服务器上**断言 8080/3001 **仅绑回环** —— 从外部探测会因安全组假阳性）。**验证（红→绿）**：新断言先跑得 **14/16、exit 1**（**精确指出** `> Environment=PDF_SERVICE_HOST=127.0.0.1` 与 `PDF 3001 监听在非回环地址：*:3001`）→ 重新部署（1 分 47 秒）→ **16/16 PASS、`DEPLOY_EXIT=0`**，`ss -lntp` = `127.0.0.1:3001`；api 单元**未被重写**（mtime 仍 09-25）证明幂等生效。黑盒回归第三轮 **4 套件全 PASS、0 失败 0 跳过**（含 AI 全链路，15 分 28 秒）。同批更正 `docs/DEPLOYMENT_DIRECT.md` §4.5「`deploy/` 需手工上传」的过期表述。报告：`docs/reviews/2026-10-01-cloud-e2e-verification.md` §7 |

@@ -127,3 +127,84 @@
 - 用法与断言清单：`docs/DEPLOYMENT_DIRECT.md` §5.2
 - 批次记录与红判定证据：`docs/reviews/2026-09-30-ideation-closure-audit.md` §2.54
 
+---
+
+## 7. 第三轮：第六十四 / 六十五批的云端复验（2026-10-01 23:12 → 23:35）
+
+### 7.1 为什么要跑
+第六十四批新增了一个 `@Scheduled` 作业与 4 个 `app.retention.purge.*` 数值键（接入 fail-closed 的
+`NumericConfigurationValidator`，受校验键 14 → 18）。这两类改动正是「仓库自洽 ≠ 真实环境生效」的
+高发区：**校验失败会让应用直接起不来**，而单测看不见真实的 `Environment`。
+
+### 7.2 部署前状态
+
+| 项 | 值 |
+| --- | --- |
+| 回滚点 | `app/api/intelligent-resume-server-0.1.0-SNAPSHOT.rollback-20261001-231226.jar` |
+| 部署前 jar | 2026-10-01 20:35（第六十一批产物） |
+| 服务器 `.env` | **无** `RETENTION_*` 键（走 `application.yml` 默认值，符合预期） |
+| 服务 | nginx / mysql / api / pdf 全部 `active` |
+
+### 7.3 第一轮部署（23:13，1 分 44 秒）—— 新配置与作业的生效证据
+
+- 探针 **12/12 PASS**（当时探针仍是 12 项）
+- `journalctl` 抓到作业在真实环境按默认执行：
+  `Retention purge disabled (app.retention.purge.enabled=false); skipped`（线程 `worker-sched-1`）
+  —— 证明**作业已装载**且**默认不删数据**
+- 启动日志无「数值型配置未解析」报错 → 4 个新键在真实 `Environment` 解析成功
+  （否则 `NumericConfigurationValidator` 的 `@PostConstruct` 会拒绝启动）
+- `Started IntelligentResumeApplication in 11.911 seconds`，无 OOM
+
+### 7.4 第二轮实测抓到的缺陷：**systemd 单元从未随部署同步**（第六十五批）
+
+`ss -lntp` 显示 pdf-service 监听 **`*:3001`**，而非文档声称的 `127.0.0.1:3001`。
+
+**取证（三条独立证据）**：
+
+| # | 证据 |
+| --- | --- |
+| 1 | 服务器 `/etc/systemd/system/intelligent-resume-pdf.service` mtime = **2026-09-25 15:46**，`grep` 不到 `PDF_SERVICE_HOST` |
+| 2 | 仓库 `deploy/systemd/intelligent-resume-pdf.service:25` **早已有** `Environment=PDF_SERVICE_HOST=127.0.0.1` |
+| 3 | `scripts/deploy-direct.remote.sh` 对 `systemd` / `daemon-reload` **零命中** —— 它只同步 nginx |
+
+**结论**：**第四十批的「PDF 服务收敛到回环」从未在真实环境生效**，与第六十一批的 nginx 洞
+**同源** —— `deploy/` 里除了 nginx，**systemd 也只存在于部署手册的手工流程**里。
+该暴露面只剩云安全组兜底；而安全组是云侧规则、在服务器内部**看不见**，所以必须
+**在服务器上**直接看监听地址 —— 从外部探测会因安全组而假阳性。
+
+### 7.5 修复
+
+- `scripts/deploy-direct.remote.sh`：新增 **systemd 单元幂等同步**（内容变化才 `install` +
+  `daemon-reload`；安装前剥离 CR，防工作区 CRLF 落进单元导致 systemd 解析异常）
+- `scripts/probe-deployment.sh`：**12 → 16 项**
+  - 第 6 节（B 类）：生效 systemd 单元 vs 仓库 `deploy/systemd/*.service`，归一化后逐行比对
+  - 第 7 节（A 类）：**在服务器上**断言 API `8080` / PDF `3001` 的监听地址**仅绑回环**
+- 同批修掉探针的一处小缺陷：`normalize` 补充去 `\r`（防工作区 CRLF 造成"整文件都不同"的假象），
+  并提升到公共区供新小节复用
+
+### 7.6 复验（红 → 绿）
+
+| 轮次 | 状态 | 探针结果 |
+| --- | --- | --- |
+| **修复前**（新断言写完立即跑） | 服务器仍是旧单元、pdf 监听 `*:3001` | **14/16，exit 1**：第 6 节**精确指出**差异 `> Environment=PDF_SERVICE_HOST=127.0.0.1`；第 7 节 `PDF 3001 监听在非回环地址：*:3001` |
+| **修复后**（23:17 → 23:19，1 分 47 秒） | 单元已同步 + pdf 重启 | **16/16 PASS**，`DEPLOY_EXIT=0`；`ss -lntp` = `127.0.0.1:3001` |
+| 幂等复核 | api 单元内容未变 | **未被重写**（mtime 仍为 2026-09-25）—— 证明"仅在变化时安装"生效，不会每次部署都 `daemon-reload` |
+
+### 7.7 黑盒回归（第三轮完整回归，含 AI）
+
+```bash
+env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY FUNCTIONAL_AI_LIVE=true \
+  python3 functional-tests/run_all.py http://101.35.239.218:8088
+```
+
+→ **4 套件全 PASS，0 失败、0 跳过**（基础链路 / 全功能扩展 / 安全与边界 / AI 全链路），耗时 15 分 28 秒。
+
+### 7.8 结论与残留
+
+- **部署成功**：第六十四批的作业与配置在真实环境生效；第六十五批修复了 systemd 链路洞并复验 16/16
+- **残留**：
+  1. `deploy/nginx/web.conf` / `edge.conf`（容器版）与容器路径的 systemd 不在同步范围（容器拓扑未在生产使用）
+  2. 回滚点 `…rollback-20261001-231226.jar` 保留在服务器，确认稳定后可删
+  3. 数据保留清扫作业**默认关闭**，本轮只验证了「作业装载 + 默认不删」；**真正的删除行为**需阶段 2
+     口径确认后，在测试环境显式开启并单独演练（dry-run 一个周期 → 再真实删除）
+
