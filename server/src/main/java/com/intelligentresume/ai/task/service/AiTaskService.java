@@ -12,6 +12,7 @@ import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import com.intelligentresume.ai.worker.AiTaskWorkerProperties;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.common.error.PublicFailureCopy;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,17 +33,20 @@ public class AiTaskService {
     private final AiQuotaService quotaService;
     private final IdempotencyService idempotencyService;
     private final AiTaskWorkerProperties workerProperties;
+    private final PublicFailureCopy publicFailureCopy;
 
     public AiTaskService(AiTaskRepository taskRepository,
                          AiConsentService consentService,
                          AiQuotaService quotaService,
                          IdempotencyService idempotencyService,
-                         AiTaskWorkerProperties workerProperties) {
+                         AiTaskWorkerProperties workerProperties,
+                         PublicFailureCopy publicFailureCopy) {
         this.taskRepository = taskRepository;
         this.consentService = consentService;
         this.quotaService = quotaService;
         this.idempotencyService = idempotencyService;
         this.workerProperties = workerProperties;
+        this.publicFailureCopy = publicFailureCopy;
     }
 
     /**
@@ -177,7 +181,8 @@ public class AiTaskService {
                 toLong(task.getInputSnapshotJson().get("jobDescriptionId")),
                 task.getStatus(),
                 task.getResultJson(),
-                task.getErrorMessage(),
+                // 公开文案边界：落库的是 provider/异常原文，只允许类别化的稳定文案出网关（原文留在库与日志）
+                publicFailureCopy.forAiTask(task.getErrorMessage()),
                 normalizeConfirmationStatus(task.getConfirmationStatus()),
                 task.getResultResumeVersionId(),
                 task.getRetryCount(),

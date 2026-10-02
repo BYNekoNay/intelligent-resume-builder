@@ -1,6 +1,8 @@
 package com.intelligentresume.ai.task.service;
 
 import com.intelligentresume.ai.consent.service.AiConsentService;
+import com.intelligentresume.common.error.PublicFailureCopy;
+import com.intelligentresume.common.observability.FailureCategoryClassifier;
 import com.intelligentresume.ai.ratelimit.AiQuotaService;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskStatus;
@@ -50,7 +52,8 @@ class AiTaskServiceTest {
         idempotencyService = new IdempotencyService();
         workerProperties = new AiTaskWorkerProperties();
         workerProperties.setMaxRetries(3);
-        service = new AiTaskService(taskRepository, consentService, quotaService, idempotencyService, workerProperties);
+        service = new AiTaskService(taskRepository, consentService, quotaService, idempotencyService, workerProperties,
+                new PublicFailureCopy(new FailureCategoryClassifier()));
         lenient().when(consentService.hasValidConsent(anyLong(), anyString(), anyCollection()))
                 .thenReturn(true);
     }

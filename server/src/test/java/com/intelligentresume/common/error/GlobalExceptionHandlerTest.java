@@ -1,6 +1,7 @@
 package com.intelligentresume.common.error;
 
 import com.intelligentresume.common.api.ApiResponse;
+import com.intelligentresume.common.observability.FailureCategoryClassifier;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,7 +31,8 @@ import static org.mockito.Mockito.mock;
  */
 class GlobalExceptionHandlerTest {
 
-    private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
+    private final GlobalExceptionHandler handler = new GlobalExceptionHandler(
+            new PublicFailureCopy(new FailureCategoryClassifier()));
 
     private MissingRequestHeaderException missingHeader(String headerName) {
         MethodParameter parameter = mock(MethodParameter.class);

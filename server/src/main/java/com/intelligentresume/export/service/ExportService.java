@@ -2,6 +2,7 @@ package com.intelligentresume.export.service;
 
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.common.error.PublicFailureCopy;
 import com.intelligentresume.export.domain.ExportStatus;
 import com.intelligentresume.export.domain.ExportTask;
 import com.intelligentresume.export.dto.CreateExportRequest;
@@ -41,17 +42,20 @@ public class ExportService {
     private final ResumeVersionRepository resumeVersionRepository;
     private final ExportStorageService storageService;
     private final ExportExpiryService expiryService;
+    private final PublicFailureCopy publicFailureCopy;
     private final long fileTtlHours;
 
     public ExportService(ExportTaskRepository exportTaskRepository,
                          ResumeVersionRepository resumeVersionRepository,
                          ExportStorageService storageService,
                          ExportExpiryService expiryService,
+                         PublicFailureCopy publicFailureCopy,
                          @Value("${app.pdf.file-ttl-hours:24}") long fileTtlHours) {
         this.exportTaskRepository = exportTaskRepository;
         this.resumeVersionRepository = resumeVersionRepository;
         this.storageService = storageService;
         this.expiryService = expiryService;
+        this.publicFailureCopy = publicFailureCopy;
         this.fileTtlHours = fileTtlHours;
     }
 
@@ -191,7 +195,8 @@ public class ExportService {
                 task.getFileSizeBytes(),
                 task.getSha256(),
                 task.getExpiresAt(),
-                task.getErrorMessage(),
+                // 公开文案边界：落库的是 PDF 服务/异常的原文，只允许类别化的稳定文案出网关
+                publicFailureCopy.forExportTask(task.getErrorMessage()),
                 downloadUrl
         );
     }

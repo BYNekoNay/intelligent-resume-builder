@@ -31,11 +31,31 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    private final PublicFailureCopy publicFailureCopy;
+
+    public GlobalExceptionHandler(PublicFailureCopy publicFailureCopy) {
+        this.publicFailureCopy = publicFailureCopy;
+    }
+
+    /**
+     * 业务异常的响应：**公开文案经 {@link PublicFailureCopy} 过一遍**。
+     *
+     * <p>AI / PDF 两条链路的 {@code BusinessException} 消息常夹带上游细节
+     * （如 {@code "Draft schema validation failed: ..."}、{@code "Resume generation failed: ..."}），
+     * 直接回给客户端会外泄实现信息、且文案随上游措辞漂移。故对这两个码只回**类别化的稳定文案**，
+     * 原文改写进日志（带 traceId）供排查。其余业务码的 message 本就是项目自己的中文用户文案，原样保留。
+     */
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException exception, HttpServletRequest request) {
         ErrorCode errorCode = exception.getErrorCode();
+        String traceId = traceId(request);
+        if (publicFailureCopy.shouldLogRawMessage(errorCode)) {
+            log.warn("Business failure with provider detail, code={}, traceId={}, raw={}",
+                    errorCode.code(), traceId, exception.getMessage());
+        }
         return ResponseEntity.status(statusFor(errorCode))
-                .body(ApiResponse.failure(errorCode.code(), exception.getMessage(), traceId(request)));
+                .body(ApiResponse.failure(errorCode.code(),
+                        publicFailureCopy.forBusinessEnvelope(errorCode, exception.getMessage()), traceId));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -1,6 +1,8 @@
 package com.intelligentresume.export.service;
 
 import com.intelligentresume.common.error.BusinessException;
+import com.intelligentresume.common.error.PublicFailureCopy;
+import com.intelligentresume.common.observability.FailureCategoryClassifier;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.export.domain.ExportStatus;
 import com.intelligentresume.export.domain.ExportTask;
@@ -41,7 +43,8 @@ class ExportServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ExportService(exportTaskRepository, resumeVersionRepository, storageService, expiryService, 24);
+        service = new ExportService(exportTaskRepository, resumeVersionRepository, storageService, expiryService,
+                new PublicFailureCopy(new FailureCategoryClassifier()), 24);
     }
 
     @Test
