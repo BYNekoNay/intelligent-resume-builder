@@ -965,6 +965,47 @@ TS/Vue 亦覆盖）。
 产物：`SourceText`（新增工具）、`SourceTextTest`（新增）、22 个门禁的读取统一化、
 `docs/08` 增「文本判据必须在抹白注释的文本上运行」条目。
 
+### 2.59 执行 E1（移除 kimi-k3）→ 顺带证实「哪个 `.env` 才生效」从未被验证过（2026-10-02 第六十七批）
+
+起因：`DECISION-BRIEF` E1 —— `kimi-k3` 拒绝 `temperature`，而本应用每次请求都带它，故它在任何请求下
+都必然 400，是链上的**纯失败跳转节点**（每次多一次约 1s 失败往返）。该条标注「下次部署窗口**顺手可做**」，
+`OPEN-DECISIONS` 仍为 `OPEN · waiting-on-external-condition`。
+
+**执行与运行时实测**（只改一行 + 重启）：
+
+| 项 | 证据 |
+| --- | --- |
+| 改动 | 部署机 `app/api/.env` 的 `BAILIAN_MODEL_CHAIN` 去掉 `,kimi-k3`（**diff 恰为 1 行、总行数 20 不变、无残留**；改前先 `cp -a` 备份） |
+| 应用加载的链 | 启动日志 `BailianAiProvider initialized: ... modelChain=[qwen3.8-max, glm-5.3, qwen3.8-27b, qwen3.8-2.4t-a95b, qwen3.8-max-0902, deepseek-v4.1-flash, deepseek-v4-pro-0813]`（7 个，**无 kimi**） |
+| 指标 | `resume_ai_model_chain_available 7.0`（原为 8） |
+| 链路仍可用 | 全量黑盒回归（`FUNCTIONAL_AI_LIVE=true`）**4 套件全 PASS、0 失败 0 跳过**（含 7 类 AI 任务真实跑通） |
+| 其他 | readiness UP、探针 **17/17** |
+
+**关键发现（比 E1 本身更值钱）：「哪个 `.env` 才生效」此前从未被验证过。**
+
+同机上有**两份**都写着 `BAILIAN_MODEL_CHAIN` 的文件，且当时**已经漂移**：`app/api/.env` 是 8 个模型（含
+`kimi-k3`）、`live-ai.env` 是 7 个（不含）。判定生效来源靠三条取证：
+
+1. `application.yml` 声明 `spring.config.import: optional:file:../.env[.properties],optional:file:.env[.properties]`；
+2. api 单元 `WorkingDirectory=/opt/intelligent-resume/app/api` ⇒ `.env` 即 `app/api/.env`；
+3. api 单元**没有** `EnvironmentFile=`，且运行进程环境里 **0 个** `BAILIAN_*`（实证：`/proc/<pid>/environ`）。
+
+⇒ **`app/api/.env` 是运行期唯一生效来源；`live-ai.env` 运行期不被读取（只在首次部署时提供密钥、
+由人抄进 `.env`）。只改 `live-ai.env` 不会有任何效果。** 已把该结论与运行时核对命令写进
+`docs/DEPLOYMENT_DIRECT.md` §4.4，并同步了两份文件的取值以消除漂移。
+
+**新增守卫：探针第 8 节「应用加载的配置 vs 磁盘 `.env`」**（16 → **17** 项）。
+nginx/systemd 那两条 B 类断言抓的是「**仓库改对了、环境是旧的**」；这条抓的是**反方向** ——
+「**文件改对了、进程是旧的**」（改了 `.env` 忘了重启）。三条合起来才覆盖住「配置真的有生效」。
+
+**红判定（实测）**：把 `,dummy-probe-model` 追加到磁盘 `.env` 但**不重启** → 第 8 节 **FAIL**，
+信息**精确给出**「磁盘=…,dummy-probe-model，进程=…」；随后 md5 校验完整恢复 → **17/17 PASS**。
+
+产物：部署机 `app/api/.env` / `live-ai.env`（链 8 → 7，已同步）、`scripts/probe-deployment.sh`
+（新增第 8 节）、`docs/DEPLOYMENT_DIRECT.md`（§4.4 生效来源与核对命令、§5/§5.2 探针清单 16 → 17、
+§7.2 注、§7.3 链长）、`docs/decisions/ADR-005` §7.4、`OPEN-DECISIONS` E1 → **RESOLVED**、
+`DECISION-BRIEF` E1 → 已执行（并提示 E2 的「25% 余量」口径需随链长 8→7 重估）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1170,3 +1211,4 @@ TS/Vue 亦覆盖）。
 | 2026-10-01 | **第六十五批（云端复验第六十四批 + 修复 systemd 单元不随部署同步；§2.56 扫描新增项）执行完成**：因第六十四批新增 `@Scheduled` 作业与 4 个接入 fail-closed 校验的配置键（受校验键 14→18，校验失败会让应用**起不来**），按铁律跑「部署 + 真实链路复验」。**第一轮部署全绿**：探针 12/12、`journalctl` 抓到 `Retention purge disabled (app.retention.purge.enabled=false); skipped`（作业已装载且默认不删）、无「数值型配置未解析」报错（4 个新键在真实 `Environment` 解析成功）、`Started … in 11.911 seconds` 无 OOM。但 `ss -lntp` 暴露 pdf-service 监听 **`*:3001`** —— 与文档不符。**取证三条**：服务器 pdf 单元 mtime = **2026-09-25**、无 `PDF_SERVICE_HOST`；仓库单元 `:25` 早有该行；`deploy-direct.remote.sh` 对 systemd **零命中**。→ 与第六十一批 nginx **同源**，**第四十批的 PDF 回环收敛从未生效**。**修复**：`remote.sh` 新增 systemd 单元**幂等**同步（内容变化才 `install` + `daemon-reload`，装前剥离 CR）；探针 **12→16 项**（第 6 节 B 类：生效单元 vs 仓库单元归一化比对；第 7 节 A 类：**在服务器上**断言 8080/3001 **仅绑回环** —— 从外部探测会因安全组假阳性）。**验证（红→绿）**：新断言先跑得 **14/16、exit 1**（**精确指出** `> Environment=PDF_SERVICE_HOST=127.0.0.1` 与 `PDF 3001 监听在非回环地址：*:3001`）→ 重新部署（1 分 47 秒）→ **16/16 PASS、`DEPLOY_EXIT=0`**，`ss -lntp` = `127.0.0.1:3001`；api 单元**未被重写**（mtime 仍 09-25）证明幂等生效。黑盒回归第三轮 **4 套件全 PASS、0 失败 0 跳过**（含 AI 全链路，15 分 28 秒）。同批更正 `docs/DEPLOYMENT_DIRECT.md` §4.5「`deploy/` 需手工上传」的过期表述。报告：`docs/reviews/2026-10-01-cloud-e2e-verification.md` §7 |
 | 2026-10-01 | **第六十五批（CI 修复：门禁依赖本机 MySQL，「本地永远绿」；§2.57 扫描新增项）执行完成**：第六十四批推送后 **CI Server tests 失败**（run 36882146555），失败的全是 `RetentionPurgeRepositorySchemaTest` 3 用例（`Failed to load ApplicationContext`）。**根因两层**：① 该类漏 `@ActiveProfiles("test")` ⇒ 连 `application.yml` 默认数据源（MySQL），`Caused by: ConnectException: Connection refused` —— **本机有 MySQL 故本地全量 919"全绿"是假阳性**（征兆：该用例耗时 25.9s，同类 H2 用例仅几十~几百毫秒）；② 其元数据查询用 `INFORMATION_SCHEMA.KEY_COLUMN_USAGE.REFERENCED_TABLE_NAME`，该列**只存在于 MySQL**（H2 2.2 实测 `Column "REFERENCED_TABLE_NAME" not found`）⇒ 该守卫从设计上只能跑在真实 MySQL 上。**修复**：补 `@ActiveProfiles("test")`；把「引用清单完整性」改为**静态解析 Flyway 迁移**（`db/migration/*.sql`：语句主角表 = `CREATE/ALTER TABLE` 名，外键 = `REFERENCES <table>(`），结果与运行环境无关而"漏一项即红"不变；「候选 SQL 可执行」（H2）与「删除语句带软删限定」保留。**新增门禁 `SpringBootTestProfileContractTest`**（每个 `@SpringBootTest` 必须声明 `@ActiveProfiles`，含规模自检 ≥30）。**红判定两轮**：① 删去 `ats_check_result` 一处 `NOT EXISTS` → 1 红且点名；② **首版门禁是假绿** —— 用整文件 `contains("@ActiveProfiles")` 判据，而被检查文件的 **javadoc 里正好写了该注解名**，去掉注解后门禁**仍通过**；改为「剥注释 + 只认行首注解」后 1 红并点名文件；两轮均 md5 校验恢复。验证：全量 **920 测试 0 失败**（本批 +1，5 skipped 为环境门控）。同批在 §2.55 加**补正**说明此前「919 全绿」对该类为假阳性。**CI + Functional Regression 双绿**（head `8a4de28`；Functional 首次卡在 `Install CJK fonts` 撞 30 分钟上限被 cancelled，属 runner 网络抖动、与改动无关，重跑 2 分 7 秒通过） |
 | 2026-10-01 | **第六十六批（门禁假绿第二种形态：注释里的同名文本；§2.58 扫描新增项）执行完成**：把第六十五批发现的「门禁可假绿」**系统化排查** —— 22 个静态门禁里 **16 个**用 `contains(...)` 在文件全文上找 token。**实测取证**：把 `JdKeywordParser` 里真正消费 `app.job.jd-text.min-length` 的 `@Value` 去掉后，`ConfigConsumerContractTest` **仍然通过**（javadoc 里正好写着该键名）—— 而它守护的正是「声明即虚构」。**修复**：新增 `SourceText`（按扩展名抹白注释）+ 把 22 个门禁 **34 处** `Files.readString(x, UTF_8)` 统一为 `SourceText.read(x)`（含 `web/src/**` 的 TS/Vue）。两个由踩坑倒逼的设计：① **抹白（等长空白）而非删除** —— 删注释会缩短文本、让「`@Transactional` 后 300 字符内」这类**距离窗口**判据变紧而制造**假红**（实测把 `ExportStreamingContractTest` 由绿变红）；② **词法级扫描 + 保留字符串字面量** —— 朴素 `indexOf("//")` 会截断 `"http://host"`，而不保留字符串会让 `@Scheduled(fixedDelayString="${app.x.y:1}")` 这类**真实消费点**丢失（假红）。**验证**：新增 `SourceTextTest` 6 例（含等长/换行守恒、字符串保留两个方向）；22 个门禁 **57 项全绿**；**红判定重做才成立**（首轮 JVM `EXCEPTION_ACCESS_VIOLATION` 崩溃，退出码 1 被误读成门禁失败 → 改看 `Failures:` 计数与失败文本后，得 `Failures: 1` 且点名该键，md5 恢复）；全量 **926 测试 0 失败**（本批 +6）；`docs/08` 增条目。**CI + Functional Regression 双绿**（head `420f1b4`，run 36953194382 / 36953194321） |
+| 2026-10-02 | **第六十七批（执行 E1：模型链移除 `kimi-k3`；§2.59 扫描新增项）执行完成**：`kimi-k3` 拒绝 `temperature` 而本应用每次请求都带它 ⇒ 必然 400、是链上纯失败跳转节点。按 `DECISION-BRIEF` E1「下次部署窗口顺手可做」执行：部署机 `app/api/.env` 去掉 `,kimi-k3`（**diff 恰 1 行**、改前 `cp -a` 备份）并重启。**运行时实测**：启动日志 `modelChain=[…7 个…]`（无 kimi）、指标 `resume_ai_model_chain_available **7.0**`（原 8）、readiness UP、探针 **17/17**、全量黑盒回归（`FUNCTIONAL_AI_LIVE=true`）**4 套件全 PASS 0 失败 0 跳过**（7 类 AI 任务真实跑通）。**顺带证实一个从未被验证的假设**：同机 `app/api/.env` 与 `live-ai.env` 都写着 `BAILIAN_MODEL_CHAIN` 且**已经漂移**（8 vs 7 个模型）；三条取证（`application.yml` 的 `spring.config.import`、单元 `WorkingDirectory`、单元无 `EnvironmentFile=` + 进程环境 **0 个** `BAILIAN_*`）判定**生效的只有 `app/api/.env`** ⇒ 只改 `live-ai.env` 完全无效。已在 `DEPLOYMENT_DIRECT` §4.4 写明并同步两文件取值。**新增探针第 8 节**「应用加载的配置 vs 磁盘 `.env`」（16 → **17** 项）—— 此前 B 类只抓「仓库改对了、环境是旧的」，这条抓**反方向**「文件改对了、进程是旧的（忘了重启）」；**红判定实测**：只改磁盘不重启 → 第 8 节 FAIL 且精确给出磁盘/进程差异，md5 恢复后 17/17。`OPEN-DECISIONS` E1 → **RESOLVED**；`DECISION-BRIEF` E1 → 已执行；`ADR-005` §7.4 同步；并提示 E2 的「25% 余量」口径需随链长重估 |
