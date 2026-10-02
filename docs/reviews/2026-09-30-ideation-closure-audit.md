@@ -1358,6 +1358,35 @@ native python.exe 时，把以 `/` 开头的 argv 当 POSIX 路径转换，`//` 
 好样本行；`MySql57BaselineContractTest` 与 `ExportStreamingContractTest` 为本轮新纳入）。
 §2.65 悬案就此**归因收口**。
 
+### 2.68 前端 i18n 门禁的动态键盲区：`ERROR_CODE_KEYS` 纳入目录对账（2026-10-02 第七十一批）
+
+**动机**：后端 contract 包已双向实测承重（§2.67），对 web 侧两个 build 链门禁（`check:i18n` /
+`check:draft-fields`）做覆盖面对账，找出未守的盲区。
+
+**发现（真实盲区）**：`errorMessage.ts` 的 `t(registeredKey ?? fallbackKey)` 是**动态调用**——
+`ERROR_CODE_KEYS`（`web/src/utils/errorCodes.ts`）登记的 11 个错误文案键**不被任何静态校验覆盖**：
+vue-tsc 不查（string 类型）、`collectStaticTranslationKeys` 的静态 `t('...')` 正则不匹配、
+catalog 删键无任何告警 ⇒ 运行时直接显示**原始键名**。错误文案是所有失败路径的必经出口，
+这是 i18n 门禁体系的结构性缺口。同族动态键还有 `resumeCompare.sectionType.*`、`import.step*`、
+`resumeEditor.*`（message 包装）；本批先收口价值最高、注册表现成的 `errors.*`，其余登记为候选。
+
+**修复**：`check-i18n.mjs` 新增 `collectErrorCodeRegistryKeys`（行首锚定的键值行解析）+
+`findDynamicKeyFailures`（键 ∈ zh/en 目录对账；**`minKeys` 规模自检**——解析不出 ≥10 键即报
+「解析可能已失效，本检查不得静默空转」，防空转假绿）并接入 `run()`；自测 +2（12/12）。
+
+**红判定①成立**：从 en-US 目录删除 `errors.conflict` → 检查红，失败信息**同时**由既有
+zh/en 一致性门禁与新对账各报一条（均点名键与 locale），md5 还原后绿。
+
+**⚠ 红判定②首版假绿被当场抓出（本批最重要的过程事实）**：把 11 个键整表注释掉（模拟注册表
+解析失效）→ 检查**仍然绿**——首版正则缺行首锚 `^`，注释行 `// 40001: 'errors.x',`（**行尾与真实
+键行完全相同**的形态）照常被解析。修正则并同步把自测的注释行样本改成这一真正危险的形态后重做：
+→ 红（`parsed 0 keys (expected >= 10)`）→ md5 恢复后绿。**教训：第六十六批 SourceText 的
+「注释污染」教训对前端脚本同样适用；第一版判据不可信，红判定不是仪式而是必需——本次若无
+红判定②，规模自检只是一个「看起来存在」的摆设。**
+
+**验证**：自测 12/12；实库 `check:i18n` 全绿（48 Vue + 29 TS + 2 locales）；`npm run build`
+完整链（check:i18n + check:draft-fields + vue-tsc + vite build）通过（9.9s）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1571,3 +1600,4 @@ native python.exe 时，把以 `/` 开头的 argv 当 POSIX 路径转换，`//` 
 | 2026-10-02 | **第六十九批·续（门禁有效性系统性抽查）执行完成**：此前只做过个案红判定，从未回答过「其余门禁里还有多少个是假的」。新增表驱动工具 `scripts/audit-gate-effectiveness.sh`：对每个门禁**注入量身坏样本 → 只跑该门禁 → 断言失败 → 还原核对 md5**；带两条稳健性设计（**注入前断言锚点存在且唯一**，否则「锚点写错⇒注入没生效⇒没红」会被误判成假绿；**还原后核对 md5**）。**首轮：23 行全部按预期变红、0 个没红、0 个注入失败**（首轮有 2 行锚点不唯一，改唯一锚点后补跑通过）⇒ contract 包 **24/24 门禁全部实测承重**（`ConfigConsumerContractTest` 已在第六十五批验证）。覆盖族：文档↔实现 / 配置↔消费方 / 部署资产 / 前端契约 / 结构细节。**结论：门禁体系经得起抽查**（首次有证据回答「是否在空转」），并固化为可复用工具。⚠ 边界：本抽查证明「注入这类坏样本会红」，不等于判据覆盖了所有情形（**误报方向**需「好样本必须通过」的抽查，两方向合起来才完整）。文档：`docs/07` §5.11 |
 | 2026-10-02 | **第六十九批·续（MySQL 5.7 升级门禁的基线自洽性门禁；§2.66）执行完成**：把第六十九批顺带核查时的**手工核对**（快照 vs V1~V19 迁移）固化为 `MySql57BaselineContractTest`（3 例）：① 基线快照建的表集合 == 版本 ≤ 基线的迁移建的表集合（双向 diff）；② 快照文件名版本 / `baselineVersion` / 迁移目录三方一致；③ 手动门硬编码数字（`migrationsExecuted` 期望、`MAX(version)`）== 实际迁移（总迁移 − 基线）—— 新增/删除迁移后忘了同步手动门即红（它平时不跑，问题会被拖很久）。解析器带下限断言防假绿，判据读取复用 `SourceText`。**接手时的发现（本批最重要的过程事实）**：该门禁在工作区处于未验证、未提交状态且**无法编译** —— `versions.count()`（`Set` 无此方法）+ lambda 内调用 `throws Exception` 的 `baselineVersion()`（受检异常不能从 `Predicate` 抛出）；修复后差值公式对「缺口位置」的行为正确（缺口在基线一侧分子分母同减、缺口在其上方差值变小 → 手动门红，正是期望行为）。**红判定 3 组实测**：快照加假表 → 红并点名；`baselineVersion("19")→"18"` → 红并精确给出「文件名 v19 vs baselineVersion(18)」；`migrationsExecuted 15→16` → 红并给出期望差值；三组注入前 grep 断言锚点生效、还原后 git status 核对干净。验证：修复后单类 **3/3 绿**（surefire 实证非退出码）；全量 **957 测试 0 失败**（本批 +3，5 skipped 环境门控）；纯测试改动**无需云端部署**。教训：接手未完成的工作，先把「能不能编译/能不能跑」变成事实，而不是假定它写完就是对的 |
 | 2026-10-02 | **第六十九批·续（抽查工具两处缺陷修复 + 好样本方向全量复跑；§2.67）执行完成**：① **表格静默损坏**（`4f92bb3` 引入）—— 坏样本表 DtoField 与 ExportStreaming 两行被挤成一行，`read -r a b c d` 第 4 变量吞掉剩余字段 ⇒ **ExportStreamingContractTest 自续四起从未被双向抽查**且 DtoField 注入混入脏文本（碰巧仍红）；工具对行格式零校验、损坏完全静默 ⇒ 拆回两行 + 新增**挤行检测**（`read ... extra`，非空即报 `TABLE-ROW-MALFORMED`；红判定：注入挤行 → 恰好报损坏 + exit 1，md5 还原一致）。② **msys2 参数路径转换根因**—— 好样本 `// 反例：...` PREPEND 到 Java 源顶部后 javac 报 [1,1]「需要 class」，列号反推出首行是**无 `//` 的裸文本**；字节级复现实锤：**Git Bash 调 native python.exe 时以 `/` 开头的 argv 被当 POSIX 路径转换，`//` 实测归一化为 `/`**（`MSYS2_ARG_CONV_EXCL='*'` 对照两行输出），⇒ `#`/`--` 行从未受影响、`//` 行（Java/TS 样本）注入被改写 —— **§2.65「首跑红、复跑绿」悬案就此归因收口**；脚本内 export 该变量（Linux 无副作用），教训入跨项目记忆。③ ExportStreaming 坏样本改 `getOutputStream()`→`getOutputStream ()`（加空格：编译合法 + contains 变 false ⇒ **断言红而非编译红**）。④ 纳入 `MySql57BaselineContractTest`（§2.66）双向两行。**结果：坏样本 24 红 / 0 没红 / 0 运行失败；好样本 24 绿 / 0 误报 / 0 运行失败（双向 exit 0）** —— 含上轮悬案的 3 个 `//` 行，contract 包 **24/24 门禁双向实测承重** |
+| 2026-10-02 | **第七十一批（前端 i18n 动态键盲区：ERROR_CODE_KEYS 纳入目录对账；§2.68）执行完成**：对 web 侧 build 链门禁做覆盖面对账，发现 `errorMessage.ts` 的 `t(registeredKey ?? fallbackKey)` 动态调用使 `ERROR_CODE_KEYS`（11 个错误文案键）**不被任何静态校验覆盖**（vue-tsc 不查 string、静态 t() 正则不匹配、catalog 删键无告警 ⇒ 运行时显示原始键名）——错误文案是所有失败路径的必经出口，属结构性缺口；同族动态键（`resumeCompare.sectionType.*`/`import.step*`/`resumeEditor.*`）登记为候选，本批先收口注册表现成的 `errors.*`。修复：`check-i18n.mjs` 新增 `collectErrorCodeRegistryKeys`（行首锚定）+ `findDynamicKeyFailures`（zh/en 对账 + **minKeys 规模自检**防空转）并接入 run()；自测 +2（12/12）。**红判定①**：en-US 删 `errors.conflict` → 既有 zh/en 门禁与新对账**各报一条**（均点名键与 locale），恢复后绿。**⚠ 红判定②首版假绿被当场抓出**：整表注释 11 键（模拟解析失效）→ 仍绿——首版正则缺行首锚，注释行（行尾与真实键行相同的形态）照常解析 ⇒ 修正则 + 自测样本改为该危险形态 → 重做红（`parsed 0 keys (expected >= 10)`）→ 恢复后绿。**教训：SourceText「注释污染」教训对前端脚本同样适用；第一版判据不可信，红判定不是仪式而是必需**。验证：实库 check:i18n 全绿（48 Vue + 29 TS）；`npm run build` 完整链通过（9.9s） |
