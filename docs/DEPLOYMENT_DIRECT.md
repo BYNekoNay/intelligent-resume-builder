@@ -241,7 +241,7 @@ PDF_SERVICE_TOKEN=<secrets.env 的 PDF_SERVICE_TOKEN>
 PDF_OUTPUT_DIR=/opt/intelligent-resume/app/api/pdf-output
 BAILIAN_API_KEY=<live-ai.env>
 BAILIAN_MODEL=qwen3.8-max
-BAILIAN_MODEL_CHAIN=qwen3.8-max,glm-5.3,qwen3.8-27b,qwen3.8-2.4t-a95b,qwen3.8-max-0902,deepseek-v4.1-flash,deepseek-v4-pro-0813,kimi-k3
+BAILIAN_MODEL_CHAIN=qwen3.8-max,glm-5.3,qwen3.8-27b,qwen3.8-2.4t-a95b,qwen3.8-max-0902,deepseek-v4.1-flash,deepseek-v4-pro-0813
 BAILIAN_READ_TIMEOUT_S=300
 AI_CHAIN_QUOTA_COOLDOWN_S=1800
 AI_CHAIN_TRANSIENT_COOLDOWN_S=60
@@ -251,6 +251,22 @@ AI_CHAIN_TOTAL_BUDGET_S=600
 > **链总预算（`AI_CHAIN_TOTAL_BUDGET_S`）**：单个模型的读超时（默认 300s）乘以链长度会放大成数十分钟，
 > 而 worker 处理单条任务期间会一直占住线程，后续 AI 任务会排队阻塞。超出总预算即停止顺延并快速失败，
 > 由 worker 的重试机制稍后再跑。取值应大于单次读超时、小于可接受的最坏排队时长。
+
+> **`app/api/.env` 是运行期唯一生效来源（第六十七批实测）**：`application.yml` 用
+> `spring.config.import: optional:file:../.env[.properties],optional:file:.env[.properties]` 读取它，
+> 而 api 单元的 `WorkingDirectory=/opt/intelligent-resume/app/api` ⇒ 生效文件即 `app/api/.env`
+> （进程环境里**没有任何** `BAILIAN_*`，单元也**没有** `EnvironmentFile=`）。
+> ⚠ 同机上的 `live-ai.env` **运行期不再被读取**（仅在首次部署时提供密钥、由人抄进 `.env`）——
+> 第六十七批实测发现两者已经**漂移**（`live-ai.env` 停在 7 模型、`.env` 是 8 模型），
+> 足以说明「只改 `live-ai.env` 不会有任何效果」。**改链一律改 `app/api/.env` 并重启**，
+> 核对方式见下（启动日志的 `modelChain=` 与 `resume_ai_model_chain_available` 指标）。
+>
+> 改动后的**运行时核对**（不要只看文件）：
+> ```bash
+> sudo systemctl restart intelligent-resume-api
+> sudo journalctl -u intelligent-resume-api --since "3 min ago" | grep -o "modelChain=\[[^]]*\]"
+> curl -s http://127.0.0.1:8080/actuator/prometheus | grep resume_ai_model_chain_available
+> ```
 
 > **模型链（`BAILIAN_MODEL_CHAIN`）**：百炼的免费额度是**按模型**计量的，单模型额度耗尽会让全部 AI 功能一起失效。
 > 这里配置有序模型链，按序尝试、失败顺延；额度耗尽或模型下线的条目进入冷却期被跳过。
@@ -354,7 +370,7 @@ draft-fields 两道静态门禁）→ **PDF 依赖 `PUPPETEER_SKIP_DOWNLOAD=true
 真实启动一次 Chromium 自检** → 原子替换产物 → **同步 nginx 站点配置**（`deploy/nginx/host.conf` +
 `security-headers.conf` 片段；先落位片段再覆盖站点文件，`nginx -t` 校验通过才 reload）→
 **同步 systemd 单元**（`deploy/systemd/*.service`；仅在内容变化时安装 + `daemon-reload`）→
-重启服务 → 等待 readiness → **部署后探针**（16 项：行为断言 + 生效配置与仓库的一致性）→
+重启服务 → 等待 readiness → **部署后探针**（17 项：行为断言 + 生效配置与仓库的一致性 + 应用加载配置与磁盘 `.env` 的一致性）→
 输出健康检查。
 
 > **nginx 配置已纳入脚本（2026-10-01 第六十一批）**。此前它**只存在于 §4.5 的手工流程**里，
@@ -423,9 +439,12 @@ SSH_HOST= bash scripts/probe-deployment.sh             # 跳过配置一致性�
 | 类别 | 内容 |
 | --- | --- |
 | **A. 行为断言** | HTTP 可观察：首页 200 · 安全头 4 条 · 匿名 health 收敛（无 `checks`）· `health/detail` 401 · **静态资源 gzip** · **5.5MB 上传已穿过 nginx** · 哈希资源长缓存。**在服务器上**直接观察：API `8080` 与 PDF `3001` 的监听地址必须**仅绑回环**（第六十五批新增） |
-| **B. 配置一致性** | ① 服务器生效的 **nginx 配置** vs 仓库 `deploy/nginx/host.conf`；② 服务器生效的 **systemd 单元** vs 仓库 `deploy/systemd/*.service`（第六十五批新增）—— 归一化后逐行比对，**通用地**发现任何「配置改了但没随部署生效」的漂移 |
+| **B. 配置一致性** | ① 服务器生效的 **nginx 配置** vs 仓库 `deploy/nginx/host.conf`；② 服务器生效的 **systemd 单元** vs 仓库 `deploy/systemd/*.service`（第六十五批新增）；③ **应用实际加载的配置** vs 磁盘 `app/api/.env`（第六十七批新增）—— 归一化后逐行/逐值比对，**通用地**发现「配置改了没生效」的漂移 |
 
 探针**失败不掩盖「部署已完成」这一事实**，但以非零退出码结束 —— 避免「部署成功」的假阳性。
+
+> **① ② 是「仓库改对了、环境是旧的」；③ 是反方向 ——「文件改对了、进程是旧的」**（改了 `.env` 忘了重启）。
+> 三条合起来才覆盖住「配置真的有生效」这一整类问题。
 
 > B 类断言的存在理由：第六十一批实测到两条 nginx 配置改动（`client_max_body_size` 5m→6m、
 > 静态资源 gzip）在仓库早已改好、CI 全绿，却因部署链路不含 `deploy/` 而**从未生效**。
@@ -510,12 +529,17 @@ HTTP 403  (0.14s)
 | `qwen-plus` | 403 `AllocationQuota.FreeTierOnly` |
 | `qwen3.8-max` / `glm-5.3` / `qwen3.8-27b` / `qwen3.8-2.4t-a95b` / `qwen3.8-max-0902` / `deepseek-v4.1-flash` / `deepseek-v4-pro-0813` / `kimi-k3` | **200 正常** |
 
+> **注（第六十七批）**：上表的「200 正常」是**探针请求**（`max_tokens` 很小）的结果。
+> `kimi-k3` 在**本应用的真实请求**下必然 400 —— 它拒绝 `temperature` 参数，而本应用每次请求都带
+> （ADR-005 §7.4），因此它是链上的**纯失败跳转节点**（每次多一次约 1s 的失败往返）。
+> 已按 `DECISION-BRIEF` **E1** 从 `BAILIAN_MODEL_CHAIN` 移除（链长 8 → 7）。
+
 **结论：不需要充值。** 真正的病根是**单模型硬编码** —— 把可用性绑死在某一个模型的额度上。
 已通过可配置的**有序模型链**解决，配置项见 §4.4 的 `BAILIAN_MODEL_CHAIN`。
 
 ### 7.3 当前状态
 
-- 模型链已上线并实测通过：8 个模型全部可用，7 类 AI 任务（选材 / 生成 / ATS 分析 / 沟通文案 / 内联润色 / 成果引导 / 模拟面试）真实跑通。
+- 模型链已上线并实测通过：**7 个模型**全部可用（第六十七批按 E1 移除 `kimi-k3`；此前为 8 个），7 类 AI 任务（选材 / 生成 / ATS 分析 / 沟通文案 / 内联润色 / 成果引导 / 模拟面试）真实跑通。
 - 单模型额度耗尽会**自动跳过**并进入 30 分钟冷却，服务不中断。
 - 链路可用性有告警覆盖：`AiModelChainExhausted`（全链失效，critical）与 `AiModelChainDegraded`（可用模型 ≤2，warning）。
 

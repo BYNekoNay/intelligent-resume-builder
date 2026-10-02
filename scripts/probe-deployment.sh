@@ -187,6 +187,31 @@ else
   check_loopback_only "PDF 3001" 3001
 fi
 
+# ---------- 8. 应用实际加载的配置 vs 磁盘上的 .env（抓「改了配置没重启」）----------
+# 第六十七批：执行 E1（移除 kimi-k3）时才发现「哪个 .env 才生效」此前从未被验证过 ——
+# 生效的是 app/api/.env（application.yml 用 spring.config.import 读它），同机的 live-ai.env
+# 运行期**不被读取**，两者当时已经漂移。这类「改了文件但进程没变」与 nginx/systemd 的
+# 「改了仓库但环境没变」同源，只是方向相反：**文件对了，运行时是旧的**。
+printf '\n=== 8. 应用加载的模型链 vs app/api/.env ===\n'
+if [ -z "${SSH_HOST:-}" ]; then
+  printf '  [SKIP] 未提供 SSH_HOST，跳过\n'
+else
+  env_chain="$(sshq "sudo grep -m1 '^BAILIAN_MODEL_CHAIN=' $REMOTE_ROOT/app/api/.env" 2>/dev/null \
+    | cut -d= -f2- | tr -d ' \r')"
+  loaded_chain="$(sshq "sudo journalctl -u intelligent-resume-api --since '7 days ago' --no-pager" 2>/dev/null \
+    | grep -o 'modelChain=\[[^]]*\]' | tail -1 \
+    | sed -e 's/^modelChain=\[//' -e 's/\]$//' -e 's/, /,/g' -e 's/[[:space:]]//g')"
+  if [ -z "$env_chain" ]; then
+    fail "读不到 $REMOTE_ROOT/app/api/.env 的 BAILIAN_MODEL_CHAIN（该文件是运行期唯一生效来源）"
+  elif [ -z "$loaded_chain" ]; then
+    fail "取不到应用启动日志里的 modelChain=[...]（无法判定运行时链路）"
+  elif [ "$env_chain" = "$loaded_chain" ]; then
+    pass "应用加载的链与 app/api/.env 一致（$(printf '%s' "$env_chain" | tr ',' ' ' | wc -w) 个模型）"
+  else
+    fail "应用加载的链与磁盘 .env 不一致 —— 极可能「改了 .env 但没重启」：磁盘=$env_chain，进程=$loaded_chain"
+  fi
+fi
+
 # ---------- 汇总 ----------
 printf '\n%s\n' "----------------------------------------------------------------------"
 printf '探针合计 %d 项：通过 %d，失败 %d\n' "$((PASS + FAIL))" "$PASS" "$FAIL"
