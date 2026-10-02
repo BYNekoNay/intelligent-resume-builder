@@ -1319,6 +1319,45 @@ build context 提到仓库根并调整 Dockerfile 路径，而容器拓扑在当
 **验证**：修复后单类 `Tests run: 3, Failures: 0`（surefire 报告实证，非退出码）；全量 **957 测试 0 失败**
 （本批 +3，5 skipped 为环境门控），BUILD SUCCESS。纯测试改动，**无需云端部署**。
 
+### 2.67 抽查工具自身两处缺陷的修复与好样本方向全量复跑：24×24 双向全绿，§2.65 悬案归因（2026-10-02 第六十九批·续）
+
+**动机**：把 §2.66 的新门禁纳入双向抽查时，顺带处理 §2.65 的两个遗留——好样本方向「1 行首跑红、
+单行复跑绿、未完全归因」的悬案，以及该方向此前的覆盖缺口。
+
+**发现 1（表格静默损坏，`4f92bb3` 引入）**：坏样本表的 `DtoFieldContractTest` 行与
+`ExportStreamingContractTest` 行被**挤成了一行**（`git log -S` 实锤引入于续四的编辑）——
+`IFS=$'\t' read -r gate file old new` 只取 4 个字段，第 4 变量吞掉剩余全部内容 ⇒
+**`ExportStreamingContractTest` 自续四起从未被双向抽查**（两个方向都没有它），且 DtoField 的
+注入样本混入了脏文本（碰巧仍红，但不是设计样本的干净红）。工具对「行恰好 4 个字段」**零校验**，
+损坏完全静默——又一处「永远通过」形态。**修复**：拆回两行；脚本新增**挤行检测**
+（`read ... extra`，第 5 字段非空即报 `TABLE-ROW-MALFORMED` 并以非零码结束）；
+**红判定**：临时注入挤行 → 恰好报「表格行损坏」+ exit 1，md5 还原一致。
+
+**发现 2（本机工具链根因，与 §2.65 悬案同源）**：好样本方向把 `// 反例：...` PREPEND 到 Java
+源码顶部后 mvn 编译报 `AccountExportService.java:[1,1] 需要 class` + `[1,5] 非法字符 '\uff1a'`
+——列号反推出第 1 行是**没有 `//` 的裸文本**。字节级复现实验定位根因：**Git Bash (msys2) 调用
+native python.exe 时，把以 `/` 开头的 argv 当 POSIX 路径转换，`//` 实测被归一化成 `/`**
+（`MSYS2_ARG_CONV_EXCL='*'` 下原样保留，对照实验两行输出实锤）。于是：
+`#`/`--` 开头的样本行（YAML/env/SQL/nginx）从未受影响，`//` 行（Java/TS 注释样本）的注入文本
+被改写 ⇒ 编译错或文本变形 —— **这就是 §2.65 那个「首跑红、复跑绿」不一致的最可能根因**
+（受影响与否取决于该行是否 `/` 开头及当轮 runner 的编译行为）。**修复**：脚本内
+`export MSYS2_ARG_CONV_EXCL='*'`（Linux CI 无此机制，设置无副作用）；教训已写入跨项目记忆。
+
+**顺带**：ExportStreaming 的坏样本从「`getOutputStream()` 改名」改为「`getOutputStream ()` 加空格」——
+改名会让 javac 编译失败（RUN-FAILED、无结论），加空格则**编译合法**且
+`contains("getOutputStream()")` 变 false ⇒ **断言红**（「断言红而非编译红」同 §2.65 判定纪律）。
+
+**结果（runner＝classworlds mvn，逐门禁单跑）**：
+
+| 方向 | 结果 |
+| --- | --- |
+| 坏样本必须变红 | **24 红 / 0 没红 / 0 运行失败**（exit 0） |
+| 好样本必须保持绿 | **24 绿 / 0 误报 / 0 运行失败**（exit 0）——含上一轮悬案的 3 个 `//` Java/TS 行与新增 2 行 |
+
+⇒ contract 包 **24/24 门禁双向实测承重**（本表 24 行 = 23 门禁 + `ConfigConsumerContractTest`
+好样本行；`MySql57BaselineContractTest` 与 `ExportStreamingContractTest` 为本轮新纳入）。
+§2.65 悬案就此**归因收口**。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1531,3 +1570,4 @@ build context 提到仓库根并调整 Dockerfile 路径，而容器拓扑在当
 | 2026-10-02 | **第六十九批·续（安全头的下发可达性门禁；§2.63 扫描留观项收口）执行完成**：先确认事实（镜像内实际生效的是 `web/nginx.conf`（`web/Dockerfile:12` COPY）、compose `web.build.context: ../web` 使镜像拿不到 `deploy/nginx/` 的片段、**4 条安全头在全套测试里零覆盖**）⇒「每条对外配置都真的下发了那 4 条头」此前**没有任何门禁**，「容器版由 edge 兜住」只是注释里的假设。**取舍（记录为决策）**：**保留不对称、不做 build-context 重构**（合并需把 compose build context 提到仓库根并调 Dockerfile 路径，而容器拓扑未用于生产，代价与收益不成比例；公网响应由 `edge` 统一下发、无实际影响）→ 写进 `docs/08`。**新增 `SecurityHeaderDeliveryContractTest`（5 例）**：片段完整性（4 条头 + `always`）／每份对外配置 server 级 include／**继承陷阱**（自带 `add_header` 的 location 必须再 include 一次 —— 加一条 `Cache-Control` 就让该 location 的安全头全没，而 `nginx -t` 通过、探针看不见）／**镜像内不得 include 镜像里不存在的片段**（挡住「为消除不对称而补 include → 容器启动即崩」）／include 必须指向真实文件。实现用 `SourceText` 先抹白注释再解析（注释里大量 `location`/`add_header` 字样），并带解析下限断言防假绿。**红判定双注入**：给 `edge.conf` 的 location 加自有 `add_header` 不补 include → 红；给 `web/nginx.conf` 补片段 include → 红；两条各响一次（`Failures: 2`），md5 恢复。验证：该门禁 5/5 绿；全量测试 0 失败 |
 | 2026-10-02 | **第六十九批·续（门禁有效性系统性抽查）执行完成**：此前只做过个案红判定，从未回答过「其余门禁里还有多少个是假的」。新增表驱动工具 `scripts/audit-gate-effectiveness.sh`：对每个门禁**注入量身坏样本 → 只跑该门禁 → 断言失败 → 还原核对 md5**；带两条稳健性设计（**注入前断言锚点存在且唯一**，否则「锚点写错⇒注入没生效⇒没红」会被误判成假绿；**还原后核对 md5**）。**首轮：23 行全部按预期变红、0 个没红、0 个注入失败**（首轮有 2 行锚点不唯一，改唯一锚点后补跑通过）⇒ contract 包 **24/24 门禁全部实测承重**（`ConfigConsumerContractTest` 已在第六十五批验证）。覆盖族：文档↔实现 / 配置↔消费方 / 部署资产 / 前端契约 / 结构细节。**结论：门禁体系经得起抽查**（首次有证据回答「是否在空转」），并固化为可复用工具。⚠ 边界：本抽查证明「注入这类坏样本会红」，不等于判据覆盖了所有情形（**误报方向**需「好样本必须通过」的抽查，两方向合起来才完整）。文档：`docs/07` §5.11 |
 | 2026-10-02 | **第六十九批·续（MySQL 5.7 升级门禁的基线自洽性门禁；§2.66）执行完成**：把第六十九批顺带核查时的**手工核对**（快照 vs V1~V19 迁移）固化为 `MySql57BaselineContractTest`（3 例）：① 基线快照建的表集合 == 版本 ≤ 基线的迁移建的表集合（双向 diff）；② 快照文件名版本 / `baselineVersion` / 迁移目录三方一致；③ 手动门硬编码数字（`migrationsExecuted` 期望、`MAX(version)`）== 实际迁移（总迁移 − 基线）—— 新增/删除迁移后忘了同步手动门即红（它平时不跑，问题会被拖很久）。解析器带下限断言防假绿，判据读取复用 `SourceText`。**接手时的发现（本批最重要的过程事实）**：该门禁在工作区处于未验证、未提交状态且**无法编译** —— `versions.count()`（`Set` 无此方法）+ lambda 内调用 `throws Exception` 的 `baselineVersion()`（受检异常不能从 `Predicate` 抛出）；修复后差值公式对「缺口位置」的行为正确（缺口在基线一侧分子分母同减、缺口在其上方差值变小 → 手动门红，正是期望行为）。**红判定 3 组实测**：快照加假表 → 红并点名；`baselineVersion("19")→"18"` → 红并精确给出「文件名 v19 vs baselineVersion(18)」；`migrationsExecuted 15→16` → 红并给出期望差值；三组注入前 grep 断言锚点生效、还原后 git status 核对干净。验证：修复后单类 **3/3 绿**（surefire 实证非退出码）；全量 **957 测试 0 失败**（本批 +3，5 skipped 环境门控）；纯测试改动**无需云端部署**。教训：接手未完成的工作，先把「能不能编译/能不能跑」变成事实，而不是假定它写完就是对的 |
+| 2026-10-02 | **第六十九批·续（抽查工具两处缺陷修复 + 好样本方向全量复跑；§2.67）执行完成**：① **表格静默损坏**（`4f92bb3` 引入）—— 坏样本表 DtoField 与 ExportStreaming 两行被挤成一行，`read -r a b c d` 第 4 变量吞掉剩余字段 ⇒ **ExportStreamingContractTest 自续四起从未被双向抽查**且 DtoField 注入混入脏文本（碰巧仍红）；工具对行格式零校验、损坏完全静默 ⇒ 拆回两行 + 新增**挤行检测**（`read ... extra`，非空即报 `TABLE-ROW-MALFORMED`；红判定：注入挤行 → 恰好报损坏 + exit 1，md5 还原一致）。② **msys2 参数路径转换根因**—— 好样本 `// 反例：...` PREPEND 到 Java 源顶部后 javac 报 [1,1]「需要 class」，列号反推出首行是**无 `//` 的裸文本**；字节级复现实锤：**Git Bash 调 native python.exe 时以 `/` 开头的 argv 被当 POSIX 路径转换，`//` 实测归一化为 `/`**（`MSYS2_ARG_CONV_EXCL='*'` 对照两行输出），⇒ `#`/`--` 行从未受影响、`//` 行（Java/TS 样本）注入被改写 —— **§2.65「首跑红、复跑绿」悬案就此归因收口**；脚本内 export 该变量（Linux 无副作用），教训入跨项目记忆。③ ExportStreaming 坏样本改 `getOutputStream()`→`getOutputStream ()`（加空格：编译合法 + contains 变 false ⇒ **断言红而非编译红**）。④ 纳入 `MySql57BaselineContractTest`（§2.66）双向两行。**结果：坏样本 24 红 / 0 没红 / 0 运行失败；好样本 24 绿 / 0 误报 / 0 运行失败（双向 exit 0）** —— 含上轮悬案的 3 个 `//` 行，contract 包 **24/24 门禁双向实测承重** |
