@@ -43,12 +43,12 @@ TABLE=$(cat <<'TABLE_EOF'
 StaticAssetDeliveryContractTest	web/nginx.conf	gzip on;	gzip off;
 UploadPathContractTest	web/nginx.conf	client_max_body_size 6m;	client_max_body_size 1m;
 DeployProxyClientIpContractTest	deploy/nginx/host.conf	proxy_set_header X-Forwarded-For $remote_addr;	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-ComposeResourceBoundsContractTest	deploy/docker-compose.prod.yml	x-logging: &service-logging	x-logging2: &service-logging
-EnvExampleContractTest	server/.env.example	SERVER_PORT=8080	
+ComposeResourceBoundsContractTest	deploy/docker-compose.prod.yml	mem_limit: 1200m	
+EnvExampleContractTest	server/.env.example	<<PREPEND>>	GHOST_AUDIT_KEY=1
 ErrorCodeContractTest	web/src/utils/errorCodes.ts	50002: 'errors.aiFailure',	
 AlertRuleContractTest	monitoring/prometheus/rules/intelligent-resume-alerts.yml	sum(rate(resume_ai_provider_calls_total{outcome="success"}[10m]))	sum(rate(resume_ai_provider_calls_totals{outcome="success"}[10m]))
 SpringBootTestProfileContractTest	server/src/test/java/com/intelligentresume/ai/confirmation/controller/ConfirmationControllerIT.java	@ActiveProfiles("test")	
-ShutdownContractTest	server/src/main/resources/application.yml	timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}	timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:5s}
+ShutdownContractTest	server/src/main/resources/application.yml	${SHUTDOWN_TIMEOUT:20s}	${SHUTDOWN_TIMEOUT:60s}
 RetentionPolicyContractTest	docs/07-测试计划与验收说明书.md	AI 任务原始输入和结果 90 天后删除非必要内容	AI 任务原始输入和结果 30 天后删除非必要内容
 PdfServiceBindScopeContractTest	deploy/systemd/intelligent-resume-api.service	Environment=SERVER_ADDRESS=127.0.0.1	Environment=SERVER_ADDRESS=0.0.0.0
 PdfOutputBoundContractTest	server/src/main/java/com/intelligentresume/export/service/PdfServiceClient.java	if (pdfBytes.length > maxOutputBytes) {	if (false) {
@@ -56,9 +56,7 @@ TemplateCodeContractTest	web/src/api/export.ts	'academic'	'academic2'
 SecurityHeaderDeliveryContractTest	deploy/nginx/edge.conf	include snippets/security-headers.conf;	
 ApiDocCoverageGateTest	docs/05-接口设计说明书.md	`POST /api/auth/register`	`POST /api/auth/registr`
 ConfigFallbackContractTest	server/src/main/resources/application.yml	render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:50}	render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:30}
-DtoFieldContractTest	web/src/api/ai.ts	  errorMessage: string | null
-	
-ExportStreamingContractTest	server/src/main/java/com/intelligentresume/auth/controller/AuthController.java	getOutputStream()	getOutputStreamXX()
+DtoFieldContractTest	web/src/api/ai.ts	  errorMessage: string | null	  ghostAuditField: string | nullExportStreamingContractTest	server/src/main/java/com/intelligentresume/auth/controller/AuthController.java	getOutputStream()	getOutputStreamXX()
 FrontendApiContractTest	web/src/api/export.ts	'/api/exports/pdf'	'/api/exports/pdf2'
 FrontendEnumContractTest	web/src/api/ai.ts	| 'CANCELLED'	
 PdfDeadlineContractTest	server/src/main/resources/application.yml	render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:50}	render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:5000}
