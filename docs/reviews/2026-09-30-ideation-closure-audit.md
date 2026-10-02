@@ -925,6 +925,45 @@ Web/PDF 作业均通过。失败的全是 `RetentionPurgeRepositorySchemaTest` �
 产物：`RetentionPurgeRepositorySchemaTest`（改写为静态解析 + `@ActiveProfiles`）、
 `SpringBootTestProfileContractTest`（新增）。
 
+### 2.58 门禁假绿的第二种形态：注释里的同名文本（2026-10-01 第六十六批）
+
+第六十五批刚发现「门禁可以假绿」（新门禁用整文件 `contains` 判据、被 javadoc 骗过）。本批把这个
+模式**系统化排查**：22 个静态门禁里有 **16 个**用 `contains(...)` 在**文件全文**上找 token，
+而**注释里的同名文本会让判据假绿**。
+
+**取证（实测，非推测）**：`ConfigConsumerContractTest` 的判据是「每个 `app.*` 标量键必须在源码里
+找到消费点」。把 `JdKeywordParser` 里真正消费 `app.job.jd-text.min-length` 的 `@Value` 去掉后，
+门禁**仍然通过**（`Tests run: 1, Failures: 0`）—— 因为该类的 **javadoc 里正好写着这个键名**。
+而这条门禁守护的正是本项目吃过两次亏的「声明即虚构」。
+
+**修复**：新增测试侧工具 `SourceText`（按扩展名抹白注释），并把 22 个门禁里 **34 处**
+`Files.readString(x, StandardCharsets.UTF_8)` 统一替换为 `SourceText.read(x)`（`web/src/**` 的
+TS/Vue 亦覆盖）。
+
+两个关键设计（都由踩坑倒逼，不是先验）：
+
+| 设计 | 为什么 |
+| --- | --- |
+| **抹白（等长空白）而不是删除** | 部分判据是**距离窗口**式（「`@Transactional` 之后 300 字符内不得出现 X」）。删注释会缩短文本、让窗口变紧 → 实测把 `ExportStreamingContractTest` 由绿变**假红**。抹白保留长度与换行，「注释不再命中」与「距离语义不变」兼得 |
+| **词法级扫描 + 保留字符串字面量** | 朴素 `indexOf("//")` 会把 `"http://host"` 截断（既假红、又破坏"保留字符串"的初衷）；而若不保留字符串，`@Scheduled(fixedDelayString = "${app.x.y:1}")` 这类**真实消费点**会丢失（假红）。故跟踪 `"…"`/`'…'`/`"""…"""` 与转义；`'a--b'`、`"a#b"` 均不被误当注释 |
+
+**验证**：
+
+- `SourceTextTest` **6 例**（注释被抹白 / 字符串保留 / 文本块保留 / `#` 风格 / SQL 风格 / 文档不剥，
+  并断言**等长与换行守恒**）
+- 22 个门禁 **57 项全绿**（改判据后无回归）
+- **红判定（重做一次才成立）**：注回坏样本 → `ConfigConsumerContractTest` **`Failures: 1`**，
+  失败信息点名 `app.job.jd-text.min-length`；md5 校验恢复。
+  ⚠ **首轮红判定无效**：运行 JVM 以 `EXCEPTION_ACCESS_VIOLATION` 崩溃，退出码 1 被误读成
+  「门禁失败」。**教训：红判定必须看 `Failures:` 计数与失败文本，不能只看退出码** ——
+  JVM 崩溃、编译错误、依赖下载失败都会给非零码。
+- 全量 **926 测试 0 失败**（本批 +6，5 skipped 为环境门控）
+
+**残留**：字符串字面量里的 token 仍会被算作命中（多数命中本身即合法消费点）；出现真实案例再评估。
+
+产物：`SourceText`（新增工具）、`SourceTextTest`（新增）、22 个门禁的读取统一化、
+`docs/08` 增「文本判据必须在抹白注释的文本上运行」条目。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1129,3 +1168,4 @@ Web/PDF 作业均通过。失败的全是 `RetentionPurgeRepositorySchemaTest` �
 | 2026-10-01 | **第六十四批（决策 D2 阶段 1 落地：数据生命周期分档清扫作业；§2.55 扫描新增项）执行完成**：实现 A 档「无引用者」按期物理删除，仅覆盖 `career_material` 与 `resume_version`（`resume_version` 被 **11 处**外键引用含自引用 —— 直接硬删必撞外键，这是「必须分档」的硬理由）。新增 `RetentionPurgeService`（`@Scheduled`）、`RetentionPurgeRepository`（候选查询逐条 `NOT EXISTS` 排除引用者；删除语句带 `deleted_at IS NOT NULL` 二次保护）、`RetentionPurgeProperties` 与 `app.retention.purge.*` 配置。**纠正两处在途偏差**：① 原「循环到候选耗尽」与方案 §6 G3「单轮每表最多 batch-size 行」矛盾 → 改为**一次调度只处理一批**；② 单测 `assertEquals(0, purgeExpiredSoftDeleted() - 0 - 0, …)` 是**重复调用**而非断言上次结果 → 改为直接断言。护栏 **G1–G7 全落地**（含新增 G6 指标 `retention_purge_scanned/purged/skipped` 与 G7 四键接入 `NumericConfigurationValidator`，受校验键 14→**18**）。守卫用**元数据反查**而非 fixture 端到端：`RetentionPurgeRepositorySchemaTest` 从 `INFORMATION_SCHEMA` 反查所有指向该资源的外键与 SQL 比对（**漏一项即红**）+ 断言删除语句恒带软删限定。**红判定已做**：删去 `ats_check_result` 一处 `NOT EXISTS` → 完整性用例红；`dryRun` 默认值 `true`→`false` → 护栏用例红；md5 校验完整恢复。回归：定向 22/22 绿；server 全量 **919 测试 0 失败**（本批 +10，5 skipped 为环境门控）。文档按**分档**改写（`docs/04` §7.1/§7.2、`docs/07` §5.10、`docs/08` §9.6/§10），`RetentionPolicyContractTest` 改为**按档位双向断言**，`OPEN-DECISIONS` D2 状态更新为「阶段 1 已实现、阶段 2/3 待排期」。**残留**：无 fixture 级端到端删除用例；B 档快照化与账户侧未实现 |
 | 2026-10-01 | **第六十五批（云端复验第六十四批 + 修复 systemd 单元不随部署同步；§2.56 扫描新增项）执行完成**：因第六十四批新增 `@Scheduled` 作业与 4 个接入 fail-closed 校验的配置键（受校验键 14→18，校验失败会让应用**起不来**），按铁律跑「部署 + 真实链路复验」。**第一轮部署全绿**：探针 12/12、`journalctl` 抓到 `Retention purge disabled (app.retention.purge.enabled=false); skipped`（作业已装载且默认不删）、无「数值型配置未解析」报错（4 个新键在真实 `Environment` 解析成功）、`Started … in 11.911 seconds` 无 OOM。但 `ss -lntp` 暴露 pdf-service 监听 **`*:3001`** —— 与文档不符。**取证三条**：服务器 pdf 单元 mtime = **2026-09-25**、无 `PDF_SERVICE_HOST`；仓库单元 `:25` 早有该行；`deploy-direct.remote.sh` 对 systemd **零命中**。→ 与第六十一批 nginx **同源**，**第四十批的 PDF 回环收敛从未生效**。**修复**：`remote.sh` 新增 systemd 单元**幂等**同步（内容变化才 `install` + `daemon-reload`，装前剥离 CR）；探针 **12→16 项**（第 6 节 B 类：生效单元 vs 仓库单元归一化比对；第 7 节 A 类：**在服务器上**断言 8080/3001 **仅绑回环** —— 从外部探测会因安全组假阳性）。**验证（红→绿）**：新断言先跑得 **14/16、exit 1**（**精确指出** `> Environment=PDF_SERVICE_HOST=127.0.0.1` 与 `PDF 3001 监听在非回环地址：*:3001`）→ 重新部署（1 分 47 秒）→ **16/16 PASS、`DEPLOY_EXIT=0`**，`ss -lntp` = `127.0.0.1:3001`；api 单元**未被重写**（mtime 仍 09-25）证明幂等生效。黑盒回归第三轮 **4 套件全 PASS、0 失败 0 跳过**（含 AI 全链路，15 分 28 秒）。同批更正 `docs/DEPLOYMENT_DIRECT.md` §4.5「`deploy/` 需手工上传」的过期表述。报告：`docs/reviews/2026-10-01-cloud-e2e-verification.md` §7 |
 | 2026-10-01 | **第六十五批（CI 修复：门禁依赖本机 MySQL，「本地永远绿」；§2.57 扫描新增项）执行完成**：第六十四批推送后 **CI Server tests 失败**（run 36882146555），失败的全是 `RetentionPurgeRepositorySchemaTest` 3 用例（`Failed to load ApplicationContext`）。**根因两层**：① 该类漏 `@ActiveProfiles("test")` ⇒ 连 `application.yml` 默认数据源（MySQL），`Caused by: ConnectException: Connection refused` —— **本机有 MySQL 故本地全量 919"全绿"是假阳性**（征兆：该用例耗时 25.9s，同类 H2 用例仅几十~几百毫秒）；② 其元数据查询用 `INFORMATION_SCHEMA.KEY_COLUMN_USAGE.REFERENCED_TABLE_NAME`，该列**只存在于 MySQL**（H2 2.2 实测 `Column "REFERENCED_TABLE_NAME" not found`）⇒ 该守卫从设计上只能跑在真实 MySQL 上。**修复**：补 `@ActiveProfiles("test")`；把「引用清单完整性」改为**静态解析 Flyway 迁移**（`db/migration/*.sql`：语句主角表 = `CREATE/ALTER TABLE` 名，外键 = `REFERENCES <table>(`），结果与运行环境无关而"漏一项即红"不变；「候选 SQL 可执行」（H2）与「删除语句带软删限定」保留。**新增门禁 `SpringBootTestProfileContractTest`**（每个 `@SpringBootTest` 必须声明 `@ActiveProfiles`，含规模自检 ≥30）。**红判定两轮**：① 删去 `ats_check_result` 一处 `NOT EXISTS` → 1 红且点名；② **首版门禁是假绿** —— 用整文件 `contains("@ActiveProfiles")` 判据，而被检查文件的 **javadoc 里正好写了该注解名**，去掉注解后门禁**仍通过**；改为「剥注释 + 只认行首注解」后 1 红并点名文件；两轮均 md5 校验恢复。验证：全量 **920 测试 0 失败**（本批 +1，5 skipped 为环境门控）。同批在 §2.55 加**补正**说明此前「919 全绿」对该类为假阳性。**CI + Functional Regression 双绿**（head `8a4de28`；Functional 首次卡在 `Install CJK fonts` 撞 30 分钟上限被 cancelled，属 runner 网络抖动、与改动无关，重跑 2 分 7 秒通过） |
+| 2026-10-01 | **第六十六批（门禁假绿第二种形态：注释里的同名文本；§2.58 扫描新增项）执行完成**：把第六十五批发现的「门禁可假绿」**系统化排查** —— 22 个静态门禁里 **16 个**用 `contains(...)` 在文件全文上找 token。**实测取证**：把 `JdKeywordParser` 里真正消费 `app.job.jd-text.min-length` 的 `@Value` 去掉后，`ConfigConsumerContractTest` **仍然通过**（javadoc 里正好写着该键名）—— 而它守护的正是「声明即虚构」。**修复**：新增 `SourceText`（按扩展名抹白注释）+ 把 22 个门禁 **34 处** `Files.readString(x, UTF_8)` 统一为 `SourceText.read(x)`（含 `web/src/**` 的 TS/Vue）。两个由踩坑倒逼的设计：① **抹白（等长空白）而非删除** —— 删注释会缩短文本、让「`@Transactional` 后 300 字符内」这类**距离窗口**判据变紧而制造**假红**（实测把 `ExportStreamingContractTest` 由绿变红）；② **词法级扫描 + 保留字符串字面量** —— 朴素 `indexOf("//")` 会截断 `"http://host"`，而不保留字符串会让 `@Scheduled(fixedDelayString="${app.x.y:1}")` 这类**真实消费点**丢失（假红）。**验证**：新增 `SourceTextTest` 6 例（含等长/换行守恒、字符串保留两个方向）；22 个门禁 **57 项全绿**；**红判定重做才成立**（首轮 JVM `EXCEPTION_ACCESS_VIOLATION` 崩溃，退出码 1 被误读成门禁失败 → 改看 `Failures:` 计数与失败文本后，得 `Failures: 1` 且点名该键，md5 恢复）；全量 **926 测试 0 失败**（本批 +6）；`docs/08` 增条目 |
