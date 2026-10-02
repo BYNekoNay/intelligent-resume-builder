@@ -169,6 +169,6 @@ class UploadPathContractTest {
         Path fromServer = serverRoot.resolve("..").resolve(relative).normalize();
         Path target = Files.exists(fromServer) ? fromServer : serverRoot.resolve(relative);
         assertTrue(Files.exists(target), "找不到文件: " + relative + "（门禁必须在仓库内运行）");
-        return Files.readString(target, StandardCharsets.UTF_8);
+        return SourceText.read(target);
     }
 }

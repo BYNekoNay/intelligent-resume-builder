@@ -42,7 +42,7 @@ class ApiDocCoverageGateTest {
         Path javaSources = serverRoot.resolve("src/main/java/com/intelligentresume");
         Path apiDoc = locateApiDoc(serverRoot);
 
-        String doc = Files.readString(apiDoc, StandardCharsets.UTF_8);
+        String doc = SourceText.read(apiDoc);
         List<String> missing = new ArrayList<>();
         List<Path> controllers;
         try (Stream<Path> files = Files.walk(javaSources)) {
@@ -51,7 +51,7 @@ class ApiDocCoverageGateTest {
         assertTrue(!controllers.isEmpty(), "未找到控制器源码，门禁路径配置有误: " + javaSources);
 
         for (Path controller : controllers) {
-            String source = Files.readString(controller, StandardCharsets.UTF_8);
+            String source = SourceText.read(controller);
             Matcher baseMatcher = BASE_MAPPING.matcher(source);
             String base = baseMatcher.find() ? baseMatcher.group(1) : "";
             Matcher mapping = ENDPOINT_MAPPING.matcher(source);

@@ -51,7 +51,7 @@ class SpringBootTestProfileContractTest {
         int springBootTests = 0;
         List<String> offenders = new ArrayList<>();
         for (Path file : javaFiles) {
-            String code = stripComments(Files.readString(file, StandardCharsets.UTF_8));
+            String code = stripComments(SourceText.read(file));
             if (!SPRING_BOOT_TEST.matcher(code).find()) {
                 continue;
             }

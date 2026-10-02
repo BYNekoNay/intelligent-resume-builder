@@ -116,20 +116,20 @@ class TemplateCodeContractTest {
     }
 
     private Set<String> frontUnion() throws Exception {
-        String source = Files.readString(repoFile("web/src/api/export.ts"), StandardCharsets.UTF_8);
+        String source = SourceText.read(repoFile("web/src/api/export.ts"));
         Matcher matcher = FRONT_UNION.matcher(source);
         return matcher.find() ? literals(matcher.group(1), TS_STRING) : Set.of();
     }
 
     private Set<String> frontOptions() throws Exception {
-        String source = Files.readString(repoFile("web/src/views/ResumeEditorView.vue"), StandardCharsets.UTF_8);
+        String source = SourceText.read(repoFile("web/src/views/ResumeEditorView.vue"));
         Matcher matcher = FRONT_OPTIONS_ARRAY.matcher(source);
         return matcher.find() ? literals(matcher.group(1), FRONT_OPTION_CODE) : Set.of();
     }
 
     private Set<String> collect(String relative, Pattern pattern, int group) throws Exception {
         Set<String> values = new LinkedHashSet<>();
-        Matcher matcher = pattern.matcher(Files.readString(repoFile(relative), StandardCharsets.UTF_8));
+        Matcher matcher = pattern.matcher(SourceText.read(repoFile(relative)));
         while (matcher.find()) {
             values.add(matcher.group(group));
         }

@@ -83,7 +83,7 @@ class FrontendEnumContractTest {
         try (Stream<Path> paths = Files.walk(repoFile("server/src/main/java"))) {
             for (Path file : paths.filter(Files::isRegularFile)
                     .filter(p -> p.getFileName().toString().equals(enumName + ".java")).toList()) {
-                String source = Files.readString(file, StandardCharsets.UTF_8);
+                String source = SourceText.read(file);
                 int start = source.indexOf("public enum " + enumName);
                 if (start < 0) continue;
                 int open = source.indexOf('{', start);
@@ -111,7 +111,7 @@ class FrontendEnumContractTest {
 
     /** {@code export type X = 'A' | 'B'} （允许跨行，直到语句结束）。 */
     private Set<String> frontendUnionType(String file, String symbol) throws Exception {
-        String source = Files.readString(repoFile(file), StandardCharsets.UTF_8);
+        String source = SourceText.read(repoFile(file));
         Matcher matcher = Pattern.compile(
                 "export\\s+type\\s+" + Pattern.quote(symbol) + "\\s*=([^;\\n]*)").matcher(source);
         if (!matcher.find()) return Set.of();
@@ -120,7 +120,7 @@ class FrontendEnumContractTest {
 
     /** {@code export const X = ['A','B'] as const}。 */
     private Set<String> frontendArrayLiteral(String file, String symbol) throws Exception {
-        String source = Files.readString(repoFile(file), StandardCharsets.UTF_8);
+        String source = SourceText.read(repoFile(file));
         Matcher matcher = Pattern.compile(
                 "export\\s+const\\s+" + Pattern.quote(symbol) + "\\s*=\\s*\\[(.*?)\\]", Pattern.DOTALL)
                 .matcher(source);

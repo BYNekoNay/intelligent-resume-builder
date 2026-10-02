@@ -150,7 +150,7 @@ class ConfigConsumerContractTest {
     private Map<String, Set<String>> readBindings() throws Exception {
         Map<String, Set<String>> bindings = new LinkedHashMap<>();
         for (Path file : sourceFiles("server/src/main/java", ".java")) {
-            String source = Files.readString(file, StandardCharsets.UTF_8);
+            String source = SourceText.read(file);
             Matcher matcher = CONFIG_PROPERTIES.matcher(source);
             if (!matcher.find()) continue;
             Set<String> fields = new LinkedHashSet<>();
@@ -166,7 +166,7 @@ class ConfigConsumerContractTest {
     private List<String> readCorpus() throws Exception {
         List<String> texts = new ArrayList<>();
         for (Path file : sourceFiles("server/src/main", ".java", ".yml", ".yaml", ".properties")) {
-            texts.add(Files.readString(file, StandardCharsets.UTF_8));
+            texts.add(SourceText.read(file));
         }
         return texts;
     }

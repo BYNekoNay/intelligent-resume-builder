@@ -91,7 +91,7 @@ class SchemaDocContractTest {
         try (Stream<Path> paths = Files.walk(repoFile("server/src/main/resources/db/migration"))) {
             for (Path sql : paths.filter(Files::isRegularFile)
                     .filter(path -> path.toString().endsWith(".sql")).sorted().toList()) {
-                Matcher matcher = CREATE_TABLE.matcher(Files.readString(sql, StandardCharsets.UTF_8));
+                Matcher matcher = CREATE_TABLE.matcher(SourceText.read(sql));
                 while (matcher.find()) {
                     migrated.add(matcher.group(1).toLowerCase());
                 }
@@ -102,7 +102,7 @@ class SchemaDocContractTest {
 
     /** §3 表章节 → 是否显式标注「未实现 / 设计草案」。 */
     private Map<String, Boolean> documentedTables() throws Exception {
-        String doc = Files.readString(repoFile("docs/04-数据库设计说明书.md"), StandardCharsets.UTF_8);
+        String doc = SourceText.read(repoFile("docs/04-数据库设计说明书.md"));
         Map<String, Boolean> documented = new LinkedHashMap<>();
         Matcher matcher = DOC_TABLE_SECTION.matcher(doc);
         while (matcher.find()) {

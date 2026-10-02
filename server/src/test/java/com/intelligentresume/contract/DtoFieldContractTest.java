@@ -118,7 +118,7 @@ class DtoFieldContractTest {
             for (Path file : paths.filter(Files::isRegularFile)
                     .filter(p -> p.toString().endsWith(".java"))
                     .filter(p -> p.toString().replace('\\', '/').contains("/dto/")).toList()) {
-                String source = Files.readString(file, StandardCharsets.UTF_8);
+                String source = SourceText.read(file);
                 Matcher recordMatcher = BACKEND_RECORD.matcher(source);
                 Set<String> fields = new LinkedHashSet<>();
                 String name = null;
@@ -177,7 +177,7 @@ class DtoFieldContractTest {
         try (Stream<Path> paths = Files.walk(repoFile("web/src/api"))) {
             for (Path file : paths.filter(Files::isRegularFile)
                     .filter(p -> p.toString().endsWith(".ts")).toList()) {
-                String source = Files.readString(file, StandardCharsets.UTF_8);
+                String source = SourceText.read(file);
                 Matcher matcher = FRONT_INTERFACE.matcher(source);
                 while (matcher.find()) {
                     Set<String> fields = new LinkedHashSet<>();

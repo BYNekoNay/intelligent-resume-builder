@@ -40,7 +40,7 @@ class EnvExampleContractTest {
     /** 解析 {@code KEY=VALUE}（忽略注释与空行）。 */
     private List<Map.Entry<String, String>> envEntries() throws Exception {
         List<Map.Entry<String, String>> entries = new ArrayList<>();
-        for (String line : Files.readString(repoFile("server/.env.example"), StandardCharsets.UTF_8).split("\n")) {
+        for (String line : SourceText.read(repoFile("server/.env.example")).split("\n")) {
             Matcher matcher = ENV_LINE.matcher(line.trim());
             if (matcher.matches()) {
                 entries.add(Map.entry(matcher.group(1), matcher.group(2).trim()));
@@ -52,7 +52,7 @@ class EnvExampleContractTest {
     /** application.yml 中 {@code ${KEY:default}} → 默认值（同一键多处出现时保留全部）。 */
     private Map<String, List<String>> yamlPlaceholders() throws Exception {
         Map<String, List<String>> result = new LinkedHashMap<>();
-        String yaml = Files.readString(repoFile("server/src/main/resources/application.yml"), StandardCharsets.UTF_8);
+        String yaml = SourceText.read(repoFile("server/src/main/resources/application.yml"));
         Matcher matcher = PLACEHOLDER.matcher(yaml);
         while (matcher.find()) {
             result.computeIfAbsent(matcher.group(1), key -> new ArrayList<>()).add(matcher.group(2));

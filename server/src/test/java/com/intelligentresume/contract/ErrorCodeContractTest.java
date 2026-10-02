@@ -75,7 +75,7 @@ class ErrorCodeContractTest {
 
     private Set<String> extract(Path file, Pattern pattern, int group) throws Exception {
         Set<String> values = new LinkedHashSet<>();
-        Matcher matcher = pattern.matcher(Files.readString(file, StandardCharsets.UTF_8));
+        Matcher matcher = pattern.matcher(SourceText.read(file));
         while (matcher.find()) {
             values.add(matcher.group(group));
         }
@@ -84,7 +84,7 @@ class ErrorCodeContractTest {
 
     /** 只取 docs/05 §1.3 小节内的码（避免误收其它章节的数字）。 */
     private Set<String> extractSection(Path docFile) throws Exception {
-        String doc = Files.readString(docFile, StandardCharsets.UTF_8);
+        String doc = SourceText.read(docFile);
         int start = doc.indexOf("### 1.3");
         assertTrue(start >= 0, "docs/05 找不到 §1.3 小节（标题可能已改名）");
         int end = doc.length();

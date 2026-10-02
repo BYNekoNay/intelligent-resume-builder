@@ -271,7 +271,7 @@ class AlertRuleContractTest {
     }
 
     private String read(String relative) throws Exception {
-        return Files.readString(repoFile(relative), StandardCharsets.UTF_8);
+        return SourceText.read(repoFile(relative));
     }
 
     /** 测试从 server/ 运行，资源位于仓库根；兼容从仓库根目录运行。 */

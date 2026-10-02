@@ -48,7 +48,7 @@ class ConfigFallbackContractTest {
         int compared = 0;
         int total = 0;
         for (Path file : javaSources("server/src/main/java")) {
-            String source = Files.readString(file, StandardCharsets.UTF_8);
+            String source = SourceText.read(file);
             Matcher matcher = VALUE_ANNOTATION.matcher(source);
             while (matcher.find()) {
                 total++;
@@ -96,7 +96,7 @@ class ConfigFallbackContractTest {
         List<String> mismatches = new ArrayList<>();
         int compared = 0;
         for (Path file : javaSources("server/src/main/java")) {
-            String source = Files.readString(file, StandardCharsets.UTF_8);
+            String source = SourceText.read(file);
             Matcher classMatcher = CONFIG_PROPERTIES_CLASS.matcher(source);
             if (!classMatcher.find()) continue;
             String prefix = classMatcher.group(1);

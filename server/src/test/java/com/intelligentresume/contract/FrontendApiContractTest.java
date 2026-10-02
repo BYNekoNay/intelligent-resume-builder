@@ -96,7 +96,7 @@ class FrontendApiContractTest {
         try (Stream<Path> paths = Files.walk(repoFile("server/src/main/java"))) {
             for (Path file : paths.filter(Files::isRegularFile)
                     .filter(p -> p.toString().endsWith("Controller.java")).toList()) {
-                String source = Files.readString(file, StandardCharsets.UTF_8);
+                String source = SourceText.read(file);
                 Matcher classMatcher = CLASS_MAPPING.matcher(source);
                 String base = classMatcher.find() ? classMatcher.group(1) : "";
 
@@ -121,7 +121,7 @@ class FrontendApiContractTest {
         try (Stream<Path> paths = Files.walk(repoFile("web/src/api"))) {
             for (Path file : paths.filter(Files::isRegularFile)
                     .filter(p -> p.toString().endsWith(".ts")).toList()) {
-                String source = Files.readString(file, StandardCharsets.UTF_8);
+                String source = SourceText.read(file);
                 String name = file.getFileName().toString();
                 Matcher matcher = FRONT_PATH.matcher(source);
                 while (matcher.find()) {

@@ -148,7 +148,7 @@ class RetentionPolicyContractTest {
     }
 
     private String read(String relativePath) throws Exception {
-        return Files.readString(repoFile(relativePath), StandardCharsets.UTF_8);
+        return SourceText.read(repoFile(relativePath));
     }
 
     /** 测试从 server/ 运行，资源位于仓库根；兼容从仓库根目录运行。 */
