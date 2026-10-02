@@ -1094,6 +1094,61 @@ nginx/systemd 那两条 B 类断言抓的是「**仓库改对了、环境是旧�
 
 **残留**：**仅账户侧（阶段 3）** —— 是否引入 7 天可撤销窗口 + `account_deletion_job`，需求本身待定。
 
+### 2.62 失败消息的「公开文案接缝」：provider 原文不再出网关（2026-10-02 第六十九批）
+
+起因：`§4` 留观项「失败消息『公开文案接缝』（对客户端只暴露稳定文案，而非 provider 原文）——需要产品文案层，未做」。
+
+**先取证，不靠推测**：`ai_task.error_message` / `export_task.error_message` 落的是 provider 与异常的
+**原始 message**（`"Resume generation failed: " + response.errorMessage()`、
+`"Draft schema validation failed: " + e.getMessage()`、provider 抛出的 `e.getMessage()`），
+而这两个字段被**原样**放进 `AiTaskStatusResponse.errorMessage` / `ExportTaskStatusResponse.errorMessage`，
+前端**直接渲染**（`web/src/api/ai.ts:245`、`ExportView.vue:132`、`CommunicationView.vue:152`、
+`GenerationConfirmView.vue:69/92`、`materialGeneration.ts:71`）。⇒ 模型名、HTTP 状态码、上游错误体、
+内部字节上限都会到达终端用户；文案还随上游措辞漂移、英文原文出现在中文界面。信封层同样泄漏
+（`GlobalExceptionHandler` 直接回 `exception.getMessage()`）。
+
+**关键发现：设计意图早已存在，只是两条路径没跟上** —— 面试路径的
+`InterviewStateResponse.AiFailureInfo` **自始只暴露 `messageCode`**，从不暴露原文。
+所以这不是发明新机制，而是把既有口径补到 AI 任务/导出两条链路上。
+
+**修复**（全部复用已有零件，不新增机制）：
+
+| 动作 | 说明 |
+| --- | --- |
+| 新增 `PublicFailureCopy` | 已有的 `FailureCategoryClassifier` → `AiFailureCategory`/`PdfFailureCategory` → **稳定文案**；类别映射用**穷尽 switch**，新增类别漏配文案会**编译失败**而不是静默退回上一行 |
+| 三个装配点接入 | `AiTaskService.toResponse`、`ExportService.toResponse`、`GlobalExceptionHandler.handleBusiness` |
+| **原文不丢** | 仍完整落在两列 `error_message` 与新增 WARN 日志 `code=…, traceId=…, raw=…`（排障口径不变，且与响应里的 `traceId` 可对上） |
+| 只改两个码 | 仅 50002/50003（会夹带上游细节）；其余业务码的 message 本就是项目自己的中文用户文案，**原样保留** |
+| 保留可行动文案 | 体积超限（`INPUT_TOO_LARGE`/`OUTPUT_TOO_LARGE`）仍给「请减少内容后重试」，只去掉内部字节数 |
+
+**既有用例抓到了我的一个过度映射**（本批最有价值的一次失败）：`retry` 会把 `error_message` **清空**，
+而我把 `null` 也映射成了文案 ⇒ **「无错误」变成了「有错误」**。
+`AiTaskServiceTest.retry_authorized_requeuesWithoutIncrementingAttempt:383` 与
+`ExportServiceTest.retry_failedTask_resetsToPending:377` 同时转红。
+修正：**状态响应的 `null` 必须保持 `null`**（只有出错信封才必须必有文案），并把这个语义写进门禁断言。
+
+**门禁与红判定**：
+
+- `PublicFailureCopyTest`（6 例）：用**真实会落库的 provider 原文样本**（含模型名/HTTP 码/上游错误体）
+  断言①文案等于约定值、②**敏感片段一个都不许残留**（14 个片段逐一检查）、③`null`/空白语义、
+  ④每个失败类别都有非空文案（穷尽性）。
+- `AiTaskPublicFailureCopyContractTest`（2 例）：**行为级** —— 构造一条带真实 provider 原文的任务，
+  走一遍 `toResponse`，断言**最终出网关的字符串**（而不是「源码里有某个方法名」这种只能证明写法的断言）；
+  并断言「无错误时保持 `null`」。
+- **红判定**：把装配点回退为直传原文 → 转红，失败信息**直接展示了泄漏内容**
+  （`expected: <AI 服务暂时不可用，请稍后重试> but was: <Resume generation failed: HTTP 429 quota exceeded for model qwen3.8-max>`）；
+  md5 校验恢复。
+
+**验证**：全量 **949 测试 0 失败**（本批 +8，5 skipped 为环境门控）。
+
+**刻意不做**（登记为后续项）：把失败**类别**也放进响应、让前端按类别本地化（i18n）—— 那是一次
+DTO 契约变更（含前端类型与中英文案），属产品文案层；当前终端的展示需求只是「一句稳定、可重试的话」，
+且前端已有 `|| t(...)` 兜底。
+
+产物：`PublicFailureCopy`（新增）、`PublicFailureCopyTest`（新增）、
+`AiTaskPublicFailureCopyContractTest`（新增）、`AiTaskService` / `ExportService` /
+`GlobalExceptionHandler`（接入）、`docs/05` §1.3「失败文案的公开边界」、`docs/08` §6 上游细节日志。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1194,7 +1249,7 @@ nginx/systemd 那两条 B 类断言抓的是「**仓库改对了、环境是旧�
 57. ✅ #7 账号数据导出与删号入口：新增 `GET /api/auth/export` 把本人各域数据聚合为可下载 JSON（`formatVersion: 1`、`Content-Disposition` 附件、显式 UTF-8；定向测试暴露并修正「String 消息转换器默认 ISO-8859-1 会把中文写成 `?`」）；范围＝简历+版本（含归档）/职业资料/JD/投递/面试会话+轮次/答案资产+章节/自定义沟通模板+草稿/个人资料/AI 同意记录，显式排除 AI 任务内联快照与结果及其派生 ATS/匹配分析、登录会话凭据（`User` 白名单取值）；账号页新增「数据与隐私」带（导出下载 + 删号对话框：输入用户名二次确认 → 现有 `DELETE /api/auth/me` → 清本地会话跳登录）。顺带：`CommunicationDraft` 补标准 getter（原仅 setter，无法序列化）、`CareerMaterial.contentJsonText` 加 `@JsonIgnore`（搜索用内部投影不外泄）。`docs/05` §2.7/§2.8 契约同步
 
 **第十五批 · 异步失败消息边界与观测/消费口径（#514/#524/#533，台账对账新增项）— ✅ 已执行（2026-09-30）**
-58. ✅ #514 异步失败消息持久化边界：AI 任务/面试 AI 尝试的 `error_message`（`VARCHAR(1024)`）此前原样写入 provider/异常 message，超长消息在 MySQL 严格模式下会让「释放失败」事务失败——任务停在 RUNNING（面试尝试停在进行中）直到租约过期被接管，真实失败原因被掩盖、重试计数与告警口径漂移。新增 `AsyncFailureMessages.persisted()`（截断 1000 < 列宽 1024、不切断代理对、null 保持清空语义）并接入 6 处写入路径（`TaskLeaseService`、面试 `markAttemptFailed` 与 3 处配额分支）；PDF 导出任务原有内联截断收敛到同一实现。测试：`AsyncFailureMessagesTest`（null/边界 1000/超长/代理对不切断）+ `TaskLeaseServiceTest` 超长消息用例（断言 5000 → 1000）。**未做**：失败消息「公开文案接缝」（对客户端只暴露稳定文案）仍属架构方向，留观
+58. ✅ #514 异步失败消息持久化边界：AI 任务/面试 AI 尝试的 `error_message`（`VARCHAR(1024)`）此前原样写入 provider/异常 message，超长消息在 MySQL 严格模式下会让「释放失败」事务失败——任务停在 RUNNING（面试尝试停在进行中）直到租约过期被接管，真实失败原因被掩盖、重试计数与告警口径漂移。新增 `AsyncFailureMessages.persisted()`（截断 1000 < 列宽 1024、不切断代理对、null 保持清空语义）并接入 6 处写入路径（`TaskLeaseService`、面试 `markAttemptFailed` 与 3 处配额分支）；PDF 导出任务原有内联截断收敛到同一实现。测试：`AsyncFailureMessagesTest`（null/边界 1000/超长/代理对不切断）+ `TaskLeaseServiceTest` 超长消息用例（断言 5000 → 1000）。**未做**：失败消息「公开文案接缝」（对客户端只暴露稳定文案）—— 已于**第六十九批**完成，见 §2.62
 59. ✅ #524 AI 配额观测口径：gauge `resume_ai_quota_daily_tasks_created` 用全站**任务行数**（`countByTaskTypeAndCreatedAtAfter`），与限流按「每用户当日尝试数（重试计次）」的口径不可比（面板同时并列「每用户限额」gauge，易读成使用率）。现改为 `resume_ai_quota_daily_attempts{scope="all_users"}`（新增全局尝试数查询，与限流同一单位）；Grafana 面板表达式与标题同步；`AppObservabilityTest` 断言新口径、旧指标不再注册、重复注册幂等；删除已无调用方的旧查询
 60. ✅ #533 归档版本消费契约（评分对齐）：`ScoringService.score` 直接用 `findById` 加载版本、不校验 `deletedAt`，而 ATS/导出/投递/沟通均拒绝归档版本——同一版本在不同模块「能不能消费」结论不一致。现按 ATS 既有语义返回 40901「该简历版本已归档，请先恢复后再发起评分」（归属校验在前，避免用归档状态区分他人版本是否存在）；`ScoringControllerIT` 新增「归档 40901 → 恢复后 200」用例
 
@@ -1211,7 +1266,7 @@ nginx/systemd 那两条 B 类断言抓的是「**仓库改对了、环境是旧�
   1. **#22 MySQL 5.7 门禁去留**（是否有常驻 5.7 环境 / 是否接入 CI）——待你决策；门禁本身已推进到 V34，本机可通过 `scripts/Invoke-MySql57MigrationGate.ps1` 实跑。
   2. **架构方向类**（§2.10 与 §2.11 归并）：投递状态机 / 模板 / 沟通 / 导入 / 模式 / 资料类型多 runtime 登记、ATS/面试 schema 重复维护、全量类型化配置、跨运行时时间契约、AI 任务恢复收件箱、导入来源追溯、PDF 对象存储、AI 提供者路由、投递流水线契约——当前规模属过度工程边界，留待真实需求。
   3. **两项证据化留观**：a) JD 解析平铺 `contains` 的误命中（有真实案例再评估）；b) DOCX 展开量上限（POI 防护 + 5MB 入口 + 15s 超时已覆盖）。
-  4. **失败消息「公开文案接缝」**（对客户端只暴露稳定文案，而非 provider 原文）——需要产品文案层，未做。
+  4. **~~失败消息「公开文案接缝」~~**（对客户端只暴露稳定文案，而非 provider 原文）—— ✅ **第六十九批已完成**（见 §2.62）：AI 任务/导出两条链路与出错信封均已接 `PublicFailureCopy`，原文改为记 WARN 日志（带 traceId）；「把失败类别放进响应、让前端按类别本地化」作为产品文案层项单独登记。
   5. **第三十二~三十八批新增留观**：a) ~~账号导出整份缓冲为 String~~ → **第三十八批已完成**（改流式写出并把序列化移出事务：`-Xmx128m` 上 12.2MB 响应由 OOM 变为可服务 18.41MB，见 §2.31）；b) 导出文档本身无体积上限（是否给账号数据/导出文档设上限或分片，属产品口径）；c) ~~静态资源压缩~~ → **第三十五批已完成**（三份 nginx 配置开启 gzip 并补哈希产物长缓存，见 §2.28）；d) 镜像内 `web/nginx.conf` 不含 `security-headers.conf` 片段（构建上下文为 `web/`），其与部署侧「同步副本」多出 4 处 include —— 公网响应由 `edge` 统一下发安全头，故无影响，但片段的单一来源需一次设计取舍（见 §2.28 末段）。
 - 持续留观：`web/e2e/ats-ai.spec.ts` 在第十三批出现过 1 次偶发失败（尚无第二次复现，继续留观）。
 - ~~`web/e2e/applications-edit.spec.ts`（「编辑投递时只发 1 次版本列表请求」）偶发失败~~ → **第二十九批已按登记口径排查并修复**（第二次复现于纯文档提交的 CI run 36768442619，head 900f5c1）：根因是真实前端竞态（非测试问题），详见 §2.22；同时把该用例的竞态窗口用「延迟选项响应」固化，修复前稳定失败、修复后稳定通过。
@@ -1302,3 +1357,4 @@ nginx/systemd 那两条 B 类断言抓的是「**仓库改对了、环境是旧�
 | 2026-10-02 | **第六十七批（执行 E1：模型链移除 `kimi-k3`；§2.59 扫描新增项）执行完成**：`kimi-k3` 拒绝 `temperature` 而本应用每次请求都带它 ⇒ 必然 400、是链上纯失败跳转节点。按 `DECISION-BRIEF` E1「下次部署窗口顺手可做」执行：部署机 `app/api/.env` 去掉 `,kimi-k3`（**diff 恰 1 行**、改前 `cp -a` 备份）并重启。**运行时实测**：启动日志 `modelChain=[…7 个…]`（无 kimi）、指标 `resume_ai_model_chain_available **7.0**`（原 8）、readiness UP、探针 **17/17**、全量黑盒回归（`FUNCTIONAL_AI_LIVE=true`）**4 套件全 PASS 0 失败 0 跳过**（7 类 AI 任务真实跑通）。**顺带证实一个从未被验证的假设**：同机 `app/api/.env` 与 `live-ai.env` 都写着 `BAILIAN_MODEL_CHAIN` 且**已经漂移**（8 vs 7 个模型）；三条取证（`application.yml` 的 `spring.config.import`、单元 `WorkingDirectory`、单元无 `EnvironmentFile=` + 进程环境 **0 个** `BAILIAN_*`）判定**生效的只有 `app/api/.env`** ⇒ 只改 `live-ai.env` 完全无效。已在 `DEPLOYMENT_DIRECT` §4.4 写明并同步两文件取值。**新增探针第 8 节**「应用加载的配置 vs 磁盘 `.env`」（16 → **17** 项）—— 此前 B 类只抓「仓库改对了、环境是旧的」，这条抓**反方向**「文件改对了、进程是旧的（忘了重启）」；**红判定实测**：只改磁盘不重启 → 第 8 节 FAIL 且精确给出磁盘/进程差异，md5 恢复后 17/17。`OPEN-DECISIONS` E1 → **RESOLVED**；`DECISION-BRIEF` E1 → 已执行；`ADR-005` §7.4 同步；并提示 E2 的「25% 余量」口径需随链长重估 | 注：`DECISION-BRIEF` E2 已按「维持 `<= 2`（2/7≈29%）」落定 |
 | 2026-10-02 | **第六十八批（D2 阶段 2 落地：B 档最小快照 + 补行级端到端用例；§2.60 扫描新增项）执行完成**：`DECISION-BRIEF` D2 的阶段 2 此前卡在「快照口径待确认」，本轮按最推荐口径实施并**否决了两处初版设想**：① 「保留摘要前 200 字」**非幂等**（同语句内从即将清空的字段派生，重跑源已空）且摘要可能含 PII；② 「只留键名」需把动态 JSON 文本写回 JSON 列，而 **MySQL 的 `CAST(? AS JSON)` 解析成对象、H2 的 `CAST('{"a":1}' AS JSON)` 得到 JSON 字符串值 `"{\"a\":1}"`**（要 `'...' FORMAT JSON` 才是对象）⇒ 为审计辅助信息引入方言分支不划算，收敛为常量表达式 `JSON_OBJECT('__purged', TRUE)`。**顺带修正一处 PII 遗漏**：初版漏清 `career_material.source_text`（MEDIUMTEXT 导入原文）。**补上阶段 1 残留**：新增 `RetentionPurgeIntegrationIT`（造真实行：user/resume/resume_version/career_material/resume_material_reference），断言行级最终状态（A 档真删、B 档真快照且外键仍成立、未超期不动、连跑两次逐字节一致）——**因为 `UPDATE ... WHERE id = ?` 在 0 行匹配时不求值 SET，不造真实行就验证不了 JSON 写入**（上面的 H2 方言问题正是这样暴露的）。**新增门禁 2 条**：快照语句必须 `id = ? AND deleted_at IS NOT NULL`；**A/B 两极必须覆盖同一份引用者集合**（引入 `EXISTS` 极性后清单变两处）。**红判定 3 轮实测**：去软删限定 → 1 红；从 B 档移除一个 `EXISTS` → 1 红且给出差集；候选 SQL 漏项 → 1 红；均 md5 恢复（其中第 2 轮**首次注入因锚点写错而未生效**，查明是坏样本没注入成功而非门禁失效——**门禁没红时先怀疑坏样本**）。验证：retention 相关 21 项绿；全量 **935 测试 0 失败**（本批 +9）。文档：`docs/04` §7.1 两行改「已实施」、`docs/07` §5.10、`docs/08` §9.6、方案 §4 注/§7、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2。**残留**：`resume`/`job_description`（阶段 2b，需先处理间接引用）与账户侧（阶段 3） |
 | 2026-10-02 | **第六十八批·续（D2 阶段 2b：`resume` / `job_description` 纳入同一范式；§2.61 扫描新增项）执行完成**：`resume` 引用仅 1 处（`resume_version.resume_id`）且**只有 `title`、无大字段 ⇒ 无 B 档**，被引用者原样保留；`job_description` 8 处引用、B 档把 `jd_text` **仅超长时**截断到 197 + `...`。**「间接引用」不需要特殊处理** —— 方案 §3 标注的风险（先引用版本、再由版本指向简历）**由分档设计本身消解**：B 档只改内容**不删行** ⇒ FK 始终成立、直查即覆盖，无需传递闭包。**第二处非幂等陷阱**：无条件截断+追加省略号会让**短文本**越跑越长（红判定实测得 `…MySQL。......` 两个省略号）⇒ 写成 `CASE WHEN CHAR_LENGTH(jd_text) > 200 THEN CONCAT(SUBSTRING(jd_text,1,197),'...') ELSE jd_text END` 的**不动点**。**顺带更正方案文档事实错误**：§1 误把 `ai_task` 列为 `job_description` 的引用者（该表无 `job_description_id` 列），按迁移逐条核对 + 门禁复核后更正为 8 处。**新增门禁** `jobDescriptionTruncationIsAFixedPoint`；**红判定**改无条件截断 → **2 条同时红**（静态门禁 + 端到端用例）。验证：retention 相关 27 项绿；全量 **941 测试 0 失败**（本批 +6）。文档：`docs/04` §7.1 第四行改「已实施」、`docs/07` §5.10、`docs/08` §9.6、方案 §1/§4/§6-G6/§7、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2。**残留：仅账户侧（阶段 3）** |
+| 2026-10-02 | **第六十九批（失败消息的「公开文案接缝」；§2.62 扫描留观项）执行完成**：先取证确认泄漏真实存在 —— `ai_task.error_message` / `export_task.error_message` 落的是 provider/异常**原文**，而两字段被原样放进 `AiTaskStatusResponse` / `ExportTaskStatusResponse` 且前端**直接渲染**（`web/src/api/ai.ts:245`、`ExportView.vue:132`、`CommunicationView.vue:152` 等），信封层也直接回 `exception.getMessage()` ⇒ 模型名/HTTP 码/上游错误体/内部字节上限到达终端用户。**关键发现：设计意图早已存在** —— 面试路径的 `AiFailureInfo` 自始只暴露 `messageCode`，本次只是把该口径补到另两条链路。**修复**：新增 `PublicFailureCopy`（复用已有 `FailureCategoryClassifier`，类别映射用**穷尽 switch**，漏配即编译失败）并接入三个装配点；原文改记 WARN 日志 `code=…, traceId=…, raw=…`（库中两列亦保留）；只改会夹带上游细节的 50002/50003，其余码的中文用户文案原样保留；体积超限保留可行动文案、去掉内部字节数。**既有用例抓到我的过度映射**：`retry` 会清空 `error_message`，我把 `null` 也映射成文案 ⇒「无错误」变「有错误」，`AiTaskServiceTest`/`ExportServiceTest` 同时转红 ⇒ 修正为**状态响应 `null` 保持 `null`**（只有信封必有文案）并写进门禁。**门禁**：`PublicFailureCopyTest`（6 例，含"14 个敏感片段一个都不许残留"+类别穷尽性）、`AiTaskPublicFailureCopyContractTest`（2 例，**行为级**走一遍 `toResponse`）。**红判定**：装配点回退为直传原文 → 转红且失败信息直接展示泄漏内容，md5 恢复。验证：全量 **949 测试 0 失败**（+8）。文档：`docs/05` §1.3、`docs/08` §6；报告 §4 该留观项标记完成 |
