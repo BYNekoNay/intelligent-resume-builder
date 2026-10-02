@@ -15,6 +15,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -87,8 +88,8 @@ class RetentionPolicyContractTest {
     }
 
     @Test
-    @DisplayName("A 档（无引用者硬删）已实施：对应行必须标「已实施」，且 B 档仍标「计划中」")
-    void implementedTierIsNoLongerMarkedPending() throws Exception {
+    @DisplayName("A/B 两档均已实施：对应行必须标「已实施」，且不得再标「计划中」")
+    void implementedTiersAreFullyMarkedImplemented() throws Exception {
         String lifecycle = read("docs/04-数据库设计说明书.md");
         assertTrue(!PARTIALLY_IMPLEMENTED_ROWS.isEmpty(), "A 档已实施行清单不得为空（否则本门禁空转）");
 
@@ -97,8 +98,9 @@ class RetentionPolicyContractTest {
             assertTrue(row.contains("已实施"),
                     "该行对应资源的「无引用者硬删」已在决策 D2 阶段 1 落地（清扫作业 + 数值配置校验），"
                             + "必须显式标注「已实施」，不得继续被读作未兑现：\n" + row);
-            assertTrue(row.contains("计划中"),
-                    "该行的 B 档「被引用者转最小快照」尚未实现，必须保留「计划中」标注，否则会被读作已兑现：\n" + row);
+            assertFalse(row.contains("计划中"),
+                    "该资源的 A 档（无引用者硬删）与 B 档（被引用者转最小快照）均已在阶段 1 + 阶段 2 落地"
+                            + "—— 不得再标「计划中」，否则与实现不一致（第六十八批起）：\n" + row);
         }
     }
 

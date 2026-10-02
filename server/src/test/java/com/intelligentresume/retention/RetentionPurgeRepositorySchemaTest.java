@@ -17,6 +17,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -87,6 +88,63 @@ class RetentionPurgeRepositorySchemaTest {
     void deleteStatementsNeverTouchLiveRows() {
         assertGuardedDelete("resume_version", RetentionPurgeRepository.DELETE_RESUME_VERSION);
         assertGuardedDelete("career_material", RetentionPurgeRepository.DELETE_CAREER_MATERIAL);
+    }
+
+    @Test
+    @DisplayName("快照语句同样带 id + deleted_at 双重限定：不会改到活数据，也不做无界更新")
+    void snapshotStatementsAreNarrowlyScoped() {
+        assertGuardedUpdate("resume_version", RetentionPurgeRepository.SNAPSHOT_RESUME_VERSION);
+        assertGuardedUpdate("career_material", RetentionPurgeRepository.SNAPSHOT_CAREER_MATERIAL);
+    }
+
+    @Test
+    @DisplayName("A 档与 B 档是同一份引用清单的两种极性（防两处清单漂移）")
+    void purgeAndSnapshotPolaritiesCoverTheSameReferencers() {
+        assertSameReferencers("resume_version",
+                RetentionPurgeRepository.PURGEABLE_RESUME_VERSIONS,
+                RetentionPurgeRepository.SNAPSHOTTABLE_RESUME_VERSIONS);
+        assertSameReferencers("career_material",
+                RetentionPurgeRepository.PURGEABLE_CAREER_MATERIALS,
+                RetentionPurgeRepository.SNAPSHOTTABLE_CAREER_MATERIALS);
+    }
+
+    /** 两条语句必须提及**完全相同**的引用者集合 —— 漏一边就会把某类行同时判成 A 与 B（或都不判）。 */
+    private void assertSameReferencers(String resource, String purgeable, String snapshottable) {
+        Set<String> inPurgeable = mentionedTables(purgeable);
+        Set<String> inSnapshottable = mentionedTables(snapshottable);
+        assertTrue(inPurgeable.size() >= 2,
+                resource + " 的候选查询提及的表过少（" + inPurgeable + "），解析可能已失效");
+        assertEquals(inPurgeable, inSnapshottable,
+                resource + " 的 A 档（NOT EXISTS）与 B 档（EXISTS）引用了**不同的**表集合 —— "
+                        + "两者必须是同一份清单的两种极性，否则会有行既不被删也不被快照（或反之）：\n"
+                        + "  仅 A 档有：" + diff(inPurgeable, inSnapshottable) + "\n"
+                        + "  仅 B 档有：" + diff(inSnapshottable, inPurgeable));
+    }
+
+    private Set<String> mentionedTables(String sql) {
+        Set<String> mentioned = new LinkedHashSet<>();
+        Matcher matcher = MENTIONED_TABLE.matcher(sql);
+        while (matcher.find()) {
+            mentioned.add(matcher.group(1).toLowerCase());
+        }
+        return mentioned;
+    }
+
+    private Set<String> diff(Set<String> a, Set<String> b) {
+        Set<String> only = new LinkedHashSet<>(a);
+        only.removeAll(b);
+        return only;
+    }
+
+    /** 快照语句必须形如 {@code UPDATE <table> SET ... WHERE id = ? AND deleted_at IS NOT NULL}。 */
+    private void assertGuardedUpdate(String table, String sql) {
+        Pattern guarded = Pattern.compile(
+                "UPDATE\\s+" + Pattern.quote(table) + "\\s+SET\\s+[\\s\\S]+\\sWHERE\\s+id\\s*=\\s*\\?"
+                        + "\\s+AND\\s+deleted_at\\s+IS\\s+NOT\\s+NULL",
+                Pattern.CASE_INSENSITIVE);
+        assertTrue(guarded.matcher(sql.trim()).matches(),
+                "快照 " + table + " 的语句必须同时限定 id 与 deleted_at IS NOT NULL——"
+                        + "否则候选查询一旦被改坏就会**改写活数据**（比误删更隐蔽）：\n" + sql);
     }
 
     /** 候选 SQL 必须提及（作为 {@code NOT EXISTS} 子查询）迁移里每一个引用 {@code resource} 的表。 */

@@ -27,12 +27,12 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * 分档清扫作业的**护栏与编排**测试（决策 D2 阶段 1）。
+ * 分档清扫作业的**护栏与编排**测试（决策 D2 阶段 1 A 档 + 阶段 2 B 档）。
  *
- * <p>只用 Mockito 驱动仓库，聚焦四件事：两条默认安全护栏是否真的生效、A 档是否真删、
- * **单轮是否只处理一批**（方案 §6 G3 / §8.6），以及 TOCTOU 冲突是否被安全跳过并计入 skipped 指标。
- * **SQL 本身的正确性**由 {@link RetentionPurgeRepositorySchemaTest} 在真实 schema 上冒烟
- * （那是手写 SQL 的主要风险）。
+ * <p>只用 Mockito 驱动仓库，聚焦：两条默认安全护栏是否真的生效、A 档是否真删、**B 档是否转快照
+ * 而非删除**、单轮是否只处理一批（方案 §6 G3 / §8.6），以及 TOCTOU 冲突是否被安全跳过并计入指标。
+ * **SQL 与 JSON 写入的正确性**由 {@link RetentionPurgeIntegrationIT} 在真实 schema 上以真实行验证
+ * （那是手写 SQL 与跨库 JSON 方言的主要风险）。
  */
 class RetentionPurgeServiceTest {
 
@@ -52,9 +52,9 @@ class RetentionPurgeServiceTest {
     }
 
     @Test
-    @DisplayName("护栏 G1：默认关闭 —— 不查库、不删除、不记指标，返回 0")
+    @DisplayName("护栏 G1：默认关闭 —— 不查库、不写库、不记指标，返回 0")
     void disabledByDefault_doesNothing() {
-        assertFalse(properties.isEnabled(), "enabled 默认必须是 false（部署后不得自动删数据）");
+        assertFalse(properties.isEnabled(), "enabled 默认必须是 false（部署后不得自动删/改数据）");
 
         assertEquals(0, service.purgeExpiredSoftDeleted());
 
@@ -63,20 +63,22 @@ class RetentionPurgeServiceTest {
     }
 
     @Test
-    @DisplayName("护栏 G2：开启但默认 dry-run —— 只扫描、不删除")
-    void dryRun_doesNotDelete() {
+    @DisplayName("护栏 G2：开启但默认 dry-run —— 只扫描、不删除也不快照")
+    void dryRun_writesNothing() {
         properties.setEnabled(true);
         assertTrue(properties.isDryRun(), "dry-run 默认必须是 true");
         when(repository.findPurgeableResumeVersions(any(), anyInt())).thenReturn(List.of(1L, 2L));
-        when(repository.findPurgeableCareerMaterials(any(), anyInt())).thenReturn(List.of());
+        when(repository.findSnapshottableResumeVersions(any(), anyInt())).thenReturn(List.of(9L));
 
         assertEquals(0, service.purgeExpiredSoftDeleted(), "dry-run 不得计入已删除");
 
         verify(repository, never()).deleteResumeVersion(anyLong());
         verify(repository, never()).deleteCareerMaterial(anyLong());
-        // 指标仍记录候选量（scanned），但不记已删除
-        verify(observability).recordRetentionPurge("resume_version", 2, 0, 0);
-        verify(observability).recordRetentionPurge("career_material", 0, 0, 0);
+        verify(repository, never()).snapshotResumeVersion(anyLong());
+        verify(repository, never()).snapshotCareerMaterial(anyLong());
+        // 指标仍记录候选量（scanned），但不记已删除/已快照
+        verify(observability).recordRetentionPurge("resume_version", 2, 0, 0, 0);
+        verify(observability).recordRetentionPurge("career_material", 0, 0, 0, 0);
     }
 
     @Test
@@ -85,49 +87,75 @@ class RetentionPurgeServiceTest {
         properties.setEnabled(true);
         properties.setDryRun(false);
         when(repository.findPurgeableResumeVersions(any(), anyInt())).thenReturn(List.of(1L, 2L));
-        when(repository.findPurgeableCareerMaterials(any(), anyInt())).thenReturn(List.of());
         when(repository.deleteResumeVersion(anyLong())).thenReturn(1);
 
         assertEquals(2, service.purgeExpiredSoftDeleted());
 
         verify(repository).deleteResumeVersion(1L);
         verify(repository).deleteResumeVersion(2L);
-        verify(observability).recordRetentionPurge("resume_version", 2, 2, 0);
+        verify(observability).recordRetentionPurge("resume_version", 2, 2, 0, 0);
     }
 
     @Test
-    @DisplayName("护栏 G3：一次调度只处理一批（LIMIT = batch-size），不循环耗尽积压")
+    @DisplayName("B 档：被引用且超期 —— 转最小快照、**不删除**、计入 snapshotted")
+    void referencedAndExpired_isSnapshottedNotDeleted() {
+        properties.setEnabled(true);
+        properties.setDryRun(false);
+        when(repository.findSnapshottableResumeVersions(any(), anyInt())).thenReturn(List.of(9L));
+        when(repository.snapshotResumeVersion(9L)).thenReturn(1);
+
+        assertEquals(0, service.purgeExpiredSoftDeleted(), "B 档不得计入已删除（它是写快照，不是删行）");
+
+        verify(repository, never()).deleteResumeVersion(anyLong());
+        verify(repository).snapshotResumeVersion(9L);
+        verify(observability).recordRetentionPurge("resume_version", 0, 0, 0, 1);
+    }
+
+    @Test
+    @DisplayName("B 档 · 职业资料：被引用且超期 —— 转快照（不删除），计入 snapshotted")
+    void careerMaterialSnapshot_isWrittenNotDeleted() {
+        properties.setEnabled(true);
+        properties.setDryRun(false);
+        when(repository.findSnapshottableCareerMaterials(any(), anyInt())).thenReturn(List.of(7L));
+        when(repository.snapshotCareerMaterial(7L)).thenReturn(1);
+
+        assertEquals(0, service.purgeExpiredSoftDeleted());
+
+        verify(repository, never()).deleteCareerMaterial(anyLong());
+        verify(repository).snapshotCareerMaterial(7L);
+        verify(observability).recordRetentionPurge("career_material", 0, 0, 0, 1);
+    }
+
+    @Test
+    @DisplayName("护栏 G3：一次调度每档只处理一批（LIMIT = batch-size），不循环耗尽")
     void singleRunProcessesOnlyOneBatch() {
         properties.setEnabled(true);
         properties.setDryRun(false);
         properties.setBatchSize(1);
-        // 数据库按 LIMIT 1 返回一行；此处断言的是「find 只被调用一次且带 limit=1」——
-        // 若实现改成循环耗尽，find 会被反复调用，本用例即红。
         when(repository.findPurgeableResumeVersions(any(), eq(1))).thenReturn(List.of(7L));
-        when(repository.findPurgeableCareerMaterials(any(), eq(1))).thenReturn(List.of());
         when(repository.deleteResumeVersion(7L)).thenReturn(1);
 
         assertEquals(1, service.purgeExpiredSoftDeleted());
 
         verify(repository, times(1)).findPurgeableResumeVersions(any(), eq(1));
+        verify(repository, times(1)).findSnapshottableResumeVersions(any(), eq(1));
         verify(repository, times(1)).findPurgeableCareerMaterials(any(), eq(1));
+        verify(repository, times(1)).findSnapshottableCareerMaterials(any(), eq(1));
         verify(repository).deleteResumeVersion(7L);
-        verify(observability).recordRetentionPurge("resume_version", 1, 1, 0);
     }
 
     @Test
-    @DisplayName("护栏 G4：扫描后变为被引用（外键冲突）—— 跳过、不抛异常、计入 skipped")
+    @DisplayName("护栏 G4：删除时外键冲突 —— 跳过、不抛异常、计入 skipped")
     void becameReferenced_isSkippedSilently() {
         properties.setEnabled(true);
         properties.setDryRun(false);
         when(repository.findPurgeableResumeVersions(any(), anyInt())).thenReturn(List.of(7L));
-        when(repository.findPurgeableCareerMaterials(any(), anyInt())).thenReturn(List.of());
         when(repository.deleteResumeVersion(7L)).thenThrow(new DataIntegrityViolationException("fk violated"));
 
         assertDoesNotThrow(() -> assertEquals(0, service.purgeExpiredSoftDeleted()),
                 "外键冲突必须被吞掉并跳过，不能中断整批");
 
-        verify(observability).recordRetentionPurge("resume_version", 1, 0, 1);
+        verify(observability).recordRetentionPurge("resume_version", 1, 0, 1, 0);
     }
 
     @Test

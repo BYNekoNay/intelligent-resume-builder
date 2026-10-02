@@ -176,20 +176,21 @@ public class AppObservability {
     /**
      * 记录一次数据生命周期分档清扫（决策 D2）。
      *
-     * <p>三个阶段量共用一张图、以 {@code resource} 区分（取值是有限受管资源名，
+     * <p>四个量共用一张图、以 {@code resource} 区分（取值是有限受管资源名，
      * 如 {@code resume_version} / {@code career_material}，不含任何业务数据或用户标识）：
      * <ul>
-     *   <li>{@code retention_purge_scanned} —— 本轮取回的候选行数（超期且无引用）；</li>
+     *   <li>{@code retention_purge_scanned} —— 本轮取回的 **A 档**候选行数（超期且无引用）；</li>
      *   <li>{@code retention_purge_purged} —— 本轮实际物理删除的行数；</li>
-     *   <li>{@code retention_purge_skipped} —— 扫描后变回被引用（外键冲突）而跳过的行数。</li>
+     *   <li>{@code retention_purge_skipped} —— 扫描后变回被引用（外键冲突）而跳过的行数；</li>
+     *   <li>{@code retention_purge_snapshotted} —— 本轮转为最小快照（B 档）的行数。</li>
      * </ul>
-     * 计数为 0 时不注册该序列 —— 避免产生恒为 0 的空序列。{@code snapshotted}（被引用者转最小快照）
-     * 属阶段 2，本阶段不出现。
+     * 计数为 0 时不注册该序列 —— 避免产生恒为 0 的空序列。
      */
-    public void recordRetentionPurge(String resource, int scanned, int purged, int skipped) {
+    public void recordRetentionPurge(String resource, int scanned, int purged, int skipped, int snapshotted) {
         incrementIfPositive("retention_purge_scanned", resource, scanned);
         incrementIfPositive("retention_purge_purged", resource, purged);
         incrementIfPositive("retention_purge_skipped", resource, skipped);
+        incrementIfPositive("retention_purge_snapshotted", resource, snapshotted);
     }
 
     private void incrementIfPositive(String metric, String resource, int amount) {

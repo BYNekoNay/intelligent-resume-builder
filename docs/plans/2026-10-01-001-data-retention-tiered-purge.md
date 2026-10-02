@@ -73,10 +73,24 @@
 
 | 资源 | 无引用（A 档） | 被引用（B 档） |
 | --- | --- | --- |
-| `resume_version` | 物理删除（先删其子引用？**无引用即无子引用**，故可直接删） | 快照化：`resume_json` → `{"__purged": true, "summary": "<优化摘要前 200 字>"}`；`generation_context`、`optimization_summary` 清空；保留 `id/resume_id/version_no/source_type/created_at/deleted_at` |
-| `career_material` | 物理删除 | 快照化：`content_json` → 仅保留**结构化键的键名**（丢弃值，规避 PII）；`title` 保留 |
+| `resume_version` | 物理删除（**无引用即无子引用**，故可直接删） | 快照化：`resume_json` → `{"__purged":true}`（**常量**）；`generation_context`、`optimization_summary` 清空；保留 `id/resume_id/version_no/source_type/created_at/deleted_at`。⚠ 初版的「保留摘要前 200 字」**已否决**（非幂等 + 摘要本身可能含 PII），见下方注 |
+| `career_material` | 物理删除 | 快照化：`content_json` → `{"__purged":true}`；**`source_text` 一并清空**（初版漏了这一 MEDIUMTEXT PII 载体）；`title` 保留。⚠ 初版的「只留键名」**已否决**，见下方注 |
 | `resume` | 物理删除（**前提**：其下所有版本均已删） | 快照化：`title` 保留，无大字段 |
 | `job_description` | 物理删除 | 快照化：`jd_text` → 前 200 字 + `…`；`parsed_keywords_json` 保留（非 PII） |
+
+> **注（第六十八批实施时对初版口径的修正）** —— 两处否决都来自实测，不是偏好：
+>
+> 1. **「保留摘要前 200 字」否决**：它要在同一条语句里从**即将被清空**的字段派生内容，第二次执行时
+>    源已为空 ⇒ 结果不同（**非幂等**），而清扫作业会反复跑；且摘要是 AI 生成正文，本身可能就是 PII
+>    载体。审计真正需要的是「这条版本存在过、属于谁、何时被删」，全在**保留的元数据列**里。
+> 2. **「只留键名」否决**：需要把**动态生成的 JSON 文本**写回 JSON 列，而这一步在两个数据库上
+>    **语义不同** —— MySQL 的 `CAST(? AS JSON)` 会把文本解析成 JSON 对象；H2 的
+>    `CAST('{"a":1}' AS JSON)` 得到的却是 JSON **字符串值** `"{\"a\":1}"`（读回来带引号、不是对象），
+>    要 `'...' FORMAT JSON` 才是对象。为一条审计辅助信息引入方言分支（生产 SQL ≠ 测试 SQL）不划算；
+>    且键集本身可由 `material_type` 与资料契约推导。故统一为常量标记 `JSON_OBJECT('__purged', TRUE)`
+>    —— 该函数两个数据库都有，无需绑定字符串参数。
+> 3. **顺带修正一处 PII 遗漏**：`career_material.source_text`（MEDIUMTEXT，导入原文）初版没清 ——
+>    它与 `content_json` 一样是 PII 载体，现已一并 `SET NULL`。
 
 > **`user` 与账户**：见 §7 阶段 3（本方案不覆盖）。
 
@@ -123,7 +137,7 @@
 | 期 | 范围 | 状态 |
 | --- | --- | --- |
 | **阶段 1** | 作业骨架 + A 档**物理删除**（无引用者）+ 全部护栏（G1–G7）+ 可观测（G6） | **已实现**（第 64 批；开关默认关 + dry-run，落地时仅覆盖 `resume_version` / `career_material`） |
-| **阶段 2** | B 档**快照化 + 匿名化**（§4 右侧列） | 待你确认快照口径（尤其 `career_material` 的「只留键名」是否够） |
+| **阶段 2** | B 档**快照化 + 匿名化**（§4 右侧列） | **已实现**（第六十八批，覆盖阶段 1 已纳入的两个资源；口径收敛为**常量快照**，「只留键名/保留摘要」经实测否决，见 §4 上方注） |
 | **阶段 3** | `user` / 账户侧（是否引入 7 天可撤销窗口 + `account_deletion_job`） | 需求本身待定（现为同步立即删除），**不建议现在做** |
 
 > 阶段 1 落地后，`docs/04` §7.1 的承诺可**部分**改为已实施（仅「无引用资源」这一档）；
