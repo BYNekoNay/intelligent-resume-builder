@@ -172,6 +172,82 @@ class RetentionPurgeIntegrationIT {
         assertEquals(afterFirst, afterSecond, "快照内容必须是常量/确定性派生，重跑结果一致");
     }
 
+    @Test
+    @DisplayName("A 档 · 简历主记录：无版本引用 + 超期 → 物理删除")
+    void unreferencedExpiredResume_isDeleted() {
+        long user = insertUser("ret-r-1");
+        long resume = insertResume(user, "独苗简历", expired());
+
+        service.purgeExpiredSoftDeleted();
+
+        assertEquals(0, count("resume", resume), "无版本引用的超期软删简历应被物理删除");
+    }
+
+    @Test
+    @DisplayName("简历主记录**没有 B 档**：被版本引用时不删，也不改（只有 title 无大字段）")
+    void referencedExpiredResume_isUntouched() {
+        long user = insertUser("ret-r-2");
+        long resume = insertResume(user, "有版本的简历", expired());
+        insertVersion(resume, user, 1, "{\"basics\":{}}", null, null);   // 活版本 → 形成 FK 引用
+
+        service.purgeExpiredSoftDeleted();
+
+        assertEquals(1, count("resume", resume), "被版本引用的简历不得被删除（FK 会挡）");
+        assertEquals("有版本的简历", text("SELECT title FROM resume WHERE id = ?", resume),
+                "resume 无 B 档，被引用者应**原样保留**");
+    }
+
+    @Test
+    @DisplayName("A 档 · 岗位描述：无引用 + 超期 → 物理删除")
+    void unreferencedExpiredJobDescription_isDeleted() {
+        long user = insertUser("ret-j-1");
+        long jd = insertJobDescription(user, "后端实习", "招聘后端实习生，要求熟悉 Java……", expired());
+
+        service.purgeExpiredSoftDeleted();
+
+        assertEquals(0, count("job_description", jd), "无引用的超期软删岗位描述应被物理删除");
+    }
+
+    @Test
+    @DisplayName("B 档 · 岗位描述：被引用 + 超期 → 只保留前 200 字符，且**重跑内容不变**（不动点）")
+    void referencedExpiredJobDescription_isTruncatedIdempotently() {
+        long user = insertUser("ret-j-2");
+        long resume = insertResume(user, "投递用简历", null);          // 活的简历 → 形成引用
+        String longText = "岗位职责：" + "x".repeat(600) + "（结尾）";
+        long jd = insertJobDescription(user, "后端实习", longText, expired());
+        jdbc.update("UPDATE resume SET job_description_id = ? WHERE id = ?", jd, resume);
+
+        service.purgeExpiredSoftDeleted();
+        String afterFirst = text("SELECT jd_text FROM job_description WHERE id = ?", jd);
+        service.purgeExpiredSoftDeleted();
+        String afterSecond = text("SELECT jd_text FROM job_description WHERE id = ?", jd);
+
+        assertEquals(1, count("job_description", jd), "被引用的岗位描述不得被物理删除");
+        assertNotNull(afterFirst);
+        assertEquals(200, afterFirst.length(), "应截断到 200 字符（197 + 省略号标记）");
+        assertTrue(afterFirst.startsWith(longText.substring(0, 197)), "应保留原文前 197 个字符");
+        assertTrue(afterFirst.endsWith("..."), "应带截断标记，便于审计辨识");
+        assertFalse(afterFirst.contains("（结尾）"), "尾部内容必须被截掉");
+        assertEquals(afterFirst, afterSecond, "截断必须是不动点：重跑内容不得变化");
+        assertEquals("后端实习", text("SELECT title FROM job_description WHERE id = ?", jd), "title 保留");
+    }
+
+    @Test
+    @DisplayName("B 档 · 岗位描述：本来就短于上限 → 一口气不动（无条件追加省略号会越跑越长）")
+    void shortJobDescription_isNotTruncated() {
+        long user = insertUser("ret-j-3");
+        long resume = insertResume(user, "短 JD 简历", null);
+        String shortText = "招聘后端实习生，熟悉 Java 与 MySQL。";
+        long jd = insertJobDescription(user, "短 JD", shortText, expired());
+        jdbc.update("UPDATE resume SET job_description_id = ? WHERE id = ?", jd, resume);
+
+        service.purgeExpiredSoftDeleted();
+        service.purgeExpiredSoftDeleted();
+
+        assertEquals(shortText, text("SELECT jd_text FROM job_description WHERE id = ?", jd),
+                "短文本不得被截断或追加标记（否则第二次执行会越来越长）");
+    }
+
     // ---------- 夹具 ----------
 
     private LocalDateTime expired() {
@@ -206,6 +282,12 @@ class RetentionPurgeIntegrationIT {
                         + "usage_preference, created_at, updated_at, deleted_at) "
                         + "VALUES (?, ?, ?, CAST(? AS JSON), ?, 'NORMAL', ?, ?, ?)",
                 userId, type, title, contentJson, sourceText, LocalDateTime.now(), LocalDateTime.now(), deletedAt);
+    }
+
+    private long insertJobDescription(long userId, String title, String jdText, LocalDateTime deletedAt) {
+        return insert("INSERT INTO job_description (user_id, title, jd_text, created_at, updated_at, deleted_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?)",
+                userId, title, jdText, LocalDateTime.now(), LocalDateTime.now(), deletedAt);
     }
 
     private long insert(String sql, Object... args) {

@@ -42,9 +42,9 @@ import java.util.function.ToIntFunction;
  *   <li>G7 数值配置由 {@code NumericConfigurationValidator} 在启动时校验（0/负值即拒绝）。</li>
  * </ul>
  *
- * <p><b>本作业覆盖两个资源</b>：{@code resume_version}（11 处引用，最复杂）与
- * {@code career_material}（2 处引用）。{@code resume} / {@code job_description} 按同一范式扩展
- * （阶段 2b，尚未实现）。
+ * <p><b>本作业覆盖四个资源</b>：{@code resume_version}（11 处引用）、{@code career_material}（2 处）、
+ * {@code resume}（1 处，**无 B 档**：只有 {@code title}，被引用者原样保留）、{@code job_description}（8 处）。
+ * 两个资源的「间接引用」担忧由分档设计本身消解：被引用的行会**原地保留**，FK 因而始终成立。
  */
 @Component
 public class RetentionPurgeService {
@@ -76,33 +76,46 @@ public class RetentionPurgeService {
         LocalDateTime cutoff = properties.cutoffFrom(LocalDateTime.now());
         int limit = Math.max(1, properties.getBatchSize());
 
-        PurgeOutcome versions = process("resume_version", cutoff, limit,
-                l -> repository.findPurgeableResumeVersions(cutoff, l), repository::deleteResumeVersion,
-                l -> repository.findSnapshottableResumeVersions(cutoff, l), repository::snapshotResumeVersion);
-        PurgeOutcome materials = process("career_material", cutoff, limit,
-                l -> repository.findPurgeableCareerMaterials(cutoff, l), repository::deleteCareerMaterial,
-                l -> repository.findSnapshottableCareerMaterials(cutoff, l), repository::snapshotCareerMaterial);
+        List<PurgeOutcome> outcomes = List.of(
+                process("resume_version", cutoff, limit,
+                        l -> repository.findPurgeableResumeVersions(cutoff, l), repository::deleteResumeVersion,
+                        l -> repository.findSnapshottableResumeVersions(cutoff, l),
+                        repository::snapshotResumeVersion),
+                process("career_material", cutoff, limit,
+                        l -> repository.findPurgeableCareerMaterials(cutoff, l), repository::deleteCareerMaterial,
+                        l -> repository.findSnapshottableCareerMaterials(cutoff, l),
+                        repository::snapshotCareerMaterial),
+                // resume 只有 title、无大字段 ⇒ **没有 B 档**：被引用者原样保留即可（传空 finder/无操作）
+                process("resume", cutoff, limit,
+                        l -> repository.findPurgeableResumes(cutoff, l), repository::deleteResume,
+                        l -> List.of(), id -> 0),
+                process("job_description", cutoff, limit,
+                        l -> repository.findPurgeableJobDescriptions(cutoff, l), repository::deleteJobDescription,
+                        l -> repository.findSnapshottableJobDescriptions(cutoff, l),
+                        repository::snapshotJobDescription));
 
-        record(versions);
-        record(materials);
+        outcomes.forEach(this::record);
 
-        int purged = versions.purged() + materials.purged();
-        int snapshotted = versions.snapshotted() + materials.snapshotted();
+        int purged = outcomes.stream().mapToInt(PurgeOutcome::purged).sum();
+        int snapshotted = outcomes.stream().mapToInt(PurgeOutcome::snapshotted).sum();
+        int skipped = outcomes.stream().mapToInt(PurgeOutcome::skipped).sum();
         if (properties.isDryRun()) {
-            log.info("[dry-run] retention purge scanned at cutoff {}: would purge resume_version={} (candidates {}), "
-                            + "career_material={} (candidates {}); would snapshot resume_version={} (candidates {}), "
-                            + "career_material={} (candidates {}); no rows were written",
-                    cutoff, versions.purged(), versions.scanned(), materials.purged(), materials.scanned(),
-                    versions.snapshotted(), versions.snapshotCandidates(),
-                    materials.snapshotted(), materials.snapshotCandidates());
-        } else if (purged > 0 || snapshotted > 0 || versions.skipped() > 0 || materials.skipped() > 0) {
-            log.info("Retention purge removed {} rows and snapshotted {} rows "
-                            + "(resume_version: purged={} snapshotted={}; career_material: purged={} snapshotted={}) "
-                            + "soft-deleted before {}",
-                    purged, snapshotted, versions.purged(), versions.snapshotted(),
-                    materials.purged(), materials.snapshotted(), cutoff);
+            log.info("[dry-run] retention purge scanned at cutoff {}: {}; no rows were written",
+                    cutoff, describe(outcomes));
+        } else if (purged > 0 || snapshotted > 0 || skipped > 0) {
+            log.info("Retention purge removed {} rows and snapshotted {} rows ({}), soft-deleted before {}",
+                    purged, snapshotted, describe(outcomes), cutoff);
         }
         return purged;
+    }
+
+    /** 每资源一行小计，形如 {@code resume_version[purge 2/3, snapshot 1/1]}（分子=实际、分母=候选）。 */
+    private static String describe(List<PurgeOutcome> outcomes) {
+        return outcomes.stream()
+                .map(o -> o.resource() + "[purge " + o.purged() + "/" + o.scanned()
+                        + ", snapshot " + o.snapshotted() + "/" + o.snapshotCandidates() + "]")
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("");
     }
 
     private void record(PurgeOutcome outcome) {

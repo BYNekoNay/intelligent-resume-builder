@@ -2,7 +2,8 @@
 
 > **决策来源**：`docs/decisions/DECISION-BRIEF.md` D2 —— 采 **B（分档承诺）**：
 > 无引用资源按期硬删；被引用者转最小不可编辑快照 + 匿名化，`docs/04` §7.1 的承诺按此**分档表述**。
-> **本文状态**：设计已出，实现**分三期**（见 §7）。阶段 1 已随本批实现。
+> **本文状态**：设计已出，实现**分三期**（见 §7）。**阶段 1 / 2 / 2b 均已实现**（第 64 / 68 批），
+> 覆盖四个资源；仅**阶段 3（账户侧）**待定。
 > **前置约束**：`RetentionPolicyContractTest` 已守护「无实现时不得移除 docs 里的『计划中』标注」——
 > 因此**只有某期真正落地并可验证后**，才允许把对应承诺从「计划中」改为「已实施」。
 
@@ -63,7 +64,7 @@
 | `resume_version` | §1.1 的 11 处中**排除自引用**后的 10 处（自引用只在同一简历内成链，单独看待） |
 | `career_material` | `resume_material_reference.material_id`、`interview_asset_section.material_id` |
 | `resume` | `resume_version.resume_id`、`application_record.resume_version_id`→版本→简历（**间接**）、`export_task`→版本（间接） |
-| `job_description` | 8 处引用（`match_result`、`ai_task`、`ats_check_result`、`application_record`、`interview_session`、`communication_draft`、`resume.job_description_id`、`inline_optimization_record`） |
+| `job_description` | 8 处引用（`resume.job_description_id`、`match_result`、`inline_optimization_record`、`ats_check_result`、`application_record`、`material_resume_generation`、`interview_session`、`communication_draft`）。⚠ 初版此处误列了 `ai_task` —— 该表**没有** `job_description_id` 列（第六十八批按迁移逐条核对 + 门禁复核后更正；门禁直接从迁移反查外键，故这类"文档多列/少列"不会影响实现） |
 
 **间接引用**（`resume` / `job_description` 经 `resume_version` 传递）**保守处理**：只要存在**任一未删除的版本**指向它，即视为被引用（宁可保留，不误删）。
 
@@ -75,8 +76,8 @@
 | --- | --- | --- |
 | `resume_version` | 物理删除（**无引用即无子引用**，故可直接删） | 快照化：`resume_json` → `{"__purged":true}`（**常量**）；`generation_context`、`optimization_summary` 清空；保留 `id/resume_id/version_no/source_type/created_at/deleted_at`。⚠ 初版的「保留摘要前 200 字」**已否决**（非幂等 + 摘要本身可能含 PII），见下方注 |
 | `career_material` | 物理删除 | 快照化：`content_json` → `{"__purged":true}`；**`source_text` 一并清空**（初版漏了这一 MEDIUMTEXT PII 载体）；`title` 保留。⚠ 初版的「只留键名」**已否决**，见下方注 |
-| `resume` | 物理删除（**前提**：其下所有版本均已删） | 快照化：`title` 保留，无大字段 |
-| `job_description` | 物理删除 | 快照化：`jd_text` → 前 200 字 + `…`；`parsed_keywords_json` 保留（非 PII） |
+| `resume` | 物理删除（**前提**：其下所有版本均已删） | **无 B 档**：只有 `title`，无大字段 ⇒ 被引用者**原样保留**（已实现，阶段 2b） |
+| `job_description` | 物理删除 | 快照化：`jd_text` → **仅当超长时**截断到前 197 字符 + `...`（写成不动点以保幂等）；`parsed_keywords_json` 保留（非 PII）。已实现，阶段 2b |
 
 > **注（第六十八批实施时对初版口径的修正）** —— 两处否决都来自实测，不是偏好：
 >
@@ -127,7 +128,7 @@
 | G3 | **批量上限** | 单轮每表最多 `batch-size` 行，防一次扫全表 |
 | G4 | **外键保护** | A 档删除前**再查一次**引用（TOCTOU 兜底），并捕获 `DataIntegrityViolationException` → 降级为 B 档重试一次，仍失败则跳过并告警 |
 | G5 | **不碰账户** | 作业**不含** `user` 表（阶段 3 单独设计） |
-| G6 | **可观测** | 日志 + 指标：`retention_purge_scanned/purged/skipped`（沿用既有 `Counter` 模式；计数为 0 时不注册序列）。`snapshotted` 属**阶段 2**（本阶段无被引用者处置，故不出现） |
+| G6 | **可观测** | 日志 + 指标：`retention_purge_scanned/purged/skipped/snapshotted`（沿用既有 `Counter` 模式；计数为 0 时不注册序列） |
 | G7 | **配置校验** | `recovery-days >= 0`、`grace-days >= 0`、`batch-size > 0`（接入既有 `NumericConfigurationValidator`） |
 
 ---
@@ -138,10 +139,11 @@
 | --- | --- | --- |
 | **阶段 1** | 作业骨架 + A 档**物理删除**（无引用者）+ 全部护栏（G1–G7）+ 可观测（G6） | **已实现**（第 64 批；开关默认关 + dry-run，落地时仅覆盖 `resume_version` / `career_material`） |
 | **阶段 2** | B 档**快照化 + 匿名化**（§4 右侧列） | **已实现**（第六十八批，覆盖阶段 1 已纳入的两个资源；口径收敛为**常量快照**，「只留键名/保留摘要」经实测否决，见 §4 上方注） |
+| **阶段 2b** | 把 `resume` / `job_description` 纳入同一范式 | **已实现**（第六十八批）。**「间接引用」不需要特殊处理**：曾担心「先引用版本、再由版本指向简历」会绕开直查，但 B 档只改内容、**不删行** ⇒ FK 始终成立，直查即可覆盖 |
 | **阶段 3** | `user` / 账户侧（是否引入 7 天可撤销窗口 + `account_deletion_job`） | 需求本身待定（现为同步立即删除），**不建议现在做** |
 
-> 阶段 1 落地后，`docs/04` §7.1 的承诺可**部分**改为已实施（仅「无引用资源」这一档）；
-> 「被引用者快照化」仍须保留「计划中」标注，直到阶段 2 落地。
+> 阶段 1 / 2 / 2b 落地后，`docs/04` §7.1 的四个资源行已全部改为「已实施」；**仅账户侧**保留「计划中」，
+> 由 `RetentionPolicyContractTest` 双向守护（已实施行不得再标计划中、账户行必须标）。
 
 ---
 

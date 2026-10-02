@@ -51,13 +51,13 @@ class RetentionPolicyContractTest {
             new DocClaim("docs/08-部署与运维说明书.md",
                     Pattern.compile("AI 任务原始输入和结果完成\\s*(\\d+)\\s*天后删除非必要内容")));
 
-    /** A 档已实施、B 档仍计划中的生命周期行（行首标记）。 */
-    private static final List<String> PARTIALLY_IMPLEMENTED_ROWS = List.of(
-            "职业资料", "简历版本");
+    /** A/B 两档均已实施的生命周期行（行首标记）。 */
+    private static final List<String> IMPLEMENTED_TIER_ROWS = List.of(
+            "职业资料", "简历版本", "JD、简历主记录");
 
     /** 硬删承诺完全未实现的生命周期行（行首标记）。 */
     private static final List<String> PENDING_ROWS = List.of(
-            "JD、简历主记录", "投递与面试数据", "账户");
+            "投递与面试数据", "账户");
 
     private record DocClaim(String relativePath, Pattern pattern) {}
 
@@ -91,21 +91,21 @@ class RetentionPolicyContractTest {
     @DisplayName("A/B 两档均已实施：对应行必须标「已实施」，且不得再标「计划中」")
     void implementedTiersAreFullyMarkedImplemented() throws Exception {
         String lifecycle = read("docs/04-数据库设计说明书.md");
-        assertTrue(!PARTIALLY_IMPLEMENTED_ROWS.isEmpty(), "A 档已实施行清单不得为空（否则本门禁空转）");
+        assertTrue(!IMPLEMENTED_TIER_ROWS.isEmpty(), "已实施行清单不得为空（否则本门禁空转）");
 
-        for (String marker : PARTIALLY_IMPLEMENTED_ROWS) {
+        for (String marker : IMPLEMENTED_TIER_ROWS) {
             String row = lifecycleRow(lifecycle, marker);
             assertTrue(row.contains("已实施"),
-                    "该行对应资源的「无引用者硬删」已在决策 D2 阶段 1 落地（清扫作业 + 数值配置校验），"
+                    "该资源的两档已在决策 D2 阶段 1 / 阶段 2 / 阶段 2b 落地（清扫作业 + 数值配置校验），"
                             + "必须显式标注「已实施」，不得继续被读作未兑现：\n" + row);
             assertFalse(row.contains("计划中"),
-                    "该资源的 A 档（无引用者硬删）与 B 档（被引用者转最小快照）均已在阶段 1 + 阶段 2 落地"
+                    "该资源的 A 档（无引用者硬删）与 B 档（被引用者转最小快照）均已落地"
                             + "—— 不得再标「计划中」，否则与实现不一致（第六十八批起）：\n" + row);
         }
     }
 
     @Test
-    @DisplayName("未覆盖资源的硬删承诺仍显式标注「计划中/尚未实现」，不得留作已兑现")
+    @DisplayName("未覆盖资源（账户侧）的硬删承诺仍显式标注「计划中/尚未实现」，不得留作已兑现")
     void pendingRowsStayExplicit() throws Exception {
         String lifecycle = read("docs/04-数据库设计说明书.md");
         assertTrue(!PENDING_ROWS.isEmpty(), "未实现行清单不得为空（否则本门禁空转）");
@@ -113,7 +113,7 @@ class RetentionPolicyContractTest {
         for (String marker : PENDING_ROWS) {
             String row = lifecycleRow(lifecycle, marker);
             assertTrue(row.contains("计划中") || row.contains("尚未实现"),
-                    "该资源的硬删/匿名化承诺尚无实现（决策 D2 阶段 1 未覆盖），必须显式标注「计划中」或"
+                    "该资源的硬删/匿名化承诺尚无实现（决策 D2 阶段 3 未落地），必须显式标注「计划中」或"
                             + "「尚未实现」，否则读者会当作已兑现：\n" + row);
         }
     }

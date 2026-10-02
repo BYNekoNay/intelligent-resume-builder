@@ -74,6 +74,12 @@ class RetentionPurgeRepositorySchemaTest {
                 "resume_version 的引用判定 SQL 必须能在真实 schema 上执行（含 11 处 NOT EXISTS）");
         assertDoesNotThrow(() -> assertNotNull(repository.findPurgeableCareerMaterials(cutoff, 10)),
                 "career_material 的引用判定 SQL 必须能在真实 schema 上执行");
+        assertDoesNotThrow(() -> assertNotNull(repository.findPurgeableResumes(cutoff, 10)),
+                "resume 的引用判定 SQL 必须能在真实 schema 上执行");
+        assertDoesNotThrow(() -> assertNotNull(repository.findPurgeableJobDescriptions(cutoff, 10)),
+                "job_description 的引用判定 SQL 必须能在真实 schema 上执行（含 8 处 NOT EXISTS）");
+        assertDoesNotThrow(() -> assertNotNull(repository.findSnapshottableJobDescriptions(cutoff, 10)),
+                "job_description 的 B 档候选 SQL 必须能在真实 schema 上执行");
     }
 
     @Test
@@ -81,6 +87,9 @@ class RetentionPurgeRepositorySchemaTest {
     void purgeSqlCoversEveryForeignKey() throws Exception {
         assertCoverage("resume_version", RetentionPurgeRepository.PURGEABLE_RESUME_VERSIONS);
         assertCoverage("career_material", RetentionPurgeRepository.PURGEABLE_CAREER_MATERIALS);
+        assertCoverage("resume", RetentionPurgeRepository.PURGEABLE_RESUMES);
+        assertCoverage("job_description", RetentionPurgeRepository.PURGEABLE_JOB_DESCRIPTIONS);
+        assertCoverage("job_description", RetentionPurgeRepository.SNAPSHOTTABLE_JOB_DESCRIPTIONS);
     }
 
     @Test
@@ -88,6 +97,8 @@ class RetentionPurgeRepositorySchemaTest {
     void deleteStatementsNeverTouchLiveRows() {
         assertGuardedDelete("resume_version", RetentionPurgeRepository.DELETE_RESUME_VERSION);
         assertGuardedDelete("career_material", RetentionPurgeRepository.DELETE_CAREER_MATERIAL);
+        assertGuardedDelete("resume", RetentionPurgeRepository.DELETE_RESUME);
+        assertGuardedDelete("job_description", RetentionPurgeRepository.DELETE_JOB_DESCRIPTION);
     }
 
     @Test
@@ -95,6 +106,7 @@ class RetentionPurgeRepositorySchemaTest {
     void snapshotStatementsAreNarrowlyScoped() {
         assertGuardedUpdate("resume_version", RetentionPurgeRepository.SNAPSHOT_RESUME_VERSION);
         assertGuardedUpdate("career_material", RetentionPurgeRepository.SNAPSHOT_CAREER_MATERIAL);
+        assertGuardedUpdate("job_description", RetentionPurgeRepository.SNAPSHOT_JOB_DESCRIPTION);
     }
 
     @Test
@@ -106,6 +118,20 @@ class RetentionPurgeRepositorySchemaTest {
         assertSameReferencers("career_material",
                 RetentionPurgeRepository.PURGEABLE_CAREER_MATERIALS,
                 RetentionPurgeRepository.SNAPSHOTTABLE_CAREER_MATERIALS);
+        // resume 不在此列：它没有 B 档（只有 title，无大字段），被引用者原样保留
+        assertSameReferencers("job_description",
+                RetentionPurgeRepository.PURGEABLE_JOB_DESCRIPTIONS,
+                RetentionPurgeRepository.SNAPSHOTTABLE_JOB_DESCRIPTIONS);
+    }
+
+    @Test
+    @DisplayName("岗位描述的截断必须是不动点：超长才截断到 197+省略号，否则原样（保证重跑幂等）")
+    void jobDescriptionTruncationIsAFixedPoint() {
+        String sql = RetentionPurgeRepository.SNAPSHOT_JOB_DESCRIPTION;
+        assertTrue(sql.contains("CHAR_LENGTH(jd_text) > 200"),
+                "截断必须是条件式的：无条件截断+追加省略号对**本来就短**的文本不幂等（每次都会再长一点）：\n" + sql);
+        assertTrue(sql.contains("SUBSTRING(jd_text, 1, 197)"),
+                "截断点必须与上限错开 3 个字符以容纳标记，否则结果长度会超过 200、第二次执行又变：\n" + sql);
     }
 
     /** 两条语句必须提及**完全相同**的引用者集合 —— 漏一边就会把某类行同时判成 A 与 B（或都不判）。 */
