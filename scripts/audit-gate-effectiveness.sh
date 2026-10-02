@@ -27,6 +27,13 @@
 # ============================================================================
 set -u
 
+# Git Bash (msys2) 调用 native python.exe 时会把**以 / 开头的参数**当 POSIX 路径转换：
+# 实测 '// 反例：...' 到达 python 的 argv 变成 '/ 反例：...'（双斜杠被归一化）——
+# 注入文本被改写，PREPEND 到 Java 源码顶部就是裸表达式 → javac [1,1]「需要 class」
+# （好样本方向曾因此产出「首跑红、复跑绿」的不一致结论）。此变量禁用该转换；
+# Linux CI 无此机制，设置无副作用。
+export MSYS2_ARG_CONV_EXCL='*'
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
@@ -56,12 +63,14 @@ TemplateCodeContractTest	web/src/api/export.ts	'academic'	'academic2'
 SecurityHeaderDeliveryContractTest	deploy/nginx/edge.conf	include snippets/security-headers.conf;	
 ApiDocCoverageGateTest	docs/05-接口设计说明书.md	`POST /api/auth/register`	`POST /api/auth/registr`
 ConfigFallbackContractTest	server/src/main/resources/application.yml	render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:50}	render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:30}
-DtoFieldContractTest	web/src/api/ai.ts	  errorMessage: string | null	  ghostAuditField: string | nullExportStreamingContractTest	server/src/main/java/com/intelligentresume/auth/controller/AuthController.java	getOutputStream()	getOutputStreamXX()
+DtoFieldContractTest	web/src/api/ai.ts	  errorMessage: string | null	  ghostAuditField: string | null
+ExportStreamingContractTest	server/src/main/java/com/intelligentresume/auth/controller/AuthController.java	getOutputStream()	getOutputStream ()
 FrontendApiContractTest	web/src/api/export.ts	'/api/exports/pdf'	'/api/exports/pdf2'
-FrontendEnumContractTest	web/src/api/ai.ts	| 'CANCELLED'	
+FrontendEnumContractTest	web/src/api/ai.ts	| 'CANCELLED'
 PdfDeadlineContractTest	server/src/main/resources/application.yml	render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:50}	render-timeout-seconds: ${PDF_RENDER_TIMEOUT_S:5000}
 ResponseCompressionContractTest	server/src/main/resources/application.yml	min-response-size: 2048	min-response-size: 1
 SchemaDocContractTest	docs/04-数据库设计说明书.md	### 3.4 resume_version	### 3.4 resume_version_x
+MySql57BaselineContractTest	server/src/test/resources/mysql57/v19-schema.sql	<<PREPEND>>	CREATE TABLE ghost_audit_gate_probe (id BIGINT);
 TABLE_EOF
 )
 
@@ -95,6 +104,8 @@ DeployProxyClientIpContractTest	deploy/nginx/host.conf	<<PREPEND>>	# 反例：pr
 UploadPathContractTest	web/nginx.conf	<<PREPEND>>	# 反例：client_max_body_size 1m; 只是注释
 ComposeResourceBoundsContractTest	deploy/docker-compose.prod.yml	<<PREPEND>>	# 反例：x-logging2: &service-logging 只是注释
 AlertRuleContractTest	monitoring/prometheus/rules/intelligent-resume-alerts.yml	<<PREPEND>>	# 反例：sum(rate(resume_ai_ghost_metric_total[10m])) 只是注释
+ExportStreamingContractTest	server/src/main/java/com/intelligentresume/auth/service/AccountExportService.java	<<PREPEND>>	// 反例：this.mapper.writeValueAsString(payload) 只是注释，不是整份缓冲
+MySql57BaselineContractTest	server/src/test/resources/mysql57/v19-schema.sql	<<PREPEND>>	-- 反例：CREATE TABLE ghost_audit_gate_probe (id BIGINT); 只是注释
 GOOD_EOF
 )
 
@@ -136,8 +147,16 @@ printf '\n===== 门禁有效性抽查 · %s（%s 行）=====\n' \
 printf '%-38s %-10s %s\n' '门禁' '结果' '说明'
 printf -- '--------------------------------------------------------------------\n'
 
-while IFS=$'\t' read -r gate file old new; do
+while IFS=$'\t' read -r gate file old new extra; do
   [ -z "${gate:-}" ] && continue
+  # 防挤行：一行必须恰好 4 个字段。若第 5 个字段非空，说明两行被挤成了一行
+  #（编辑事故）—— 被吞的那个门禁会**静默失去抽查资格**，而 run 只会拿脏样本跑第一个门禁。
+  if [ -n "${extra:-}" ]; then
+    inject_failed=$((inject_failed + 1))
+    REPORT+=("$gate|TABLE-ROW-MALFORMED|表格行内出现多余字段（两行被挤成一行？）—— 被挤掉的门禁从未被抽查，修复表格后再跑")
+    printf '%-38s %-10s %s\n' "$gate" '表格行损坏' '多余字段非空'
+    continue
+  fi
   if [ -n "${GATE_AUDIT_ONLY:-}" ] && [[ ",$GATE_AUDIT_ONLY," != *",$gate,"* ]]; then
     continue
   fi
