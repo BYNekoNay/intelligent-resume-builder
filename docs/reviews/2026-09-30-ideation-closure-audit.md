@@ -1195,6 +1195,48 @@ build context 提到仓库根并调整 Dockerfile 路径，而容器拓扑在当
 
 产物：`SecurityHeaderDeliveryContractTest`（新增）、`docs/08`（「安全响应头交付契约」+ 不对称取舍）。
 
+### 2.64 门禁有效性的系统性抽查：23 行全部实测承重，**0 个假绿门禁**（2026-10-02 第六十九批·续）
+
+动机：**永远返回「通过」的检查最危险**。本项目已三次遇到「门禁看着像样、实际不承重」
+（第六十五批注释污染、同批环境依赖导致从未真正执行、第六十八批判据写错）。此前每次都是
+**个案**验证（发现问题才补红判定），从未做过**系统性**抽查 —— 也就是从未回答过
+「其余门禁里还有多少个是假的」。
+
+**做法**：新增表驱动工具 `scripts/audit-gate-effectiveness.sh`。对表中每个门禁：
+
+> 注入一个量身坏样本 → **只跑该门禁** → 断言它**失败** → 还原并核对 md5。
+
+两个关键稳健性设计（都是踩坑换来的）：
+1. **注入前断言锚点存在且唯一** —— 否则「锚点写错 ⇒ 注入没生效 ⇒ 门禁没红」会被误判成
+   「门禁是假绿」（第六十八批就是这样差点误判）⇒ 锚点缺失一律报 `INJECT-FAILED`，不算门禁的问题；
+2. **还原后核对 md5** —— 确认抽查没留下任何改动。
+
+**首轮结果**：
+
+| 结果 | 数量 | 说明 |
+| --- | --- | --- |
+| **红（符合预期）** | **23** | 门禁承重：注入坏样本后确实失败 |
+| **没红** | **0** | 未发现假绿门禁 |
+| 注入失败 | 0 | 首轮有 2 行锚点不唯一（`mem_limit: 128m` ×3、`resume_ai_provider_calls_total` ×6），改用唯一锚点后补跑通过 |
+
+覆盖：contract 包 24 个门禁中，**23 个在本表内**（`ConfigConsumerContractTest` 已于第六十五批用红判定
+验证）⇒ **24/24 全部实测承重**。抽查行覆盖门禁的各个族：文档↔实现（`ApiDocCoverageGate`、
+`SchemaDocContract`、`RetentionPolicyContract`）、配置↔消费方（`ConfigFallback`、`EnvExample`、
+`ResponseCompression`、`Shutdown`、`PdfDeadline`、`PdfOutputBound`）、部署资产
+（`ComposeResourceBounds`、`PdfServiceBindScope`、`DeployProxyClientIp`、`UploadPath`、
+`StaticAssetDelivery`、`SecurityHeaderDelivery`）、前端契约（`DtoField`、`FrontendApi`、
+`FrontendEnum`、`TemplateCode`、`ErrorCode`）、结构与实现细节（`AlertRule`、`ExportStreaming`、
+`SpringBootTestProfile`）。
+
+**结论**：本项目的门禁体系**经得起抽查** —— 这是一个正面结论，也是**第一次有证据**回答
+「这些门禁是不是在空转」。同时把这个能力固化成工具：以后新增门禁，跑一次全表即可自证。
+
+⚠ **本抽查的边界（据实说明）**：它证明的是「注入这一类坏样本时门禁会红」，**不等于**门禁的判据
+覆盖了所有应当覆盖的情形（例如第六十六批那个门禁，注入「删掉配置项」会红，但它曾对注释里的
+字样误报 —— 那类问题是**误报**方向，需要的是「好样本必须通过」方向的抽查）。两个方向合起来才完整。
+
+产物：`scripts/audit-gate-effectiveness.sh`（新增，含用法与稳健性说明）、`docs/07` §5.11。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1405,3 +1447,4 @@ build context 提到仓库根并调整 Dockerfile 路径，而容器拓扑在当
 | 2026-10-02 | **第六十八批·续（D2 阶段 2b：`resume` / `job_description` 纳入同一范式；§2.61 扫描新增项）执行完成**：`resume` 引用仅 1 处（`resume_version.resume_id`）且**只有 `title`、无大字段 ⇒ 无 B 档**，被引用者原样保留；`job_description` 8 处引用、B 档把 `jd_text` **仅超长时**截断到 197 + `...`。**「间接引用」不需要特殊处理** —— 方案 §3 标注的风险（先引用版本、再由版本指向简历）**由分档设计本身消解**：B 档只改内容**不删行** ⇒ FK 始终成立、直查即覆盖，无需传递闭包。**第二处非幂等陷阱**：无条件截断+追加省略号会让**短文本**越跑越长（红判定实测得 `…MySQL。......` 两个省略号）⇒ 写成 `CASE WHEN CHAR_LENGTH(jd_text) > 200 THEN CONCAT(SUBSTRING(jd_text,1,197),'...') ELSE jd_text END` 的**不动点**。**顺带更正方案文档事实错误**：§1 误把 `ai_task` 列为 `job_description` 的引用者（该表无 `job_description_id` 列），按迁移逐条核对 + 门禁复核后更正为 8 处。**新增门禁** `jobDescriptionTruncationIsAFixedPoint`；**红判定**改无条件截断 → **2 条同时红**（静态门禁 + 端到端用例）。验证：retention 相关 27 项绿；全量 **941 测试 0 失败**（本批 +6）。文档：`docs/04` §7.1 第四行改「已实施」、`docs/07` §5.10、`docs/08` §9.6、方案 §1/§4/§6-G6/§7、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2。**残留：仅账户侧（阶段 3）** |
 | 2026-10-02 | **第六十九批（失败消息的「公开文案接缝」；§2.62 扫描留观项）执行完成**：先取证确认泄漏真实存在 —— `ai_task.error_message` / `export_task.error_message` 落的是 provider/异常**原文**，而两字段被原样放进 `AiTaskStatusResponse` / `ExportTaskStatusResponse` 且前端**直接渲染**（`web/src/api/ai.ts:245`、`ExportView.vue:132`、`CommunicationView.vue:152` 等），信封层也直接回 `exception.getMessage()` ⇒ 模型名/HTTP 码/上游错误体/内部字节上限到达终端用户。**关键发现：设计意图早已存在** —— 面试路径的 `AiFailureInfo` 自始只暴露 `messageCode`，本次只是把该口径补到另两条链路。**修复**：新增 `PublicFailureCopy`（复用已有 `FailureCategoryClassifier`，类别映射用**穷尽 switch**，漏配即编译失败）并接入三个装配点；原文改记 WARN 日志 `code=…, traceId=…, raw=…`（库中两列亦保留）；只改会夹带上游细节的 50002/50003，其余码的中文用户文案原样保留；体积超限保留可行动文案、去掉内部字节数。**既有用例抓到我的过度映射**：`retry` 会清空 `error_message`，我把 `null` 也映射成文案 ⇒「无错误」变「有错误」，`AiTaskServiceTest`/`ExportServiceTest` 同时转红 ⇒ 修正为**状态响应 `null` 保持 `null`**（只有信封必有文案）并写进门禁。**门禁**：`PublicFailureCopyTest`（6 例，含"14 个敏感片段一个都不许残留"+类别穷尽性）、`AiTaskPublicFailureCopyContractTest`（2 例，**行为级**走一遍 `toResponse`）。**红判定**：装配点回退为直传原文 → 转红且失败信息直接展示泄漏内容，md5 恢复。验证：全量 **949 测试 0 失败**（+8）。文档：`docs/05` §1.3、`docs/08` §6；报告 §4 该留观项标记完成 |
 | 2026-10-02 | **第六十九批·续（安全头的下发可达性门禁；§2.63 扫描留观项收口）执行完成**：先确认事实（镜像内实际生效的是 `web/nginx.conf`（`web/Dockerfile:12` COPY）、compose `web.build.context: ../web` 使镜像拿不到 `deploy/nginx/` 的片段、**4 条安全头在全套测试里零覆盖**）⇒「每条对外配置都真的下发了那 4 条头」此前**没有任何门禁**，「容器版由 edge 兜住」只是注释里的假设。**取舍（记录为决策）**：**保留不对称、不做 build-context 重构**（合并需把 compose build context 提到仓库根并调 Dockerfile 路径，而容器拓扑未用于生产，代价与收益不成比例；公网响应由 `edge` 统一下发、无实际影响）→ 写进 `docs/08`。**新增 `SecurityHeaderDeliveryContractTest`（5 例）**：片段完整性（4 条头 + `always`）／每份对外配置 server 级 include／**继承陷阱**（自带 `add_header` 的 location 必须再 include 一次 —— 加一条 `Cache-Control` 就让该 location 的安全头全没，而 `nginx -t` 通过、探针看不见）／**镜像内不得 include 镜像里不存在的片段**（挡住「为消除不对称而补 include → 容器启动即崩」）／include 必须指向真实文件。实现用 `SourceText` 先抹白注释再解析（注释里大量 `location`/`add_header` 字样），并带解析下限断言防假绿。**红判定双注入**：给 `edge.conf` 的 location 加自有 `add_header` 不补 include → 红；给 `web/nginx.conf` 补片段 include → 红；两条各响一次（`Failures: 2`），md5 恢复。验证：该门禁 5/5 绿；全量测试 0 失败 |
+| 2026-10-02 | **第六十九批·续（门禁有效性系统性抽查）执行完成**：此前只做过个案红判定，从未回答过「其余门禁里还有多少个是假的」。新增表驱动工具 `scripts/audit-gate-effectiveness.sh`：对每个门禁**注入量身坏样本 → 只跑该门禁 → 断言失败 → 还原核对 md5**；带两条稳健性设计（**注入前断言锚点存在且唯一**，否则「锚点写错⇒注入没生效⇒没红」会被误判成假绿；**还原后核对 md5**）。**首轮：23 行全部按预期变红、0 个没红、0 个注入失败**（首轮有 2 行锚点不唯一，改唯一锚点后补跑通过）⇒ contract 包 **24/24 门禁全部实测承重**（`ConfigConsumerContractTest` 已在第六十五批验证）。覆盖族：文档↔实现 / 配置↔消费方 / 部署资产 / 前端契约 / 结构细节。**结论：门禁体系经得起抽查**（首次有证据回答「是否在空转」），并固化为可复用工具。⚠ 边界：本抽查证明「注入这类坏样本会红」，不等于判据覆盖了所有情形（**误报方向**需「好样本必须通过」的抽查，两方向合起来才完整）。文档：`docs/07` §5.11 |
