@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { fetchCurrentUser, login, logout, refresh, register, updateProfile, type CurrentUser, type LoginPayload, type RegisterPayload } from '@/api/auth'
+import { fetchCurrentUser, login, logout, refresh, register, restoreAccountDeletion, updateProfile, type CurrentUser, type LoginPayload, type RegisterPayload } from '@/api/auth'
 import { clearUserLocalData } from '@/utils/localUserData'
 
 const LEGACY_ACCESS_TOKEN_KEY = 'intelligent-resume.access-token'
@@ -57,6 +57,13 @@ export const useAuthStore = defineStore('auth', () => {
     currentUser.value = (await fetchCurrentUser()).data
   }
 
+  async function restoreAfterDeletion(payload: LoginPayload) {
+    const response = await restoreAccountDeletion(payload)
+    setAccessToken(response.data.accessToken)
+    initializationError.value = null
+    currentUser.value = (await fetchCurrentUser()).data
+  }
+
   async function signUp(payload: RegisterPayload) {
     const response = await register(payload)
     setAccessToken(response.data.accessToken)
@@ -79,5 +86,5 @@ export const useAuthStore = defineStore('auth', () => {
     currentUser.value = (await updateProfile({ displayName })).data
   }
 
-  return { accessToken, currentUser, initialized, initializationError, setAccessToken, initialize, signIn, signUp, signOut, updateCurrentUser }
+  return { accessToken, currentUser, initialized, initializationError, setAccessToken, initialize, signIn, signUp, signOut, restoreAfterDeletion, updateCurrentUser }
 })

@@ -322,6 +322,14 @@ app:
       recovery-days: ${RETENTION_RECOVERY_DAYS:30}
       grace-days: ${RETENTION_GRACE_DAYS:7}
       interval-ms: ${RETENTION_PURGE_INTERVAL_MS:21600000}
+    # 账户删除撤销窗口（决策 D2 阶段 3，第 74 批）：删号后账号立即停用，数据保留
+    # grace-days 天（承诺口径 7 天）供凭密码恢复；窗口结束后由 account-purge 作业级联硬删。
+    account-deletion:
+      grace-days: ${ACCOUNT_DELETION_GRACE_DAYS:7}
+    account-purge:
+      enabled: ${ACCOUNT_PURGE_ENABLED:false}
+      batch-size: ${ACCOUNT_PURGE_BATCH_SIZE:20}
+      interval-ms: ${ACCOUNT_PURGE_INTERVAL_MS:21600000}
 
   pdf:
     worker:

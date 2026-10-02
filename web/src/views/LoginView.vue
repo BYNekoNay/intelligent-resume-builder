@@ -5,6 +5,8 @@ import { AlertCircle, Eye, EyeOff, LockKeyhole, UserRound } from 'lucide-vue-nex
 import AuthShell from '@/components/AuthShell.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useLocale } from '@/i18n'
+import { extractErrorCode } from '@/utils/errorCodes'
+import { resolveApiError } from '@/utils/errorMessage'
 
 const username = ref('')
 const password = ref('')
@@ -18,13 +20,26 @@ const { t } = useLocale()
 const redirect = computed(() => typeof route.query.redirect === 'string' ? route.query.redirect : '/')
 const credentialChanged = computed(() => route.query.changed === '1')
 
+// 删除撤销期（D2 阶段 3）：登录被 40303 拒绝时，凭同一组密码自动走恢复入口；
+// 恢复失败（如窗口已结束 40903）按登记错误码显示文案，不得透传服务端 message。
 async function submit() {
   error.value = ''
   loading.value = true
   try {
     await auth.signIn({ username: username.value, password: password.value })
     await router.push(redirect.value)
-  } catch {
+  } catch (err) {
+    if (extractErrorCode(err) === 40303) {
+      try {
+        await auth.restoreAfterDeletion({ username: username.value, password: password.value })
+        await router.push(redirect.value)
+        return
+      } catch (restoreErr) {
+        error.value = resolveApiError(restoreErr, 'auth.loginError')
+        loading.value = false
+        return
+      }
+    }
     error.value = t('auth.loginError')
   } finally {
     loading.value = false

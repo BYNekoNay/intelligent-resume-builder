@@ -41,9 +41,9 @@ class MySql57MigrationLiveIT {
                     .cleanDisabled(true)
                     .load();
 
-            // V20~V34 共 15 条迁移必须全部在 MySQL 5.7 上成功（V23~V34 的 5.7 兼容由本门禁证明）
-            assertEquals(15, flyway.migrate().migrationsExecuted);
-            assertEquals("34", scalar(statement,
+            // V20~V35 共 16 条迁移必须全部在 MySQL 5.7 上成功（V23~V35 的 5.7 兼容由本门禁证明）
+            assertEquals(16, flyway.migrate().migrationsExecuted);
+            assertEquals("35", scalar(statement,
                     "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1"));
             assertEquals("1", scalar(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='19' AND type='BASELINE' AND success=1"));
@@ -96,6 +96,11 @@ class MySql57MigrationLiveIT {
 
             // V34：全站配额观测计数索引（task_type, created_at 两列）
             assertEquals("2", scalar(statement, indexColumnCountSql(schema, "ai_task", "idx_ai_task_type_created")));
+
+            // V35：账户删除撤销窗口任务表（决策 D2 阶段 3）—— 状态默认 PENDING、窗口列必填、无外键（成功审计行在 user 删除后保留）
+            assertEquals("1", scalar(statement, tableCountSql(schema, "account_deletion_job")));
+            assertEquals("PENDING", scalar(statement, columnDefaultSql(schema, "account_deletion_job", "status")));
+            assertEquals("YES", scalar(statement, columnNullableSql(schema, "account_deletion_job", "completed_at")));
         }
     }
 

@@ -55,9 +55,8 @@ class RetentionPolicyContractTest {
     private static final List<String> IMPLEMENTED_TIER_ROWS = List.of(
             "职业资料", "简历版本", "JD、简历主记录");
 
-    /** 硬删承诺完全未实现的生命周期行（行首标记）。 */
-    private static final List<String> PENDING_ROWS = List.of(
-            "投递与面试数据", "账户");
+    /** 硬删承诺完全未实现的生命周期行（行首标记）。第 74 批后账户侧已实现，仅剩投递与面试数据。 */
+    private static final List<String> PENDING_ROWS = List.of("投递与面试数据");
 
     private record DocClaim(String relativePath, Pattern pattern) {}
 

@@ -17,6 +17,9 @@ import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.export.repository.ExportTaskRepository;
+import com.intelligentresume.retention.AccountDeletionJob;
+import com.intelligentresume.retention.AccountDeletionJobRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,6 +54,9 @@ public class AuthService {
     private final ExportTaskRepository exportTaskRepository;
     private final AuthSessionRevocationService authSessionRevocationService;
     private final ActiveUserCache activeUserCache;
+    private final AccountDeletionJobRepository deletionJobRepository;
+    /** 删除撤销窗口（天）。docs/04 §7.1 的承诺口径：7 天窗口 + 窗口结束后 30 天内完成清理。 */
+    private final int deletionGraceDays;
 
     public AuthService(UserRepository userRepository,
                        AuthSessionRepository authSessionRepository,
@@ -60,7 +66,9 @@ public class AuthService {
                        AiTaskRepository aiTaskRepository,
                        ExportTaskRepository exportTaskRepository,
                        AuthSessionRevocationService authSessionRevocationService,
-                       ActiveUserCache activeUserCache) {
+                       ActiveUserCache activeUserCache,
+                       AccountDeletionJobRepository deletionJobRepository,
+                       @Value("${app.retention.account-deletion.grace-days:7}") int deletionGraceDays) {
         this.userRepository = userRepository;
         this.authSessionRepository = authSessionRepository;
         this.tokenService = tokenService;
@@ -70,6 +78,8 @@ public class AuthService {
         this.exportTaskRepository = exportTaskRepository;
         this.authSessionRevocationService = authSessionRevocationService;
         this.activeUserCache = activeUserCache;
+        this.deletionJobRepository = deletionJobRepository;
+        this.deletionGraceDays = deletionGraceDays;
     }
 
     @Transactional
@@ -97,6 +107,12 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED, "账号或密码错误"));
 
         if (user.getStatus() != User.UserStatus.ACTIVE) {
+            // 删除撤销期内的账号（D2 阶段 3）给专用错误码，登录页据此展示「恢复账号」入口；
+            // 其余停用账号维持原拒绝语义。恢复动作必须走凭据验证的 /deletion/restore。
+            if (hasActiveDeletionWindow(user.getId())) {
+                throw new BusinessException(ErrorCode.ACCOUNT_DELETION_PENDING,
+                        "账号处于删除撤销期（7 天内可凭密码恢复），请使用恢复入口重新激活账号");
+            }
             throw new BusinessException(ErrorCode.FORBIDDEN, "账号已停用");
         }
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
@@ -104,6 +120,53 @@ public class AuthService {
         }
 
         return issueNewFamily(user, "login");
+    }
+
+    /**
+     * 删除撤销（决策 D2 阶段 3）：凭用户名/邮箱 + 密码恢复处于撤销窗口内的账号。
+     *
+     * <p>恢复 = 账号回 ACTIVE、清除 deletedAt、全部 PENDING 删号任务转 CANCELLED，并签发全新
+     * 会话（等价重新登录）。删号时已执行的不可逆动作**不回滚**：AI 授权需重新同意、已取消的
+     * AI/导出任务不复活、原会话需重新登录 —— 恢复入口的界面文案必须写明。
+     *
+     * <p>凭据错误统一报「账号或密码错误」（防账号枚举）；凭据正确但无有效撤销窗口时才区分
+     * 「不在撤销期（40903）」。
+     */
+    @Transactional
+    public TokenResponse restoreDeletion(LoginRequest request) {
+        User user = userRepository.findByUsername(request.username())
+                .or(() -> userRepository.findByEmail(request.username()))
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED, "账号或密码错误"));
+        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.UNAUTHENTICATED, "账号或密码错误");
+        }
+
+        AccountDeletionJob job = deletionJobRepository
+                .findFirstByUserIdAndStatusOrderByIdDesc(user.getId(), AccountDeletionJob.Status.PENDING)
+                .filter(pending -> pending.getCancelUntil().isAfter(LocalDateTime.now()))
+                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_DELETION_WINDOW_EXPIRED,
+                        "该账号不在删除撤销期内（从未请求删除，或撤销窗口已结束）"));
+
+        // 标记撤销（正常恰好一行 PENDING；CANCELLED 行留作审计）
+        for (AccountDeletionJob pending : deletionJobRepository
+                .findByUserIdAndStatus(user.getId(), AccountDeletionJob.Status.PENDING)) {
+            pending.setStatus(AccountDeletionJob.Status.CANCELLED);
+            pending.setCompletedAt(LocalDateTime.now());
+            deletionJobRepository.save(pending);
+        }
+
+        user.setStatus(User.UserStatus.ACTIVE);
+        user.setDeletedAt(null);
+        userRepository.save(user);
+        activeUserCache.evict(user.getId());
+        return issueNewFamily(user, "deletion_restored");
+    }
+
+    private boolean hasActiveDeletionWindow(Long userId) {
+        return deletionJobRepository
+                .findFirstByUserIdAndStatusOrderByIdDesc(userId, AccountDeletionJob.Status.PENDING)
+                .map(job -> job.getCancelUntil().isAfter(LocalDateTime.now()))
+                .orElse(false);
     }
 
     /**
@@ -202,6 +265,18 @@ public class AuthService {
         aiTaskRepository.cancelActiveByUserId(userId, "Account deleted", now);
         exportTaskRepository.failActiveByUserId(userId, "Account deleted", now);
         logoutAll(userId);
+        // 决策 D2 阶段 3：删号进入撤销窗口 —— 数据保留 grace-days 天，窗口内可凭密码恢复；
+        // 窗口结束后由 AccountPurgeService 级联硬删。已有 PENDING 行则幂等跳过（重复请求不重建）。
+        if (deletionJobRepository
+                .findFirstByUserIdAndStatusOrderByIdDesc(userId, AccountDeletionJob.Status.PENDING)
+                .isEmpty()) {
+            AccountDeletionJob job = new AccountDeletionJob();
+            job.setUserId(userId);
+            job.setStatus(AccountDeletionJob.Status.PENDING);
+            job.setRequestedAt(now);
+            job.setCancelUntil(now.plusDays(deletionGraceDays));
+            deletionJobRepository.save(job);
+        }
         // 「删号即失效」（#6）:用户状态缓存必须在**事务提交后**清除。
         // 提交前清除存在竞态:并发请求可能回读到未提交的 ACTIVE 并重新缓存,
         // 令失效延迟一个 TTL。无事务上下文（如单测直调）时立即清除。

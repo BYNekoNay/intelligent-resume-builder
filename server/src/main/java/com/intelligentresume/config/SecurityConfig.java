@@ -63,6 +63,8 @@ public class SecurityConfig {
                 .requestMatchers(
                         "/api/auth/register",
                         "/api/auth/login",
+                        // 删除撤销（D2 阶段 3）：删号后会话已全撤，恢复入口必须匿名可达（凭密码验证）
+                        "/api/auth/deletion/restore",
                         "/api/auth/refresh",
                         "/api/auth/logout",
                         "/api/system/health",

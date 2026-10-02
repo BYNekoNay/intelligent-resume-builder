@@ -195,10 +195,10 @@ public class GlobalExceptionHandler {
         return switch (errorCode) {
             case VALIDATION -> HttpStatus.BAD_REQUEST;
             case UNAUTHENTICATED -> HttpStatus.UNAUTHORIZED;
-            case FORBIDDEN, CONSENT_REQUIRED -> HttpStatus.FORBIDDEN;
+            case FORBIDDEN, CONSENT_REQUIRED, ACCOUNT_DELETION_PENDING -> HttpStatus.FORBIDDEN;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
-            case CONFLICT, VERSION_ARCHIVED -> HttpStatus.CONFLICT;
+            case CONFLICT, VERSION_ARCHIVED, ACCOUNT_DELETION_WINDOW_EXPIRED -> HttpStatus.CONFLICT;
             case INTERNAL, AI_FAILURE, PDF_FAILURE -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
     }

@@ -52,6 +52,7 @@ class AuthServiceTest {
     @Mock private ExportTaskRepository exportTaskRepository;
     @Mock private AuthSessionRevocationService authSessionRevocationService;
     @Mock private ActiveUserCache activeUserCache;
+    @Mock private com.intelligentresume.retention.AccountDeletionJobRepository deletionJobRepository;
 
     private AuthService authService;
 
@@ -63,7 +64,7 @@ class AuthServiceTest {
         authService = new AuthService(
                 userRepository, authSessionRepository, tokenService, passwordEncoder,
                 aiConsentService, aiTaskRepository, exportTaskRepository,
-                authSessionRevocationService, activeUserCache);
+                authSessionRevocationService, activeUserCache, deletionJobRepository, 7);
     }
 
     // ---- 注册 ----
@@ -333,6 +334,143 @@ class AuthServiceTest {
         verify(authSessionRepository).saveAll(List.of());
         // 无事务上下文（单测直调）:状态缓存立即清除,保证「删号即失效」
         verify(activeUserCache).evict(1L);
+    }
+
+    @Test
+    @DisplayName("删号进入撤销窗口：创建 PENDING 任务，cancel_until = now + 7 天（D2 阶段 3）")
+    void deleteAccount_createsPendingDeletionJob() {
+        User user = activeUser(1L, "alice");
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user));
+        when(authSessionRepository.findByUserIdAndRevokedAtIsNull(1L)).thenReturn(List.of());
+        when(deletionJobRepository.findFirstByUserIdAndStatusOrderByIdDesc(1L,
+                com.intelligentresume.retention.AccountDeletionJob.Status.PENDING))
+                .thenReturn(Optional.empty());
+
+        authService.deleteAccount(1L);
+
+        var saved = ArgumentCaptor.forClass(com.intelligentresume.retention.AccountDeletionJob.class);
+        verify(deletionJobRepository).save(saved.capture());
+        assertEquals(com.intelligentresume.retention.AccountDeletionJob.Status.PENDING,
+                saved.getValue().getStatus());
+        LocalDateTime cancelUntil = saved.getValue().getCancelUntil();
+        assertTrue(cancelUntil.isAfter(LocalDateTime.now().plusDays(6)));
+        assertTrue(cancelUntil.isBefore(LocalDateTime.now().plusDays(8)));
+    }
+
+    @Test
+    @DisplayName("重复删号请求不重建 PENDING 任务（幂等）")
+    void deleteAccount_isIdempotentOnPendingJob() {
+        User user = activeUser(1L, "alice");
+        user.setStatus(User.UserStatus.DISABLED);
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user));
+        when(authSessionRepository.findByUserIdAndRevokedAtIsNull(1L)).thenReturn(List.of());
+        when(deletionJobRepository.findFirstByUserIdAndStatusOrderByIdDesc(1L,
+                com.intelligentresume.retention.AccountDeletionJob.Status.PENDING))
+                .thenReturn(Optional.of(new com.intelligentresume.retention.AccountDeletionJob()));
+
+        authService.deleteAccount(1L);
+
+        verify(deletionJobRepository, never()).save(any());
+    }
+
+    private com.intelligentresume.retention.AccountDeletionJob pendingJob(
+            Long userId, LocalDateTime cancelUntil) {
+        var job = new com.intelligentresume.retention.AccountDeletionJob();
+        job.setUserId(userId);
+        job.setStatus(com.intelligentresume.retention.AccountDeletionJob.Status.PENDING);
+        job.setRequestedAt(cancelUntil.minusDays(7));
+        job.setCancelUntil(cancelUntil);
+        return job;
+    }
+
+    @Test
+    @DisplayName("撤销窗口内的 DISABLED 账号登录 → 40303 引导恢复入口")
+    void login_pendingDeletion_returnsDeletionPendingCode() {
+        LoginRequest req = new LoginRequest("alice", "correcthorse");
+        User user = activeUser(1L, "alice");
+        user.setStatus(User.UserStatus.DISABLED);
+        user.setDeletedAt(LocalDateTime.now().minusDays(1));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(deletionJobRepository.findFirstByUserIdAndStatusOrderByIdDesc(1L,
+                com.intelligentresume.retention.AccountDeletionJob.Status.PENDING))
+                .thenReturn(Optional.of(pendingJob(1L, LocalDateTime.now().plusDays(6))));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> authService.login(req));
+
+        assertEquals(ErrorCode.ACCOUNT_DELETION_PENDING.code(), ex.getErrorCode().code());
+    }
+
+    @Test
+    @DisplayName("恢复成功：账号回 ACTIVE、任务转 CANCELLED、签发新会话")
+    void restoreDeletion_success() {
+        LoginRequest req = new LoginRequest("alice", "correcthorse");
+        User user = activeUser(1L, "alice");
+        user.setStatus(User.UserStatus.DISABLED);
+        user.setDeletedAt(LocalDateTime.now().minusDays(1));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("correcthorse", "$2a$10$hashed")).thenReturn(true);
+        when(deletionJobRepository.findFirstByUserIdAndStatusOrderByIdDesc(1L,
+                com.intelligentresume.retention.AccountDeletionJob.Status.PENDING))
+                .thenReturn(Optional.of(pendingJob(1L, LocalDateTime.now().plusDays(6))));
+        when(deletionJobRepository.findByUserIdAndStatus(1L,
+                com.intelligentresume.retention.AccountDeletionJob.Status.PENDING))
+                .thenReturn(List.of(pendingJob(1L, LocalDateTime.now().plusDays(6))));
+        stubTokenServiceForNewFamily();
+
+        TokenResponse resp = authService.restoreDeletion(req);
+
+        assertEquals("access-token", resp.accessToken());
+        assertEquals(User.UserStatus.ACTIVE, user.getStatus());
+        assertNull(user.getDeletedAt());
+        verify(activeUserCache).evict(1L);
+    }
+
+    @Test
+    @DisplayName("恢复凭据错误 → 统一 40101（防账号枚举）")
+    void restoreDeletion_wrongPassword_throws() {
+        LoginRequest req = new LoginRequest("alice", "wrongpassword");
+        User user = activeUser(1L, "alice");
+        user.setStatus(User.UserStatus.DISABLED);
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrongpassword", "$2a$10$hashed")).thenReturn(false);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> authService.restoreDeletion(req));
+
+        assertEquals(ErrorCode.UNAUTHENTICATED.code(), ex.getErrorCode().code());
+    }
+
+    @Test
+    @DisplayName("无 PENDING 任务的账号恢复 → 40903（不在撤销期）")
+    void restoreDeletion_withoutPendingJob_throws() {
+        LoginRequest req = new LoginRequest("alice", "correcthorse");
+        User user = activeUser(1L, "alice");
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("correcthorse", "$2a$10$hashed")).thenReturn(true);
+        when(deletionJobRepository.findFirstByUserIdAndStatusOrderByIdDesc(1L,
+                com.intelligentresume.retention.AccountDeletionJob.Status.PENDING))
+                .thenReturn(Optional.empty());
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> authService.restoreDeletion(req));
+
+        assertEquals(ErrorCode.ACCOUNT_DELETION_WINDOW_EXPIRED.code(), ex.getErrorCode().code());
+    }
+
+    @Test
+    @DisplayName("撤销窗口已结束 → 40903（数据将随后由清扫作业硬删）")
+    void restoreDeletion_windowExpired_throws() {
+        LoginRequest req = new LoginRequest("alice", "correcthorse");
+        User user = activeUser(1L, "alice");
+        user.setStatus(User.UserStatus.DISABLED);
+        user.setDeletedAt(LocalDateTime.now().minusDays(8));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("correcthorse", "$2a$10$hashed")).thenReturn(true);
+        when(deletionJobRepository.findFirstByUserIdAndStatusOrderByIdDesc(1L,
+                com.intelligentresume.retention.AccountDeletionJob.Status.PENDING))
+                .thenReturn(Optional.of(pendingJob(1L, LocalDateTime.now().minusDays(1))));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> authService.restoreDeletion(req));
+
+        assertEquals(ErrorCode.ACCOUNT_DELETION_WINDOW_EXPIRED.code(), ex.getErrorCode().code());
     }
 
     // ---- 辅助方法 ----

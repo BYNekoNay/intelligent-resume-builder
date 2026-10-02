@@ -17,6 +17,8 @@ public enum ErrorCode {
      * 与真实处置动作不符。
      */
     VERSION_ARCHIVED(40902, "简历版本已归档"),
+    ACCOUNT_DELETION_PENDING(40303, "账号处于删除撤销期"),
+    ACCOUNT_DELETION_WINDOW_EXPIRED(40903, "删除撤销期已结束"),
     INTERNAL(50001, "系统异常"),
     AI_FAILURE(50002, "AI 调用失败"),
     PDF_FAILURE(50003, "PDF 导出失败");

@@ -193,6 +193,18 @@ public class AppObservability {
         incrementIfPositive("retention_purge_snapshotted", resource, snapshotted);
     }
 
+    /** 账户清扫（决策 D2 阶段 3）：按结果计数成功/失败的任务数。 */
+    public void recordAccountPurge(int succeeded, int failed) {
+        if (succeeded > 0) {
+            Counter.builder("retention_account_purge_total").tag("outcome", "success")
+                    .register(registry).increment(succeeded);
+        }
+        if (failed > 0) {
+            Counter.builder("retention_account_purge_total").tag("outcome", "failed")
+                    .register(registry).increment(failed);
+        }
+    }
+
     private void incrementIfPositive(String metric, String resource, int amount) {
         if (amount > 0) {
             Counter.builder(metric).tag("resource", resource).register(registry).increment(amount);

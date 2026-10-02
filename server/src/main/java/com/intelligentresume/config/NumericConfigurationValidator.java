@@ -95,6 +95,11 @@ public class NumericConfigurationValidator {
         minimums.put("app.retention.purge.recovery-days", 0);
         minimums.put("app.retention.purge.grace-days", 0);
         minimums.put("app.retention.purge.interval-ms", 1000);
+        // 账户清扫（决策 D2 阶段 3，第 74 批）：批量 0 → 到期任务永远清不掉（承诺落空）；
+        // 间隔 0 → 热循环；撤销窗口天数 0 → 删号即失去撤销机会（合法下限为 1，承诺口径 7 天）。
+        minimums.put("app.retention.account-purge.batch-size", 1);
+        minimums.put("app.retention.account-purge.interval-ms", 1000);
+        minimums.put("app.retention.account-deletion.grace-days", 1);
         return Collections.unmodifiableMap(minimums);
     }
 }

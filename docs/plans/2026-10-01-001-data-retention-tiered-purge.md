@@ -140,7 +140,7 @@
 | **阶段 1** | 作业骨架 + A 档**物理删除**（无引用者）+ 全部护栏（G1–G7）+ 可观测（G6） | **已实现**（第 64 批；开关默认关 + dry-run，落地时仅覆盖 `resume_version` / `career_material`） |
 | **阶段 2** | B 档**快照化 + 匿名化**（§4 右侧列） | **已实现**（第六十八批，覆盖阶段 1 已纳入的两个资源；口径收敛为**常量快照**，「只留键名/保留摘要」经实测否决，见 §4 上方注） |
 | **阶段 2b** | 把 `resume` / `job_description` 纳入同一范式 | **已实现**（第六十八批）。**「间接引用」不需要特殊处理**：曾担心「先引用版本、再由版本指向简历」会绕开直查，但 B 档只改内容、**不删行** ⇒ FK 始终成立，直查即可覆盖 |
-| **阶段 3** | `user` / 账户侧（是否引入 7 天可撤销窗口 + `account_deletion_job`） | 需求本身待定（现为同步立即删除），**不建议现在做** |
+| **阶段 3** | `user` / 账户侧：7 天可撤销窗口 + `account_deletion_job` | **已实现**（第 74 批，2026-10-02 用户拍板引入）：V35 建表（无外键 —— SUCCESS 审计行在 user 删除后保留）；`deleteAccount` 落 PENDING 行（`cancel_until = now + grace-days`，幂等）；登录对窗口内 DISABLED 账号返回 `40303` 引导 `POST /api/auth/deletion/restore`（凭据验证、匿名可达、限流同登录）恢复；窗口结束后 `AccountPurgeService`（`ACCOUNT_PURGE_ENABLED` 默认 false）按 FK 拓扑级联硬删 22 张业务表 + `user` 行，每任务独立事务、语句幂等可重入；覆盖完整性由 `AccountPurgeRepositorySchemaTest`（迁移反查 18 张 user_id 表 + 4 张经链表，漏一即红）与 `AccountPurgeIntegrationIT`（H2 真实行 + 真外键拦截顺序错误）守护 |
 
 > 阶段 1 / 2 / 2b 落地后，`docs/04` §7.1 的四个资源行已全部改为「已实施」；**仅账户侧**保留「计划中」，
 > 由 `RetentionPolicyContractTest` 双向守护（已实施行不得再标计划中、账户行必须标）。

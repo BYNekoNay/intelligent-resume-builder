@@ -74,6 +74,16 @@ public class AuthController {
         return withRefreshCookie(tokens, httpRequest);
     }
 
+    /**
+     * 删除撤销（决策 D2 阶段 3）：撤销窗口内的账号凭用户名/邮箱 + 密码恢复并直接登录。
+     * 匿名可达；限流同登录（凭据验证面，见 RateLimitFilter）。
+     */
+    @PostMapping("/deletion/restore")
+    public ResponseEntity<ApiResponse<TokenResponse>> restoreDeletion(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        TokenResponse tokens = authService.restoreDeletion(request);
+        return withRefreshCookie(tokens, httpRequest);
+    }
+
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<TokenResponse>> refresh(HttpServletRequest httpRequest) {
         String refresh = extractRefreshToken(httpRequest);

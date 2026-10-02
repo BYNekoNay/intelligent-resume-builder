@@ -138,6 +138,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private Integer limitFor(String path) {
         if (path == null) return null;
         if (path.equals("/api/auth/login")) return loginPerMinute;
+        // 删除撤销是同强度的凭据验证面（用户名/邮箱 + 密码），与登录共用阈值
+        if (path.equals("/api/auth/deletion/restore")) return loginPerMinute;
         if (path.equals("/api/auth/register")) return registerPerMinute;
         if (path.equals("/api/auth/refresh")) return refreshPerMinute;
         // 凭证变更是「当前密码」验证面：不限流时可用被盗 access token 无限试密码

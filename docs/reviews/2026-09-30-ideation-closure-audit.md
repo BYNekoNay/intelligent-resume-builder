@@ -1437,6 +1437,26 @@ URL 三形态，6/6）。修复后重跑：坏 9 红 + 好 3 绿 + `npm run buil
 本轮抽查再次实证「注释污染」是跨语言、跨工具链的通用失败形态（Java javadoc / YAML / nginx /
 TS 对象字面量四处均曾出现）。
 
+### 2.71 D2 阶段 3：账户删除 7 天撤销窗口 + 账户级联清扫（2026-10-02 第七十四批，用户拍板引入）
+
+**需求**：`docs/04` §7.1 的账户承诺「7 天撤销窗口 → 窗口结束后 30 天内完成清理」从「计划中」转「已实施」（登记册 D2 分四期至此全部 RESOLVED）。
+
+**实现**：
+- **V35** `account_deletion_job`（status 流转 PENDING→RUNNING→SUCCESS/PARTIAL_FAILED/CANCELLED）。**不挂外键** —— SUCCESS 审计行须在 user 删除后独立保留。
+- **删号流程改造**（`AuthService.deleteAccount`）：原有立即失效动作全部保留（停用/撤会话/取消任务/撤回同意），新增落 `PENDING` 行（`cancel_until = now + ACCOUNT_DELETION_GRACE_DAYS`，重复请求幂等不重建）。
+- **恢复路径**：登录对「DISABLED + 窗口内」账号返回新码 **40303**（引导入口），登录页凭同一组密码自动调 **`POST /api/auth/deletion/restore`**（匿名可达、限流同登录、防枚举统一 40101）；恢复 = 账号回 ACTIVE + PENDING 转 CANCELLED + 全新会话；**不可逆动作不回滚**（AI 授权重新同意、已取消任务不复活）；窗口过期/无任务返回 **40903**。statusFor 编译期穷尽映射同步。
+- **清扫作业**（`AccountPurgeService`，语义与分档清扫不同：账户删除无「被引用者保留」分支）：按 FK 拓扑级联硬删 **22 张业务表 + user 行**，每任务独立事务、语句幂等、PARTIAL_FAILED 可重入；`ACCOUNT_PURGE_ENABLED` 默认 false + 数值键接入 fail-closed 校验（G7）+ 指标 `retention_account_purge_total`。
+- **前端**：40303/40903 登记错误码三处同步（ErrorCodeContractTest 守护）+ 登录页自动恢复流 + 删号对话框文案写明撤销期（zh/en）。
+
+**测试过程中的三次真失败（全部修复并留档）**：
+1. **H2 真外键拦截级联顺序**（AccountPurgeIntegrationIT）：首版顺序 `answer_asset` 在 `asset_section` 前删除被 `FK_ASSET_SECTION_ASSET` 拦截 —— **这正是行级 IT 用真实行的价值**（mock 永远测不出顺序错误）；按 FK 拓扑重排（引用方先删）后通过。
+2. **@Enumerated 缺失**：`AccountDeletionJob.status` 未注解 `EnumType.STRING` → 默认 ORDINAL 写 0、读 `'PENDING'` 永不匹配 ⇒ **候选查询恒空、清扫静默不处理任何任务**（又一处「永远通过」形态，IT 的 purged=0 断言抓到）。
+3. **@Value 字段注入在 Mockito 单测不生效**：grace-days 改为构造参数注入（Spring 对 @Value 构造参数同样支持）。
+
+**静态红判定**：`AccountPurgeRepositorySchemaTest`（迁移反查 18 张 user_id 表 + 4 张经链表必须全覆盖 / communication_template 必须带 user_id 条件防误删 16 行系统种子 / 每表恰好一次）——注入「删去 ai_consent 的 DELETE」→ 2 红，md5 还原后绿。
+
+**验证**：定向 33/33 + 全量 **973 测试 0 失败**（本批 +16）；前端 `npm run build` 完整链通过。**同批环境修复**：WorkBuddy safe-delete shim 的 bulk-guard 状态文件损坏（全 NUL 字节）导致本机 `rm`/vite `emptyDir` 全面失败 —— 重写状态文件恢复（已记跨项目记忆）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1652,3 +1672,4 @@ TS 对象字面量四处均曾出现）。
 | 2026-10-02 | **第六十九批·续（抽查工具两处缺陷修复 + 好样本方向全量复跑；§2.67）执行完成**：① **表格静默损坏**（`4f92bb3` 引入）—— 坏样本表 DtoField 与 ExportStreaming 两行被挤成一行，`read -r a b c d` 第 4 变量吞掉剩余字段 ⇒ **ExportStreamingContractTest 自续四起从未被双向抽查**且 DtoField 注入混入脏文本（碰巧仍红）；工具对行格式零校验、损坏完全静默 ⇒ 拆回两行 + 新增**挤行检测**（`read ... extra`，非空即报 `TABLE-ROW-MALFORMED`；红判定：注入挤行 → 恰好报损坏 + exit 1，md5 还原一致）。② **msys2 参数路径转换根因**—— 好样本 `// 反例：...` PREPEND 到 Java 源顶部后 javac 报 [1,1]「需要 class」，列号反推出首行是**无 `//` 的裸文本**；字节级复现实锤：**Git Bash 调 native python.exe 时以 `/` 开头的 argv 被当 POSIX 路径转换，`//` 实测归一化为 `/`**（`MSYS2_ARG_CONV_EXCL='*'` 对照两行输出），⇒ `#`/`--` 行从未受影响、`//` 行（Java/TS 样本）注入被改写 —— **§2.65「首跑红、复跑绿」悬案就此归因收口**；脚本内 export 该变量（Linux 无副作用），教训入跨项目记忆。③ ExportStreaming 坏样本改 `getOutputStream()`→`getOutputStream ()`（加空格：编译合法 + contains 变 false ⇒ **断言红而非编译红**）。④ 纳入 `MySql57BaselineContractTest`（§2.66）双向两行。**结果：坏样本 24 红 / 0 没红 / 0 运行失败；好样本 24 绿 / 0 误报 / 0 运行失败（双向 exit 0）** —— 含上轮悬案的 3 个 `//` 行，contract 包 **24/24 门禁双向实测承重** |
 | 2026-10-02 | **第七十一批（前端 i18n 动态键盲区：ERROR_CODE_KEYS 纳入目录对账；§2.68）执行完成**：对 web 侧 build 链门禁做覆盖面对账，发现 `errorMessage.ts` 的 `t(registeredKey ?? fallbackKey)` 动态调用使 `ERROR_CODE_KEYS`（11 个错误文案键）**不被任何静态校验覆盖**（vue-tsc 不查 string、静态 t() 正则不匹配、catalog 删键无告警 ⇒ 运行时显示原始键名）——错误文案是所有失败路径的必经出口，属结构性缺口；同族动态键（`resumeCompare.sectionType.*`/`import.step*`/`resumeEditor.*`）登记为候选，本批先收口注册表现成的 `errors.*`。修复：`check-i18n.mjs` 新增 `collectErrorCodeRegistryKeys`（行首锚定）+ `findDynamicKeyFailures`（zh/en 对账 + **minKeys 规模自检**防空转）并接入 run()；自测 +2（12/12）。**红判定①**：en-US 删 `errors.conflict` → 既有 zh/en 门禁与新对账**各报一条**（均点名键与 locale），恢复后绿。**⚠ 红判定②首版假绿被当场抓出**：整表注释 11 键（模拟解析失效）→ 仍绿——首版正则缺行首锚，注释行（行尾与真实键行相同的形态）照常解析 ⇒ 修正则 + 自测样本改为该危险形态 → 重做红（`parsed 0 keys (expected >= 10)`）→ 恢复后绿。**教训：SourceText「注释污染」教训对前端脚本同样适用；第一版判据不可信，红判定不是仪式而是必需**。验证：实库 check:i18n 全绿（48 Vue + 29 TS）；`npm run build` 完整链通过（9.9s） |
 | 2026-10-02 | **第七十二批（动态键家族 2~4 纳入 i18n 对账；§2.69）执行完成**：三家族取值域全部落到机器可读来源 —— `resumeCompare.sectionType.*` ← `SectionChangeType` 联合类型、`import.step1..N` ← 模板 `v-for="step in 4"`（先断言模板串仍在用，防 UI 下线后 v-for 残留误报）、`resumeEditor.*` ← 全部 `message('literal'` 调用（定义行抹白后统计）。**口径**：errors 是注册表型（minKeys=10），三新家族是使用处型（minKeys=0，功能下线键集自然为空，不误报）。**健全性自检首跑即抓到真实形态缺口**：`removeSimpleItem` 三元链构造键后动态传参（`message(key,…)`），字面量收集覆盖不到 ⇒ 按「键集可静态枚举」哲学静态化为三分支字面量调用（行为等价），此后 `otherCalls>0` 即红。**红判定三家族各一**：① en 删 sectionType.CHANGED → 既有门禁+新对账各一条；② en 删 import.step3 → 同构双报；③ 注入 `message('ghostAuditKey')`+`message(undefined)` → 三条（zh/en 缺键 + 非字面量自检）；③ 首次注入锚点不唯一 INJECT-FAILED（workItem 多处调用），按纪律换唯一定义行锚点重做。各组 md5 还原后绿。验证：自测 16/16（+4）；实库 check 全绿；`npm run build` 完整链通过（5.7s） |
+| 2026-10-02 | **第七十四批（D2 阶段 3 落地：账户删除 7 天撤销窗口；§2.71）执行完成**：用户拍板引入 → V35 `account_deletion_job`（无外键留审计行）；删号落 PENDING 行（幂等）；登录 40303 引导 `POST /api/auth/deletion/restore` 恢复（凭据验证/匿名可达/限流同登录/防枚举；不可逆动作不回滚）；窗口后 `AccountPurgeService` 级联硬删 22 表 + user 行（独立事务/幂等重入/默认关）；错误码 40303/40903 三处同步；数值键入 fail-closed 校验。**三次真失败全修复留档**：① H2 真外键拦截级联顺序错误（行级 IT 的价值实证）→ 按 FK 拓扑重排；② @Enumerated 缺失致清扫静默空转（候选查询恒空）→ 补 EnumType.STRING；③ @Value 字段注入 Mockito 不生效 → 改构造参数注入。静态红判定：删 ai_consent 的 DELETE → SchemaTest 2 红，还原后绿。全量 **973 测试 0 失败**（+16）；前端 build 链通过；safe-delete shim 状态文件损坏已修（记跨项目记忆） |

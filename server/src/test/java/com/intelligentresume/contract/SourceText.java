@@ -35,13 +35,16 @@ import java.nio.file.Path;
  * <p><b>残留</b>（已登记）：字符串字面量里的 token 仍会被算作命中。实践中这比注释罕见得多，
  * 且多数命中本身就是合法消费点；如后续出现真实案例再评估。
  */
-final class SourceText {
+/**
+ * 第 74 批起跨测试包使用（retention 包的账户级联清单门禁也读迁移源码），故提升为 public。
+ */
+public final class SourceText {
 
     private SourceText() {
     }
 
     /** 读文件并按扩展名剥注释。 */
-    static String read(Path path) throws IOException {
+    public static String read(Path path) throws IOException {
         return stripComments(Files.readString(path, StandardCharsets.UTF_8), path.getFileName().toString());
     }
 

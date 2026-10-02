@@ -69,3 +69,8 @@ export async function exportAccountData(): Promise<string> {
 export async function deleteAccount(): Promise<ApiResponse<void>> {
   return (await apiClient.delete<ApiResponse<void>>('/api/auth/me')).data
 }
+
+/** D2 阶段 3：删除撤销 —— 撤销窗口内凭用户名/邮箱 + 密码恢复账号并直接登录（返回新 token）。 */
+export async function restoreAccountDeletion(payload: LoginPayload): Promise<ApiResponse<TokenResponse>> {
+  return (await apiClient.post<ApiResponse<TokenResponse>>('/api/auth/deletion/restore', payload)).data
+}
