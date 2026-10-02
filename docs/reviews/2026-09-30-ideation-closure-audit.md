@@ -1006,6 +1006,60 @@ nginx/systemd 那两条 B 类断言抓的是「**仓库改对了、环境是旧�
 §7.2 注、§7.3 链长）、`docs/decisions/ADR-005` §7.4、`OPEN-DECISIONS` E1 → **RESOLVED**、
 `DECISION-BRIEF` E1 → 已执行（并提示 E2 的「25% 余量」口径需随链长 8→7 重估）。
 
+### 2.60 D2 阶段 2 落地：B 档「被引用者转最小快照」+ 补上阶段 1 遗留的**行级**端到端用例（2026-10-02 第六十八批）
+
+起因：`DECISION-BRIEF` D2 的阶段 2 一直卡在「快照口径待确认」。本轮按最推荐口径实施，并在实施中
+发现两处初版设想的硬伤、一处 PII 遗漏。
+
+**最终口径**（覆盖阶段 1 已纳入的两个资源）：
+
+| 资源 | A 档 | B 档快照 |
+| --- | --- | --- |
+| `resume_version` | 物理删除 | `resume_json` → `{"__purged":true}`（**常量**）；`generation_context` / `optimization_summary` → NULL；保留 `id`/`resume_id`/`version_no`/`source_type`/`created_at`/`deleted_at` |
+| `career_material` | 物理删除 | `content_json` → `{"__purged":true}`；**`source_text` → NULL**；保留 `title` |
+
+**两处初版口径经实测否决**（不是偏好）：
+
+1. **「保留摘要前 200 字」** → 需要在同一条语句里从**即将被清空**的字段派生内容，第二次执行源已空
+   ⇒ **非幂等**（作业要反复跑）；且摘要是 AI 生成正文，本身可能就是 PII。
+2. **「只留键名」** → 需要把**动态生成的 JSON 文本**写回 JSON 列，而这一步**两个数据库语义不同**：
+   MySQL 的 `CAST(? AS JSON)` 解析成 JSON 对象；**H2 的 `CAST('{"a":1}' AS JSON)` 得到的却是
+   JSON *字符串值* `"{\"a\":1}"`**（读回来带引号、不是对象），要 `'...' FORMAT JSON` 才是对象。
+   为一条审计辅助信息引入方言分支（生产 SQL ≠ 测试 SQL）不划算，且键集可由 `material_type`
+   与资料契约推导 ⇒ 收敛为常量表达式 `JSON_OBJECT('__purged', TRUE)`（两库都有、无需绑定字符串参数）。
+
+**顺带修正一处 PII 遗漏**：初版只清 `career_material.content_json`，漏了 `source_text`（MEDIUMTEXT，
+导入**原文**）—— 它与 content 一样是 PII 载体，现一并 `SET NULL`。
+
+**补上阶段 1 的残留**：此前只有静态守卫，「DELETE/UPDATE 真的按预期改了数据吗」**没有任何用例**。
+新增 `RetentionPurgeIntegrationIT`（**造真实行**：`user` / `resume` / `resume_version` /
+`career_material` / `resume_material_reference`），断言行级最终状态：A 档真删、B 档真快照且**外键仍成立**、
+未超期不动、**连跑两次逐字节一致（幂等）**。
+
+> **为什么必须造真实行**：`UPDATE ... WHERE id = ?` 在**匹配 0 行时不会求值 SET 表达式** ——
+> 所以「0 行更新」的测试根本验证不了 JSON 写入路径。上面的 H2 方言问题正是靠真实行才暴露的。
+
+**新增门禁 2 条**：
+- 快照语句必须 `id = ? AND deleted_at IS NOT NULL`（改写活数据比误删更隐蔽）；
+- **A 档与 B 档必须覆盖同一份引用者集合**（阶段 2 引入 `EXISTS` 极性后，清单出现两处）—— 集合不等即红。
+
+**红判定（3 轮，全部实测）**：① 去掉快照语句的软删限定 → **1 红**；② 从 B 档移除一个 `EXISTS`
+→ **1 红**且精确给出两侧差集；③ 候选 SQL 漏一个引用项 → **1 红**。均 md5 校验恢复。
+（注：第 ②轮的**首次注入**因锚点写错（该行以单个 `)` 结尾）**未生效**，门禁"没响"—— 查明是注入
+失败而非门禁失效，重做后成立。**教训：门禁没红时，先怀疑坏样本没注入成功。**）
+
+**验证**：retention 相关 **21 项绿**；全量 **935 测试 0 失败**（本批 +9，5 skipped 为环境门控）；
+文档按分档更新（`docs/04` §7.1 两行改「已实施」、`docs/07` §5.10、`docs/08` §9.6、
+方案 §4 注与 §7、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2）。
+
+**残留**：`resume` / `job_description`（阶段 2b —— 需先处理**经 `resume_version` 的间接引用**、
+且各有自己的快照列）与**账户侧**（阶段 3）仍未实现，文档继续按「计划中」标注。
+
+产物：`RetentionSnapshot`（新增，含口径与被否决方案的完整理由）、`RetentionPurgeRepository`
+（B 档候选 + 快照语句）、`RetentionPurgeService`（A/B 分流 + `snapshotted` 指标）、
+`AppObservability`（+`retention_purge_snapshotted`）、`RetentionPurgeIntegrationIT`（新增，5 例）、
+`RetentionPurgeServiceTest` / `RetentionPurgeRepositorySchemaTest` / `RetentionPolicyContractTest`（更新）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1211,4 +1265,5 @@ nginx/systemd 那两条 B 类断言抓的是「**仓库改对了、环境是旧�
 | 2026-10-01 | **第六十五批（云端复验第六十四批 + 修复 systemd 单元不随部署同步；§2.56 扫描新增项）执行完成**：因第六十四批新增 `@Scheduled` 作业与 4 个接入 fail-closed 校验的配置键（受校验键 14→18，校验失败会让应用**起不来**），按铁律跑「部署 + 真实链路复验」。**第一轮部署全绿**：探针 12/12、`journalctl` 抓到 `Retention purge disabled (app.retention.purge.enabled=false); skipped`（作业已装载且默认不删）、无「数值型配置未解析」报错（4 个新键在真实 `Environment` 解析成功）、`Started … in 11.911 seconds` 无 OOM。但 `ss -lntp` 暴露 pdf-service 监听 **`*:3001`** —— 与文档不符。**取证三条**：服务器 pdf 单元 mtime = **2026-09-25**、无 `PDF_SERVICE_HOST`；仓库单元 `:25` 早有该行；`deploy-direct.remote.sh` 对 systemd **零命中**。→ 与第六十一批 nginx **同源**，**第四十批的 PDF 回环收敛从未生效**。**修复**：`remote.sh` 新增 systemd 单元**幂等**同步（内容变化才 `install` + `daemon-reload`，装前剥离 CR）；探针 **12→16 项**（第 6 节 B 类：生效单元 vs 仓库单元归一化比对；第 7 节 A 类：**在服务器上**断言 8080/3001 **仅绑回环** —— 从外部探测会因安全组假阳性）。**验证（红→绿）**：新断言先跑得 **14/16、exit 1**（**精确指出** `> Environment=PDF_SERVICE_HOST=127.0.0.1` 与 `PDF 3001 监听在非回环地址：*:3001`）→ 重新部署（1 分 47 秒）→ **16/16 PASS、`DEPLOY_EXIT=0`**，`ss -lntp` = `127.0.0.1:3001`；api 单元**未被重写**（mtime 仍 09-25）证明幂等生效。黑盒回归第三轮 **4 套件全 PASS、0 失败 0 跳过**（含 AI 全链路，15 分 28 秒）。同批更正 `docs/DEPLOYMENT_DIRECT.md` §4.5「`deploy/` 需手工上传」的过期表述。报告：`docs/reviews/2026-10-01-cloud-e2e-verification.md` §7 |
 | 2026-10-01 | **第六十五批（CI 修复：门禁依赖本机 MySQL，「本地永远绿」；§2.57 扫描新增项）执行完成**：第六十四批推送后 **CI Server tests 失败**（run 36882146555），失败的全是 `RetentionPurgeRepositorySchemaTest` 3 用例（`Failed to load ApplicationContext`）。**根因两层**：① 该类漏 `@ActiveProfiles("test")` ⇒ 连 `application.yml` 默认数据源（MySQL），`Caused by: ConnectException: Connection refused` —— **本机有 MySQL 故本地全量 919"全绿"是假阳性**（征兆：该用例耗时 25.9s，同类 H2 用例仅几十~几百毫秒）；② 其元数据查询用 `INFORMATION_SCHEMA.KEY_COLUMN_USAGE.REFERENCED_TABLE_NAME`，该列**只存在于 MySQL**（H2 2.2 实测 `Column "REFERENCED_TABLE_NAME" not found`）⇒ 该守卫从设计上只能跑在真实 MySQL 上。**修复**：补 `@ActiveProfiles("test")`；把「引用清单完整性」改为**静态解析 Flyway 迁移**（`db/migration/*.sql`：语句主角表 = `CREATE/ALTER TABLE` 名，外键 = `REFERENCES <table>(`），结果与运行环境无关而"漏一项即红"不变；「候选 SQL 可执行」（H2）与「删除语句带软删限定」保留。**新增门禁 `SpringBootTestProfileContractTest`**（每个 `@SpringBootTest` 必须声明 `@ActiveProfiles`，含规模自检 ≥30）。**红判定两轮**：① 删去 `ats_check_result` 一处 `NOT EXISTS` → 1 红且点名；② **首版门禁是假绿** —— 用整文件 `contains("@ActiveProfiles")` 判据，而被检查文件的 **javadoc 里正好写了该注解名**，去掉注解后门禁**仍通过**；改为「剥注释 + 只认行首注解」后 1 红并点名文件；两轮均 md5 校验恢复。验证：全量 **920 测试 0 失败**（本批 +1，5 skipped 为环境门控）。同批在 §2.55 加**补正**说明此前「919 全绿」对该类为假阳性。**CI + Functional Regression 双绿**（head `8a4de28`；Functional 首次卡在 `Install CJK fonts` 撞 30 分钟上限被 cancelled，属 runner 网络抖动、与改动无关，重跑 2 分 7 秒通过） |
 | 2026-10-01 | **第六十六批（门禁假绿第二种形态：注释里的同名文本；§2.58 扫描新增项）执行完成**：把第六十五批发现的「门禁可假绿」**系统化排查** —— 22 个静态门禁里 **16 个**用 `contains(...)` 在文件全文上找 token。**实测取证**：把 `JdKeywordParser` 里真正消费 `app.job.jd-text.min-length` 的 `@Value` 去掉后，`ConfigConsumerContractTest` **仍然通过**（javadoc 里正好写着该键名）—— 而它守护的正是「声明即虚构」。**修复**：新增 `SourceText`（按扩展名抹白注释）+ 把 22 个门禁 **34 处** `Files.readString(x, UTF_8)` 统一为 `SourceText.read(x)`（含 `web/src/**` 的 TS/Vue）。两个由踩坑倒逼的设计：① **抹白（等长空白）而非删除** —— 删注释会缩短文本、让「`@Transactional` 后 300 字符内」这类**距离窗口**判据变紧而制造**假红**（实测把 `ExportStreamingContractTest` 由绿变红）；② **词法级扫描 + 保留字符串字面量** —— 朴素 `indexOf("//")` 会截断 `"http://host"`，而不保留字符串会让 `@Scheduled(fixedDelayString="${app.x.y:1}")` 这类**真实消费点**丢失（假红）。**验证**：新增 `SourceTextTest` 6 例（含等长/换行守恒、字符串保留两个方向）；22 个门禁 **57 项全绿**；**红判定重做才成立**（首轮 JVM `EXCEPTION_ACCESS_VIOLATION` 崩溃，退出码 1 被误读成门禁失败 → 改看 `Failures:` 计数与失败文本后，得 `Failures: 1` 且点名该键，md5 恢复）；全量 **926 测试 0 失败**（本批 +6）；`docs/08` 增条目。**CI + Functional Regression 双绿**（head `420f1b4`，run 36953194382 / 36953194321） |
-| 2026-10-02 | **第六十七批（执行 E1：模型链移除 `kimi-k3`；§2.59 扫描新增项）执行完成**：`kimi-k3` 拒绝 `temperature` 而本应用每次请求都带它 ⇒ 必然 400、是链上纯失败跳转节点。按 `DECISION-BRIEF` E1「下次部署窗口顺手可做」执行：部署机 `app/api/.env` 去掉 `,kimi-k3`（**diff 恰 1 行**、改前 `cp -a` 备份）并重启。**运行时实测**：启动日志 `modelChain=[…7 个…]`（无 kimi）、指标 `resume_ai_model_chain_available **7.0**`（原 8）、readiness UP、探针 **17/17**、全量黑盒回归（`FUNCTIONAL_AI_LIVE=true`）**4 套件全 PASS 0 失败 0 跳过**（7 类 AI 任务真实跑通）。**顺带证实一个从未被验证的假设**：同机 `app/api/.env` 与 `live-ai.env` 都写着 `BAILIAN_MODEL_CHAIN` 且**已经漂移**（8 vs 7 个模型）；三条取证（`application.yml` 的 `spring.config.import`、单元 `WorkingDirectory`、单元无 `EnvironmentFile=` + 进程环境 **0 个** `BAILIAN_*`）判定**生效的只有 `app/api/.env`** ⇒ 只改 `live-ai.env` 完全无效。已在 `DEPLOYMENT_DIRECT` §4.4 写明并同步两文件取值。**新增探针第 8 节**「应用加载的配置 vs 磁盘 `.env`」（16 → **17** 项）—— 此前 B 类只抓「仓库改对了、环境是旧的」，这条抓**反方向**「文件改对了、进程是旧的（忘了重启）」；**红判定实测**：只改磁盘不重启 → 第 8 节 FAIL 且精确给出磁盘/进程差异，md5 恢复后 17/17。`OPEN-DECISIONS` E1 → **RESOLVED**；`DECISION-BRIEF` E1 → 已执行；`ADR-005` §7.4 同步；并提示 E2 的「25% 余量」口径需随链长重估 |
+| 2026-10-02 | **第六十七批（执行 E1：模型链移除 `kimi-k3`；§2.59 扫描新增项）执行完成**：`kimi-k3` 拒绝 `temperature` 而本应用每次请求都带它 ⇒ 必然 400、是链上纯失败跳转节点。按 `DECISION-BRIEF` E1「下次部署窗口顺手可做」执行：部署机 `app/api/.env` 去掉 `,kimi-k3`（**diff 恰 1 行**、改前 `cp -a` 备份）并重启。**运行时实测**：启动日志 `modelChain=[…7 个…]`（无 kimi）、指标 `resume_ai_model_chain_available **7.0**`（原 8）、readiness UP、探针 **17/17**、全量黑盒回归（`FUNCTIONAL_AI_LIVE=true`）**4 套件全 PASS 0 失败 0 跳过**（7 类 AI 任务真实跑通）。**顺带证实一个从未被验证的假设**：同机 `app/api/.env` 与 `live-ai.env` 都写着 `BAILIAN_MODEL_CHAIN` 且**已经漂移**（8 vs 7 个模型）；三条取证（`application.yml` 的 `spring.config.import`、单元 `WorkingDirectory`、单元无 `EnvironmentFile=` + 进程环境 **0 个** `BAILIAN_*`）判定**生效的只有 `app/api/.env`** ⇒ 只改 `live-ai.env` 完全无效。已在 `DEPLOYMENT_DIRECT` §4.4 写明并同步两文件取值。**新增探针第 8 节**「应用加载的配置 vs 磁盘 `.env`」（16 → **17** 项）—— 此前 B 类只抓「仓库改对了、环境是旧的」，这条抓**反方向**「文件改对了、进程是旧的（忘了重启）」；**红判定实测**：只改磁盘不重启 → 第 8 节 FAIL 且精确给出磁盘/进程差异，md5 恢复后 17/17。`OPEN-DECISIONS` E1 → **RESOLVED**；`DECISION-BRIEF` E1 → 已执行；`ADR-005` §7.4 同步；并提示 E2 的「25% 余量」口径需随链长重估 | 注：`DECISION-BRIEF` E2 已按「维持 `<= 2`（2/7≈29%）」落定 |
+| 2026-10-02 | **第六十八批（D2 阶段 2 落地：B 档最小快照 + 补行级端到端用例；§2.60 扫描新增项）执行完成**：`DECISION-BRIEF` D2 的阶段 2 此前卡在「快照口径待确认」，本轮按最推荐口径实施并**否决了两处初版设想**：① 「保留摘要前 200 字」**非幂等**（同语句内从即将清空的字段派生，重跑源已空）且摘要可能含 PII；② 「只留键名」需把动态 JSON 文本写回 JSON 列，而 **MySQL 的 `CAST(? AS JSON)` 解析成对象、H2 的 `CAST('{"a":1}' AS JSON)` 得到 JSON 字符串值 `"{\"a\":1}"`**（要 `'...' FORMAT JSON` 才是对象）⇒ 为审计辅助信息引入方言分支不划算，收敛为常量表达式 `JSON_OBJECT('__purged', TRUE)`。**顺带修正一处 PII 遗漏**：初版漏清 `career_material.source_text`（MEDIUMTEXT 导入原文）。**补上阶段 1 残留**：新增 `RetentionPurgeIntegrationIT`（造真实行：user/resume/resume_version/career_material/resume_material_reference），断言行级最终状态（A 档真删、B 档真快照且外键仍成立、未超期不动、连跑两次逐字节一致）——**因为 `UPDATE ... WHERE id = ?` 在 0 行匹配时不求值 SET，不造真实行就验证不了 JSON 写入**（上面的 H2 方言问题正是这样暴露的）。**新增门禁 2 条**：快照语句必须 `id = ? AND deleted_at IS NOT NULL`；**A/B 两极必须覆盖同一份引用者集合**（引入 `EXISTS` 极性后清单变两处）。**红判定 3 轮实测**：去软删限定 → 1 红；从 B 档移除一个 `EXISTS` → 1 红且给出差集；候选 SQL 漏项 → 1 红；均 md5 恢复（其中第 2 轮**首次注入因锚点写错而未生效**，查明是坏样本没注入成功而非门禁失效——**门禁没红时先怀疑坏样本**）。验证：retention 相关 21 项绿；全量 **935 测试 0 失败**（本批 +9）。文档：`docs/04` §7.1 两行改「已实施」、`docs/07` §5.10、`docs/08` §9.6、方案 §4 注/§7、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2。**残留**：`resume`/`job_description`（阶段 2b，需先处理间接引用）与账户侧（阶段 3） |
