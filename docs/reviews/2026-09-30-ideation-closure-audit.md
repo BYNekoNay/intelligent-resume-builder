@@ -1387,6 +1387,34 @@ zh/en 一致性门禁与新对账各报一条（均点名键与 locale），md5 
 **验证**：自测 12/12；实库 `check:i18n` 全绿（48 Vue + 29 TS + 2 locales）；`npm run build`
 完整链（check:i18n + check:draft-fields + vue-tsc + vite build）通过（9.9s）。
 
+### 2.69 动态键家族 2~4 纳入 i18n 对账：取值域全部落到机器可读来源（2026-10-02 第七十二批）
+
+**动机**：§2.68 收口了 `errors.*` 家族并登记三个候选；本批把候选全部纳入同一对账框架，
+且每个家族的取值域**都取自机器可读来源**（不引入手工清单）：
+
+| 家族 | 动态调用形态 | 取值域来源（机器可读） |
+| --- | --- | --- |
+| `resumeCompare.sectionType.*` | `t(\`resumeCompare.sectionType.${type}\`)` | `resumeDiff.ts` 的 `export type SectionChangeType = 'UNCHANGED' \| 'ADDED' \| …` 联合类型 |
+| `import.step1..N` | `t(\`import.step${step}\`)` | `ResumeImportView.vue` 的 `v-for="step in 4"`（且先断言模板串仍在使用，防步骤 UI 下线后 v-for 残留误报） |
+| `resumeEditor.*` | `message(key, params)` 包装 | `ResumeEditorView.vue` 内全部 `message('literal'` 调用（定义行抹白后统计） |
+
+**口径**：errors 是「注册表型」（表空=门禁坏了，minKeys=10）；三个新家族是「使用处型」
+（使用存在才构造键，功能整体下线时键集自然为空，minKeys=0）——避免「功能下线后门禁误报缺键」。
+
+**过程发现（健全性自检首跑即抓到真实形态缺口）**：`ResumeEditorView.vue` 的 `removeSimpleItem`
+把键经三元链赋给变量后**动态传参**（`message(key, …)`）——字面量收集覆盖不到。按门禁哲学
+**静态化**：改为三分支各用字面量调用（运行时行为等价：短路求值保持），此后
+`otherCalls>0`（存在非字面量调用）即红——该断言从此守护「message 键集可静态枚举」这一性质。
+
+**红判定（三家族各一，全部实测）**：
+① en 目录删 `sectionType.CHANGED` → 既有 zh/en 门禁与新对账**各一条**（点名键与 locale）；
+② en 目录删 `import.step3` → 同构双报；
+③ 注入 `message('ghostAuditKey')` + `message(undefined)` → **三条**（zh 缺键 / en 缺键 / 非字面量自检）。
+其中 ③ 首次注入因锚点不唯一 INJECT-FAILED（`message('workItem', …)` 多处出现），按纪律换唯一定义行锚点重做——
+注入失败不算门禁问题，先修坏样本。每组 md5 还原后绿。
+
+**验证**：自测 16/16（+4）；实库 check 全绿（48 Vue + 29 TS）；`npm run build` 完整链通过（5.7s）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1601,3 +1629,4 @@ zh/en 一致性门禁与新对账各报一条（均点名键与 locale），md5 
 | 2026-10-02 | **第六十九批·续（MySQL 5.7 升级门禁的基线自洽性门禁；§2.66）执行完成**：把第六十九批顺带核查时的**手工核对**（快照 vs V1~V19 迁移）固化为 `MySql57BaselineContractTest`（3 例）：① 基线快照建的表集合 == 版本 ≤ 基线的迁移建的表集合（双向 diff）；② 快照文件名版本 / `baselineVersion` / 迁移目录三方一致；③ 手动门硬编码数字（`migrationsExecuted` 期望、`MAX(version)`）== 实际迁移（总迁移 − 基线）—— 新增/删除迁移后忘了同步手动门即红（它平时不跑，问题会被拖很久）。解析器带下限断言防假绿，判据读取复用 `SourceText`。**接手时的发现（本批最重要的过程事实）**：该门禁在工作区处于未验证、未提交状态且**无法编译** —— `versions.count()`（`Set` 无此方法）+ lambda 内调用 `throws Exception` 的 `baselineVersion()`（受检异常不能从 `Predicate` 抛出）；修复后差值公式对「缺口位置」的行为正确（缺口在基线一侧分子分母同减、缺口在其上方差值变小 → 手动门红，正是期望行为）。**红判定 3 组实测**：快照加假表 → 红并点名；`baselineVersion("19")→"18"` → 红并精确给出「文件名 v19 vs baselineVersion(18)」；`migrationsExecuted 15→16` → 红并给出期望差值；三组注入前 grep 断言锚点生效、还原后 git status 核对干净。验证：修复后单类 **3/3 绿**（surefire 实证非退出码）；全量 **957 测试 0 失败**（本批 +3，5 skipped 环境门控）；纯测试改动**无需云端部署**。教训：接手未完成的工作，先把「能不能编译/能不能跑」变成事实，而不是假定它写完就是对的 |
 | 2026-10-02 | **第六十九批·续（抽查工具两处缺陷修复 + 好样本方向全量复跑；§2.67）执行完成**：① **表格静默损坏**（`4f92bb3` 引入）—— 坏样本表 DtoField 与 ExportStreaming 两行被挤成一行，`read -r a b c d` 第 4 变量吞掉剩余字段 ⇒ **ExportStreamingContractTest 自续四起从未被双向抽查**且 DtoField 注入混入脏文本（碰巧仍红）；工具对行格式零校验、损坏完全静默 ⇒ 拆回两行 + 新增**挤行检测**（`read ... extra`，非空即报 `TABLE-ROW-MALFORMED`；红判定：注入挤行 → 恰好报损坏 + exit 1，md5 还原一致）。② **msys2 参数路径转换根因**—— 好样本 `// 反例：...` PREPEND 到 Java 源顶部后 javac 报 [1,1]「需要 class」，列号反推出首行是**无 `//` 的裸文本**；字节级复现实锤：**Git Bash 调 native python.exe 时以 `/` 开头的 argv 被当 POSIX 路径转换，`//` 实测归一化为 `/`**（`MSYS2_ARG_CONV_EXCL='*'` 对照两行输出），⇒ `#`/`--` 行从未受影响、`//` 行（Java/TS 样本）注入被改写 —— **§2.65「首跑红、复跑绿」悬案就此归因收口**；脚本内 export 该变量（Linux 无副作用），教训入跨项目记忆。③ ExportStreaming 坏样本改 `getOutputStream()`→`getOutputStream ()`（加空格：编译合法 + contains 变 false ⇒ **断言红而非编译红**）。④ 纳入 `MySql57BaselineContractTest`（§2.66）双向两行。**结果：坏样本 24 红 / 0 没红 / 0 运行失败；好样本 24 绿 / 0 误报 / 0 运行失败（双向 exit 0）** —— 含上轮悬案的 3 个 `//` 行，contract 包 **24/24 门禁双向实测承重** |
 | 2026-10-02 | **第七十一批（前端 i18n 动态键盲区：ERROR_CODE_KEYS 纳入目录对账；§2.68）执行完成**：对 web 侧 build 链门禁做覆盖面对账，发现 `errorMessage.ts` 的 `t(registeredKey ?? fallbackKey)` 动态调用使 `ERROR_CODE_KEYS`（11 个错误文案键）**不被任何静态校验覆盖**（vue-tsc 不查 string、静态 t() 正则不匹配、catalog 删键无告警 ⇒ 运行时显示原始键名）——错误文案是所有失败路径的必经出口，属结构性缺口；同族动态键（`resumeCompare.sectionType.*`/`import.step*`/`resumeEditor.*`）登记为候选，本批先收口注册表现成的 `errors.*`。修复：`check-i18n.mjs` 新增 `collectErrorCodeRegistryKeys`（行首锚定）+ `findDynamicKeyFailures`（zh/en 对账 + **minKeys 规模自检**防空转）并接入 run()；自测 +2（12/12）。**红判定①**：en-US 删 `errors.conflict` → 既有 zh/en 门禁与新对账**各报一条**（均点名键与 locale），恢复后绿。**⚠ 红判定②首版假绿被当场抓出**：整表注释 11 键（模拟解析失效）→ 仍绿——首版正则缺行首锚，注释行（行尾与真实键行相同的形态）照常解析 ⇒ 修正则 + 自测样本改为该危险形态 → 重做红（`parsed 0 keys (expected >= 10)`）→ 恢复后绿。**教训：SourceText「注释污染」教训对前端脚本同样适用；第一版判据不可信，红判定不是仪式而是必需**。验证：实库 check:i18n 全绿（48 Vue + 29 TS）；`npm run build` 完整链通过（9.9s） |
+| 2026-10-02 | **第七十二批（动态键家族 2~4 纳入 i18n 对账；§2.69）执行完成**：三家族取值域全部落到机器可读来源 —— `resumeCompare.sectionType.*` ← `SectionChangeType` 联合类型、`import.step1..N` ← 模板 `v-for="step in 4"`（先断言模板串仍在用，防 UI 下线后 v-for 残留误报）、`resumeEditor.*` ← 全部 `message('literal'` 调用（定义行抹白后统计）。**口径**：errors 是注册表型（minKeys=10），三新家族是使用处型（minKeys=0，功能下线键集自然为空，不误报）。**健全性自检首跑即抓到真实形态缺口**：`removeSimpleItem` 三元链构造键后动态传参（`message(key,…)`），字面量收集覆盖不到 ⇒ 按「键集可静态枚举」哲学静态化为三分支字面量调用（行为等价），此后 `otherCalls>0` 即红。**红判定三家族各一**：① en 删 sectionType.CHANGED → 既有门禁+新对账各一条；② en 删 import.step3 → 同构双报；③ 注入 `message('ghostAuditKey')`+`message(undefined)` → 三条（zh/en 缺键 + 非字面量自检）；③ 首次注入锚点不唯一 INJECT-FAILED（workItem 多处调用），按纪律换唯一定义行锚点重做。各组 md5 还原后绿。验证：自测 16/16（+4）；实库 check 全绿；`npm run build` 完整链通过（5.7s） |
