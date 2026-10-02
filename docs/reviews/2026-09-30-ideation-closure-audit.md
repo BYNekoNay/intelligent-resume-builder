@@ -1149,6 +1149,52 @@ DTO 契约变更（含前端类型与中英文案），属产品文案层；当�
 `AiTaskPublicFailureCopyContractTest`（新增）、`AiTaskService` / `ExportService` /
 `GlobalExceptionHandler`（接入）、`docs/05` §1.3「失败文案的公开边界」、`docs/08` §6 上游细节日志。
 
+### 2.63 安全头的下发可达性门禁：把「零覆盖的安全承诺」与一处刻意不对称固定住（2026-10-02 第六十九批·续）
+
+起因：§4 留观项「镜像内 `web/nginx.conf` 不含 `security-headers.conf` 片段 —— 片段的单一来源需一次设计取舍」。
+
+**先确认事实**（不凭注释判断）：
+
+| 事实 | 证据 |
+| --- | --- |
+| **镜像内实际生效的是 `web/nginx.conf`** | `web/Dockerfile:12` `COPY nginx.conf /etc/nginx/conf.d/default.conf`；`deploy/nginx/web.conf` 顶部注释亦自称「部署侧同步副本」 |
+| 镜像**拿不到** `deploy/nginx/` 下的片段 | compose `web.build.context: ../web` ⇒ 注释里给的理由是真实的 |
+| **4 条安全头在全套测试里零覆盖** | `grep -rl "security-headers\|X-Content-Type-Options" server/src/test/java` → **0 命中**；`snippets` 同样 0 命中 |
+
+⇒ 也就是说：「每条对外配置都真的下发了那 4 条头」**没有任何门禁**，而「容器版由外层 `edge` 兜住」
+只是注释里的**假设**。
+
+**取舍（记录为决策）**：**保留不对称，不做 build-context 重构**。合并成单一来源需要把 compose 的
+build context 提到仓库根并调整 Dockerfile 路径，而容器拓扑在当前环境**未用于生产**，代价与收益不成比例；
+且该不对称本身**无实际影响**（`edge → web → api` 中最外层 edge 已下发）。→ 写进 `docs/08`。
+
+**新增门禁 `SecurityHeaderDeliveryContractTest`（5 例）**：
+
+1. **片段完整性**：4 条头一条不少、且带 `always`（少一条就是少一层防护，没有任何其它测试会报警）；
+2. **server 级**：每份对外配置（`host.conf` / `web.conf` / `edge.conf` / `edge-ip-test.conf.template`）都必须在
+   `server` 级 include 一次（实现：先移除所有 location 块，再断言剩余文本含 include）；
+3. **继承陷阱**（真正会静默失效的一条）：凡**自带 `add_header` 的 `location`** 必须在该 location 内再
+   include 一次 —— 加一条 `Cache-Control` 就会让该 location 的 4 条安全头**全部失效**，
+   而 `nginx -t` 照样通过、探针也看不见；
+4. **镜像内配置不得 include 镜像里不存在的文件** —— 挡住「为了消除不对称而给 `web/nginx.conf` 补
+   `include snippets/...` → 镜像构建照样成功，但**容器启动时 nginx 直接退出**」这一类
+   构建期与全部自动化都看不见的失败；
+5. **include 指向真实文件**：每个 `include snippets/X` 必须对应仓库里存在的 `deploy/nginx/X`
+   （拼错即 `nginx -t` 失败、reload 被拒）。
+
+实现细节：用 **`SourceText` 先抹白注释再解析** —— 本项目注释里大量出现 `location` / `add_header`
+字样，不剥注释会把块解析带偏（这是第六十六批那个工具的**第二个**用户）；块解析用大括号配平 +
+词边界匹配 `location`，并带**解析下限断言**（location 数 ≥ 6、include 数 ≥ 6），
+防「解析失效 ⇒ 门禁假绿」——正是第六十五批那类教训。
+
+**红判定（双注入，实测）**：① 给 `edge.conf` 的 `location /` 加一条自有 `add_header` 但不补 include
+→ 继承陷阱用例红；② 给 `web/nginx.conf` 补 `include snippets/security-headers.conf` → 镜像用例红。
+两条**各响一次**（`Failures: 2`），md5 校验恢复。
+
+**验证**：该门禁 **5/5 绿**；全量测试 0 失败。
+
+产物：`SecurityHeaderDeliveryContractTest`（新增）、`docs/08`（「安全响应头交付契约」+ 不对称取舍）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1267,7 +1313,7 @@ DTO 契约变更（含前端类型与中英文案），属产品文案层；当�
   2. **架构方向类**（§2.10 与 §2.11 归并）：投递状态机 / 模板 / 沟通 / 导入 / 模式 / 资料类型多 runtime 登记、ATS/面试 schema 重复维护、全量类型化配置、跨运行时时间契约、AI 任务恢复收件箱、导入来源追溯、PDF 对象存储、AI 提供者路由、投递流水线契约——当前规模属过度工程边界，留待真实需求。
   3. **两项证据化留观**：a) JD 解析平铺 `contains` 的误命中（有真实案例再评估）；b) DOCX 展开量上限（POI 防护 + 5MB 入口 + 15s 超时已覆盖）。
   4. **~~失败消息「公开文案接缝」~~**（对客户端只暴露稳定文案，而非 provider 原文）—— ✅ **第六十九批已完成**（见 §2.62）：AI 任务/导出两条链路与出错信封均已接 `PublicFailureCopy`，原文改为记 WARN 日志（带 traceId）；「把失败类别放进响应、让前端按类别本地化」作为产品文案层项单独登记。
-  5. **第三十二~三十八批新增留观**：a) ~~账号导出整份缓冲为 String~~ → **第三十八批已完成**（改流式写出并把序列化移出事务：`-Xmx128m` 上 12.2MB 响应由 OOM 变为可服务 18.41MB，见 §2.31）；b) 导出文档本身无体积上限（是否给账号数据/导出文档设上限或分片，属产品口径）；c) ~~静态资源压缩~~ → **第三十五批已完成**（三份 nginx 配置开启 gzip 并补哈希产物长缓存，见 §2.28）；d) 镜像内 `web/nginx.conf` 不含 `security-headers.conf` 片段（构建上下文为 `web/`），其与部署侧「同步副本」多出 4 处 include —— 公网响应由 `edge` 统一下发安全头，故无影响，但片段的单一来源需一次设计取舍（见 §2.28 末段）。
+  5. **第三十二~三十八批新增留观**：a) ~~账号导出整份缓冲为 String~~ → **第三十八批已完成**（改流式写出并把序列化移出事务：`-Xmx128m` 上 12.2MB 响应由 OOM 变为可服务 18.41MB，见 §2.31）；b) 导出文档本身无体积上限（是否给账号数据/导出文档设上限或分片，属产品口径）；c) ~~静态资源压缩~~ → **第三十五批已完成**（三份 nginx 配置开启 gzip 并补哈希产物长缓存，见 §2.28）；d) ~~镜像内 `web/nginx.conf` 不含 `security-headers.conf` 片段~~ → **第六十九批已收口**（见 §2.63）：**刻意保留不对称**（合并需把 compose 的 build context 提到仓库根，而容器拓扑未用于生产，代价与收益不成比例；且公网响应由 `edge` 统一下发，无实际影响），改为**用门禁固定住**并补上此前完全缺失的安全头下发门禁（`SecurityHeaderDeliveryContractTest`）。
 - 持续留观：`web/e2e/ats-ai.spec.ts` 在第十三批出现过 1 次偶发失败（尚无第二次复现，继续留观）。
 - ~~`web/e2e/applications-edit.spec.ts`（「编辑投递时只发 1 次版本列表请求」）偶发失败~~ → **第二十九批已按登记口径排查并修复**（第二次复现于纯文档提交的 CI run 36768442619，head 900f5c1）：根因是真实前端竞态（非测试问题），详见 §2.22；同时把该用例的竞态窗口用「延迟选项响应」固化，修复前稳定失败、修复后稳定通过。
 - **CI runner 迁移预检（2026-10-01）**：GitHub 公告 `ubuntu-latest` 将于 **10/19–11/19 渐进迁移到 Ubuntu 26.04**（默认 JDK 17→25、Node 22→24、MySQL 8.0→8.4，并移除若干工具；官方建议先在 `ubuntu-26.04` 上显式验证）。已用临时探针分支（`workflow_dispatch` 显式触发，**验证后已删除**）把 5 个 job 全部切到 `ubuntu-26.04` 实跑：**CI 与功能回归双绿**（server 测试 / web 构建 + Playwright Chromium / MySQL 8.0 容器 / CJK 字体 apt / pdf-service Puppeteer 渲染全部通过）——结论：**本次迁移对本仓无破坏，无需 pin 到 24.04**；顺带把 `actions/setup-python` 由 v5 升到 v7（v5 基于已被 GitHub 移除的 Node 20，运行时被强制替换并产生弃用告警）。
@@ -1358,3 +1404,4 @@ DTO 契约变更（含前端类型与中英文案），属产品文案层；当�
 | 2026-10-02 | **第六十八批（D2 阶段 2 落地：B 档最小快照 + 补行级端到端用例；§2.60 扫描新增项）执行完成**：`DECISION-BRIEF` D2 的阶段 2 此前卡在「快照口径待确认」，本轮按最推荐口径实施并**否决了两处初版设想**：① 「保留摘要前 200 字」**非幂等**（同语句内从即将清空的字段派生，重跑源已空）且摘要可能含 PII；② 「只留键名」需把动态 JSON 文本写回 JSON 列，而 **MySQL 的 `CAST(? AS JSON)` 解析成对象、H2 的 `CAST('{"a":1}' AS JSON)` 得到 JSON 字符串值 `"{\"a\":1}"`**（要 `'...' FORMAT JSON` 才是对象）⇒ 为审计辅助信息引入方言分支不划算，收敛为常量表达式 `JSON_OBJECT('__purged', TRUE)`。**顺带修正一处 PII 遗漏**：初版漏清 `career_material.source_text`（MEDIUMTEXT 导入原文）。**补上阶段 1 残留**：新增 `RetentionPurgeIntegrationIT`（造真实行：user/resume/resume_version/career_material/resume_material_reference），断言行级最终状态（A 档真删、B 档真快照且外键仍成立、未超期不动、连跑两次逐字节一致）——**因为 `UPDATE ... WHERE id = ?` 在 0 行匹配时不求值 SET，不造真实行就验证不了 JSON 写入**（上面的 H2 方言问题正是这样暴露的）。**新增门禁 2 条**：快照语句必须 `id = ? AND deleted_at IS NOT NULL`；**A/B 两极必须覆盖同一份引用者集合**（引入 `EXISTS` 极性后清单变两处）。**红判定 3 轮实测**：去软删限定 → 1 红；从 B 档移除一个 `EXISTS` → 1 红且给出差集；候选 SQL 漏项 → 1 红；均 md5 恢复（其中第 2 轮**首次注入因锚点写错而未生效**，查明是坏样本没注入成功而非门禁失效——**门禁没红时先怀疑坏样本**）。验证：retention 相关 21 项绿；全量 **935 测试 0 失败**（本批 +9）。文档：`docs/04` §7.1 两行改「已实施」、`docs/07` §5.10、`docs/08` §9.6、方案 §4 注/§7、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2。**残留**：`resume`/`job_description`（阶段 2b，需先处理间接引用）与账户侧（阶段 3） |
 | 2026-10-02 | **第六十八批·续（D2 阶段 2b：`resume` / `job_description` 纳入同一范式；§2.61 扫描新增项）执行完成**：`resume` 引用仅 1 处（`resume_version.resume_id`）且**只有 `title`、无大字段 ⇒ 无 B 档**，被引用者原样保留；`job_description` 8 处引用、B 档把 `jd_text` **仅超长时**截断到 197 + `...`。**「间接引用」不需要特殊处理** —— 方案 §3 标注的风险（先引用版本、再由版本指向简历）**由分档设计本身消解**：B 档只改内容**不删行** ⇒ FK 始终成立、直查即覆盖，无需传递闭包。**第二处非幂等陷阱**：无条件截断+追加省略号会让**短文本**越跑越长（红判定实测得 `…MySQL。......` 两个省略号）⇒ 写成 `CASE WHEN CHAR_LENGTH(jd_text) > 200 THEN CONCAT(SUBSTRING(jd_text,1,197),'...') ELSE jd_text END` 的**不动点**。**顺带更正方案文档事实错误**：§1 误把 `ai_task` 列为 `job_description` 的引用者（该表无 `job_description_id` 列），按迁移逐条核对 + 门禁复核后更正为 8 处。**新增门禁** `jobDescriptionTruncationIsAFixedPoint`；**红判定**改无条件截断 → **2 条同时红**（静态门禁 + 端到端用例）。验证：retention 相关 27 项绿；全量 **941 测试 0 失败**（本批 +6）。文档：`docs/04` §7.1 第四行改「已实施」、`docs/07` §5.10、`docs/08` §9.6、方案 §1/§4/§6-G6/§7、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2。**残留：仅账户侧（阶段 3）** |
 | 2026-10-02 | **第六十九批（失败消息的「公开文案接缝」；§2.62 扫描留观项）执行完成**：先取证确认泄漏真实存在 —— `ai_task.error_message` / `export_task.error_message` 落的是 provider/异常**原文**，而两字段被原样放进 `AiTaskStatusResponse` / `ExportTaskStatusResponse` 且前端**直接渲染**（`web/src/api/ai.ts:245`、`ExportView.vue:132`、`CommunicationView.vue:152` 等），信封层也直接回 `exception.getMessage()` ⇒ 模型名/HTTP 码/上游错误体/内部字节上限到达终端用户。**关键发现：设计意图早已存在** —— 面试路径的 `AiFailureInfo` 自始只暴露 `messageCode`，本次只是把该口径补到另两条链路。**修复**：新增 `PublicFailureCopy`（复用已有 `FailureCategoryClassifier`，类别映射用**穷尽 switch**，漏配即编译失败）并接入三个装配点；原文改记 WARN 日志 `code=…, traceId=…, raw=…`（库中两列亦保留）；只改会夹带上游细节的 50002/50003，其余码的中文用户文案原样保留；体积超限保留可行动文案、去掉内部字节数。**既有用例抓到我的过度映射**：`retry` 会清空 `error_message`，我把 `null` 也映射成文案 ⇒「无错误」变「有错误」，`AiTaskServiceTest`/`ExportServiceTest` 同时转红 ⇒ 修正为**状态响应 `null` 保持 `null`**（只有信封必有文案）并写进门禁。**门禁**：`PublicFailureCopyTest`（6 例，含"14 个敏感片段一个都不许残留"+类别穷尽性）、`AiTaskPublicFailureCopyContractTest`（2 例，**行为级**走一遍 `toResponse`）。**红判定**：装配点回退为直传原文 → 转红且失败信息直接展示泄漏内容，md5 恢复。验证：全量 **949 测试 0 失败**（+8）。文档：`docs/05` §1.3、`docs/08` §6；报告 §4 该留观项标记完成 |
+| 2026-10-02 | **第六十九批·续（安全头的下发可达性门禁；§2.63 扫描留观项收口）执行完成**：先确认事实（镜像内实际生效的是 `web/nginx.conf`（`web/Dockerfile:12` COPY）、compose `web.build.context: ../web` 使镜像拿不到 `deploy/nginx/` 的片段、**4 条安全头在全套测试里零覆盖**）⇒「每条对外配置都真的下发了那 4 条头」此前**没有任何门禁**，「容器版由 edge 兜住」只是注释里的假设。**取舍（记录为决策）**：**保留不对称、不做 build-context 重构**（合并需把 compose build context 提到仓库根并调 Dockerfile 路径，而容器拓扑未用于生产，代价与收益不成比例；公网响应由 `edge` 统一下发、无实际影响）→ 写进 `docs/08`。**新增 `SecurityHeaderDeliveryContractTest`（5 例）**：片段完整性（4 条头 + `always`）／每份对外配置 server 级 include／**继承陷阱**（自带 `add_header` 的 location 必须再 include 一次 —— 加一条 `Cache-Control` 就让该 location 的安全头全没，而 `nginx -t` 通过、探针看不见）／**镜像内不得 include 镜像里不存在的片段**（挡住「为消除不对称而补 include → 容器启动即崩」）／include 必须指向真实文件。实现用 `SourceText` 先抹白注释再解析（注释里大量 `location`/`add_header` 字样），并带解析下限断言防假绿。**红判定双注入**：给 `edge.conf` 的 location 加自有 `add_header` 不补 include → 红；给 `web/nginx.conf` 补片段 include → 红；两条各响一次（`Failures: 2`），md5 恢复。验证：该门禁 5/5 绿；全量测试 0 失败 |
