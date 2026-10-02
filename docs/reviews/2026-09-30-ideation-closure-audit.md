@@ -1060,6 +1060,40 @@ nginx/systemd 那两条 B 类断言抓的是「**仓库改对了、环境是旧�
 `AppObservability`（+`retention_purge_snapshotted`）、`RetentionPurgeIntegrationIT`（新增，5 例）、
 `RetentionPurgeServiceTest` / `RetentionPurgeRepositorySchemaTest` / `RetentionPolicyContractTest`（更新）。
 
+### 2.61 D2 阶段 2b：把 `resume` / `job_description` 纳入同一范式（2026-10-02 第六十八批·续）
+
+**口径**（四个资源至此全覆盖）：
+
+| 资源 | 引用处数 | A 档 | B 档 |
+| --- | --- | --- | --- |
+| `resume` | 1（`resume_version.resume_id`） | 物理删除 | **无** —— 只有 `title`，无大字段 ⇒ 被引用者**原样保留** |
+| `job_description` | 8 | 物理删除 | `jd_text` **仅超长时**截断到 197 + `...`；`parsed_keywords_json` 保留（非 PII） |
+
+**「间接引用」不需要特殊处理** —— 这是方案 §3 标注的风险（「先引用 `resume_version`、再由版本指向简历」），
+本轮实测**由分档设计本身消解**：B 档只改内容、**不删行** ⇒ 那条 FK 永远成立，直查即可覆盖。
+不需要传递闭包查询，也不需要额外的递归。
+
+**截断必须是不动点**（第二处「非幂等」陷阱，与阶段 2 的「保留摘要」同类）：
+「无条件截断 + 追加省略号」对**本来就短于上限**的文本，每次执行都会更长一点 —— 红判定实测拿到
+`招聘后端实习生，熟悉 Java 与 MySQL。......`（**两个**省略号）。故写成
+`CASE WHEN CHAR_LENGTH(jd_text) > 200 THEN CONCAT(SUBSTRING(jd_text, 1, 197), '...') ELSE jd_text END`：
+结果长度恒为 200，第二次 `> 200` 不再成立 ⇒ 内容不变（不动点）。
+
+**顺带更正方案文档一处事实错误**：方案 §1 的 `job_description` 引用清单误列了 `ai_task` —— 该表
+**没有** `job_description_id` 列（按迁移逐条核对 + 门禁复核后更正为 8 处）。
+⇒ 也再次说明**判据取自机器可读来源**（门禁直接从迁移反查外键）的价值：文档多列/少列都不会
+影响实现正确性，而文档错误会被对照出来。
+
+**新增门禁**：`jobDescriptionTruncationIsAFixedPoint` —— 断言截断是条件式的、且截断点与上限错开 3 字符
+（否则结果会超过上限、第二次又变）。
+**红判定**：改成无条件截断 → **2 条同时红**（静态门禁 + 端到端用例，后者直接实证了非幂等的形态）。
+
+**验证**：retention 相关 **27 项绿**；全量 **941 测试 0 失败**（本批 +6，5 skipped 为环境门控）。
+文档：`docs/04` §7.1 第四行改「已实施」+ 分档口径注（含「间接引用」结论）、`docs/07` §5.10、
+`docs/08` §9.6、方案 §1/§4/§6-G6/§7/状态行、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2。
+
+**残留**：**仅账户侧（阶段 3）** —— 是否引入 7 天可撤销窗口 + `account_deletion_job`，需求本身待定。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）
@@ -1267,3 +1301,4 @@ nginx/systemd 那两条 B 类断言抓的是「**仓库改对了、环境是旧�
 | 2026-10-01 | **第六十六批（门禁假绿第二种形态：注释里的同名文本；§2.58 扫描新增项）执行完成**：把第六十五批发现的「门禁可假绿」**系统化排查** —— 22 个静态门禁里 **16 个**用 `contains(...)` 在文件全文上找 token。**实测取证**：把 `JdKeywordParser` 里真正消费 `app.job.jd-text.min-length` 的 `@Value` 去掉后，`ConfigConsumerContractTest` **仍然通过**（javadoc 里正好写着该键名）—— 而它守护的正是「声明即虚构」。**修复**：新增 `SourceText`（按扩展名抹白注释）+ 把 22 个门禁 **34 处** `Files.readString(x, UTF_8)` 统一为 `SourceText.read(x)`（含 `web/src/**` 的 TS/Vue）。两个由踩坑倒逼的设计：① **抹白（等长空白）而非删除** —— 删注释会缩短文本、让「`@Transactional` 后 300 字符内」这类**距离窗口**判据变紧而制造**假红**（实测把 `ExportStreamingContractTest` 由绿变红）；② **词法级扫描 + 保留字符串字面量** —— 朴素 `indexOf("//")` 会截断 `"http://host"`，而不保留字符串会让 `@Scheduled(fixedDelayString="${app.x.y:1}")` 这类**真实消费点**丢失（假红）。**验证**：新增 `SourceTextTest` 6 例（含等长/换行守恒、字符串保留两个方向）；22 个门禁 **57 项全绿**；**红判定重做才成立**（首轮 JVM `EXCEPTION_ACCESS_VIOLATION` 崩溃，退出码 1 被误读成门禁失败 → 改看 `Failures:` 计数与失败文本后，得 `Failures: 1` 且点名该键，md5 恢复）；全量 **926 测试 0 失败**（本批 +6）；`docs/08` 增条目。**CI + Functional Regression 双绿**（head `420f1b4`，run 36953194382 / 36953194321） |
 | 2026-10-02 | **第六十七批（执行 E1：模型链移除 `kimi-k3`；§2.59 扫描新增项）执行完成**：`kimi-k3` 拒绝 `temperature` 而本应用每次请求都带它 ⇒ 必然 400、是链上纯失败跳转节点。按 `DECISION-BRIEF` E1「下次部署窗口顺手可做」执行：部署机 `app/api/.env` 去掉 `,kimi-k3`（**diff 恰 1 行**、改前 `cp -a` 备份）并重启。**运行时实测**：启动日志 `modelChain=[…7 个…]`（无 kimi）、指标 `resume_ai_model_chain_available **7.0**`（原 8）、readiness UP、探针 **17/17**、全量黑盒回归（`FUNCTIONAL_AI_LIVE=true`）**4 套件全 PASS 0 失败 0 跳过**（7 类 AI 任务真实跑通）。**顺带证实一个从未被验证的假设**：同机 `app/api/.env` 与 `live-ai.env` 都写着 `BAILIAN_MODEL_CHAIN` 且**已经漂移**（8 vs 7 个模型）；三条取证（`application.yml` 的 `spring.config.import`、单元 `WorkingDirectory`、单元无 `EnvironmentFile=` + 进程环境 **0 个** `BAILIAN_*`）判定**生效的只有 `app/api/.env`** ⇒ 只改 `live-ai.env` 完全无效。已在 `DEPLOYMENT_DIRECT` §4.4 写明并同步两文件取值。**新增探针第 8 节**「应用加载的配置 vs 磁盘 `.env`」（16 → **17** 项）—— 此前 B 类只抓「仓库改对了、环境是旧的」，这条抓**反方向**「文件改对了、进程是旧的（忘了重启）」；**红判定实测**：只改磁盘不重启 → 第 8 节 FAIL 且精确给出磁盘/进程差异，md5 恢复后 17/17。`OPEN-DECISIONS` E1 → **RESOLVED**；`DECISION-BRIEF` E1 → 已执行；`ADR-005` §7.4 同步；并提示 E2 的「25% 余量」口径需随链长重估 | 注：`DECISION-BRIEF` E2 已按「维持 `<= 2`（2/7≈29%）」落定 |
 | 2026-10-02 | **第六十八批（D2 阶段 2 落地：B 档最小快照 + 补行级端到端用例；§2.60 扫描新增项）执行完成**：`DECISION-BRIEF` D2 的阶段 2 此前卡在「快照口径待确认」，本轮按最推荐口径实施并**否决了两处初版设想**：① 「保留摘要前 200 字」**非幂等**（同语句内从即将清空的字段派生，重跑源已空）且摘要可能含 PII；② 「只留键名」需把动态 JSON 文本写回 JSON 列，而 **MySQL 的 `CAST(? AS JSON)` 解析成对象、H2 的 `CAST('{"a":1}' AS JSON)` 得到 JSON 字符串值 `"{\"a\":1}"`**（要 `'...' FORMAT JSON` 才是对象）⇒ 为审计辅助信息引入方言分支不划算，收敛为常量表达式 `JSON_OBJECT('__purged', TRUE)`。**顺带修正一处 PII 遗漏**：初版漏清 `career_material.source_text`（MEDIUMTEXT 导入原文）。**补上阶段 1 残留**：新增 `RetentionPurgeIntegrationIT`（造真实行：user/resume/resume_version/career_material/resume_material_reference），断言行级最终状态（A 档真删、B 档真快照且外键仍成立、未超期不动、连跑两次逐字节一致）——**因为 `UPDATE ... WHERE id = ?` 在 0 行匹配时不求值 SET，不造真实行就验证不了 JSON 写入**（上面的 H2 方言问题正是这样暴露的）。**新增门禁 2 条**：快照语句必须 `id = ? AND deleted_at IS NOT NULL`；**A/B 两极必须覆盖同一份引用者集合**（引入 `EXISTS` 极性后清单变两处）。**红判定 3 轮实测**：去软删限定 → 1 红；从 B 档移除一个 `EXISTS` → 1 红且给出差集；候选 SQL 漏项 → 1 红；均 md5 恢复（其中第 2 轮**首次注入因锚点写错而未生效**，查明是坏样本没注入成功而非门禁失效——**门禁没红时先怀疑坏样本**）。验证：retention 相关 21 项绿；全量 **935 测试 0 失败**（本批 +9）。文档：`docs/04` §7.1 两行改「已实施」、`docs/07` §5.10、`docs/08` §9.6、方案 §4 注/§7、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2。**残留**：`resume`/`job_description`（阶段 2b，需先处理间接引用）与账户侧（阶段 3） |
+| 2026-10-02 | **第六十八批·续（D2 阶段 2b：`resume` / `job_description` 纳入同一范式；§2.61 扫描新增项）执行完成**：`resume` 引用仅 1 处（`resume_version.resume_id`）且**只有 `title`、无大字段 ⇒ 无 B 档**，被引用者原样保留；`job_description` 8 处引用、B 档把 `jd_text` **仅超长时**截断到 197 + `...`。**「间接引用」不需要特殊处理** —— 方案 §3 标注的风险（先引用版本、再由版本指向简历）**由分档设计本身消解**：B 档只改内容**不删行** ⇒ FK 始终成立、直查即覆盖，无需传递闭包。**第二处非幂等陷阱**：无条件截断+追加省略号会让**短文本**越跑越长（红判定实测得 `…MySQL。......` 两个省略号）⇒ 写成 `CASE WHEN CHAR_LENGTH(jd_text) > 200 THEN CONCAT(SUBSTRING(jd_text,1,197),'...') ELSE jd_text END` 的**不动点**。**顺带更正方案文档事实错误**：§1 误把 `ai_task` 列为 `job_description` 的引用者（该表无 `job_description_id` 列），按迁移逐条核对 + 门禁复核后更正为 8 处。**新增门禁** `jobDescriptionTruncationIsAFixedPoint`；**红判定**改无条件截断 → **2 条同时红**（静态门禁 + 端到端用例）。验证：retention 相关 27 项绿；全量 **941 测试 0 失败**（本批 +6）。文档：`docs/04` §7.1 第四行改「已实施」、`docs/07` §5.10、`docs/08` §9.6、方案 §1/§4/§6-G6/§7、`OPEN-DECISIONS` D2、`DECISION-BRIEF` D2。**残留：仅账户侧（阶段 3）** |
