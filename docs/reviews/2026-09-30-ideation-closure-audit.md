@@ -1415,6 +1415,28 @@ zh/en 一致性门禁与新对账各报一条（均点名键与 locale），md5 
 
 **验证**：自测 16/16（+4）；实库 check 全绿（48 Vue + 29 TS）；`npm run build` 完整链通过（5.7s）。
 
+### 2.70 前端门禁承重性抽查：双向实测 + 抓到 check-draft-fields 的注释污染误报（2026-10-02 第七十三批 · 质量线收尾）
+
+**动机**：后端 contract 包已双向实测承重（§2.64~§2.67），web 侧两个 build 链门禁
+（`check-i18n.mjs` / `check-draft-fields.mjs`）从未被抽查。新增 `scripts/audit-web-gates.sh`
+（与后端版同一骨架：锚点断言 / md5 还原 / 「红 = 退出码非 0 且输出含 FAILED」的断言区分），
+对两个门禁的判据面做双向抽查。
+
+**坏样本方向（9 行全红，0 异常）**：键一致性（en 删键）、重复键、模板硬编码文案、
+运行时 message 赋值、静态 t() 键缺失、动态键幽灵键（§2.68）、字段标签漏配、
+draftFields zh 缺键、枚举值英文化 —— 两个门禁的**全部判据面**逐条实测承重。
+
+**⚠ 好样本方向抓到真实误报缺陷**：往 `FIELD_LABEL_KEYS` 对象体内注入注释行
+`// ghostAuditField: 'draftFields.ghostAudit',` → 门禁**红**——`parseStringMap` 的键值正则
+**不区分代码与注释**，把注释里的键解析进映射，随后因 `draftFields.ghostAudit` 在目录中不存在
+而报缺失。**修复**：新增 `stripObjectComments`（块注释等长抹白 + 行注释按「左侧引号闭合」判定，
+值内 `http://` 不受影响），`parseStringMap` 与 `parseDraftFields` 统一接入；自测 +1（注释行/块注释/
+URL 三形态，6/6）。修复后重跑：坏 9 红 + 好 3 绿 + `npm run build` 完整链通过。
+
+**质量线到此收口**：后端 24 门禁 + 前端 2 门禁 + 部署探针 17 项，全部经双向抽查实证承重；
+本轮抽查再次实证「注释污染」是跨语言、跨工具链的通用失败形态（Java javadoc / YAML / nginx /
+TS 对象字面量四处均曾出现）。
+
 ## 3. 已闭环（不再重复提报）
 
 - 旧诊断 O-01~O-14 全部闭环（ideation 自带表格 + 本次复核一致）

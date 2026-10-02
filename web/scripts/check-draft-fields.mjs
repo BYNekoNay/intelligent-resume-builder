@@ -41,6 +41,21 @@ export const SCHEMA_FIELDS = [
   'issuer', 'credentialId', 'url', 'date', 'organization', 'provider', 'publisher', 'duration',
 ]
 
+/** 剥除对象体源码中的注释（键值正则不区分代码与注释，注释里的 `键: '值'` 会被误解析
+ *  —— 2026-10-02 抽查实证：好样本方向的注释键触发了误报）。块注释等长抹白保位置；
+ *  行注释按「左侧引号是否闭合」判定（值内 `http://` 这类 `//` 不受影响）。 */
+function stripObjectComments(body) {
+  const withoutBlock = body.replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, ' '))
+  return withoutBlock.split('\n').map(line => {
+    let inString = false
+    for (let i = 0; i < line.length - 1; i++) {
+      if (line[i] === "'") inString = !inString
+      if (!inString && line[i] === '/' && line[i + 1] === '/') return line.slice(0, i)
+    }
+    return line
+  }).join('\n')
+}
+
 /** 从对象字面量里抽取 `键: '值'` 映射（用于源码静态解析，不做完整 TS 解析）。
  *  注意：字段表是**一行多个键**（`name: '...', title: '...'`），故不能要求键在行首。 */
 export function parseStringMap(source, marker) {
@@ -49,7 +64,7 @@ export function parseStringMap(source, marker) {
   const open = source.indexOf('{', start)
   const close = source.indexOf('\n}', open)
   if (open === -1 || close === -1) throw new Error(`${marker} 的对象字面量不完整`)
-  const body = source.slice(open + 1, close)
+  const body = stripObjectComments(source.slice(open + 1, close))
   const map = {}
   for (const match of body.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*'([^']+)'/g)) {
     map[match[1]] = match[2]
@@ -65,7 +80,7 @@ export function parseDraftFields(source, index) {
   }
   if (cursor === -1) throw new Error(`未找到第 ${index + 1} 个 draftFields 块`)
   const close = source.indexOf('\n    },', cursor)
-  const body = source.slice(cursor, close === -1 ? undefined : close)
+  const body = stripObjectComments(source.slice(cursor, close === -1 ? undefined : close))
   const map = {}
   for (const match of body.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*'([^']*)'/g)) {
     map[match[1]] = match[2]
