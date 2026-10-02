@@ -80,7 +80,7 @@ class AccountPurgeRepositorySchemaTest {
     void systemSeedTemplatesSurviveAccountPurge() {
         String joined = String.join("\n", AccountPurgeRepository.PURGE_STATEMENTS);
         assertTrue(joined.contains("DELETE FROM communication_template WHERE user_id = ?"),
-                "communication_template 含 is_system=1 的共享种子行（16 行）——账户清扫只允许按 user_id "
+                "communication_template 含 is_system=1 的共享种子行（V23 共 14 行）——账户清扫只允许按 user_id "
                         + "删除用户自建模板，不带条件的 DELETE 会把全部用户的种子一起删掉");
     }
 

@@ -176,8 +176,9 @@ async function confirmDeleteAccount() {
   deleteMessage.value = ''
   try {
     await deleteAccount()
-    // 删号即数据主体要求清理：服务端删除账号数据，浏览器本地也不能留（完整简历草稿、
-    // 导入原文、文案草稿等），否则共享设备上仍可读到已删账号的 PII（docs/08 §9.6 口径）。
+    // 删号进入 7 天撤销窗口（D2 阶段 3）：服务端保留数据待恢复或清扫，但账号已停用、会话已全撤；
+    // 浏览器本地同样不能留（完整简历草稿、导入原文、文案草稿等），否则共享设备上
+    // 仍可读到该账号的 PII（docs/08 §9.6 口径）。窗口内恢复后这些本地数据不会自动回填。
     clearUserLocalData(auth.currentUser?.id)
     auth.setAccessToken(null)
     await router.replace({ name: 'login' })

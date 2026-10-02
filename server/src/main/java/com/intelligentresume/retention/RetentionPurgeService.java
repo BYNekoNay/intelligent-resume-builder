@@ -37,7 +37,7 @@ import java.util.function.ToIntFunction;
  *   <li>G3 单轮每资源每档最多 {@code batchSize} 行（一次调度各处理一批，不循环耗尽）；</li>
  *   <li>G4 删除前由 SQL 再判一次引用（{@code NOT EXISTS}/{@code EXISTS} 就在候选查询里），
  *       并捕获外键冲突降级跳过（TOCTOU 兜底）；</li>
- *   <li>G5 不碰 {@code user} 表（账户侧留待阶段 3）；</li>
+ *   <li>G5 不碰 {@code user} 表（账户级联删除由 {@link AccountPurgeService} 独立实现，见 D2 阶段 3）；</li>
  *   <li>G6 可观测：汇总日志 + {@code retention_purge_scanned/purged/skipped/snapshotted} 指标；</li>
  *   <li>G7 数值配置由 {@code NumericConfigurationValidator} 在启动时校验（0/负值即拒绝）。</li>
  * </ul>

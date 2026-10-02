@@ -17,7 +17,7 @@
 | 清扫作业 | **不存在**。全仓 `@Scheduled` 中与清理相关的只有两处：`AiTaskRetentionService`（AI 任务留存）、`ExportExpiryService`（导出文件过期）——**均不处理软删资源** |
 | 硬删仓储方法 | 无 `deleteByDeletedAt*` 之类方法 |
 | 账户侧 | `AuthService.deleteAccount` 是**同步**路径（停用 + 撤销会话 + 取消 AI/PDF 任务 + 撤回同意），**不存在** docs 描述的「7 天撤销窗口」 |
-| `account_deletion_job` 表 | `V1~V34` 中**不存在**（§7.2 的字段表是设计草案） |
+| `account_deletion_job` 表 | `V1~V34` 中**不存在**（§7.2 的字段表是设计草案）——第 74 批已建（V35），见 §7 阶段 3 |
 
 ### 1.1 引用面（决定「谁算被引用」）
 

@@ -1453,7 +1453,7 @@ TS 对象字面量四处均曾出现）。
 2. **@Enumerated 缺失**：`AccountDeletionJob.status` 未注解 `EnumType.STRING` → 默认 ORDINAL 写 0、读 `'PENDING'` 永不匹配 ⇒ **候选查询恒空、清扫静默不处理任何任务**（又一处「永远通过」形态，IT 的 purged=0 断言抓到）。
 3. **@Value 字段注入在 Mockito 单测不生效**：grace-days 改为构造参数注入（Spring 对 @Value 构造参数同样支持）。
 
-**静态红判定**：`AccountPurgeRepositorySchemaTest`（迁移反查 18 张 user_id 表 + 4 张经链表必须全覆盖 / communication_template 必须带 user_id 条件防误删 16 行系统种子 / 每表恰好一次）——注入「删去 ai_consent 的 DELETE」→ 2 红，md5 还原后绿。
+**静态红判定**：`AccountPurgeRepositorySchemaTest`（迁移反查 18 张 user_id 表 + 4 张经链表必须全覆盖 / communication_template 必须带 user_id 条件防误删系统种子（V23 共 14 行；首版误记 16 行—— IT 断言 >=16 曾靠其它测试残留的 NULL 用户行侥幸通过，本批更正为 >=14 并修正注释）/ 每表恰好一次）——注入「删去 ai_consent 的 DELETE」→ 2 红，md5 还原后绿。
 
 **验证**：定向 33/33 + 全量 **973 测试 0 失败**（本批 +16）；前端 `npm run build` 完整链通过。**同批环境修复**：WorkBuddy safe-delete shim 的 bulk-guard 状态文件损坏（全 NUL 字节）导致本机 `rm`/vite `emptyDir` 全面失败 —— 重写状态文件恢复（已记跨项目记忆）。
 

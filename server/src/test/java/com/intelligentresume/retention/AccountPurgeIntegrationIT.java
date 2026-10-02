@@ -167,10 +167,10 @@ class AccountPurgeIntegrationIT {
         assertThat(bystanderResumes).isEqualTo(1);
         Long bystanderSessions = d.queryForObject("SELECT COUNT(*) FROM interview_session WHERE user_id = ?", Long.class, bystander);
         assertThat(bystanderSessions).isEqualTo(1);
-        // 系统种子模板不被触碰（V23 种子 16 行，is_system=1）
+        // 系统种子模板不被触碰（V23 内置只读种子共 14 行，user_id NULL + is_system=1）
         Long seedTemplates = d.queryForObject(
                 "SELECT COUNT(*) FROM communication_template WHERE user_id IS NULL", Long.class);
-        assertThat(seedTemplates).isGreaterThanOrEqualTo(16);
+        assertThat(seedTemplates).isGreaterThanOrEqualTo(14);
         // 目标用户的自建模板被删
         Long victimTemplates = d.queryForObject(
                 "SELECT COUNT(*) FROM communication_template WHERE user_id = ?", Long.class, victim);
