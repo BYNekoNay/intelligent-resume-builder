@@ -210,6 +210,24 @@ export function collectRegistryTranslationKeys(source) {
     .map(match => match[1])
 }
 
+// 动态 t() 调用（如 errorMessage.ts 的 t(registeredKey ?? fallbackKey)）不被静态键校验覆盖：
+// catalog 删键时 vue-tsc 不报（string 类型）、静态 t() 正则不匹配、运行时直接显示原始键名。
+// 因此「动态键家族」必须有**静态注册表**，由本检查把注册表的每个键对账进两种语言的目录。
+// 行首锚定不可省：注释行 `// 40001: 'errors.x',` 的行尾与真实键行完全相同，
+// 无锚正则会把注释里的键照常解析（红判定实测假绿）——与 SourceText 的教训同源。
+export function collectErrorCodeRegistryKeys(source) {
+  return [...source.matchAll(/^\s*\d{5}:\s*'([A-Za-z0-9_.-]+)'\s*,?\s*$/gm)].map(match => match[1])
+}
+
+export function findDynamicKeyFailures(keys, locales, requiredLocales, { minKeys = 1 } = {}) {
+  if (keys.length < minKeys) {
+    return [`dynamic key registry parsed ${keys.length} keys (expected >= ${minKeys}) —— 解析可能已失效，本检查不得静默空转`]
+  }
+  return keys.flatMap(key => requiredLocales
+    .filter(locale => !locales.get(locale)?.has(key))
+    .map(locale => `missing ${locale} translation for ${key}（经动态 t() 调用消费，静态键校验覆盖不到）`))
+}
+
 function run() {
   // TC-2（2026-09-30）：审计范围从 .vue 扩展到 api/stores/composables 的 .ts ——
   // api 层硬编码中文曾 8+ 处绕过门禁。.ts 不是 SFC，findVisibleLiterals（模板检测）
@@ -263,6 +281,14 @@ function run() {
     for (const locale of requiredLocales) {
       if (!locales.get(locale)?.has(key)) failures.push(`src/navigation/registry.ts: missing ${locale} translation for ${key}`)
     }
+  }
+
+  // 动态键注册表对账（errorMessage.ts 的 t(registeredKey)）：错误文案是所有失败路径的必经出口，
+  // 键缺失时用户看到的是原始键名而不是文案。ERROR_CODE_KEYS 目前 11 键，规模下限防解析失效假绿。
+  const errorCodesSource = readFileSync(join(projectRoot, 'src', 'utils', 'errorCodes.ts'), 'utf8')
+  const errorCodeKeys = collectErrorCodeRegistryKeys(errorCodesSource)
+  for (const failure of findDynamicKeyFailures(errorCodeKeys, locales, requiredLocales, { minKeys: 10 })) {
+    failures.push(`src/utils/errorCodes.ts: ${failure}`)
   }
 
   if (failures.length) {

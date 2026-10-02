@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { collectRegistryTranslationKeys, collectStaticTranslationKeys, findLocaleKeyMismatches, findRuntimeLiterals, findVisibleLiterals, inspectCatalog } from './check-i18n.mjs'
+import { collectErrorCodeRegistryKeys, collectRegistryTranslationKeys, collectStaticTranslationKeys, findDynamicKeyFailures, findLocaleKeyMismatches, findRuntimeLiterals, findVisibleLiterals, inspectCatalog } from './check-i18n.mjs'
 
 test('rejects visible Chinese inside a structural tag line', () => {
   const source = '<template><button class="primary">保存</button></template>'
@@ -77,4 +77,28 @@ test('collects dynamic navigation registry translation descriptors', () => {
     'home.workflowResumeTitle',
     'home.workflowResumeDesc',
   ])
+})
+
+test('collects error-code registry keys and ignores non-registry lines', () => {
+  const source = `export const ERROR_CODE_KEYS: Readonly<Record<number, string>> = {
+  40001: 'errors.validation',
+  40902: 'errors.versionArchived',
+}
+// 99999: 'errors.inComment',  ← 注释行行尾与真实键行相同，无行首锚的正则会把它解析进来`
+  assert.deepEqual(collectErrorCodeRegistryKeys(source), ['errors.validation', 'errors.versionArchived'])
+  assert.deepEqual(collectErrorCodeRegistryKeys('export const EMPTY = {}'), [])
+})
+
+test('dynamic key failures point at the missing locale and key, and refuse to idle on a broken registry', () => {
+  const locales = new Map([
+    ['zh-CN', new Set(['errors.conflict'])],
+    ['en-US', new Set([])],
+  ])
+  assert.deepEqual(
+    findDynamicKeyFailures(['errors.conflict'], locales, ['zh-CN', 'en-US']),
+    ['missing en-US translation for errors.conflict（经动态 t() 调用消费，静态键校验覆盖不到）'],
+  )
+  assert.deepEqual(findDynamicKeyFailures(['errors.conflict'], locales, ['zh-CN']), [])
+  // 解析失效（0 键）必须报错而不是静默通过 —— 「永远通过」的检查最危险
+  assert.ok(findDynamicKeyFailures([], locales, ['zh-CN', 'en-US'], { minKeys: 10 })[0].includes('解析可能已失效'))
 })
