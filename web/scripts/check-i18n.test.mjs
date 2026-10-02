@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { collectErrorCodeRegistryKeys, collectRegistryTranslationKeys, collectStaticTranslationKeys, findDynamicKeyFailures, findLocaleKeyMismatches, findRuntimeLiterals, findVisibleLiterals, inspectCatalog } from './check-i18n.mjs'
+import { collectErrorCodeRegistryKeys, collectImportStepKeys, collectMessageWrapperKeys, collectRegistryTranslationKeys, collectSectionChangeTypeKeys, collectStaticTranslationKeys, findDynamicKeyFailures, findLocaleKeyMismatches, findRuntimeLiterals, findVisibleLiterals, inspectCatalog } from './check-i18n.mjs'
 
 test('rejects visible Chinese inside a structural tag line', () => {
   const source = '<template><button class="primary">保存</button></template>'
@@ -101,4 +101,43 @@ test('dynamic key failures point at the missing locale and key, and refuse to id
   assert.deepEqual(findDynamicKeyFailures(['errors.conflict'], locales, ['zh-CN']), [])
   // 解析失效（0 键）必须报错而不是静默通过 —— 「永远通过」的检查最危险
   assert.ok(findDynamicKeyFailures([], locales, ['zh-CN', 'en-US'], { minKeys: 10 })[0].includes('解析可能已失效'))
+})
+
+test('sectionType keys come from the SectionChangeType union type', () => {
+  const source = `export type SectionChangeType = 'UNCHANGED' | 'ADDED' | 'REMOVED' | 'CHANGED'`
+  assert.deepEqual(collectSectionChangeTypeKeys(source), [
+    'resumeCompare.sectionType.UNCHANGED',
+    'resumeCompare.sectionType.ADDED',
+    'resumeCompare.sectionType.REMOVED',
+    'resumeCompare.sectionType.CHANGED',
+  ])
+  // 类型定义被改名/删除时返回空（使用处型，minKeys=0 不误报），不得抛错
+  assert.deepEqual(collectSectionChangeTypeKeys('export type Other = 1'), [])
+})
+
+test('import.step keys follow the v-for bound and only when the template string is in use', () => {
+  const view = `<li v-for="step in 4" :key="step">{{ t(\`import.step\${step}\`) }}</li>`
+  assert.deepEqual(collectImportStepKeys(view), ['import.step1', 'import.step2', 'import.step3', 'import.step4'])
+  // 模板串不在使用（步骤 UI 下线）→ 不构造键，避免对已死的 v-for 误报缺键
+  assert.deepEqual(collectImportStepKeys('<li v-for="step in 4">{{ step }}</li>'), [])
+})
+
+test('message wrapper keys exclude the definition line and surface non-literal calls', () => {
+  const source = `function message(key, values) {
+  return t(\`resumeEditor.\${key}\`)
+}
+message('workItem', { index: 1 })
+message('undoRemoved', { label })
+`
+  const { keys, otherCalls } = collectMessageWrapperKeys(source)
+  assert.deepEqual(keys, ['resumeEditor.workItem', 'resumeEditor.undoRemoved'])
+  // 定义行被抹白后不计数；dynamicCall 变量传参（message({ label }) 之类）会计入 otherCalls
+  assert.ok(otherCalls >= 0)
+})
+
+test('non-literal message() calls are reported as an incomplete audit', () => {
+  const source = `const dynamicKey = 'workItem'\nmessage(dynamicKey, {})\nmessage('workItem', {})`
+  const { keys, otherCalls } = collectMessageWrapperKeys(source)
+  assert.deepEqual(keys, ['resumeEditor.workItem'])
+  assert.equal(otherCalls, 1)
 })

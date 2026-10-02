@@ -228,6 +228,37 @@ export function findDynamicKeyFailures(keys, locales, requiredLocales, { minKeys
     .map(locale => `missing ${locale} translation for ${key}（经动态 t() 调用消费，静态键校验覆盖不到）`))
 }
 
+// ---------- 动态键家族 2~4（第七十二批）：每个家族取值域都取自机器可读来源 ----------
+// 口径：errors 家族是「注册表型」（表空 = 门禁坏了）；以下三家族是「使用处型」
+// （使用存在才构造键，功能整体下线时键集自然为空，minKeys 恒传 0）。
+
+// 家族 2：CompareVersionsView 的 t(`resumeCompare.sectionType.${type}`)，
+// 取值域 = resumeDiff.ts 的 SectionChangeType 联合类型。
+export function collectSectionChangeTypeKeys(source) {
+  const match = source.match(/export type SectionChangeType\s*=((?:\s*'[^']+'\s*\|)*\s*'[^']+')/)
+  if (!match) return []
+  return [...match[1].matchAll(/'([^']+)'/g)].map(m => `resumeCompare.sectionType.${m[1]}`)
+}
+
+// 家族 3：ResumeImportView 的 v-for="step in N" + t(`import.step${step}`)。
+// 先确认模板串仍在使用（防止步骤 UI 下线后 v-for 残留造成误报），再按 N 构造 step1..stepN。
+export function collectImportStepKeys(source) {
+  if (!/\bt\(`import\.step\$\{step\}`\)/.test(source)) return []
+  const match = source.match(/v-for="step in (\d+)"/)
+  if (!match) return []
+  return Array.from({ length: Number(match[1]) }, (_, i) => `import.step${i + 1}`)
+}
+
+// 家族 4：ResumeEditorView 的 message(key, params) 包装 = t(`resumeEditor.${key}`)。
+// 定义行需抹白（否则 function message( 会混进调用计数）；返回 otherCalls 供
+// 「存在动态传参（非字面量键）→ 对账不完整」的健全性断言使用。
+export function collectMessageWrapperKeys(source) {
+  const withoutDefinition = source.replace(/\bfunction\s+message\s*\(/g, m => m.replace(/[^\n]/g, ' '))
+  const keys = [...withoutDefinition.matchAll(/\bmessage\('([A-Za-z]+)'/g)].map(m => `resumeEditor.${m[1]}`)
+  const otherCalls = [...withoutDefinition.matchAll(/\bmessage\((?!')/g)].length
+  return { keys, otherCalls }
+}
+
 function run() {
   // TC-2（2026-09-30）：审计范围从 .vue 扩展到 api/stores/composables 的 .ts ——
   // api 层硬编码中文曾 8+ 处绕过门禁。.ts 不是 SFC，findVisibleLiterals（模板检测）
@@ -289,6 +320,26 @@ function run() {
   const errorCodeKeys = collectErrorCodeRegistryKeys(errorCodesSource)
   for (const failure of findDynamicKeyFailures(errorCodeKeys, locales, requiredLocales, { minKeys: 10 })) {
     failures.push(`src/utils/errorCodes.ts: ${failure}`)
+  }
+
+  // 家族 2~4：动态 t() 模板字符串与包装函数（使用处型，minKeys=0 —— 功能下线时键集自然为空）
+  const resumeDiffSource = readFileSync(join(projectRoot, 'src', 'utils', 'resumeDiff.ts'), 'utf8')
+  for (const failure of findDynamicKeyFailures(collectSectionChangeTypeKeys(resumeDiffSource), locales, requiredLocales, { minKeys: 0 })) {
+    failures.push(`src/utils/resumeDiff.ts: ${failure}`)
+  }
+
+  const importViewSource = readFileSync(join(projectRoot, 'src', 'views', 'ResumeImportView.vue'), 'utf8')
+  for (const failure of findDynamicKeyFailures(collectImportStepKeys(importViewSource), locales, requiredLocales, { minKeys: 0 })) {
+    failures.push(`src/views/ResumeImportView.vue: ${failure}`)
+  }
+
+  const editorViewSource = readFileSync(join(projectRoot, 'src', 'views', 'ResumeEditorView.vue'), 'utf8')
+  const { keys: messageKeys, otherCalls } = collectMessageWrapperKeys(editorViewSource)
+  if (otherCalls > 0) {
+    failures.push(`src/views/ResumeEditorView.vue: message() 存在 ${otherCalls} 处非字面量键调用 —— 对账不完整（字面量解析覆盖不到），需人工核对`)
+  }
+  for (const failure of findDynamicKeyFailures(messageKeys, locales, requiredLocales, { minKeys: 0 })) {
+    failures.push(`src/views/ResumeEditorView.vue: ${failure}`)
   }
 
   if (failures.length) {
