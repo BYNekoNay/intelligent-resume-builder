@@ -13,7 +13,7 @@
 
     <groupId>com.intelligentresume</groupId>
     <artifactId>intelligent-resume-server</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.3.0</version>
     <name>intelligent-resume-server</name>
     <description>Intelligent Resume Builder API</description>
 

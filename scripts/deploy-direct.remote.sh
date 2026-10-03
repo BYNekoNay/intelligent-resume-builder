@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT=/opt/intelligent-resume
 SRC=$ROOT/src
 APP=$ROOT/app
-JAR_NAME=intelligent-resume-server-0.1.0-SNAPSHOT.jar
+JAR_NAME=intelligent-resume-server-0.3.0.jar
 
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 export PATH="$JAVA_HOME/bin:$PATH"

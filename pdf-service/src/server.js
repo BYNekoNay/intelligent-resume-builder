@@ -73,7 +73,7 @@ app.get('/health', async (_request, response) => {
   response.json({
     service: 'intelligent-resume-pdf-service',
     status: rendererReady && !capacity.draining ? 'UP' : 'DEGRADED',
-    version: '0.1.0',
+    version: '0.3.0',
     capabilities: ['pdf-render', `${TEMPLATE_CODES.size}-resume-templates`, 'ordered-resume-sections'],
     checks: [
       { capability: 'pdf-renderer', status: rendererReady ? 'UP' : 'DOWN' },

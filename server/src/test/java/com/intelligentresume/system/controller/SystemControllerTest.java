@@ -95,7 +95,7 @@ class SystemControllerTest {
 
         assertCheckOrderAndCapabilities(response.data());
         assertEquals("intelligent-resume-server", response.data().service());
-        assertEquals("0.1.0", response.data().version());
+        assertEquals("0.3.0", response.data().version());
         assertEquals("DEGRADED", response.data().status(), "密钥 UP 但模型链 DOWN，整体必须降级");
         assertEquals("UP", response.data().checks().get(1).status(), "密钥已配置");
         assertEquals("DOWN", response.data().checks().get(2).status(), "但没有可调度的模型");
