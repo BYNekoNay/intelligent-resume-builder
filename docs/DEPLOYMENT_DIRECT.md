@@ -69,7 +69,7 @@
 ├── src/                       上传的源码（构建用，保留以支持增量重建）
 ├── app/
 │   ├── api/
-│   │   ├── intelligent-resume-server-0.1.0-SNAPSHOT.jar
+│   │   ├── intelligent-resume-server-0.3.0.jar
 │   │   ├── .env               后端配置（600；后端从 CWD 读取）
 │   │   └── pdf-output/        PDF 导出落盘目录
 │   ├── web/                   nginx 静态根（保留 web.bak 供回滚）
