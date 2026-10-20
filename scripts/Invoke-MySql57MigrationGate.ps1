@@ -1,3 +1,8 @@
+# 本机 MySQL 5.7 迁移门禁（Windows / 本机已装 5.7 时使用）。
+#
+# 官方入口是 scripts/Invoke-PersistenceGate.sh：它在云服务器上跑两个口径
+# （mysql84 = 生产口径 V1→V36 全新安装；mysql57 = 存量升级 V19→V36）。
+# 本文件仅供「本机 3306 已有 5.7」的开发机做快速校验，且它假定本机有 mysql 客户端与管理员凭据。
 [CmdletBinding()]
 param()
 
@@ -36,6 +41,16 @@ FLUSH PRIVILEGES;
     $pushedLocation = $true
     & mvn test '-Dtest=MySql57MigrationLiveIT'
     if ($LASTEXITCODE -ne 0) { throw 'MySQL 5.7 V19-to-current upgrade gate failed.' }
+    # 「被跳过」不等于「通过」：环境变量没生效时 JUnit 会跳过整类，mvn 仍返回 0，
+    # 而 surefire 报告里是 tests=1 skipped=1。只看退出码会把「未验证」记成绿。
+    $report = Join-Path $root 'server\target\surefire-reports\TEST-com.intelligentresume.database.MySql57MigrationLiveIT.xml'
+    if (-not (Test-Path $report)) { throw "MySQL 5.7 gate surefire report missing: $report — the class did not run." }
+    [xml]$reportXml = Get-Content $report
+    $ranTests = [int]$reportXml.testsuite.tests
+    $skippedTests = [int]$reportXml.testsuite.skipped
+    if ($ranTests -eq 0 -or $skippedTests -ge $ranTests) {
+        throw "MySQL 5.7 gate was skipped (tests=$ranTests skipped=$skippedTests) — that is NOT a pass."
+    }
 } finally {
     if ($pushedLocation) { Pop-Location }
     $cleanupSql = @"
