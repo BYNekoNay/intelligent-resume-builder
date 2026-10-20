@@ -12,6 +12,7 @@ import {
 } from '@/api/ai'
 import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useAiTaskStore } from '@/stores/aiTask'
+import { useAuthStore } from '@/stores/auth'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
 
@@ -19,6 +20,7 @@ const { t } = useLocale()
 const route = useRoute()
 const router = useRouter()
 const taskStore = useAiTaskStore()
+const auth = useAuthStore()
 const MATERIAL_TYPE_KEYS: Record<string, string> = {
   WORK_EXPERIENCE: 'materialSelection.typeWorkExperience',
   PROJECT_EXPERIENCE: 'materialSelection.typeProjectExperience',
@@ -37,8 +39,11 @@ const confirming = ref(false)
 const error = ref('')
 const selectedIds = ref(new Set<number>())
 const forcedIds = ref(new Set<number>())
+const confirmationUpdatedAt = ref<string | null>(null)
+const confirmationIdempotencyKey = ref<string | null>(null)
 const pollingTimedOut = ref(false)
 const polling = useTaskPolling<AiTask>()
+const selectionStorageKey = computed(() => `intelligent-resume.material-selection.${auth.currentUser?.id ?? 'anonymous'}.${taskId.value}`)
 
 const taskId = computed(() => Number(route.query.taskId))
 const result = computed<MaterialSelectionResult>(() => {
@@ -83,7 +88,7 @@ async function loadTask(initialize = false) {
       return
     }
     if (task.value.status === 'SUCCESS') {
-      if (initialize) selectedIds.value = new Set(result.value.recommended.map(item => item.materialId))
+      if (initialize) restoreSelection()
       loading.value = false
       return
     }
@@ -108,7 +113,7 @@ function startPolling(initialize: boolean) {
     onTask: (next) => {
       task.value = next
       if (next.status === 'SUCCESS') {
-        if (initialize) selectedIds.value = new Set(result.value.recommended.map(item => item.materialId))
+        if (initialize) restoreSelection()
         loading.value = false
       } else if (next.status === 'FAILED' || next.status === 'CANCELLED') {
         error.value = next.errorMessage
@@ -134,6 +139,59 @@ function startPolling(initialize: boolean) {
   })
 }
 
+function restoreSelection() {
+  try {
+    const saved = localStorage.getItem(selectionStorageKey.value)
+    if (saved) {
+      const parsed = JSON.parse(saved) as {
+        selectedIds?: unknown
+        forcedIds?: unknown
+        taskUpdatedAt?: unknown
+        idempotencyKey?: unknown
+      }
+      const available = new Set(allItems.value.map(item => item.materialId))
+      const selected = Array.isArray(parsed.selectedIds)
+        ? parsed.selectedIds.filter((id): id is number => Number.isInteger(id) && available.has(id))
+        : []
+      const forced = Array.isArray(parsed.forcedIds)
+        ? parsed.forcedIds.filter((id): id is number => Number.isInteger(id) && selected.includes(id))
+        : []
+      if (selected.length > 0) {
+        selectedIds.value = new Set(selected)
+        forcedIds.value = new Set(forced)
+        confirmationUpdatedAt.value = typeof parsed.taskUpdatedAt === 'string' ? parsed.taskUpdatedAt : null
+        confirmationIdempotencyKey.value = typeof parsed.idempotencyKey === 'string' ? parsed.idempotencyKey : null
+        return
+      }
+    }
+  } catch { /* Ignore invalid local selection data and use recommendations. */ }
+  selectedIds.value = new Set(result.value.recommended.map(item => item.materialId))
+  forcedIds.value = new Set()
+  confirmationUpdatedAt.value = null
+  confirmationIdempotencyKey.value = null
+  persistSelection()
+}
+
+function persistSelection(clearConfirmation = false) {
+  if (clearConfirmation) {
+    confirmationUpdatedAt.value = null
+    confirmationIdempotencyKey.value = null
+  }
+  try {
+    localStorage.setItem(selectionStorageKey.value, JSON.stringify({
+      selectedIds: [...selectedIds.value].sort((a, b) => a - b),
+      forcedIds: [...forcedIds.value].sort((a, b) => a - b),
+      taskUpdatedAt: confirmationUpdatedAt.value,
+      idempotencyKey: confirmationIdempotencyKey.value,
+    }))
+  } catch { /* Storage may be unavailable; confirmation remains usable in this page. */ }
+}
+
+function createConfirmationIdempotencyKey() {
+  const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `confirm-materials-${taskId.value}-${nonce}`
+}
+
 function add(item: MaterialSelectionItem, force = false) {
   if (selectedIds.value.size >= 30) {
     error.value = t('materialSelection.errorMaxLimit')
@@ -141,6 +199,7 @@ function add(item: MaterialSelectionItem, force = false) {
   }
   selectedIds.value = new Set(selectedIds.value).add(item.materialId)
   if (force) forcedIds.value = new Set(forcedIds.value).add(item.materialId)
+  persistSelection(true)
   error.value = ''
 }
 
@@ -151,6 +210,7 @@ function remove(item: MaterialSelectionItem) {
   const nextForced = new Set(forcedIds.value)
   nextForced.delete(item.materialId)
   forcedIds.value = nextForced
+  persistSelection(true)
 }
 
 async function confirmSelection() {
@@ -160,13 +220,21 @@ async function confirmSelection() {
   }
   confirming.value = true
   error.value = ''
+  const selectedMaterialIds = [...selectedIds.value].sort((a, b) => a - b)
+  const forcedIncludedMaterialIds = [...forcedIds.value].sort((a, b) => a - b)
+  const taskUpdatedAt = confirmationUpdatedAt.value ?? task.value.updatedAt
+  const idempotencyKey = confirmationIdempotencyKey.value
+    ?? createConfirmationIdempotencyKey()
+  confirmationUpdatedAt.value = taskUpdatedAt
+  confirmationIdempotencyKey.value = idempotencyKey
+  persistSelection()
   try {
     const response = await confirmMaterials(task.value.id, {
-      taskUpdatedAt: task.value.updatedAt,
-      selectedMaterialIds: [...selectedIds.value],
-      forcedIncludedMaterialIds: [...forcedIds.value],
+      taskUpdatedAt,
+      selectedMaterialIds,
+      forcedIncludedMaterialIds,
       resumeTitle: typeof task.value.resultJson?.resumeTitle === 'string' ? task.value.resultJson.resumeTitle : undefined,
-    }, `confirm-materials-${task.value.id}-${Date.now()}`)
+    }, idempotencyKey)
     const generationTask = response.data.data
     taskStore.remember(generationTask.id)
     await router.push(`/generate/confirm?taskId=${generationTask.id}`)

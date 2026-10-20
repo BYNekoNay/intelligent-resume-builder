@@ -12,6 +12,7 @@ import { resolveApiError } from '@/utils/errorMessage'
 const { t } = useLocale()
 const raw = ref(''); const result = ref<MaterialGenerationResponse | null>(null); const association = ref<MaterialAssociationResponse | null>(null); const error = ref(''); const consentRequired = ref(false); const loading = ref(false); const associating = ref(false); const title = ref('From raw materials'); const saving = ref(false)
 const router = useRouter()
+const importedCandidates = ref<Record<string, unknown> | null>(null)
 
 // 幂等键生命周期：动作发起时按 payload 指纹生成/复用，整次逻辑提交期间（含超时重试）沿用同一键，成功后清除。
 // 超时后任务仍在后端执行，此时再次点击会以同一幂等键命中后端去重，不会重复计费。
@@ -29,6 +30,26 @@ function idempotencyKeyFor(action: string, payload: unknown) {
 function clearIdempotencyKey(action: string) { pendingIdempotency.delete(action) }
 
 async function generate() {
+  error.value = ''; consentRequired.value = false; result.value = null
+  if (!raw.value.trim()) { error.value = t('materialGeneration.errorEmpty'); return }
+  result.value = createLocalDraft(raw.value, importedCandidates.value)
+}
+
+function createLocalDraft(text: string, candidates: Record<string, unknown> | null): MaterialGenerationResponse {
+  const candidateBasics = candidates?.basics
+  const basics = candidateBasics && typeof candidateBasics === 'object' && !Array.isArray(candidateBasics)
+    ? { ...(candidateBasics as Record<string, unknown>), summary: text.trim() }
+    : { summary: text.trim() }
+  return {
+    taskId: 0,
+    rawMaterialText: text.trim(),
+    generatedResumeJson: { basics },
+    suggestions: [t('materialGeneration.localDraftSuggestion')],
+    requiresManualConfirmation: true,
+  }
+}
+
+async function generateWithAi() {
   error.value = ''; consentRequired.value = false; result.value = null
   if (!raw.value.trim()) { error.value = t('materialGeneration.errorEmpty'); return }
   loading.value = true
@@ -87,7 +108,16 @@ function manageConsent() {
 
 onMounted(() => {
   const imported = sessionStorage.getItem('resume-import-text')
-  if (imported) { raw.value = imported; sessionStorage.removeItem('resume-import-text') }
+  if (imported) {
+    raw.value = imported
+    sessionStorage.removeItem('resume-import-text')
+    try {
+      const candidates = sessionStorage.getItem('resume-import-candidates')
+      if (candidates) importedCandidates.value = JSON.parse(candidates) as Record<string, unknown>
+    } catch { importedCandidates.value = null }
+    sessionStorage.removeItem('resume-import-candidates')
+    result.value = createLocalDraft(imported, importedCandidates.value)
+  }
 })
 </script>
 
@@ -103,8 +133,9 @@ onMounted(() => {
       <header class="generation-section-heading"><span><FileInput :size="19" /></span><div><p>{{ t('materialGeneration.sourceEyebrow') }}</p><h2>{{ t('materialGeneration.sourceTitle') }}</h2><small>{{ t('materialGeneration.sourceDescription') }}</small></div></header>
       <label class="raw-material-field">{{ t('materialGeneration.label') }}<textarea v-model="raw" rows="12" maxlength="30000" :placeholder="t('materialGeneration.placeholder')" /><small>{{ raw.length }} / 30000</small></label>
       <div class="material-actions">
-        <button class="btn-neon btn-primary" :disabled="loading || associating"><Sparkles :size="16" />{{ loading ? t('materialGeneration.generating') : t('materialGeneration.generateButton') }}</button>
-        <button class="btn-neon btn-secondary" type="button" :disabled="loading || associating" @click="associate"><Lightbulb :size="16" />{{ associating ? t('materialGeneration.associating') : t('materialGeneration.associateButton') }}</button>
+        <button class="btn-neon btn-primary" :disabled="loading || associating"><Check :size="16" />{{ t('materialGeneration.generateButton') }}</button>
+        <button class="btn-neon btn-secondary" type="button" :disabled="loading || associating" @click="generateWithAi"><Sparkles :size="16" />{{ loading ? t('materialGeneration.generating') : t('materialGeneration.aiGenerateButton') }}</button>
+        <button class="btn-neon btn-ghost" type="button" :disabled="loading || associating" @click="associate"><Lightbulb :size="16" />{{ associating ? t('materialGeneration.associating') : t('materialGeneration.associateButton') }}</button>
       </div>
     </form>
     <div v-if="error" class="form-error material-error" role="alert">

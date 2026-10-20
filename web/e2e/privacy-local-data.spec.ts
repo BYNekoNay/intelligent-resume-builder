@@ -12,6 +12,7 @@ const version = { id: 11, resumeId: 1, versionNo: 1, sourceType: 'MANUAL', resum
 
 const DRAFT_KEY = 'intelligent-resume.editor-draft.99.1'
 const TASK_KEY = 'intelligent-resume.active-ai-task.99'
+const SELECTION_KEY = 'intelligent-resume.material-selection.99.71'
 
 async function mockAuthenticatedApi(page: Page) {
   await page.route('**/api/auth/refresh', route => route.fulfill({ json: response({ accessToken: 'e2e-token' }) }))
@@ -42,15 +43,18 @@ async function seedBrowserLocalData(page: Page) {
   await page.getByLabel('姓名').fill('Alice Chen')
   await expect.poll(() => page.evaluate(key => localStorage.getItem(key), DRAFT_KEY)).not.toBeNull()
   await page.evaluate(key => localStorage.setItem(key, '71'), TASK_KEY)
+  await page.evaluate(key => localStorage.setItem(key, '{"selectedIds":[1]}'), SELECTION_KEY)
   await page.evaluate(() => {
     // 与导入页 / 文案页留下的键一致（键名为应用契约，见 utils/localUserData.ts 的清单）
     sessionStorage.setItem('resume-import-text', '从 PDF 解析出的简历原文')
+    sessionStorage.setItem('resume-import-candidates', '{"basics":{"name":"Alice"}}')
     sessionStorage.setItem('application-draft', '{"text":"沟通文案草稿"}')
   })
   const stored = await page.evaluate(() => [
     localStorage.getItem('intelligent-resume.editor-draft.99.1'),
     localStorage.getItem('intelligent-resume.active-ai-task.99'),
     sessionStorage.getItem('resume-import-text'),
+    sessionStorage.getItem('resume-import-candidates'),
     sessionStorage.getItem('application-draft'),
   ])
   expect(stored.every(value => value !== null)).toBe(true)
@@ -61,7 +65,9 @@ async function seedBrowserLocalData(page: Page) {
 async function expectBrowserLocalDataCleared(page: Page) {
   await expect.poll(() => page.evaluate(key => localStorage.getItem(key), DRAFT_KEY)).toBeNull()
   await expect.poll(() => page.evaluate(key => localStorage.getItem(key), TASK_KEY)).toBeNull()
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), SELECTION_KEY)).toBeNull()
   await expect.poll(() => page.evaluate(key => sessionStorage.getItem(key), 'resume-import-text')).toBeNull()
+  await expect.poll(() => page.evaluate(key => sessionStorage.getItem(key), 'resume-import-candidates')).toBeNull()
   await expect.poll(() => page.evaluate(key => sessionStorage.getItem(key), 'application-draft')).toBeNull()
 }
 

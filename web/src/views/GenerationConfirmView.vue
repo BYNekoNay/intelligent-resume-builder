@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAiTaskStore } from '@/stores/aiTask'
 import { getTask, confirmTask, rejectTask, retryTask, type AiTask } from '@/api/ai'
 import { useTaskPolling } from '@/composables/useTaskPolling'
-import { listResumesByJd } from '@/api/resume'
+import { getResumeVersion, listResumesByJd } from '@/api/resume'
 import { useDraftReview } from '@/composables/useDraftReview'
 import { Check, ClipboardCheck, Sparkles } from 'lucide-vue-next'
 import { useLocale } from '@/i18n'
@@ -24,6 +24,7 @@ const loading = ref(true)
 const error = ref('')
 const confirming = ref(false)
 const rejecting = ref(false)
+const confirmedResumeId = ref<number | null>(null)
 
 // Task data
 const task = ref<any>(null)
@@ -56,6 +57,12 @@ async function loadTask(id: number) {
       parseDraft(resultJson.value)
       loading.value = false
       return
+    }
+    if (task.value.status === 'SUCCESS' && task.value.confirmationStatus === 'CONFIRMED' && task.value.resultResumeVersionId) {
+      try {
+        const version = await getResumeVersion(task.value.resultResumeVersionId)
+        confirmedResumeId.value = version.data.data.resumeId
+      } catch { /* Keep the generation workspace fallback if the result cannot be resolved. */ }
     }
     if (task.value.status === 'PENDING' || task.value.status === 'RUNNING') {
       // 任务仍在后台执行：**保持加载态**，由轮询驱动后续渲染。
@@ -239,7 +246,10 @@ async function handleRetry() {
 
     <div v-else-if="task && task.status === 'SUCCESS'" class="status-card success">
       <p>{{ t('generationConfirm.reviewAlreadyHandled') }}</p>
-      <button class="btn-primary" type="button" @click="router.push('/generate')">
+      <button v-if="confirmedResumeId" class="btn-primary" type="button" @click="router.push(`/resumes/${confirmedResumeId}`)">
+        {{ t('generationConfirm.viewCreatedResume') }}
+      </button>
+      <button v-else class="btn-primary" type="button" @click="router.push('/generate')">
         {{ t('generationConfirm.returnToGeneration') }}
       </button>
     </div>

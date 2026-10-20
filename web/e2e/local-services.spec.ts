@@ -73,6 +73,92 @@ test.describe('@local-services local application smoke', () => {
     expect(cleanup.status()).toBe(200)
   })
 
+  test('completes the manual resume, application, communication, and rules ATS loop without AI', async ({ page }, testInfo) => {
+    test.setTimeout(120_000)
+    const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`
+    const resumeTitle = `Manual loop resume ${suffix}`
+    const jobTitle = `Manual loop engineer ${suffix}`
+    let accessToken: string | undefined
+
+    try {
+      accessToken = await registerSyntheticAccount(page, 'manual', suffix)
+      await switchToEnglish(page)
+
+      await page.goto('/resumes')
+      const resumeForm = page.locator('form.resume-create-form')
+      await resumeForm.locator('input').nth(0).fill(resumeTitle)
+      await resumeForm.locator('input').nth(1).fill(`Candidate ${suffix}`)
+      const [resumeResponse] = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/resumes')),
+        resumeForm.getByRole('button', { name: 'New resume' }).click(),
+      ])
+      expect(resumeResponse.status(), `Resume creation failed: ${await resumeResponse.text()}`).toBe(201)
+      await expect(page.locator('.resume-row-main').filter({ hasText: resumeTitle })).toBeVisible()
+
+      await page.goto('/jobs')
+      const jobForm = page.locator('form.job-composer')
+      await jobForm.locator('input').nth(0).fill(jobTitle)
+      await jobForm.locator('input').nth(1).fill('Manual Loop Systems')
+      await jobForm.locator('textarea').fill('Java, Spring Boot, and MySQL experience. Own API delivery and reliability.')
+      await jobForm.getByRole('button', { name: 'Save job' }).click()
+      await expect(page.locator('.job-card').filter({ hasText: jobTitle })).toBeVisible()
+
+      await page.goto('/communications')
+      const communicationForm = page.locator('form.communication-setup')
+      const communicationSelects = communicationForm.locator('select')
+      await communicationSelects.nth(0).selectOption({ label: resumeTitle })
+      await expect(communicationSelects.nth(1)).toBeEnabled()
+      await communicationSelects.nth(1).selectOption({ index: 1 })
+      await communicationSelects.nth(2).selectOption({ label: `${jobTitle} · Manual Loop Systems` })
+      await communicationSelects.nth(3).selectOption('EMAIL')
+      await communicationForm.getByRole('button', { name: 'Use template' }).click()
+      await expect(page.locator('article.communication-draft')).toBeVisible()
+      await expect(page.locator('article.communication-draft textarea')).toHaveValue(/Manual loop engineer/)
+      await page.locator('article.communication-draft textarea').fill('Edited manual follow-up draft.')
+      await page.locator('article.communication-draft .job-actions .btn-primary').click()
+      await expect(page).toHaveURL(/\/applications$/)
+      const applicationForm = page.locator('form.application-composer')
+      await expect(applicationForm.locator('textarea').nth(1)).toHaveValue('Edited manual follow-up draft.')
+      const [applicationResponse] = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/applications')),
+        applicationForm.getByRole('button', { name: 'Create draft' }).click(),
+      ])
+      expect(applicationResponse.status(), `Application creation failed: ${await applicationResponse.text()}`).toBe(201)
+      const ticket = page.locator('.application-ticket').filter({ hasText: jobTitle })
+      await expect(ticket).toBeVisible()
+      await expect(ticket).toContainText('1/3')
+      await ticket.getByRole('button', { name: 'Feedback' }).click()
+      await expect(ticket.locator('.application-drafts')).toContainText('Edited manual follow-up draft.')
+
+      await page.goto('/ats')
+      const atsForm = page.locator('form.ats-config')
+      const atsSelects = atsForm.locator('select')
+      await atsSelects.nth(0).selectOption({ label: resumeTitle })
+      await expect(atsSelects.nth(1)).toBeEnabled()
+      await atsSelects.nth(1).selectOption({ index: 1 })
+      await atsSelects.nth(2).selectOption({ label: `${jobTitle} · Manual Loop Systems` })
+      await page.locator('form.ats-config button[type="button"]').click()
+      await expect(page.locator('.ats-result')).toBeVisible()
+      await expect(page.locator('.ats-result')).toContainText('Rules only')
+
+      await page.goto('/resumes')
+      await page.locator('.resume-row-main').filter({ hasText: resumeTitle }).click()
+      await expect(page.locator('.version-card').first()).toBeVisible()
+      await page.locator('.version-card').first().getByRole('button', { name: 'Export PDF' }).click()
+      await expect(page).toHaveURL(/\/exports\/\d+$/)
+      await expect(page.getByText('PDF is ready', { exact: true })).toBeVisible({ timeout: 30_000 })
+      const downloadResponse = page.waitForResponse(response => response.url().includes('/api/exports/files/') && response.status() === 200)
+      await page.getByRole('button', { name: 'Download PDF' }).click()
+      const downloadedPdf = await downloadResponse
+      expect(downloadedPdf.headers()['content-type']).toContain('application/pdf')
+      expect((await downloadedPdf.body()).subarray(0, 5).toString()).toBe('%PDF-')
+    } finally {
+      if (accessToken) {
+        await cleanupSyntheticAccount(page, accessToken, testInfo)
+      }
+    }
+  })
+
   test('imports a text resume, lets the user correct it, and creates an editable draft', async ({ page }) => {
     test.setTimeout(90_000)
     const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`

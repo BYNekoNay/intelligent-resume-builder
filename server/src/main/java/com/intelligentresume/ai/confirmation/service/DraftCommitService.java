@@ -125,17 +125,20 @@ public class DraftCommitService {
 
         // 8. EDIT 决策 → 新增 career_material
         List<Long> newMaterialIds = new ArrayList<>();
+        Map<String, Long> editedMaterialIds = new LinkedHashMap<>();
         for (ConfirmedDraftItem item : items) {
             if (item.decision() == Decision.EDIT && item.editedValue() != null) {
                 CareerMaterial newMat = new CareerMaterial();
                 newMat.setUserId(userId);
                 newMat.setMaterialType(inferTypeFromPath(item.outputPath()));
                 newMat.setTitle("用户确认编辑");
-                newMat.setContentJson(item.editedValue());
-                newMat.setSourceText(item.editedValue().toString());
+                Map<String, Object> editedContent = stripProvenance(item.editedValue());
+                newMat.setContentJson(editedContent);
+                newMat.setSourceText(editedContent.toString());
                 newMat.setUsagePreference(UsagePreference.NORMAL);
                 materialRepository.save(newMat);
                 newMaterialIds.add(newMat.getId());
+                editedMaterialIds.put(item.outputPath(), newMat.getId());
             }
         }
 
@@ -181,7 +184,12 @@ public class DraftCommitService {
                 resumeId, ResumeSourceType.JD_CUSTOMIZED, normalized,
                 "岗位定制生成", genContext, userId);
 
-        // 10. 写入 resume_material_reference
+        // 10. 写入最终内容的来源引用。REJECT 不产生引用；EDIT 使用新建的
+        // 用户编辑资料，不能继续引用 AI 生成时的原始素材。
+        Map<String, ConfirmedDraftItem> decisionsByPath = new LinkedHashMap<>();
+        for (ConfirmedDraftItem item : items) {
+            decisionsByPath.put(item.outputPath(), item);
+        }
         if (selected != null) {
             for (Map<String, Object> sel : selected) {
                 Long materialId = toLong(sel.get("materialId"));
@@ -190,22 +198,26 @@ public class DraftCommitService {
                 }
                 String outputPath = sel.get("outputPath") != null
                         ? sel.get("outputPath").toString() : "";
+                ConfirmedDraftItem decision = decisionForSourcePath(outputPath, decisionsByPath);
+                if (decision == null || decision.decision() != Decision.ACCEPT) {
+                    continue;
+                }
 
                 // 读取 CareerMaterial 快照（带 userId 过滤，避免越权读取他人资料；即使后续被软删，快照仍可读）
                 Map<String, Object> matSnapshot = materialRepository.findByIdAndUserId(materialId, userId)
                         .map(this::buildSnapshot)
                         .orElse(Map.of("id", materialId, "note", "资料已不存在"));
 
-                ResumeMaterialReference ref = new ResumeMaterialReference();
-                ref.setResumeVersionId(version.getId());
-                ref.setMaterialId(materialId);
-                ref.setSelectionStatus("SELECTED");
-                ref.setOutputPath(outputPath);
-                ref.setSourceSnapshotJson(matSnapshot);
-                ref.setSelectionReason(sel.get("selectedReason") != null
-                        ? sel.get("selectedReason").toString() : null);
-                referenceRepository.save(ref);
+                saveReference(version.getId(), materialId, outputPath, matSnapshot,
+                        sel.get("selectedReason") != null ? sel.get("selectedReason").toString() : null);
             }
+        }
+        for (Map.Entry<String, Long> edited : editedMaterialIds.entrySet()) {
+            CareerMaterial material = materialRepository.findByIdAndUserId(edited.getValue(), userId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Edited material not found"));
+            Map<String, Object> editedSnapshot = buildSnapshot(material);
+            editedSnapshot.put("origin", "USER_EDITED");
+            saveReference(version.getId(), material.getId(), edited.getKey(), editedSnapshot, "USER_EDITED");
         }
 
         // 11. 更新任务状态
@@ -272,6 +284,63 @@ public class DraftCommitService {
         snapshot.put("sourceText", m.getSourceText());
         snapshot.put("usagePreference", m.getUsagePreference().name());
         return snapshot;
+    }
+
+    private void saveReference(Long versionId, Long materialId, String outputPath,
+                               Map<String, Object> snapshot, String reason) {
+        ResumeMaterialReference ref = new ResumeMaterialReference();
+        ref.setResumeVersionId(versionId);
+        ref.setMaterialId(materialId);
+        ref.setSelectionStatus("SELECTED");
+        ref.setOutputPath(outputPath);
+        ref.setSourceSnapshotJson(snapshot);
+        ref.setSelectionReason(reason);
+        referenceRepository.save(ref);
+    }
+
+    private ConfirmedDraftItem decisionForSourcePath(
+            String sourcePath, Map<String, ConfirmedDraftItem> decisionsByPath) {
+        ConfirmedDraftItem match = null;
+        int longestMatch = -1;
+        for (ConfirmedDraftItem item : decisionsByPath.values()) {
+            String decisionPath = item.outputPath();
+            if ((sourcePath.equals(decisionPath)
+                    || sourcePath.startsWith(decisionPath + ".")
+                    || sourcePath.startsWith(decisionPath + "["))
+                    && decisionPath.length() > longestMatch) {
+                match = item;
+                longestMatch = decisionPath.length();
+            }
+        }
+        return match;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> stripProvenance(Map<String, Object> value) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        value.forEach((key, child) -> {
+            if (!key.equals("_source") && !key.equals("_sources") && !key.equals("_pending")) {
+                copy.put(key, stripProvenanceValue(child));
+            }
+        });
+        return copy;
+    }
+
+    private Object stripProvenanceValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            map.forEach((key, child) -> {
+                if (key instanceof String name
+                        && !name.equals("_source") && !name.equals("_sources") && !name.equals("_pending")) {
+                    copy.put(name, stripProvenanceValue(child));
+                }
+            });
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(this::stripProvenanceValue).toList();
+        }
+        return value;
     }
 
     private MaterialType inferTypeFromPath(String outputPath) {

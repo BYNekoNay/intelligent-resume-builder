@@ -2,6 +2,7 @@ package com.intelligentresume.ai.confirmation.service;
 
 import com.intelligentresume.ai.confirmation.dto.ConfirmedDraftItem;
 import com.intelligentresume.ai.confirmation.dto.ConfirmedDraftItem.Decision;
+import com.intelligentresume.ai.confirmation.domain.ResumeMaterialReference;
 import com.intelligentresume.ai.confirmation.repository.ResumeMaterialReferenceRepository;
 import com.intelligentresume.ai.generation.service.SourcePathResolver;
 import com.intelligentresume.ai.task.domain.AiTask;
@@ -137,15 +138,20 @@ class DraftCommitServiceTest {
         when(resumeRepository.findByIdAndUserId(10L, USER_ID))
                 .thenReturn(Optional.of(new com.intelligentresume.resume.domain.Resume()));
         when(normalizer.normalize(any(), any())).thenReturn(new LinkedHashMap<>());
-        when(materialRepository.findByIdAndUserId(1L, USER_ID)).thenReturn(Optional.empty());
 
-        CareerMaterial savedMat = new CareerMaterial();
-        savedMat.setId(99L);
         when(materialRepository.save(any(CareerMaterial.class))).thenAnswer(inv -> {
             CareerMaterial m = inv.getArgument(0);
             m.setId(99L);
             return m;
         });
+        CareerMaterial editedMaterial = new CareerMaterial();
+        editedMaterial.setId(99L);
+        editedMaterial.setUserId(USER_ID);
+        editedMaterial.setTitle("用户确认编辑");
+        editedMaterial.setMaterialType(MaterialType.WORK_EXPERIENCE);
+        editedMaterial.setContentJson(Map.of("company", "新公司", "role", "架构师"));
+        editedMaterial.setUsagePreference(UsagePreference.NORMAL);
+        when(materialRepository.findByIdAndUserId(99L, USER_ID)).thenReturn(Optional.of(editedMaterial));
 
         ResumeVersion version = new ResumeVersion();
         version.setId(51L);
@@ -167,6 +173,164 @@ class DraftCommitServiceTest {
         verify(materialRepository).save(captor.capture());
         assertEquals(USER_ID, captor.getValue().getUserId());
         assertEquals(MaterialType.WORK_EXPERIENCE, captor.getValue().getMaterialType());
+    }
+
+    @Test
+    @DisplayName("引用只对应最终采纳内容，编辑来源标为用户编辑，拒绝内容不产生引用")
+    void commit_referencesOnlyAcceptedAndEditedFinalContent() {
+        AiTask task = buildTask(AiTaskStatus.SUCCESS, ConfirmationStatus.PENDING);
+        Map<String, Object> first = new LinkedHashMap<>();
+        first.put("company", "Accepted Co");
+        first.put("_sources", List.of(Map.of("materialId", 1, "materialType", "WORK_EXPERIENCE")));
+        Map<String, Object> second = new LinkedHashMap<>();
+        second.put("company", "AI Draft Co");
+        second.put("_sources", List.of(Map.of("materialId", 2, "materialType", "WORK_EXPERIENCE")));
+        Map<String, Object> third = new LinkedHashMap<>();
+        third.put("company", "Rejected Co");
+        third.put("_sources", List.of(Map.of("materialId", 3, "materialType", "WORK_EXPERIENCE")));
+        Map<String, Object> draft = new LinkedHashMap<>();
+        draft.put("work", List.of(first, second, third));
+        task.setResultJson(new LinkedHashMap<>(Map.of(
+                "draftResumeJson", draft,
+                "selected", List.of(
+                        Map.of("materialId", 1, "outputPath", "work[0]", "selectedReason", "AI_REFERENCED"),
+                        Map.of("materialId", 2, "outputPath", "work[1]", "selectedReason", "AI_REFERENCED"),
+                        Map.of("materialId", 3, "outputPath", "work[2]", "selectedReason", "AI_REFERENCED")
+                ))));
+        when(taskRepository.findByIdForUpdate(TASK_ID)).thenReturn(Optional.of(task));
+        when(resumeRepository.findByIdAndUserId(10L, USER_ID))
+                .thenReturn(Optional.of(new com.intelligentresume.resume.domain.Resume()));
+        when(normalizer.normalize(any(), any())).thenAnswer(invocation ->
+                new ResumeJsonNormalizer().normalize(invocation.getArgument(0), invocation.getArgument(1)));
+
+        CareerMaterial acceptedMaterial = new CareerMaterial();
+        acceptedMaterial.setId(1L);
+        acceptedMaterial.setTitle("Accepted source");
+        acceptedMaterial.setMaterialType(MaterialType.WORK_EXPERIENCE);
+        acceptedMaterial.setContentJson(Map.of("company", "Accepted Co"));
+        acceptedMaterial.setUsagePreference(UsagePreference.NORMAL);
+        when(materialRepository.findByIdAndUserId(1L, USER_ID)).thenReturn(Optional.of(acceptedMaterial));
+        when(materialRepository.save(any(CareerMaterial.class))).thenAnswer(invocation -> {
+            CareerMaterial material = invocation.getArgument(0);
+            material.setId(99L);
+            return material;
+        });
+        when(materialRepository.findByIdAndUserId(99L, USER_ID)).thenAnswer(invocation -> {
+            CareerMaterial material = new CareerMaterial();
+            material.setId(99L);
+            material.setUserId(USER_ID);
+            material.setTitle("用户确认编辑");
+            material.setMaterialType(MaterialType.WORK_EXPERIENCE);
+            material.setContentJson(Map.of("company", "User Edited Co", "role", "Architect"));
+            material.setSourceText("{company=User Edited Co, role=Architect}");
+            material.setUsagePreference(UsagePreference.NORMAL);
+            return Optional.of(material);
+        });
+        ResumeVersion version = new ResumeVersion();
+        version.setId(52L);
+        version.setVersionNo(5);
+        when(versionService.createInTransaction(anyLong(), any(), any(), any(), any(), anyLong()))
+                .thenReturn(version);
+
+        List<ConfirmedDraftItem> items = List.of(
+                new ConfirmedDraftItem("work[0]", Decision.ACCEPT, null),
+                new ConfirmedDraftItem("work[1]", Decision.EDIT, Map.of(
+                        "company", "User Edited Co", "role", "Architect",
+                        "_sources", List.of(Map.of("materialId", 2, "materialType", "WORK_EXPERIENCE")))),
+                new ConfirmedDraftItem("work[2]", Decision.REJECT, null)
+        );
+
+        service.commit(TASK_ID, items, null, UPDATED_AT, USER_ID, null, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> resumeJsonCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(versionService).createInTransaction(eq(10L), eq(ResumeSourceType.JD_CUSTOMIZED),
+                resumeJsonCaptor.capture(), any(), any(), eq(USER_ID));
+        List<Map<String, Object>> finalWork = (List<Map<String, Object>>) resumeJsonCaptor.getValue().get("work");
+        assertEquals(2, finalWork.size());
+        assertEquals("Accepted Co", finalWork.get(0).get("company"));
+        assertEquals("User Edited Co", finalWork.get(1).get("company"));
+
+        ArgumentCaptor<ResumeMaterialReference> referenceCaptor =
+                ArgumentCaptor.forClass(ResumeMaterialReference.class);
+        verify(referenceRepository, times(2)).save(referenceCaptor.capture());
+        List<ResumeMaterialReference> references = referenceCaptor.getAllValues();
+        assertEquals(Set.of(1L, 99L), references.stream()
+                .map(ResumeMaterialReference::getMaterialId).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(Set.of("work[0]", "work[1]"), references.stream()
+                .map(ResumeMaterialReference::getOutputPath).collect(java.util.stream.Collectors.toSet()));
+
+        ResumeMaterialReference editedReference = references.stream()
+                .filter(reference -> reference.getMaterialId().equals(99L)).findFirst().orElseThrow();
+        assertEquals("USER_EDITED", editedReference.getSelectionReason());
+        assertEquals("USER_EDITED", editedReference.getSourceSnapshotJson().get("origin"));
+        Map<String, Object> editedSnapshotContent = (Map<String, Object>)
+                editedReference.getSourceSnapshotJson().get("contentJson");
+        assertEquals("User Edited Co", editedSnapshotContent.get("company"));
+        assertFalse(editedSnapshotContent.containsKey("_sources"));
+        verify(materialRepository, never()).findByIdAndUserId(2L, USER_ID);
+        verify(materialRepository, never()).findByIdAndUserId(3L, USER_ID);
+    }
+
+    @Test
+    @DisplayName("静默跳过是选择性的: 恰好 1 条引用，且只写被 ACCEPT 覆盖的那条（ADR-011 Decision 3）")
+    void commit_selectedMaterialMissingFromItems_isSilentlySkipped() {
+        // fixture：selected 有两条 —— work[0]（items 未覆盖）与 basics（被 ACCEPT 覆盖）；
+        // items 只 ACCEPT basics。故 work[0] 的 decisionForSourcePath 返回 null，
+        // 走 DraftCommitService:202-204 的 continue 短路，而 basics 照常写引用。
+        //
+        // 关键：**同一个 fixture 内同时证明「跳过」与「不误伤」**。只断言 never() 是不够的 ——
+        // 那个写法在「循环被改成无脑全部 continue」时仍然全绿，证明不了跳过是选择性的。
+        //
+        // 此断言钉住 ADR-011 Decision 3 的**当前语义**：未列入 items 的 selected 素材 = 未确认 ≠ 被使用，
+        // 静默不写引用、不报 400/409；其余被 ACCEPT 覆盖的素材引用照常写。
+        // 若未来改为显式拒绝（OPEN-DECISIONS.md 2026-10-20 条目），本用例是唯一会变红的基线 ——
+        // 请连同 ADR-011 Decision 3 一起改，不要只删断言。
+        AiTask task = buildTask(AiTaskStatus.SUCCESS, ConfirmationStatus.PENDING);
+        task.setResultJson(new LinkedHashMap<>(Map.of(
+                "draftResumeJson", task.getResultJson().get("draftResumeJson"),
+                "selected", List.of(
+                        Map.of("materialId", 1, "outputPath", "work[0]", "selectedReason", "AI_REFERENCED"),
+                        Map.of("materialId", 2, "outputPath", "basics", "selectedReason", "AI_REFERENCED")))));
+        when(taskRepository.findByIdForUpdate(TASK_ID)).thenReturn(Optional.of(task));
+        when(resumeRepository.findByIdAndUserId(10L, USER_ID))
+                .thenReturn(Optional.of(new com.intelligentresume.resume.domain.Resume()));
+        when(normalizer.normalize(any(), any())).thenReturn(new LinkedHashMap<>());
+        ResumeVersion version = new ResumeVersion();
+        version.setId(53L);
+        version.setVersionNo(6);
+        when(versionService.createInTransaction(anyLong(), any(), any(), any(), any(), anyLong()))
+                .thenReturn(version);
+
+        CareerMaterial coveredMaterial = new CareerMaterial();
+        coveredMaterial.setId(2L);
+        coveredMaterial.setTitle("基本信息素材");
+        coveredMaterial.setMaterialType(MaterialType.EDUCATION);
+        coveredMaterial.setContentJson(Map.of("name", "张三"));
+        coveredMaterial.setUsagePreference(UsagePreference.NORMAL);
+        when(materialRepository.findByIdAndUserId(2L, USER_ID)).thenReturn(Optional.of(coveredMaterial));
+
+        List<ConfirmedDraftItem> items = List.of(
+                new ConfirmedDraftItem("basics", Decision.ACCEPT, null)
+        );
+
+        // 语义 1：不抛异常（静默跳过，而不是 400/409）
+        DraftCommitService.CommitResult result = assertDoesNotThrow(
+                () -> service.commit(TASK_ID, items, null, UPDATED_AT, USER_ID, null, null));
+        assertEquals(53L, result.resumeVersionId());
+        assertEquals(ConfirmationStatus.CONFIRMED, task.getConfirmationStatus());
+
+        // 语义 2：**恰好 1 条**引用 —— 未被覆盖的 work[0] 不写，被覆盖的 basics 照常写。
+        // 「恰好 1 条」本身就是选择性的证据：0 条意味着误伤，2 条意味着漏跳过。
+        ArgumentCaptor<ResumeMaterialReference> captor = ArgumentCaptor.forClass(ResumeMaterialReference.class);
+        verify(referenceRepository, times(1)).save(captor.capture());
+        ResumeMaterialReference written = captor.getValue();
+        assertEquals(2L, written.getMaterialId(), "引用应指向被 ACCEPT 覆盖的素材 2");
+        assertEquals("basics", written.getOutputPath(), "引用路径应为被覆盖的 basics");
+        assertNotEquals("work[0]", written.getOutputPath(), "未覆盖的 work[0] 不得留下引用");
+
+        // 语义 3：被跳过的素材连快照都不读（避免无谓 IO，也不扩大越权读取面）
+        verify(materialRepository, never()).findByIdAndUserId(1L, USER_ID);
     }
 
     @Test

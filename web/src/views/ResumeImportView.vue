@@ -50,6 +50,7 @@ async function continueToGeneration() {
     return
   }
   sessionStorage.setItem('resume-import-text', extractedText.value.trim())
+  sessionStorage.setItem('resume-import-candidates', JSON.stringify(result.value.normalizedResumeInput))
   await router.push({ name: 'material-generation' })
 }
 </script>

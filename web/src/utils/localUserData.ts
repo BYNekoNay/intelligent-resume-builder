@@ -10,7 +10,7 @@
  * <p>清理范围（本地存储的完整清单，新增用户级键时必须在此登记）：
  * <ul>
  *   <li>localStorage：`editor-draft`（简历/编辑草稿，含 PII）、`active-ai-task`（待恢复的 AI 任务 id）；</li>
- *   <li>sessionStorage：`resume-import-text`（导入解析出的简历原文）、`application-draft`
+ *   <li>sessionStorage：`resume-import-text` / `resume-import-candidates`（导入解析出的简历内容）、`application-draft`
  *       （沟通/投递文案草稿）、`pending-job-generation`（待确认的生成任务）、
  *       `interview-session-id`（当前面试会话 id）。</li>
  * </ul>
@@ -20,11 +20,12 @@
  */
 
 /** localStorage 中按用户隔离的键前缀：`intelligent-resume.<prefix>.<userId>[.<rest>]`。 */
-const LOCAL_USER_SCOPED_PREFIXES = ['editor-draft', 'active-ai-task']
+const LOCAL_USER_SCOPED_PREFIXES = ['editor-draft', 'active-ai-task', 'material-selection']
 
 /** sessionStorage 中的用户数据键（单标签页单用户，键名不带 userId）。 */
 const SESSION_USER_KEYS = [
   'resume-import-text',
+  'resume-import-candidates',
   'application-draft',
   'pending-job-generation',
   'interview-session-id',
