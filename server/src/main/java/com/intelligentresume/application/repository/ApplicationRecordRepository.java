@@ -45,9 +45,13 @@ public interface ApplicationRecordRepository extends JpaRepository<ApplicationRe
     List<StatusCountProjection> countGroupByStatus(@Param("userId") Long userId);
 
     /**
-     * 停留时长统计所需行（#3）：只有 APPLIED/INTERVIEWING/OFFERED 需要逐行时间戳
+     * 停留时长统计所需行（#3）：只有 APPLIED/SCREENING/INTERVIEWING/OFFERED 需要逐行时间戳
      * （进入时刻与创建时刻），其它状态仅参与计数，由
      * {@link #countGroupByStatus} 在 SQL 侧聚合。
+     *
+     * <p>HIRED/REJECTED/WITHDRAWN/NO_RESPONSE 不在此列表：唯一消费方
+     * {@code ApplicationService.stats} 的三个时长口径分别只取
+     * APPLIED|SCREENING、INTERVIEWING、OFFERED，取回其它状态的行无人使用。
      */
     @Query("""
             SELECT a.status AS status, a.appliedAt AS appliedAt, a.stageEnteredAt AS stageEnteredAt,
@@ -55,6 +59,7 @@ public interface ApplicationRecordRepository extends JpaRepository<ApplicationRe
             FROM ApplicationRecord a
             WHERE a.userId = :userId
               AND a.status IN (com.intelligentresume.application.domain.ApplicationStatus.APPLIED,
+                               com.intelligentresume.application.domain.ApplicationStatus.SCREENING,
                                com.intelligentresume.application.domain.ApplicationStatus.INTERVIEWING,
                                com.intelligentresume.application.domain.ApplicationStatus.OFFERED)
             """)
@@ -64,7 +69,7 @@ public interface ApplicationRecordRepository extends JpaRepository<ApplicationRe
      * 按跟进筛选查询当前用户投递记录。
      *
      * <p>followUp 取值：ALL（不过滤）/ TODAY（next_follow_up_at 位于 [startOfDay, endOfDay)）/
-     * OVERDUE（已过且状态非终态 OFFERED/REJECTED/WITHDRAWN）。服务端按服务器本地日界计算。
+     * OVERDUE（已过且状态非终态）。服务端按服务器本地日界计算。
      */
     @Query("""
             SELECT a FROM ApplicationRecord a
@@ -73,9 +78,10 @@ public interface ApplicationRecordRepository extends JpaRepository<ApplicationRe
                    OR (:followUp = 'TODAY' AND a.nextFollowUpAt IS NOT NULL
                        AND a.nextFollowUpAt >= :startOfDay AND a.nextFollowUpAt < :endOfDay)
                    OR (:followUp = 'OVERDUE' AND a.nextFollowUpAt IS NOT NULL AND a.nextFollowUpAt < :now
-                       AND a.status <> com.intelligentresume.application.domain.ApplicationStatus.OFFERED
+                       AND a.status <> com.intelligentresume.application.domain.ApplicationStatus.HIRED
                        AND a.status <> com.intelligentresume.application.domain.ApplicationStatus.REJECTED
-                       AND a.status <> com.intelligentresume.application.domain.ApplicationStatus.WITHDRAWN))
+                       AND a.status <> com.intelligentresume.application.domain.ApplicationStatus.WITHDRAWN
+                       AND a.status <> com.intelligentresume.application.domain.ApplicationStatus.NO_RESPONSE))
             ORDER BY a.updatedAt DESC
             """)
     List<ApplicationRecord> findByUserIdAndFollowUp(@Param("userId") Long userId,

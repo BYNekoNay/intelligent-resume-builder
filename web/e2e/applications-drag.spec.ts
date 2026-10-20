@@ -28,13 +28,17 @@ const record = (id: number, status: string, version: number) => ({
 
 const stats = {
   total: 2,
+  // 与 ApplicationStatus（9 态）保持同键集：缺键会让后来者误以为契约只有 6 态。
   byStatus: [
     { status: 'DRAFT', count: 1, percent: 50 },
     { status: 'APPLIED', count: 1, percent: 50 },
+    { status: 'SCREENING', count: 0, percent: 0 },
     { status: 'INTERVIEWING', count: 0, percent: 0 },
     { status: 'OFFERED', count: 0, percent: 0 },
+    { status: 'HIRED', count: 0, percent: 0 },
     { status: 'REJECTED', count: 0, percent: 0 },
     { status: 'WITHDRAWN', count: 0, percent: 0 },
+    { status: 'NO_RESPONSE', count: 0, percent: 0 },
   ],
   conversionRates: { appliedToInterviewing: 0, interviewingToOffered: null, appliedToOffered: 0 },
   avgStageDurationDays: { applied: 0, interviewing: null, totalToOffer: null },

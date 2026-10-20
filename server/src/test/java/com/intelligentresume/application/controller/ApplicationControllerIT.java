@@ -57,6 +57,10 @@ class ApplicationControllerIT {
                 .andExpect(jsonPath("$.data.resumeVersionId").value(versionId))
                 .andExpect(jsonPath("$.data.status").value("DRAFT"))
                 .andExpect(jsonPath("$.data.coverLetterText").value("Hello"))
+                .andExpect(jsonPath("$.data.statusHistory", org.hamcrest.Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.data.statusHistory[0].fromStatus").isEmpty())
+                .andExpect(jsonPath("$.data.statusHistory[0].toStatus").value("DRAFT"))
+                .andExpect(jsonPath("$.data.statusHistory[0].changedAt").isNotEmpty())
                 .andExpect(jsonPath("$.data.version").value(0))
                 .andReturn();
         applicationId = objectMapper.readTree(created.getResponse().getContentAsString()).path("data").path("id").asLong();
@@ -78,6 +82,7 @@ class ApplicationControllerIT {
         mockMvc.perform(get("/api/applications/" + applicationId).header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.coverLetterText").value("Hello"))
+                .andExpect(jsonPath("$.data.statusHistory", org.hamcrest.Matchers.hasSize(1)))
                 .andExpect(jsonPath("$.data.draftCount").doesNotExist());
         mockMvc.perform(get("/api/applications/" + applicationId).header("Authorization", "Bearer " + tokenB))
                 .andExpect(status().isNotFound());
@@ -99,11 +104,18 @@ class ApplicationControllerIT {
         mockMvc.perform(patch("/api/applications/" + applicationId + "/status")
                         .header("Authorization", "Bearer " + tokenA)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"status\":\"APPLIED\",\"version\":1}"))
+                        .content("{\"status\":\"APPLIED\",\"version\":1,\"note\":\"Submitted via company site\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("APPLIED"))
                 .andExpect(jsonPath("$.data.appliedAt").isNotEmpty())
                 .andExpect(jsonPath("$.data.version").value(2));
+
+        mockMvc.perform(get("/api/applications/" + applicationId).header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.statusHistory", org.hamcrest.Matchers.hasSize(2)))
+                .andExpect(jsonPath("$.data.statusHistory[1].fromStatus").value("DRAFT"))
+                .andExpect(jsonPath("$.data.statusHistory[1].toStatus").value("APPLIED"))
+                .andExpect(jsonPath("$.data.statusHistory[1].note").value("Submitted via company site"));
 
         mockMvc.perform(patch("/api/applications/" + applicationId + "/status")
                         .header("Authorization", "Bearer " + tokenA)
@@ -142,26 +154,52 @@ class ApplicationControllerIT {
 
     @Test
     @Order(4)
-    void statsReturnsOwnedAggregationAndIsolatesForeignUsers() throws Exception {
-        // 前序用例已将唯一投递记录置为 APPLIED
-        mockMvc.perform(get("/api/applications/stats").header("Authorization", "Bearer " + tokenA))
+    void progressesThroughWorkflowAndMakesOnlyNoResponseReopenable() throws Exception {
+        transition("SCREENING", 4);
+        transition("INTERVIEWING", 5);
+        transition("OFFERED", 6);
+        transition("HIRED", 7);
+
+        mockMvc.perform(patch("/api/applications/" + applicationId + "/status")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"APPLIED\",\"version\":8}"))
+                .andExpect(status().isConflict());
+
+        // A separate record exercises the no-response reopen path without undoing the hired record.
+        long secondId = id(postJson("/api/applications", tokenA,
+                "{\"jobDescriptionId\":%d,\"resumeVersionId\":%d}".formatted(jobId, versionId)));
+        transition(secondId, "APPLIED", 0);
+        transition(secondId, "NO_RESPONSE", 1);
+        transition(secondId, "SCREENING", 2);
+        mockMvc.perform(get("/api/applications/" + secondId).header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.byStatus", org.hamcrest.Matchers.hasSize(6)))
-                .andExpect(jsonPath("$.data.byStatus[1].status").value("APPLIED"))
-                .andExpect(jsonPath("$.data.byStatus[1].count").value(1))
-                .andExpect(jsonPath("$.data.byStatus[1].percent").value(100.0))
-                // 无 OFFERED 记录：interviewingToOffered 分母为 0 → null
-                .andExpect(jsonPath("$.data.conversionRates.interviewingToOffered").value(org.hamcrest.Matchers.nullValue()));
-        // 归属隔离：用户 B 看不到用户 A 的投递统计
-        mockMvc.perform(get("/api/applications/stats").header("Authorization", "Bearer " + tokenB))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.total").value(0))
-                .andExpect(jsonPath("$.data.byStatus", org.hamcrest.Matchers.hasSize(6)));
+                .andExpect(jsonPath("$.data.statusHistory", org.hamcrest.Matchers.hasSize(4)))
+                .andExpect(jsonPath("$.data.statusHistory[2].toStatus").value("NO_RESPONSE"))
+                .andExpect(jsonPath("$.data.statusHistory[3].fromStatus").value("NO_RESPONSE"));
     }
 
     @Test
     @Order(5)
+    void statsReturnsOwnedAggregationAndIsolatesForeignUsers() throws Exception {
+        // 前序用例将主记录置为 HIRED，第二条记录处于 SCREENING。
+        mockMvc.perform(get("/api/applications/stats").header("Authorization", "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(2))
+                .andExpect(jsonPath("$.data.byStatus", org.hamcrest.Matchers.hasSize(9)))
+                .andExpect(jsonPath("$.data.byStatus[5].status").value("HIRED"))
+                .andExpect(jsonPath("$.data.byStatus[5].count").value(1))
+                // HIRED 计入已完成 offer 漏斗，因此当前面试/offer 转化率为 0.5。
+                .andExpect(jsonPath("$.data.conversionRates.interviewingToOffered").value(0.5));
+        // 归属隔离：用户 B 看不到用户 A 的投递统计
+        mockMvc.perform(get("/api/applications/stats").header("Authorization", "Bearer " + tokenB))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0))
+                .andExpect(jsonPath("$.data.byStatus", org.hamcrest.Matchers.hasSize(9)));
+    }
+
+    @Test
+    @Order(6)
     void statsUnauthenticated_returns40101() throws Exception {
         mockMvc.perform(get("/api/applications/stats"))
                 .andExpect(status().isUnauthorized())
@@ -169,7 +207,7 @@ class ApplicationControllerIT {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     void crossUserCannotMutateAndOwnerCanDelete() throws Exception {
         mockMvc.perform(delete("/api/applications/" + applicationId)
                         .header("Authorization", "Bearer " + tokenB))
@@ -178,11 +216,12 @@ class ApplicationControllerIT {
                         .header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/applications").header("Authorization", "Bearer " + tokenA))
-                .andExpect(jsonPath("$.data").isEmpty());
+                .andExpect(jsonPath("$.data", org.hamcrest.Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.data[0].status").value("SCREENING"));
     }
 
     @Test
-    @Order(7)
+    @Order(8)
     void unauthenticated_returns40101() throws Exception {
         mockMvc.perform(get("/api/applications"))
                 .andExpect(status().isUnauthorized())
@@ -205,5 +244,18 @@ class ApplicationControllerIT {
 
     private long id(MvcResult result) throws Exception {
         return objectMapper.readTree(result.getResponse().getContentAsString()).path("data").path("id").asLong();
+    }
+
+    private void transition(String status, long version) throws Exception {
+        transition(applicationId, status, version);
+    }
+
+    private void transition(long id, String status, long version) throws Exception {
+        mockMvc.perform(patch("/api/applications/" + id + "/status")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"%s\",\"version\":%d}".formatted(status, version)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(status));
     }
 }

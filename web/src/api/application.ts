@@ -1,6 +1,14 @@
 import { apiClient, type ApiResponse } from './client'
 
-export type ApplicationStatus = 'DRAFT' | 'APPLIED' | 'INTERVIEWING' | 'OFFERED' | 'REJECTED' | 'WITHDRAWN'
+export type ApplicationStatus = 'DRAFT' | 'APPLIED' | 'SCREENING' | 'INTERVIEWING' | 'OFFERED' | 'HIRED' | 'REJECTED' | 'WITHDRAWN' | 'NO_RESPONSE'
+
+export interface ApplicationStatusHistory {
+  id: number
+  fromStatus: ApplicationStatus | null
+  toStatus: ApplicationStatus
+  note: string | null
+  changedAt: string
+}
 export type FollowUpFilter = 'ALL' | 'TODAY' | 'OVERDUE'
 
 export interface ApplicationRecord {
@@ -17,6 +25,7 @@ export interface ApplicationRecord {
   version: number
   createdAt: string
   updatedAt: string
+  statusHistory?: ApplicationStatusHistory[]
 }
 
 /**
@@ -59,8 +68,8 @@ export function createApplication(payload: ApplicationPayload) {
 export function updateApplication(id: number, payload: ApplicationPayload) {
   return apiClient.put<ApiResponse<ApplicationRecord>>(`/api/applications/${id}`, payload)
 }
-export function updateApplicationStatus(id: number, status: ApplicationStatus, version: number, feedbackText?: string) {
-  return apiClient.patch<ApiResponse<ApplicationRecord>>(`/api/applications/${id}/status`, { status, version, feedbackText })
+export function updateApplicationStatus(id: number, status: ApplicationStatus, version: number, feedbackText?: string, note?: string) {
+  return apiClient.patch<ApiResponse<ApplicationRecord>>(`/api/applications/${id}/status`, { status, version, ...(feedbackText !== undefined ? { feedbackText } : {}), ...(note !== undefined ? { note } : {}) })
 }
 export function deleteApplication(id: number) { return apiClient.delete<ApiResponse<void>>(`/api/applications/${id}`) }
 export function getApplicationStats() {

@@ -12,12 +12,13 @@ import java.util.List;
  * 最后删除 {@code user} 行本身。与 {@link RetentionPurgeRepository} 的分档清扫语义不同：
  * 账户删除没有「被引用者保留」分支 —— 引用链整体同属被删用户，一并消失。
  *
- * <p>清单来源：全部迁移的 23 张表逐张核对（2026-10-02）——
+ * <p>清单来源：全部迁移的 24 张表逐张核对（2026-10-20）——
  * <ul>
  *   <li>18 张含 {@code user_id}：直接 {@code WHERE user_id = ?}；</li>
- *   <li>4 张无 {@code user_id} 经链到达：{@code resume_version}（经 resume）、
- *       {@code resume_material_reference} 与 {@code match_result}（经 resume_version）、
- *       {@code interview_record}（经 interview_session）—— 用 {@code IN (SELECT …)}；</li>
+ *   <li>5 张无 {@code user_id} 经链到达：{@code application_status_history}（经 application_record）、
+ *       {@code resume_version}（经 resume）、{@code resume_material_reference} 与
+ *       {@code match_result}（经 resume_version）、{@code interview_record}（经 interview_session）——
+ *       用 {@code IN (SELECT …)}；</li>
  *   <li>{@code communication_template} 有系统种子行（{@code user_id IS NULL}），条件删除只会
  *       命中该用户自建模板；</li>
  *   <li>覆盖完整性由 {@code AccountPurgeRepositorySchemaTest} 从迁移反查守护（漏一张即红）；
@@ -46,6 +47,7 @@ public class AccountPurgeRepository {
             "DELETE FROM ats_check_result WHERE user_id = ?",
             "DELETE FROM ai_task WHERE user_id = ?",
             "DELETE FROM export_task WHERE user_id = ?",
+            "DELETE FROM application_status_history WHERE application_record_id IN (SELECT id FROM application_record WHERE user_id = ?)",
             "DELETE FROM application_record WHERE user_id = ?",
             "DELETE FROM inline_optimization_record WHERE user_id = ?",
             "DELETE FROM communication_draft WHERE user_id = ?",

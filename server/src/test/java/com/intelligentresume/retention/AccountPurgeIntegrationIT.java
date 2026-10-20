@@ -15,9 +15,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>为什么必须造真实行：级联 DELETE 的顺序错误只有在外键真实存在时才会暴露
  * （H2 强制 FK）—— mock 掉数据库的单元测试永远验证不了「顺序」。本用例为目标用户与
- * 旁观用户各造一整套业务行（覆盖全部 22 张业务表），执行清扫后断言：
+ * 旁观用户各造一整套业务行（覆盖全部 23 张业务表），执行清扫后断言：
  * <ul>
- *   <li>目标用户：22 张业务表全部归零 + {@code user} 行消失；</li>
+ *   <li>目标用户：23 张业务表全部归零 + {@code user} 行消失；</li>
  *   <li>旁观用户：全部数据原样保留（级联只对准被删用户）；</li>
  *   <li>{@code communication_template} 的系统种子行（is_system=1，V23 种子）原样保留；</li>
  *   <li>任务行保留并转 SUCCESS（审计：不挂外键，user 删除后仍可查）。</li>
@@ -64,7 +64,7 @@ class AccountPurgeIntegrationIT {
     }
 
     @Test
-    @DisplayName("窗口已过的删号任务 → 目标用户 22 表级联清空、旁观用户与系统种子不受影响、任务转 SUCCESS")
+    @DisplayName("窗口已过的删号任务 → 目标用户 23 表级联清空、旁观用户与系统种子不受影响、任务转 SUCCESS")
     void purgeRemovesExactlyTheTargetUser() {
         JdbcTemplate d = jdbc;
         long victim = 9101L;
@@ -105,6 +105,9 @@ class AccountPurgeIntegrationIT {
                     + "VALUES (?, ?, 'classic', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)", u, versionId);
             d.update("INSERT INTO application_record (user_id, resume_version_id, job_description_id, status) "
                     + "VALUES (?, ?, ?, 'APPLIED')", u, versionId, jdId);
+            long applicationId = d.queryForObject("SELECT id FROM application_record WHERE user_id = ?", Long.class, u);
+            d.update("INSERT INTO application_status_history (application_record_id, to_status, changed_at) "
+                    + "VALUES (?, 'APPLIED', CURRENT_TIMESTAMP)", applicationId);
             d.update("INSERT INTO inline_optimization_record (user_id, resume_version_id, section_code, provider_code, "
                     + "original_content, result_json) VALUES (?, ?, 'work', 'qwen', 'a', '{}' FORMAT JSON)", u, versionId);
             d.update("INSERT INTO communication_draft (user_id, resume_version_id, job_description_id, draft_type, draft_text) "
@@ -160,6 +163,8 @@ class AccountPurgeIntegrationIT {
         assertThat(d.queryForObject("SELECT COUNT(*) FROM match_result WHERE resume_version_id IN "
                 + "(SELECT rv.id FROM resume_version rv JOIN resume r ON rv.resume_id = r.id WHERE r.user_id = ?)",
                 Long.class, victim)).isZero();
+        assertThat(d.queryForObject("SELECT COUNT(*) FROM application_status_history WHERE application_record_id IN "
+                + "(SELECT id FROM application_record WHERE user_id = ?)", Long.class, victim)).isZero();
         assertThat(d.queryForObject("SELECT COUNT(*) FROM interview_record WHERE session_id IN "
                 + "(SELECT id FROM interview_session WHERE user_id = ?)", Long.class, victim)).isZero();
         // 旁观用户的数据原样保留
@@ -167,6 +172,8 @@ class AccountPurgeIntegrationIT {
         assertThat(bystanderResumes).isEqualTo(1);
         Long bystanderSessions = d.queryForObject("SELECT COUNT(*) FROM interview_session WHERE user_id = ?", Long.class, bystander);
         assertThat(bystanderSessions).isEqualTo(1);
+        assertThat(d.queryForObject("SELECT COUNT(*) FROM application_status_history h JOIN application_record a "
+                + "ON h.application_record_id = a.id WHERE a.user_id = ?", Long.class, bystander)).isEqualTo(1);
         // 系统种子模板不被触碰（V23 内置只读种子共 14 行，user_id NULL + is_system=1）
         Long seedTemplates = d.queryForObject(
                 "SELECT COUNT(*) FROM communication_template WHERE user_id IS NULL", Long.class);

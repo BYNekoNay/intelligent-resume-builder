@@ -41,9 +41,9 @@ class MySql57MigrationLiveIT {
                     .cleanDisabled(true)
                     .load();
 
-            // V20~V35 共 16 条迁移必须全部在 MySQL 5.7 上成功（V23~V35 的 5.7 兼容由本门禁证明）
-            assertEquals(16, flyway.migrate().migrationsExecuted);
-            assertEquals("35", scalar(statement,
+            // V20~V36 共 17 条迁移必须全部在 MySQL 5.7 上成功（V23~V36 的 5.7 兼容由本门禁证明）
+            assertEquals(17, flyway.migrate().migrationsExecuted);
+            assertEquals("36", scalar(statement,
                     "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1"));
             assertEquals("1", scalar(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='19' AND type='BASELINE' AND success=1"));
@@ -68,6 +68,9 @@ class MySql57MigrationLiveIT {
             // V26/V27/V29/V30：新增可空列与乐观锁版本列（NOT NULL DEFAULT 0）
             assertEquals("YES", scalar(statement, columnNullableSql(schema, "application_record", "next_follow_up_at")));
             assertEquals("YES", scalar(statement, columnNullableSql(schema, "application_record", "stage_entered_at")));
+
+            // V36：投递状态历史表用于审计与复盘
+            assertEquals("1", scalar(statement, tableCountSql(schema, "application_status_history")));
             assertEquals("NO", scalar(statement, columnNullableSql(schema, "career_material", "version")));
             assertEquals("0", scalar(statement, columnDefaultSql(schema, "career_material", "version")));
             assertEquals("NO", scalar(statement, columnNullableSql(schema, "communication_template", "version")));

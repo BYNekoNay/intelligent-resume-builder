@@ -3,6 +3,7 @@ package com.intelligentresume.auth.controller;
 import com.intelligentresume.auth.dto.CurrentUserResponse;
 import com.intelligentresume.auth.dto.ChangeEmailRequest;
 import com.intelligentresume.auth.dto.ChangePasswordRequest;
+import com.intelligentresume.auth.dto.ExportDataRequest;
 import com.intelligentresume.auth.dto.LoginRequest;
 import com.intelligentresume.auth.dto.RegisterRequest;
 import com.intelligentresume.auth.dto.TokenResponse;
@@ -152,8 +153,9 @@ public class AuthController {
      * 流式写出的堆占用为常数级，且事务在序列化前已提交（DB 连接不在 JSON 生成期间被占用）。
      * 代价：响应无 {@code Content-Length}（分块传输），且流已写出后无法再改写为错误信封。
      */
-    @GetMapping("/export")
-    public void exportData(HttpServletRequest httpRequest, HttpServletResponse httpResponse) throws IOException {
+    @PostMapping("/export")
+    public void exportData(@Valid @RequestBody ExportDataRequest request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) throws IOException {
+        authService.verifyCurrentPassword(currentUserId(httpRequest), request.currentPassword());
         Map<String, Object> payload = accountExportService.loadExportPayload(currentUserId(httpRequest));
         String fileName = "intelligent-resume-export-" + LocalDate.now() + ".json";
         httpResponse.setStatus(HttpServletResponse.SC_OK);

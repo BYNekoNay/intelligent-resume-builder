@@ -28,8 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <ol>
  *   <li>全部迁移中**含 user_id 列**的表（18 张）必须各有直接 {@code DELETE … WHERE user_id = ?}；</li>
- *   <li>4 张无 user_id 的关联表（resume_version / resume_material_reference / match_result /
- *       interview_record）必须以 {@code IN (SELECT …)} 子查询形态覆盖；</li>
+ *   <li>5 张无 user_id 的关联表（application_status_history / resume_version /
+ *       resume_material_reference / match_result / interview_record）必须以
+ *       {@code IN (SELECT …)} 子查询形态覆盖；</li>
  *   <li>{@code communication_template} 含系统种子行 —— 其 DELETE **必须**带 user_id 条件
  *       （不带即全表删种子 = 灾难）；</li>
  *   <li>每张业务表恰好出现一次（重复 = 复制粘贴事故，遗漏 = 残留）。</li>
@@ -62,7 +63,7 @@ class AccountPurgeRepositorySchemaTest {
                 "以下含 user_id 的表没有直接 DELETE 覆盖 —— 账户硬删后这些表的数据会残留：" + missing);
 
         Set<String> coveredViaSubquery = new TreeSet<>();
-        for (String table : List.of("resume_version", "resume_material_reference", "match_result", "interview_record")) {
+        for (String table : List.of("application_status_history", "resume_version", "resume_material_reference", "match_result", "interview_record")) {
             Pattern via = Pattern.compile("(?i)DELETE\\s+FROM\\s+" + table + "\\s+WHERE\\s+.*IN\\s*\\(",
                     Pattern.DOTALL);
             if (via.matcher(joined).find()) coveredViaSubquery.add(table);
@@ -72,7 +73,7 @@ class AccountPurgeRepositorySchemaTest {
                 "以下无 user_id 的关联表缺少 IN 子查询形态的 DELETE：" + missing
                         + "（清单来源：docs/plans/2026-10-01-001 §7 与迁移外键链）");
         assertEquals(18, coveredDirect.size(), "直接覆盖的 user_id 表数应与迁移反查一致");
-        assertEquals(4, coveredViaSubquery.size(), "经链覆盖的关联表数应为 4");
+        assertEquals(5, coveredViaSubquery.size(), "经链覆盖的关联表数应为 5");
     }
 
     @Test

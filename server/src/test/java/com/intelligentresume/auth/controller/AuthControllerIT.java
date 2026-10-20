@@ -341,16 +341,17 @@ class AuthControllerIT {
 
     @Test
     @Order(9)
-    @DisplayName("GET /api/auth/export 未登录返回 40101")
+    @DisplayName("POST /api/auth/export 未登录返回 40101")
     void exportData_unauthenticated_returns40101() throws Exception {
-        mockMvc.perform(get("/api/auth/export"))
+        mockMvc.perform(post("/api/auth/export").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"correcthorse\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(40101));
     }
 
     @Test
     @Order(10)
-    @DisplayName("GET /api/auth/export 聚合本人各域数据，排除他人数据/系统模板/凭据字段")
+    @DisplayName("POST /api/auth/export 复核密码后聚合本人各域数据，排除他人数据/系统模板/凭据字段")
     void exportData_aggregatesOwnDataOnly() throws Exception {
         String tokenA = registerAndGetToken("export_a", "export_a@example.com");
         registerAndGetToken("export_b", "export_b@example.com");
@@ -361,15 +362,24 @@ class AuthControllerIT {
         seedExportData(userBId, "userB");
         seedSystemTemplate();
 
-        String body = mockMvc.perform(get("/api/auth/export")
-                        .header("Authorization", "Bearer " + tokenA))
+        String body = mockMvc.perform(post("/api/auth/export")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"correcthorse\"}"))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, containsString("attachment")))
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
 
+        mockMvc.perform(post("/api/auth/export")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"incorrect-password\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40101));
+
         JsonNode root = objectMapper.readTree(body);
         // 导出物是数据文档（非统一 ApiResponse 信封），带结构版本与导出时间
-        assertEquals(1, root.path("formatVersion").asInt());
+        assertEquals(2, root.path("formatVersion").asInt());
         assertTrue(root.path("exportedAt").isTextual());
         assertTrue(root.path("code").isMissingNode());
         assertEquals("export_a", root.path("account").path("username").asText());
@@ -392,6 +402,7 @@ class AuthControllerIT {
         assertEquals(1, root.path("jobDescriptions").size());
         assertEquals(1, root.path("applications").size());
         assertEquals("导出求职信 userA", root.path("applications").get(0).path("coverLetterText").asText());
+        assertTrue(root.path("applications").get(0).path("statusHistory").isArray());
 
         // 面试会话 → 轮次记录；答案资产 → 关联章节
         assertEquals(1, root.path("interviewSessions").size());

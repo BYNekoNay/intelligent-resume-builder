@@ -61,7 +61,8 @@ test('application creation surfaces the archived-version guidance', async ({ pag
   await page.route('**/api/applications/stats', route =>
     route.fulfill({ json: response({
       total: 0,
-      byStatus: ['DRAFT', 'APPLIED', 'INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN']
+      // 与 ApplicationStatus（9 态）保持同键集：缺键会让后来者误以为契约只有 6 态。
+      byStatus: ['DRAFT', 'APPLIED', 'SCREENING', 'INTERVIEWING', 'OFFERED', 'HIRED', 'REJECTED', 'WITHDRAWN', 'NO_RESPONSE']
         .map(status => ({ status, count: 0, percent: null })),
       conversionRates: { appliedToInterviewing: null, interviewingToOffered: null, appliedToOffered: null },
       avgStageDurationDays: { applied: null, interviewing: null, totalToOffer: null },

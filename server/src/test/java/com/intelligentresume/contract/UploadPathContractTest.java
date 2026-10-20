@@ -122,8 +122,8 @@ class UploadPathContractTest {
     @DisplayName("账号导出下载超时与兄弟下载路径对齐：体量随账号增长且无上限，30s 只够 ~3.2Mbps")
     void accountExportDownloadSetsSufficientTimeout() throws Exception {
         String api = read("web/src/api/auth.ts");
-        Matcher call = Pattern.compile("apiClient\\.get<string>\\('/api/auth/export'[^)]*\\)").matcher(api);
-        assertTrue(call.find(), "web/src/api/auth.ts 应存在账号导出调用（否则本门禁需更新）");
+        Matcher call = Pattern.compile("apiClient\\.post<string>\\('/api/auth/export'[^)]*\\)").matcher(api);
+        assertTrue(call.find(), "web/src/api/auth.ts 应存在带密码复核的账号导出调用");
         Matcher timeout = Pattern.compile("timeout:\\s*([\\d_]+)").matcher(call.group());
         assertTrue(timeout.find(), "账号导出未显式设置 timeout：会回落到全局 10s");
         long clientTimeoutMs = Long.parseLong(timeout.group(1).replace("_", ""));

@@ -28,9 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li><b>文档漏写已实现的表</b>：{@code personal_profile} / {@code communication_draft} /
  *       {@code communication_template} / {@code inline_optimization_record} / {@code interview_ai_attempt} /
  *       {@code interview_asset_section} 共 6 张表已由 V3/V13/V17/V20/V23/V25 建出，§3 无章节；</li>
- *   <li><b>文档写了不存在的表</b>：{@code application_status_history} 在 {@code V1~V34} 中**无 CREATE TABLE**、
- *       代码亦无引用（设计草案）；另一处是命名漂移 —— 早年写作 {@code material_resume_task}，
- *       迁移里实为 {@code material_resume_generation}。</li>
+ *   <li><b>文档写了不存在的表</b>：另一处曾是命名漂移 —— 早年写作 {@code material_resume_task}，
+ *       迁移里实为 {@code material_resume_generation}。状态历史表后由 V36 正式实现。</li>
  * </ol>
  *
  * <p>两个方向拆成两个用例，使失败信息各自聚焦（同一方法内的首个断言失败会掩盖第二个）。
@@ -40,7 +39,7 @@ class SchemaDocContractTest {
     private static final Pattern CREATE_TABLE =
             Pattern.compile("(?i)CREATE\\s+TABLE\\s+`?([a-z_][a-z0-9_]*)`?");
 
-    /** §3 的表章节标题，如 {@code ### 3.12 application_status_history（**设计草案，未实现**）}。 */
+    /** §3 的表章节标题，如 {@code ### 3.12 application_status_history}。 */
     private static final Pattern DOC_TABLE_SECTION =
             Pattern.compile("(?m)^###\\s+3\\.\\d+(?:\\.\\d+)?\\s+([a-z_][a-z0-9_]*)([^\\n]*)");
 

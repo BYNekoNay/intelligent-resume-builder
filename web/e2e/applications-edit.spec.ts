@@ -39,19 +39,23 @@ const applicationDetail = {
 }
 const stats = {
   total: 1,
+  // 与 ApplicationStatus（9 态）保持同键集：缺键会让后来者误以为契约只有 6 态。
   byStatus: [
     { status: 'DRAFT', count: 0, percent: 0 },
     { status: 'APPLIED', count: 1, percent: 100 },
+    { status: 'SCREENING', count: 0, percent: 0 },
     { status: 'INTERVIEWING', count: 0, percent: 0 },
     { status: 'OFFERED', count: 0, percent: 0 },
+    { status: 'HIRED', count: 0, percent: 0 },
     { status: 'REJECTED', count: 0, percent: 0 },
     { status: 'WITHDRAWN', count: 0, percent: 0 },
+    { status: 'NO_RESPONSE', count: 0, percent: 0 },
   ],
   conversionRates: { appliedToInterviewing: 0, interviewingToOffered: null, appliedToOffered: 0 },
   avgStageDurationDays: { applied: 0, interviewing: null, totalToOffer: null },
 }
 
-async function mockApplicationsPage(page: Page) {
+async function mockApplicationsPage(page: Page, summary = applicationSummary) {
   await page.addInitScript(() => localStorage.setItem('intelligent-resume.locale', 'en-US'))
   await page.route('**/api/auth/refresh', route => route.fulfill({ json: response({ accessToken: 'edit-token' }) }))
   await page.route('**/api/auth/me', route => route.fulfill({ json: response({ id: 1, username: 'edit-user', email: 'edit@example.com' }) }))
@@ -63,21 +67,25 @@ async function mockApplicationsPage(page: Page) {
   }))
   await page.route('**/api/jobs', route => route.fulfill({ json: response(jobs) }))
   // 注意：Playwright 按注册逆序匹配路由，宽泛的 applications** 先注册，更具体的 detail / stats 后注册从而优先命中。
-  await page.route('**/api/applications**', route => route.fulfill({ json: response([applicationSummary]) }))
-  await page.route('**/api/applications/31', route => route.fulfill({ json: response(applicationDetail) }))
+  await page.route('**/api/applications**', route => route.fulfill({ json: response([summary]) }))
+  await page.route('**/api/applications/31', route => route.fulfill({ json: response({ ...summary, coverLetterText: 'Evidence-backed cover letter', emailBodyText: null, openingMessageText: 'Short opener' }) }))
   await page.route('**/api/applications/stats', route => route.fulfill({ json: response(stats) }))
 }
 
 test('editing an application locates its resume version with a single lookup request', async ({ page }) => {
   await mockApplicationsPage(page)
 
-  // 放大竞态窗口：延迟选项加载（resumes/jobs），使「编辑定位目标简历」在
-  // useResumeJobOptions.load() 的选项响应返回之前就完成。Playwright 后注册的路由优先命中，
+  // 用「闸门」而不是固定 400ms 延时来确定性复现竞态窗口：
+  // 选项加载（/api/resumes）先挂住不放行，让「编辑定位目标简历」必然早于选项响应完成。
+  // 这正是该用例偶发失败（期望 1 实际 2）的成因：load() 若在编辑流选定简历之前返回，
+  // 会按「当前选中简历（null）」自行确立初始选择并额外拉一次版本列表，与编辑流已发起的加载重复。
+  // 固定 400ms 延时在并行全量下约 1/2 命中（getResumeVersion 的响应可能被拖到 400ms 之后），
+  // 闸门则由测试自己决定放行时机，不再依赖机器速度。Playwright 后注册的路由优先命中，
   // 故此处覆盖 mockApplicationsPage 中的 /api/resumes。
-  // 这正是该用例在 CI 上偶发失败（期望 1 实际 2）的成因：load() 在选项返回后按「当前选中简历」
-  // 无条件重新拉取版本列表，与编辑流已完成的加载重复。修复前本用例稳定失败。
+  let releaseResumes: () => void = () => {}
+  const resumesGate = new Promise<void>((resolve) => { releaseResumes = resolve })
   await page.route('**/api/resumes', async route => {
-    await new Promise(resolve => setTimeout(resolve, 400))
+    await resumesGate
     await route.fulfill({ json: response(resumes) })
   })
 
@@ -100,13 +108,38 @@ test('editing an application locates its resume version with a single lookup req
 
   const composer = page.locator('.application-composer')
   await expect(composer).toBeVisible()
-  // 定位到 resume 2 并选中被引用的旧版本 21
-  await expect(composer.locator('select').nth(0)).toHaveValue('2')
+  // 版本下拉选项来自 loadVersions(resume 2)：它有内容即说明「定位 + 重载目标简历版本」已完成，
+  // 而此刻 /api/resumes 仍被闸门挡着（简历/岗位下拉尚无可选值）。
+  await expect(composer.locator('select').nth(1).locator('option')).toHaveCount(3)
   await expect(composer.locator('select').nth(1)).toHaveValue('21')
 
-  await expect.poll(() => lookups).toBe(1)
-  // 只重载目标简历（resume 2）的版本列表：旧实现会扇出 2 次列表请求
-  expect(versionListsWhileEditing).toBe(1)
+  // 放行选项加载，等它 settle（简历下拉出现 2 份简历）
+  releaseResumes()
+  await expect(composer.locator('select').nth(0).locator('option')).toHaveCount(3)
+  await expect(composer.locator('select').nth(0)).toHaveValue('2')
+  await expect(composer.locator('select').nth(2)).toHaveValue('20')
+  await expect(composer.locator('select').nth(0)).toBeDisabled()
+  await expect(composer.locator('select').nth(1)).toBeDisabled()
+  await expect(composer.locator('select').nth(2)).toBeDisabled()
+
+  await expect.poll(() => lookups, { timeout: 5000 }).toBe(1)
+  // 编辑流 settle 且选项加载 settle 之后不应再有第二次列表请求：
+  // 只重载目标简历（resume 2）一次；旧实现会按简历数扇出 2 次列表请求。
+  await expect.poll(() => versionListsWhileEditing, { timeout: 5000 }).toBe(1)
+})
+
+test('draft applications keep their job and resume selectors editable', async ({ page }) => {
+  await mockApplicationsPage(page, { ...applicationSummary, status: 'DRAFT', appliedAt: null })
+
+  await page.goto('/applications')
+  const ticket = page.locator('.application-ticket')
+  await expect(ticket).toHaveCount(1)
+  await ticket.locator('.icon-button').first().click()
+
+  const composer = page.locator('.application-composer')
+  await expect(composer.locator('select').nth(0)).toBeEnabled()
+  await expect(composer.locator('select').nth(1)).toBeEnabled()
+  await expect(composer.locator('select').nth(2)).toBeEnabled()
 })
 
 test('loads draft texts on demand instead of shipping them in the list', async ({ page }) => {
@@ -144,4 +177,38 @@ test('loads draft texts on demand instead of shipping them in the list', async (
   await expect(composer.locator('textarea').nth(0)).toHaveValue('Evidence-backed cover letter')
   await expect(composer.locator('textarea').nth(2)).toHaveValue('Short opener')
   await expect.poll(() => detailRequests).toBe(2)
+})
+
+test('shows the confirmed application stages and persisted transition history', async ({ page }) => {
+  await mockApplicationsPage(page)
+  let status: string = 'APPLIED'
+  let history = [{ id: 1, fromStatus: null, toStatus: 'APPLIED', note: null, changedAt: now }]
+  await page.route('**/api/applications/31/status', async route => {
+    const payload = route.request().postDataJSON() as { status: string; version: number; note?: string }
+    status = payload.status
+    history = [...history, { id: history.length + 1, fromStatus: history.at(-1)?.toStatus ?? null, toStatus: status, note: payload.note ?? null, changedAt: now }]
+    await route.fulfill({ json: response({ ...applicationDetail, status, version: payload.version + 1, statusHistory: history }) })
+  })
+  await page.route('**/api/applications/31', route => route.fulfill({ json: response({ ...applicationDetail, status, statusHistory: history }) }))
+
+  await page.goto('/applications')
+  const ticket = page.locator('.application-ticket')
+  const stage = ticket.getByLabel('Application stage')
+  await expect(stage.locator('option')).toHaveText(['Applied', 'Screening', 'Interviewing', 'Offer', 'Rejected', 'Withdrawn', 'No response'])
+  await stage.selectOption('SCREENING')
+  await expect.poll(() => status).toBe('SCREENING')
+  await ticket.locator('.ticket-expand').click()
+  await expect(ticket.locator('.status-history')).toContainText('Applied → Screening')
+
+  await stage.selectOption('NO_RESPONSE')
+  await expect.poll(() => status).toBe('NO_RESPONSE')
+  await expect(stage.locator('option')).toHaveText(['No response', 'Applied', 'Screening', 'Interviewing', 'Offer', 'Rejected', 'Withdrawn'])
+
+  // 终态边 NO_RESPONSE → REJECTED：可一步确认被拒，时间线里只留真实发生的那一步
+  // （若强制经 APPLIED 中转，会写下一条并未发生的 No response → Applied 事件）。
+  await stage.selectOption('REJECTED')
+  await expect.poll(() => status).toBe('REJECTED')
+  await expect(ticket.locator('.status-history')).toContainText('No response → Rejected')
+  // REJECTED 仍是终态：下拉只剩自身，无法回退
+  await expect(stage.locator('option')).toHaveText(['Rejected'])
 })

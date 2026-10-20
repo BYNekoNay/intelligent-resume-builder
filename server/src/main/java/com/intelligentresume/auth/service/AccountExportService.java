@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.intelligentresume.ai.consent.repository.AiConsentRepository;
 import com.intelligentresume.application.repository.ApplicationRecordRepository;
+import com.intelligentresume.application.domain.ApplicationRecord;
+import com.intelligentresume.application.domain.ApplicationStatusHistory;
+import com.intelligentresume.application.repository.ApplicationStatusHistoryRepository;
 import com.intelligentresume.auth.domain.User;
 import com.intelligentresume.auth.repository.UserRepository;
 import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
@@ -52,7 +55,7 @@ import java.util.stream.Collectors;
 public class AccountExportService {
 
     /** 导出文档结构版本：字段增删时递增，便于消费者识别格式。 */
-    private static final int FORMAT_VERSION = 1;
+    private static final int FORMAT_VERSION = 2;
 
     private final UserRepository userRepository;
     private final PersonalProfileRepository personalProfileRepository;
@@ -61,6 +64,7 @@ public class AccountExportService {
     private final CareerMaterialRepository careerMaterialRepository;
     private final JobDescriptionRepository jobDescriptionRepository;
     private final ApplicationRecordRepository applicationRecordRepository;
+    private final ApplicationStatusHistoryRepository applicationStatusHistoryRepository;
     private final InterviewSessionRepository interviewSessionRepository;
     private final InterviewRecordRepository interviewRecordRepository;
     private final InterviewAnswerAssetRepository interviewAnswerAssetRepository;
@@ -77,6 +81,7 @@ public class AccountExportService {
                                 CareerMaterialRepository careerMaterialRepository,
                                 JobDescriptionRepository jobDescriptionRepository,
                                 ApplicationRecordRepository applicationRecordRepository,
+                                ApplicationStatusHistoryRepository applicationStatusHistoryRepository,
                                 InterviewSessionRepository interviewSessionRepository,
                                 InterviewRecordRepository interviewRecordRepository,
                                 InterviewAnswerAssetRepository interviewAnswerAssetRepository,
@@ -92,6 +97,7 @@ public class AccountExportService {
         this.careerMaterialRepository = careerMaterialRepository;
         this.jobDescriptionRepository = jobDescriptionRepository;
         this.applicationRecordRepository = applicationRecordRepository;
+        this.applicationStatusHistoryRepository = applicationStatusHistoryRepository;
         this.interviewSessionRepository = interviewSessionRepository;
         this.interviewRecordRepository = interviewRecordRepository;
         this.interviewAnswerAssetRepository = interviewAnswerAssetRepository;
@@ -141,7 +147,7 @@ public class AccountExportService {
         payload.put("resumes", resumeNodes(userId));
         payload.put("careerMaterials", careerMaterialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(userId));
         payload.put("jobDescriptions", jobDescriptionRepository.findByUserIdOrderByUpdatedAtDesc(userId));
-        payload.put("applications", applicationRecordRepository.findByUserIdOrderByUpdatedAtDesc(userId));
+        payload.put("applications", applicationNodes(userId));
         payload.put("interviewSessions", interviewSessionNodes(userId));
         payload.put("interviewAnswerAssets", interviewAnswerAssetNodes(userId));
         payload.put("communicationTemplates", communicationTemplateRepository.findByUserIdOrderByUpdatedAtDesc(userId));
@@ -173,6 +179,27 @@ public class AccountExportService {
         return resumes.stream()
                 .map(resume -> attachChildren(objectMapper.valueToTree(resume), "versions",
                         versionsByResumeId.getOrDefault(resume.getId(), List.of())))
+                .toList();
+    }
+
+    /**
+     * Export applications with their immutable status timeline. The timeline is
+     * workspace data, not a transient task, and must survive web-to-desktop transfer.
+     */
+    private List<ObjectNode> applicationNodes(Long userId) {
+        List<ApplicationRecord> applications = applicationRecordRepository.findByUserIdOrderByUpdatedAtDesc(userId);
+        if (applications.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<ApplicationStatusHistory>> historyByApplicationId =
+                applicationStatusHistoryRepository
+                        .findByApplicationRecordIdInOrderByApplicationRecordIdAscChangedAtAscIdAsc(
+                                applications.stream().map(ApplicationRecord::getId).toList())
+                        .stream()
+                        .collect(Collectors.groupingBy(ApplicationStatusHistory::getApplicationRecordId));
+        return applications.stream()
+                .map(application -> attachChildren(objectMapper.valueToTree(application), "statusHistory",
+                        historyByApplicationId.getOrDefault(application.getId(), List.of())))
                 .toList();
     }
 

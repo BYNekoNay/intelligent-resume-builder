@@ -61,8 +61,8 @@ export async function changePassword(payload: { currentPassword: string; newPass
  * 单次响应 11.92MB）：超时与同类下载路径（PDF 导出，体上限 10MB）对齐为 60s；
  * 30s 只够 ~3.2Mbps 的持续带宽，慢网络下合法下载会被中断。
  */
-export async function exportAccountData(): Promise<string> {
-  return (await apiClient.get<string>('/api/auth/export', { responseType: 'text', timeout: 60_000 })).data
+export async function exportAccountData(currentPassword: string): Promise<string> {
+  return (await apiClient.post<string>('/api/auth/export', { currentPassword }, { responseType: 'text', timeout: 60_000 })).data
 }
 
 /** #7：删除账号（服务端软删并撤销全部会话）。 */

@@ -24,6 +24,7 @@ import {
   updateApplication,
   updateApplicationStatus,
   type ApplicationRecord,
+  type ApplicationStatusHistory,
   type ApplicationStats,
   type ApplicationStatus,
   type ApplicationSummary,
@@ -43,6 +44,7 @@ const saving = ref(false)
 const loadingEdit = ref(false)
 const error = ref('')
 const editingId = ref<number | null>(null)
+const editingLineageLocked = ref(false)
 const composerOpen = ref(false)
 const searchQuery = ref('')
 const jobDescriptionId = ref('')
@@ -55,6 +57,7 @@ const feedbackDraft = ref<Record<number, string>>({})
 const expandedRecordId = ref<number | null>(null)
 /** #50：列表不含草稿长文本，展开卡片/打开编辑面板时按需拉详情并缓存。 */
 const draftTexts = ref<Record<number, Pick<ApplicationRecord, 'coverLetterText' | 'emailBodyText' | 'openingMessageText'>>>({})
+const statusHistory = ref<Record<number, ApplicationStatusHistory[]>>({})
 const followUpFilter = ref<FollowUpFilter>('ALL')
 const draggingRecordId = ref<number | null>(null)
 const dragOverLane = ref<ApplicationStatus | null>(null)
@@ -72,8 +75,8 @@ const {
   loadVersions,
 } = useResumeJobOptions()
 
-const statuses: ApplicationStatus[] = ['DRAFT', 'APPLIED', 'INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN']
-const terminalStatuses: ApplicationStatus[] = ['OFFERED', 'REJECTED', 'WITHDRAWN']
+const statuses: ApplicationStatus[] = ['DRAFT', 'APPLIED', 'SCREENING', 'INTERVIEWING', 'OFFERED', 'HIRED', 'REJECTED', 'WITHDRAWN', 'NO_RESPONSE']
+const terminalStatuses: ApplicationStatus[] = ['HIRED', 'REJECTED', 'WITHDRAWN', 'NO_RESPONSE']
 
 const filteredRecords = computed(() => {
   const query = searchQuery.value.trim().toLocaleLowerCase(locale.value)
@@ -90,9 +93,15 @@ const lanes = computed(() => statuses.map(status => ({
   records: filteredRecords.value.filter(record => record.status === status),
 })))
 
-const appliedCount = computed(() => records.value.filter(record => record.status === 'APPLIED').length)
+/**
+ * 页头「三个阶段」计数必须与 9 态看板同口径（否则 SCREENING / HIRED 的记录在页头彻底消失，用户以为数据丢了）：
+ * 投递阶段 = APPLIED + SCREENING，面试阶段 = INTERVIEWING，Offer 阶段 = OFFERED + HIRED。
+ * 口径与后端 ApplicationService 一致：统计里 applied 阶段过滤 APPLIED|SCREENING，
+ * Offer 聚合（转化率分子）取 OFFERED + HIRED。
+ */
+const appliedCount = computed(() => records.value.filter(record => record.status === 'APPLIED' || record.status === 'SCREENING').length)
 const interviewCount = computed(() => records.value.filter(record => record.status === 'INTERVIEWING').length)
-const offerCount = computed(() => records.value.filter(record => record.status === 'OFFERED').length)
+const offerCount = computed(() => records.value.filter(record => record.status === 'OFFERED' || record.status === 'HIRED').length)
 
 async function load() {
   loading.value = true
@@ -118,6 +127,7 @@ async function changeFollowUpFilter() {
 
 function resetForm() {
   editingId.value = null
+  editingLineageLocked.value = false
   composerOpen.value = false
   jobDescriptionId.value = ''
   resumeVersionId.value = ''
@@ -177,6 +187,7 @@ function cacheDrafts(record: ApplicationRecord) {
     emailBodyText: record.emailBodyText,
     openingMessageText: record.openingMessageText,
   }
+  statusHistory.value[record.id] = record.statusHistory ?? []
 }
 
 async function toggleDetails(record: ApplicationSummary) {
@@ -190,6 +201,7 @@ async function toggleDetails(record: ApplicationSummary) {
     cacheDrafts((await getApplication(record.id)).data.data)
   } catch {
     draftTexts.value[record.id] = { coverLetterText: null, emailBodyText: null, openingMessageText: null }
+    statusHistory.value[record.id] = []
   }
 }
 
@@ -198,6 +210,7 @@ async function edit(record: ApplicationSummary) {
   loadingEdit.value = true
   composerOpen.value = true
   editingId.value = record.id
+  editingLineageLocked.value = record.status !== 'DRAFT' || record.appliedAt !== null
   jobDescriptionId.value = String(record.jobDescriptionId)
   nextFollowUpAt.value = record.nextFollowUpAt ? record.nextFollowUpAt.slice(0, 16) : ''
   try {
@@ -257,11 +270,16 @@ async function save() {
 function allowedStatuses(status: ApplicationStatus): ApplicationStatus[] {
   const transitions: Record<ApplicationStatus, ApplicationStatus[]> = {
     DRAFT: ['DRAFT', 'APPLIED', 'WITHDRAWN'],
-    APPLIED: ['APPLIED', 'INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN'],
-    INTERVIEWING: ['INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN'],
-    OFFERED: ['OFFERED'],
+    APPLIED: ['APPLIED', 'SCREENING', 'INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN', 'NO_RESPONSE'],
+    SCREENING: ['SCREENING', 'INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN', 'NO_RESPONSE'],
+    INTERVIEWING: ['INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN', 'NO_RESPONSE'],
+    OFFERED: ['OFFERED', 'HIRED', 'REJECTED', 'WITHDRAWN', 'NO_RESPONSE'],
+    HIRED: ['HIRED'],
     REJECTED: ['REJECTED'],
     WITHDRAWN: ['WITHDRAWN'],
+    // 与后端 ApplicationService 的迁移表逐格对齐：现实最常见的收尾是「投出去没回音、最终确认被拒」，
+    // 放开 NO_RESPONSE → REJECTED 一步到位，避免强制经 APPLIED 中转时在状态历史里写下一条并未发生的事件。
+    NO_RESPONSE: ['NO_RESPONSE', 'APPLIED', 'SCREENING', 'INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN'],
   }
   return transitions[status]
 }
@@ -270,10 +288,13 @@ function statusLabel(status: ApplicationStatus) {
   const labels: Record<ApplicationStatus, string> = {
     DRAFT: t('applications.statusDraft'),
     APPLIED: t('applications.statusApplied'),
+    SCREENING: t('applications.statusScreening'),
     INTERVIEWING: t('applications.statusInterviewing'),
     OFFERED: t('applications.statusOffered'),
+    HIRED: t('applications.statusHired'),
     REJECTED: t('applications.statusRejected'),
     WITHDRAWN: t('applications.statusWithdrawn'),
+    NO_RESPONSE: t('applications.statusNoResponse'),
   }
   return labels[status]
 }
@@ -300,6 +321,10 @@ function formatFollowUp(value: string | null) {
   return new Intl.DateTimeFormat(locale.value, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }
 
+function formatStatusTime(value: string) {
+  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+}
+
 function isOverdue(record: ApplicationSummary) {
   if (!record.nextFollowUpAt) return false
   if (terminalStatuses.includes(record.status)) return false
@@ -319,6 +344,7 @@ async function changeStatus(record: ApplicationSummary, status: ApplicationStatu
       feedbackDraft.value[record.id],
     )).data.data
     Object.assign(record, toSummary(updated))
+    cacheDrafts(updated)
     feedbackDraft.value[record.id] = record.feedbackText ?? ''
   } catch (cause: any) {
     if (cause?.response?.data?.code === 40901) {
@@ -375,6 +401,7 @@ async function onLaneDrop(status: ApplicationStatus, event: DragEvent) {
       feedbackDraft.value[record.id],
     )).data.data
     records.value = records.value.map(item => item.id === updated.id ? toSummary(updated) : item)
+    cacheDrafts(updated)
     feedbackDraft.value[updated.id] = updated.feedbackText ?? ''
     toastSuccess(t('toast.applicationMoved'))
   } catch (cause: any) {
@@ -447,9 +474,9 @@ onMounted(async () => {
 
     <section class="pipeline-summary" :aria-label="t('applications.title')">
       <div><span>{{ t('applications.recordCount') }}</span><strong>{{ stats?.total ?? records.length }}</strong></div>
-      <div><span>{{ t('applications.statusApplied') }}</span><strong>{{ appliedCount }}</strong></div>
-      <div><span>{{ t('applications.statusInterviewing') }}</span><strong>{{ interviewCount }}</strong></div>
-      <div><span>{{ t('applications.statusOffered') }}</span><strong>{{ offerCount }}</strong></div>
+      <div><span>{{ t('applications.pipelineApplied') }}</span><strong>{{ appliedCount }}</strong></div>
+      <div><span>{{ t('applications.pipelineInterviewing') }}</span><strong>{{ interviewCount }}</strong></div>
+      <div><span>{{ t('applications.pipelineOffered') }}</span><strong>{{ offerCount }}</strong></div>
     </section>
 
     <section v-if="stats" class="funnel-summary" :aria-label="t('applications.funnelTitle')">
@@ -472,9 +499,9 @@ onMounted(async () => {
         </div>
         <button class="icon-button" type="button" :title="t('applications.cancel')" @click="resetForm"><X :size="17" /></button>
       </header>
-      <label>{{ t('applications.resume') }}<select v-model.number="selectedResumeId" :disabled="optionsLoading" @change="loadVersions"><option :value="null" disabled>{{ t('applications.selectResume') }}</option><option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.title }}</option></select></label>
-      <label>{{ t('applications.version') }}<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions" required><option value="" disabled>{{ t('applications.selectVersion') }}</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ t(resumeSourceLabelKey(version.sourceType)) }}</option></select></label>
-      <label>{{ t('applications.job') }}<select v-model="jobDescriptionId" :disabled="optionsLoading" required><option value="" disabled>{{ t('applications.selectJob') }}</option><option v-for="job in jobs" :key="job.id" :value="String(job.id)">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option></select></label>
+      <label>{{ t('applications.resume') }}<select v-model.number="selectedResumeId" :disabled="optionsLoading || editingLineageLocked" @change="loadVersions"><option :value="null" disabled>{{ t('applications.selectResume') }}</option><option v-for="resume in resumes" :key="resume.id" :value="resume.id">{{ resume.title }}</option></select></label>
+      <label>{{ t('applications.version') }}<select v-model="resumeVersionId" :disabled="optionsLoading || !hasVersions || editingLineageLocked" required><option value="" disabled>{{ t('applications.selectVersion') }}</option><option v-for="version in versions" :key="version.id" :value="String(version.id)">v{{ version.versionNo }} · {{ t(resumeSourceLabelKey(version.sourceType)) }}</option></select></label>
+      <label>{{ t('applications.job') }}<select v-model="jobDescriptionId" :disabled="optionsLoading || editingLineageLocked" required><option value="" disabled>{{ t('applications.selectJob') }}</option><option v-for="job in jobs" :key="job.id" :value="String(job.id)">{{ job.title }}{{ job.companyName ? ` · ${job.companyName}` : '' }}</option></select></label>
       <label>{{ t('applications.cover') }}<textarea v-model="coverLetterText" rows="4" /></label>
       <label>{{ t('applications.email') }}<textarea v-model="emailBodyText" rows="4" /></label>
       <label>{{ t('applications.opening') }}<textarea v-model="openingMessageText" rows="4" /></label>
@@ -509,6 +536,13 @@ onMounted(async () => {
             <label class="stage-control"><span>{{ t('applications.status') }}</span><select :value="record.status" :aria-label="t('applications.status')" @change="changeStatus(record, ($event.target as HTMLSelectElement).value as ApplicationStatus)"><option v-for="status in allowedStatuses(record.status)" :key="status" :value="status">{{ statusLabel(status) }}</option></select></label>
             <button class="ticket-expand" type="button" :aria-expanded="expandedRecordId === record.id" @click="toggleDetails(record)"><span>{{ t('applications.feedback') }}</span><ChevronDown :size="15" /></button>
             <div v-if="expandedRecordId === record.id" class="ticket-details">
+              <ol v-if="statusHistory[record.id]?.length" class="status-history" :aria-label="t('applications.statusHistory')">
+                <li v-for="entry in statusHistory[record.id]" :key="entry.id">
+                  <time :datetime="entry.changedAt">{{ formatStatusTime(entry.changedAt) }}</time>
+                  <span>{{ entry.fromStatus ? statusLabel(entry.fromStatus) : t('applications.statusCreated') }} → {{ statusLabel(entry.toStatus) }}</span>
+                  <small v-if="entry.note">{{ entry.note }}</small>
+                </li>
+              </ol>
               <label>{{ t('applications.feedback') }}<textarea :value="feedbackDraft[record.id] ?? record.feedbackText ?? ''" rows="3" @input="feedbackDraft[record.id] = ($event.target as HTMLTextAreaElement).value" /></label>
               <button class="btn-neon btn-secondary" type="button" @click="changeStatus(record, record.status)">{{ t('applications.saveFeedback') }}</button>
               <div class="application-drafts"><p v-if="draftTexts[record.id]?.coverLetterText"><strong>{{ t('applications.cover') }}</strong>{{ draftTexts[record.id]?.coverLetterText }}</p><p v-if="draftTexts[record.id]?.emailBodyText"><strong>{{ t('applications.email') }}</strong>{{ draftTexts[record.id]?.emailBodyText }}</p><p v-if="draftTexts[record.id]?.openingMessageText"><strong>{{ t('applications.opening') }}</strong>{{ draftTexts[record.id]?.openingMessageText }}</p></div>
@@ -563,7 +597,7 @@ onMounted(async () => {
 .pipeline-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: 11px; }
 .follow-up-filter { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 10px; font-weight: 700; }
 .follow-up-filter select { height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-input); color: var(--text-primary); font: inherit; font-size: 10px; }
-.application-board { display: grid; grid-template-columns: repeat(6, minmax(220px, 1fr)); gap: 12px; padding-bottom: 12px; overflow-x: auto; scroll-snap-type: x proximity; }
+.application-board { display: grid; grid-template-columns: repeat(9, minmax(190px, 1fr)); gap: 12px; padding-bottom: 12px; overflow-x: auto; scroll-snap-type: x proximity; }
 .pipeline-lane { min-height: 390px; border: 1px solid var(--border); border-radius: 7px; background: color-mix(in srgb, var(--bg-page) 72%, var(--bg-surface)); scroll-snap-align: start; transition: background 0.15s ease; }
 .pipeline-lane.is-drag-over { background: var(--accent-light); border-color: var(--accent); }
 .pipeline-lane > header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
@@ -571,10 +605,16 @@ onMounted(async () => {
 .pipeline-lane header strong { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; color: var(--text-secondary); background: var(--bg-page); font-family: var(--font-utility); font-size: 9px; }
 .lane-marker { width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); }
 .lane-applied .lane-marker { background: var(--accent); }
+.lane-screening .lane-marker { background: var(--highlight); }
 .lane-interviewing .lane-marker { background: var(--highlight); }
 .lane-offered .lane-marker { background: var(--success); }
-.lane-rejected .lane-marker, .lane-withdrawn .lane-marker { background: var(--border-strong); }
+.lane-hired .lane-marker { background: var(--success); }
+.lane-rejected .lane-marker, .lane-withdrawn .lane-marker, .lane-no_response .lane-marker { background: var(--border-strong); }
 .lane-records { display: grid; align-content: start; gap: 9px; padding: 9px; }
+.status-history { display: grid; gap: 7px; margin: 0 0 12px; padding: 0 0 0 16px; color: var(--text-secondary); font-size: 10px; }
+.status-history li { display: grid; gap: 2px; }
+.status-history time { color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; }
+.status-history small { color: var(--text-tertiary); }
 .application-ticket { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); box-shadow: var(--shadow-sm); cursor: grab; }
 .application-ticket.is-dragging { opacity: 0.45; }
 .application-ticket > header { display: flex; align-items: start; justify-content: space-between; gap: 8px; padding: 12px 12px 8px; }
@@ -612,6 +652,6 @@ onMounted(async () => {
 .toast-info { background: var(--info, #2563eb); }
 .toast-enter-active, .toast-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(6px); }
-@media (max-width: 900px) { .pipeline-summary { grid-template-columns: repeat(2, 1fr); }.pipeline-summary div:nth-child(2) { border-right: 0; }.pipeline-summary div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }.application-composer { grid-template-columns: 1fr 1fr; }.application-board { grid-template-columns: repeat(6, minmax(240px, 78vw)); }.funnel-summary { grid-template-columns: repeat(3, 1fr); }.funnel-title { grid-column: 1 / -1; } }
+@media (max-width: 900px) { .pipeline-summary { grid-template-columns: repeat(2, 1fr); }.pipeline-summary div:nth-child(2) { border-right: 0; }.pipeline-summary div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }.application-composer { grid-template-columns: 1fr 1fr; }.application-board { grid-template-columns: repeat(9, minmax(240px, 78vw)); }.funnel-summary { grid-template-columns: repeat(3, 1fr); }.funnel-title { grid-column: 1 / -1; } }
 @media (max-width: 680px) { .applications-heading { align-items: stretch; flex-direction: column; }.applications-heading .btn-primary { align-self: start; }.application-composer { grid-template-columns: 1fr; padding: 20px 16px; }.application-section-heading, .application-composer .job-actions { grid-column: auto; }.application-composer .job-actions .btn-neon { flex: 1; justify-content: center; }.pipeline-toolbar { align-items: stretch; flex-direction: column; }.pipeline-search { width: 100%; }.application-board { margin-inline: -16px; padding-inline: 16px; }.pipeline-toolbar > span { display: none; }.funnel-summary { grid-template-columns: repeat(2, 1fr); } }
 </style>

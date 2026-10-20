@@ -354,6 +354,10 @@ public class AuthService {
         return tokensFor(user, refresh);
     }
 
+    public void verifyCurrentPassword(Long userId, String currentPassword) {
+        requireCurrentPassword(userId, currentPassword);
+    }
+
     private User requireCurrentPassword(Long userId, String currentPassword) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));

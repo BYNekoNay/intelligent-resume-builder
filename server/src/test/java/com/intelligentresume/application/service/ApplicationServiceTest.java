@@ -5,6 +5,8 @@ import com.intelligentresume.application.domain.ApplicationStatus;
 import com.intelligentresume.application.dto.CreateApplicationRequest;
 import com.intelligentresume.application.dto.UpdateApplicationRequest;
 import com.intelligentresume.application.dto.UpdateApplicationStatusRequest;
+import com.intelligentresume.application.domain.ApplicationStatusHistory;
+import com.intelligentresume.application.repository.ApplicationStatusHistoryRepository;
 import com.intelligentresume.application.repository.ApplicationRecordRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
@@ -51,6 +53,7 @@ class ApplicationServiceTest {
     private ApplicationRecordRepository repository;
     private JobDescriptionRepository jobRepository;
     private ResumeVersionRepository versionRepository;
+    private ApplicationStatusHistoryRepository historyRepository;
     private ApplicationService service;
 
     @BeforeEach
@@ -58,7 +61,8 @@ class ApplicationServiceTest {
         repository = mock(ApplicationRecordRepository.class);
         jobRepository = mock(JobDescriptionRepository.class);
         versionRepository = mock(ResumeVersionRepository.class);
-        service = new ApplicationService(repository, jobRepository, versionRepository);
+        historyRepository = mock(ApplicationStatusHistoryRepository.class);
+        service = new ApplicationService(repository, jobRepository, versionRepository, historyRepository);
     }
 
     // ---- 帮助方法 ----
@@ -171,6 +175,89 @@ class ApplicationServiceTest {
     }
 
     @Test
+    @DisplayName("updateStatus: OFFERED 可进入 HIRED，并记录状态迁移说明")
+    void updateStatus_offeredToHired_recordsHistory() {
+        ApplicationRecord existing = record(RECORD_ID, USER_ID, ApplicationStatus.OFFERED, 1L);
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(existing));
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        UpdateApplicationStatusRequest request = new UpdateApplicationStatusRequest(ApplicationStatus.HIRED, 1L, null, "候选人已入职");
+
+        service.updateStatus(RECORD_ID, request, USER_ID);
+
+        ArgumentCaptor<ApplicationStatusHistory> captor = ArgumentCaptor.forClass(ApplicationStatusHistory.class);
+        verify(historyRepository).save(captor.capture());
+        assertEquals(ApplicationStatus.OFFERED, captor.getValue().getFromStatus());
+        assertEquals(ApplicationStatus.HIRED, captor.getValue().getToStatus());
+        assertEquals("候选人已入职", captor.getValue().getNote());
+        assertNotNull(captor.getValue().getChangedAt());
+    }
+
+    @Test
+    @DisplayName("updateStatus: NO_RESPONSE 可重开到活动状态，其他终态不可重开")
+    void updateStatus_noResponseCanReopenButTerminalCannot() {
+        ApplicationRecord noResponse = record(RECORD_ID, USER_ID, ApplicationStatus.NO_RESPONSE, 1L);
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(noResponse));
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        service.updateStatus(RECORD_ID, new UpdateApplicationStatusRequest(ApplicationStatus.SCREENING, 1L, null), USER_ID);
+        assertEquals(ApplicationStatus.SCREENING, noResponse.getStatus());
+
+        ApplicationRecord rejected = record(RECORD_ID, USER_ID, ApplicationStatus.REJECTED, 2L);
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(rejected));
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.updateStatus(RECORD_ID, new UpdateApplicationStatusRequest(ApplicationStatus.APPLIED, 2L, null), USER_ID));
+        assertEquals(ErrorCode.CONFLICT, exception.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("updateStatus: NO_RESPONSE 可由用户明确关闭为 WITHDRAWN")
+    void updateStatus_noResponseCanBeWithdrawn() {
+        ApplicationRecord noResponse = record(RECORD_ID, USER_ID, ApplicationStatus.NO_RESPONSE, 1L);
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(noResponse));
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateStatus(RECORD_ID,
+                new UpdateApplicationStatusRequest(ApplicationStatus.WITHDRAWN, 1L, null), USER_ID);
+
+        assertEquals(ApplicationStatus.WITHDRAWN, noResponse.getStatus());
+    }
+
+    @Test
+    @DisplayName("updateStatus: NO_RESPONSE 可一步确认为 REJECTED，且不伪造中间 APPLIED 事件")
+    void updateStatus_noResponseCanBeConfirmedRejectedInOneStep() {
+        ApplicationRecord noResponse = record(RECORD_ID, USER_ID, ApplicationStatus.NO_RESPONSE, 1L);
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(noResponse));
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateStatus(RECORD_ID,
+                new UpdateApplicationStatusRequest(ApplicationStatus.REJECTED, 1L, null, "企业确认未通过"), USER_ID);
+
+        assertEquals(ApplicationStatus.REJECTED, noResponse.getStatus());
+        // 走 APPLIED 中转会在审计时间线写入一条从未发生的 NO_RESPONSE→APPLIED，
+        // 因此必须只落一条 NO_RESPONSE→REJECTED 事件。
+        ArgumentCaptor<ApplicationStatusHistory> captor = ArgumentCaptor.forClass(ApplicationStatusHistory.class);
+        verify(historyRepository).save(captor.capture());
+        assertEquals(ApplicationStatus.NO_RESPONSE, captor.getValue().getFromStatus());
+        assertEquals(ApplicationStatus.REJECTED, captor.getValue().getToStatus());
+        assertEquals("企业确认未通过", captor.getValue().getNote());
+        assertNotNull(captor.getValue().getChangedAt());
+    }
+
+    @Test
+    @DisplayName("updateStatus: 新增 NO_RESPONSE→REJECTED 边不放开 REJECTED 后的任何迁移")
+    void updateStatus_rejectedStaysTerminalAfterNoResponseEdgeAdded() {
+        ApplicationRecord rejected = record(RECORD_ID, USER_ID, ApplicationStatus.REJECTED, 1L);
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(rejected));
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.updateStatus(RECORD_ID,
+                        new UpdateApplicationStatusRequest(ApplicationStatus.NO_RESPONSE, 1L, null), USER_ID));
+
+        assertEquals(ErrorCode.CONFLICT, exception.getErrorCode());
+        assertTrue(exception.getMessage().contains("不允许从 REJECTED 迁移到 NO_RESPONSE"));
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
     @DisplayName("updateStatus: DRAFT→APPLIED 合法并写入 appliedAt、feedback 与 stageEnteredAt")
     void updateStatus_draftToApplied_setsAppliedAtAndFeedback() {
         stubOwnedRecord(ApplicationStatus.DRAFT, 1L);
@@ -245,6 +332,29 @@ class ApplicationServiceTest {
         assertEquals("新的求职信", captor.getValue().getCoverLetterText());
         // 核心断言：coverLetter 变了，但进入面试时刻原样保留，未被重置
         assertEquals(enteredTenDaysAgo, captor.getValue().getStageEnteredAt());
+    }
+
+    @Test
+    @DisplayName("update: 已投递后更改 JD 或简历版本关联抛 40901 且不落库")
+    void update_appliedRecordCannotChangeLineage() {
+        ApplicationRecord existing = record(RECORD_ID, USER_ID, ApplicationStatus.APPLIED, 1L);
+        existing.setAppliedAt(LocalDateTime.now().minusDays(1));
+        when(repository.findByIdAndUserId(RECORD_ID, USER_ID)).thenReturn(Optional.of(existing));
+        UpdateApplicationRequest request = new UpdateApplicationRequest(
+                JOB_ID + 1, VERSION_ID, null, "updated text", null, null, 1L, null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.update(RECORD_ID, request, USER_ID));
+
+        assertEquals(ErrorCode.CONFLICT, ex.getErrorCode());
+        assertEquals("已进入投递流程的岗位和简历版本不可更改", ex.getMessage());
+
+        UpdateApplicationRequest resumeChange = new UpdateApplicationRequest(
+                JOB_ID, VERSION_ID + 1, null, "updated text", null, null, 1L, null);
+        BusinessException resumeChangeEx = assertThrows(BusinessException.class,
+                () -> service.update(RECORD_ID, resumeChange, USER_ID));
+        assertEquals(ErrorCode.CONFLICT, resumeChangeEx.getErrorCode());
+        verify(repository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -483,5 +593,19 @@ class ApplicationServiceTest {
 
         // 平均 = (3.0 + 1.0) / 2 = 2.0 天；若错误地仍用 updatedAt（30 分钟前）会得到远小于 2 的值
         assertEquals(2.0, stats.avgStageDurationDays().interviewing(), 0.05);
+    }
+
+    @Test
+    @DisplayName("stats: Offer 总耗时固定使用进入 Offer 时刻，不受后续编辑影响")
+    void stats_totalToOffer_usesOfferStageEnteredAt() {
+        when(repository.countGroupByStatus(USER_ID))
+                .thenReturn(List.of(count(ApplicationStatus.OFFERED, 1L)));
+        when(repository.findDurationRowsByUserId(USER_ID)).thenReturn(List.of(
+                projection(ApplicationStatus.OFFERED, LocalDateTime.now().minusDays(10),
+                        LocalDateTime.now().minusDays(7), LocalDateTime.now().minusDays(1))));
+
+        var stats = service.stats(USER_ID);
+
+        assertEquals(3.0, stats.avgStageDurationDays().totalToOffer(), 0.05);
     }
 }

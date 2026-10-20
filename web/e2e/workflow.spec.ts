@@ -541,10 +541,13 @@ test('keeps application evidence visible while tracking a pipeline stage', async
     byStatus: [
       { status: 'DRAFT', count: 0, percent: 0 },
       { status: 'APPLIED', count: 1, percent: 100 },
+      { status: 'SCREENING', count: 0, percent: 0 },
       { status: 'INTERVIEWING', count: 0, percent: 0 },
       { status: 'OFFERED', count: 0, percent: 0 },
+      { status: 'HIRED', count: 0, percent: 0 },
       { status: 'REJECTED', count: 0, percent: 0 },
       { status: 'WITHDRAWN', count: 0, percent: 0 },
+      { status: 'NO_RESPONSE', count: 0, percent: 0 },
     ],
     conversionRates: { appliedToInterviewing: 0, interviewingToOffered: null, appliedToOffered: 0 },
     avgStageDurationDays: { applied: 0, interviewing: null, totalToOffer: null },
@@ -558,7 +561,7 @@ test('keeps application evidence visible while tracking a pipeline stage', async
   await expect(page.getByRole('heading', { name: '投递记录', exact: true })).toBeVisible()
   await expect(page.getByText('Example Systems', { exact: true })).toBeVisible()
   await expect(page.getByText('Backend Engineer', { exact: true })).toBeVisible()
-  await expect(page.locator('.pipeline-lane')).toHaveCount(6)
+  await expect(page.locator('.pipeline-lane')).toHaveCount(9)
 
   const ticket = page.locator('.application-ticket')
   await expect(ticket).toHaveCount(1)
@@ -626,6 +629,8 @@ test('exports account data and deletes the account behind typed confirmation', a
   let exportRequests = 0
   await page.route('**/api/auth/export', route => {
     exportRequests += 1
+    expect(route.request().method()).toBe('POST')
+    expect(route.request().postDataJSON()).toEqual({ currentPassword: 'e2e-password' })
     return route.fulfill({ json: { formatVersion: 1, account: { username: 'e2e-user' } } })
   })
   let deleteRequests = 0
@@ -639,10 +644,23 @@ test('exports account data and deletes the account behind typed confirmation', a
 
   await page.goto('/account')
 
-  // #7：导出个人数据 → 触发 JSON 文件下载
-  const download = page.waitForEvent('download')
+  // #7：导出个人数据 → 站内密码对话框（不再用原生 prompt，避免明文回显/受限环境不可用）
   await page.getByRole('button', { name: '导出个人数据' }).click()
+  const exportDialog = page.getByRole('dialog', { name: '确认导出个人数据' })
+  await expect(exportDialog).toBeVisible()
+  const exportConfirm = exportDialog.getByRole('button', { name: '确认导出' })
+  // 不足 8 位：前端拦下并给出提示，不发请求（服务端也是 @Size(min = 8)，空串会变成 400）
+  await exportDialog.getByLabel('当前密码').fill('short')
+  await expect(exportConfirm).toBeDisabled()
+  await expect(exportDialog.getByText('密码至少需要 8 位。')).toBeVisible()
+  expect(exportRequests).toBe(0)
+
+  await exportDialog.getByLabel('当前密码').fill('e2e-password')
+  await expect(exportConfirm).toBeEnabled()
+  const download = page.waitForEvent('download')
+  await exportConfirm.click()
   expect((await download).suggestedFilename()).toMatch(/^intelligent-resume-export-\d{4}-\d{2}-\d{2}\.json$/)
+  await expect(exportDialog).toHaveCount(0)
   await expect(page.getByText('已导出个人数据。')).toBeVisible()
   expect(exportRequests).toBe(1)
 
@@ -1921,6 +1939,11 @@ test('reviews AI material selection before starting resume generation', async ({
       missingRequirements: ['大型团队管理经验'],
     },
   }) }))
+  await page.route('**/api/ai/tasks/100', route => route.fulfill({ json: response({
+    id: 100, taskType: 'JOB_GENERATION', parentTaskId: 99, jobDescriptionId: job.id,
+    status: 'PENDING', confirmationStatus: 'PENDING', resultJson: null, errorMessage: null,
+    retryCount: 0, resultResumeVersionId: null, createdAt: now, updatedAt: now,
+  }) }))
 
   await page.goto('/generate/materials?taskId=99')
   await expect(page.getByRole('heading', { name: '确认用于这份简历的资料' })).toBeVisible()
@@ -1936,6 +1959,74 @@ test('reviews AI material selection before starting resume generation', async ({
     forcedIncludedMaterialIds: [57],
   })
   await expect(page).toHaveURL(/\/generate\/confirm\?taskId=100$/)
+})
+
+test('retries material confirmation after refresh with the same selection and idempotency key', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  const requests: Array<{ key: string | undefined; body: unknown }> = []
+  let taskUpdatedAt = now
+  await page.route('**/api/ai/tasks/99/confirm-materials', async route => {
+    requests.push({
+      key: route.request().headers()['idempotency-key'],
+      body: route.request().postDataJSON(),
+    })
+    if (requests.length === 1) {
+      taskUpdatedAt = '2026-07-22T10:01:00Z'
+      await route.fulfill({ status: 503, json: response(null) })
+      return
+    }
+    await route.fulfill({ json: response({
+      id: 100, taskType: 'JOB_GENERATION', parentTaskId: 99, jobDescriptionId: job.id,
+      status: 'PENDING', confirmationStatus: 'PENDING', resultJson: null, errorMessage: null,
+      retryCount: 0, resultResumeVersionId: null, createdAt: now, updatedAt: now,
+    }) })
+  })
+  await page.route('**/api/ai/tasks/99', route => route.fulfill({ json: response({
+    id: 99, taskType: 'JOB_MATERIAL_SELECTION', jobDescriptionId: job.id,
+    status: 'SUCCESS', confirmationStatus: 'CONFIRMED', errorMessage: null, updatedAt: taskUpdatedAt,
+    resultJson: {
+      recommended: [{ materialId: 55, title: '订单平台重构', materialType: 'PROJECT_EXPERIENCE', reason: '直接匹配高并发系统经验' }],
+      unselected: [{ materialId: 56, title: 'AWS 证书', materialType: 'CERTIFICATE', reason: '与核心职责关联较弱' }],
+      excluded: [{ materialId: 57, title: '内部创新奖', materialType: 'AWARD', usagePreference: 'EXCLUDED', exclusionReason: 'GLOBAL' }],
+      missingRequirements: [],
+    },
+  }) }))
+  await page.route('**/api/ai/tasks/100', route => route.fulfill({ json: response({
+    id: 100, taskType: 'JOB_GENERATION', parentTaskId: 99, jobDescriptionId: job.id,
+    status: 'PENDING', confirmationStatus: 'PENDING', resultJson: null, errorMessage: null,
+    retryCount: 0, resultResumeVersionId: null, createdAt: now, updatedAt: now,
+  }) }))
+
+  await page.goto('/generate/materials?taskId=99')
+  await page.getByRole('button', { name: '加入', exact: true }).click()
+  await page.getByRole('button', { name: '本次强制加入' }).click()
+  await page.getByRole('button', { name: '确认选材并生成简历' }).click()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await page.reload()
+  await expect(page.locator('.selected-section')).toContainText('AWS 证书')
+  await expect(page.locator('.selected-section')).toContainText('内部创新奖')
+  await page.getByRole('button', { name: '确认选材并生成简历' }).click()
+
+  await expect(page).toHaveURL(/\/generate\/confirm\?taskId=100$/)
+  expect(requests).toHaveLength(2)
+  expect(requests[0].key).toBeTruthy()
+  expect(requests[1].key).toBe(requests[0].key)
+  expect(requests[1].body).toEqual(requests[0].body)
+})
+
+test('opens the created resume when revisiting a confirmed generation task', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  await page.route('**/api/ai/tasks/36', route => route.fulfill({ json: response({
+    id: 36, taskType: 'JOB_GENERATION', jobDescriptionId: job.id, status: 'SUCCESS',
+    confirmationStatus: 'CONFIRMED', resultResumeVersionId: 12, errorMessage: null, updatedAt: now,
+    resultJson: null,
+  }) }))
+  await page.route('**/api/resume-versions/12', route => route.fulfill({ json: response({ ...version, id: 12, resumeId: 1 }) }))
+
+  await page.goto('/generate/confirm?taskId=36')
+  await expect(page.getByRole('button', { name: '查看已创建的简历' })).toBeVisible()
+  await page.getByRole('button', { name: '查看已创建的简历' }).click()
+  await expect(page).toHaveURL(/\/resumes\/1$/)
 })
 
 test('renders the generated resume draft as readable fields instead of JSON', async ({ page }) => {

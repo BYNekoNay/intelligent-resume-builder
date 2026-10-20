@@ -28,6 +28,11 @@ const historyMessage = ref('')
 /** #7：数据导出与删号。 */
 const exporting = ref(false)
 const exportMessage = ref('')
+/** 导出需当前密码二次确认：站内对话框收集，避免原生 prompt 明文回显密码。 */
+const exportDialogOpen = ref(false)
+const exportPassword = ref('')
+const exportPasswordError = ref('')
+const exportPasswordInput = ref<HTMLInputElement | null>(null)
 const deleteDialogOpen = ref(false)
 const deleteConfirmName = ref('')
 const deleting = ref(false)
@@ -132,12 +137,35 @@ async function clearAiHistory() {
   }
 }
 
+/** 导出密码的最短长度：与服务端导出接口的 @Size(min = 8) 对齐，避免空串/短串换来一个 400。 */
+const exportPasswordTooShort = computed(() => exportPassword.value.length > 0 && exportPassword.value.length < 8)
+
+/** #7：导出个人数据——先开站内对话框收集当前密码（原生 prompt 明文回显且受限 CSP 下不可用）。 */
+async function openExportDialog() {
+  exportPassword.value = ''
+  exportPasswordError.value = ''
+  exportDialogOpen.value = true
+  await nextTick()
+  exportPasswordInput.value?.focus()
+}
+
+function closeExportDialog() {
+  exportDialogOpen.value = false
+  exportPassword.value = ''
+  exportPasswordError.value = ''
+}
+
 /** #7：导出个人数据——服务端返回 JSON 文本，前端落成 .json 文件下载。 */
-async function exportData() {
+async function confirmExportData() {
+  if (exportPassword.value.length < 8) {
+    exportPasswordError.value = t('account.exportPasswordTooShort')
+    return
+  }
   exporting.value = true
+  exportPasswordError.value = ''
   exportMessage.value = ''
   try {
-    const json = await exportAccountData()
+    const json = await exportAccountData(exportPassword.value)
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -147,9 +175,11 @@ async function exportData() {
     link.click()
     link.remove()
     URL.revokeObjectURL(url)
+    closeExportDialog()
     exportMessage.value = t('account.exportDone')
   } catch (error) {
-    exportMessage.value = resolveApiError(error, 'account.exportError')
+    // 失败保留对话框：用户可直接改密码重试，不必重走入口。
+    exportPasswordError.value = resolveApiError(error, 'account.exportError')
   } finally {
     exporting.value = false
   }
@@ -283,7 +313,7 @@ async function confirmDeleteAccount() {
         <h2>{{ t('account.dataTitle') }}</h2>
         <p>{{ t('account.dataDescription') }}</p>
         <p class="consent-history-action">
-          <button class="btn-neon btn-ghost" type="button" :disabled="exporting" @click="exportData">
+          <button class="btn-neon btn-ghost" type="button" :disabled="exporting" @click="openExportDialog">
             <Download :size="15" /> {{ exporting ? t('account.exporting') : t('account.exportData') }}
           </button>
           <button class="btn-neon btn-ghost danger-action" type="button" @click="openDeleteDialog">
@@ -293,6 +323,30 @@ async function confirmDeleteAccount() {
         </p>
       </div>
     </article>
+
+    <Teleport to="body">
+      <div v-if="exportDialogOpen" class="account-dialog-overlay" @click.self="closeExportDialog">
+        <section class="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-export-title" @keyup.esc="closeExportDialog">
+          <header>
+            <div>
+              <p class="eyebrow">{{ t('account.dataTitle') }}</p>
+              <h2 id="account-export-title">{{ t('account.exportPasswordTitle') }}</h2>
+              <p id="account-export-hint">{{ t('account.exportPasswordHint') }}</p>
+            </div>
+            <button class="icon-button" type="button" :aria-label="t('common.close')" @click="closeExportDialog"><X :size="18" /></button>
+          </header>
+          <form @submit.prevent="confirmExportData">
+            <label>{{ t('account.currentPassword') }}<input ref="exportPasswordInput" v-model="exportPassword" type="password" autocomplete="current-password" aria-describedby="account-export-hint" /></label>
+            <p v-if="exportPasswordError" class="form-error" role="alert">{{ exportPasswordError }}</p>
+            <p v-else-if="exportPasswordTooShort" class="form-error" role="status">{{ t('account.exportPasswordTooShort') }}</p>
+            <footer>
+              <button class="btn-neon btn-ghost" type="button" @click="closeExportDialog">{{ t('common.cancel') }}</button>
+              <button class="btn-neon btn-primary" :disabled="exporting || exportPassword.length < 8">{{ exporting ? t('account.exporting') : t('account.exportConfirmAction') }}</button>
+            </footer>
+          </form>
+        </section>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div v-if="deleteDialogOpen" class="account-dialog-overlay" @click.self="closeDeleteDialog">

@@ -4,6 +4,7 @@ import com.intelligentresume.application.domain.ApplicationRecord;
 import com.intelligentresume.application.domain.ApplicationStatus;
 import com.intelligentresume.application.dto.*;
 import com.intelligentresume.application.repository.ApplicationRecordRepository;
+import com.intelligentresume.application.repository.ApplicationStatusHistoryRepository;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
@@ -19,17 +20,27 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Service
 public class ApplicationService {
-    private static final Map<ApplicationStatus, Set<ApplicationStatus>> TRANSITIONS = Map.of(
-            ApplicationStatus.DRAFT, Set.of(ApplicationStatus.DRAFT, ApplicationStatus.APPLIED, ApplicationStatus.WITHDRAWN),
-            ApplicationStatus.APPLIED, Set.of(ApplicationStatus.APPLIED, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.REJECTED, ApplicationStatus.WITHDRAWN),
-            ApplicationStatus.INTERVIEWING, Set.of(ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.REJECTED, ApplicationStatus.WITHDRAWN),
-            ApplicationStatus.OFFERED, Set.of(ApplicationStatus.OFFERED),
-            ApplicationStatus.REJECTED, Set.of(ApplicationStatus.REJECTED),
-            ApplicationStatus.WITHDRAWN, Set.of(ApplicationStatus.WITHDRAWN));
+    private static final Map<ApplicationStatus, Set<ApplicationStatus>> TRANSITIONS = Map.ofEntries(
+            Map.entry(ApplicationStatus.DRAFT, Set.of(ApplicationStatus.DRAFT, ApplicationStatus.APPLIED, ApplicationStatus.WITHDRAWN)),
+            Map.entry(ApplicationStatus.APPLIED, Set.of(ApplicationStatus.APPLIED, ApplicationStatus.SCREENING, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.REJECTED, ApplicationStatus.WITHDRAWN, ApplicationStatus.NO_RESPONSE)),
+            Map.entry(ApplicationStatus.SCREENING, Set.of(ApplicationStatus.SCREENING, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.REJECTED, ApplicationStatus.WITHDRAWN, ApplicationStatus.NO_RESPONSE)),
+            Map.entry(ApplicationStatus.INTERVIEWING, Set.of(ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.REJECTED, ApplicationStatus.WITHDRAWN, ApplicationStatus.NO_RESPONSE)),
+            Map.entry(ApplicationStatus.OFFERED, Set.of(ApplicationStatus.OFFERED, ApplicationStatus.HIRED, ApplicationStatus.REJECTED, ApplicationStatus.WITHDRAWN, ApplicationStatus.NO_RESPONSE)),
+            Map.entry(ApplicationStatus.HIRED, Set.of(ApplicationStatus.HIRED)),
+            Map.entry(ApplicationStatus.REJECTED, Set.of(ApplicationStatus.REJECTED)),
+            Map.entry(ApplicationStatus.WITHDRAWN, Set.of(ApplicationStatus.WITHDRAWN)),
+            // A no-response outcome can be reopened when the employer responds, closed as
+            // withdrawn by the user, or confirmed as a rejection. The most common real-world
+            // ending is "no reply, eventually confirmed rejected", so REJECTED must be reachable
+            // in one step -- routing it through APPLIED would forge a NO_RESPONSE->APPLIED event
+            // in the audit timeline that never happened. REJECTED is terminal: it only self-loops.
+            Map.entry(ApplicationStatus.NO_RESPONSE, Set.of(ApplicationStatus.NO_RESPONSE, ApplicationStatus.APPLIED, ApplicationStatus.SCREENING, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.REJECTED, ApplicationStatus.WITHDRAWN)));
 
     private static final String FOLLOW_UP_ALL = "ALL";
     private static final String FOLLOW_UP_TODAY = "TODAY";
@@ -38,13 +49,24 @@ public class ApplicationService {
     private final ApplicationRecordRepository repository;
     private final JobDescriptionRepository jobRepository;
     private final ResumeVersionRepository versionRepository;
+    private final ApplicationStatusHistoryRepository historyRepository;
 
+    /** Retained for focused legacy unit tests; Spring uses the history-aware constructor. */
     public ApplicationService(ApplicationRecordRepository repository,
                               JobDescriptionRepository jobRepository,
                               ResumeVersionRepository versionRepository) {
+        this(repository, jobRepository, versionRepository, null);
+    }
+
+    @Autowired
+    public ApplicationService(ApplicationRecordRepository repository,
+                              JobDescriptionRepository jobRepository,
+                              ResumeVersionRepository versionRepository,
+                              ApplicationStatusHistoryRepository historyRepository) {
         this.repository = repository;
         this.jobRepository = jobRepository;
         this.versionRepository = versionRepository;
+        this.historyRepository = historyRepository;
     }
 
     @Transactional(readOnly = true)
@@ -59,7 +81,8 @@ public class ApplicationService {
 
     @Transactional(readOnly = true)
     public ApplicationResponse get(Long id, Long userId) {
-        return response(owned(id, userId));
+        ApplicationRecord record = owned(id, userId);
+        return response(record, readHistory(record.getId()));
     }
 
     @Transactional
@@ -75,12 +98,15 @@ public class ApplicationService {
         record.setResumeVersionId(request.resumeVersionId());
         record.setStatus(initialStatus);
         // 修复 P1-4：创建即进入 DRAFT，记录初始状态进入时刻
-        record.setStageEnteredAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        record.setStageEnteredAt(now);
         record.setCoverLetterText(request.coverLetterText());
         record.setEmailBodyText(request.emailBodyText());
         record.setOpeningMessageText(request.openingMessageText());
         record.setNextFollowUpAt(request.nextFollowUpAt());
-        return response(repository.saveAndFlush(record));
+        ApplicationRecord saved = repository.saveAndFlush(record);
+        recordHistory(saved.getId(), null, initialStatus, null, now);
+        return response(saved, readHistory(saved.getId()));
     }
 
     @Transactional
@@ -89,6 +115,11 @@ public class ApplicationService {
         requireVersion(record, request.version());
         if (request.status() != null && request.status() != record.getStatus()) {
             throw new BusinessException(ErrorCode.CONFLICT, "请通过状态接口更新投递状态");
+        }
+        boolean lineageChanged = !Objects.equals(request.jobDescriptionId(), record.getJobDescriptionId())
+                || !Objects.equals(request.resumeVersionId(), record.getResumeVersionId());
+        if (lineageChanged && (record.getAppliedAt() != null || record.getStatus() != ApplicationStatus.DRAFT)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "已进入投递流程的岗位和简历版本不可更改");
         }
         // 修复 P1-4：本方法不会改变 status（与当前值不一致时已在上方抛出），
         // 因此严禁刷新 stageEnteredAt —— 正是原缺陷中 updatedAt 被任意编辑重置的反面。
@@ -99,7 +130,8 @@ public class ApplicationService {
         record.setEmailBodyText(request.emailBodyText());
         record.setOpeningMessageText(request.openingMessageText());
         record.setNextFollowUpAt(request.nextFollowUpAt());
-        return response(repository.saveAndFlush(record));
+        ApplicationRecord saved = repository.saveAndFlush(record);
+        return response(saved, readHistory(saved.getId()));
     }
 
     @Transactional
@@ -109,13 +141,16 @@ public class ApplicationService {
         if (!TRANSITIONS.get(record.getStatus()).contains(request.status())) {
             throw new BusinessException(ErrorCode.CONFLICT, "不允许从 " + record.getStatus() + " 迁移到 " + request.status());
         }
+        boolean statusChanged = request.status() != record.getStatus();
+        LocalDateTime changedAt = LocalDateTime.now();
+        ApplicationStatus previousStatus = record.getStatus();
         if (request.status() == ApplicationStatus.APPLIED && record.getAppliedAt() == null) {
-            record.setAppliedAt(LocalDateTime.now());
+            record.setAppliedAt(changedAt);
         }
-        if (request.status() != record.getStatus()) {
+        if (statusChanged) {
             // 修复 P1-4：仅当状态实际发生迁移时刷新进入时刻；
             // 状态未变化（如 DRAFT→DRAFT、补 feedback）不得刷新，否则停留时长被重置。
-            record.setStageEnteredAt(LocalDateTime.now());
+            record.setStageEnteredAt(changedAt);
         }
         record.setStatus(request.status());
         // PATCH 语义：feedbackText 缺席或 null = 不改动备注（否则「拖拽改状态」这类不关心备注的
@@ -123,7 +158,11 @@ public class ApplicationService {
         if (request.feedbackText() != null) {
             record.setFeedbackText(request.feedbackText().isBlank() ? null : request.feedbackText());
         }
-        return response(repository.saveAndFlush(record));
+        ApplicationRecord saved = repository.saveAndFlush(record);
+        if (statusChanged) {
+            recordHistory(saved.getId(), previousStatus, request.status(), request.note(), changedAt);
+        }
+        return response(saved, readHistory(saved.getId()));
     }
 
     @Transactional
@@ -155,9 +194,11 @@ public class ApplicationService {
         }
 
         // 转化率：排除 REJECTED/WITHDRAWN 对分母的干扰
-        long appliedOrFurther = countIn(counts, ApplicationStatus.APPLIED, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED);
-        long interviewingOrFurther = countIn(counts, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED);
-        long offered = counts.get(ApplicationStatus.OFFERED);
+        long appliedOrFurther = countIn(counts, ApplicationStatus.APPLIED, ApplicationStatus.SCREENING,
+                ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.HIRED);
+        long interviewingOrFurther = countIn(counts, ApplicationStatus.SCREENING,
+                ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.HIRED);
+        long offered = countIn(counts, ApplicationStatus.OFFERED, ApplicationStatus.HIRED);
         Double appliedToInterviewing = ratio(interviewingOrFurther, appliedOrFurther);
         Double interviewingToOffered = ratio(offered, interviewingOrFurther);
         Double appliedToOffered = ratio(offered, appliedOrFurther);
@@ -187,7 +228,7 @@ public class ApplicationService {
 
     private Double avgAppliedDuration(List<ApplicationRecordRepository.StatsProjection> records, LocalDateTime now) {
         List<Double> days = records.stream()
-                .filter(record -> record.getStatus() == ApplicationStatus.APPLIED)
+                .filter(record -> record.getStatus() == ApplicationStatus.APPLIED || record.getStatus() == ApplicationStatus.SCREENING)
                 .map(record -> {
                     LocalDateTime base = record.getAppliedAt() != null ? record.getAppliedAt() : record.getCreatedAt();
                     return base == null ? null : ChronoUnit.MINUTES.between(base, now) / 1440.0;
@@ -219,8 +260,10 @@ public class ApplicationService {
                 .filter(record -> record.getStatus() == ApplicationStatus.OFFERED)
                 .map(record -> {
                     LocalDateTime base = record.getAppliedAt() != null ? record.getAppliedAt() : record.getCreatedAt();
-                    if (base == null || record.getUpdatedAt() == null) return null;
-                    return ChronoUnit.MINUTES.between(base, record.getUpdatedAt()) / 1440.0;
+                    LocalDateTime offeredAt = record.getStageEnteredAt() != null
+                            ? record.getStageEnteredAt() : record.getUpdatedAt();
+                    if (base == null || offeredAt == null) return null;
+                    return ChronoUnit.MINUTES.between(base, offeredAt) / 1440.0;
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();
@@ -260,11 +303,32 @@ public class ApplicationService {
         }
     }
 
-    private ApplicationResponse response(ApplicationRecord record) {
+    private ApplicationResponse response(ApplicationRecord record, List<ApplicationStatusHistoryResponse> history) {
         return new ApplicationResponse(record.getId(), record.getJobDescriptionId(), record.getResumeVersionId(),
                 record.getStatus(), record.getCoverLetterText(), record.getEmailBodyText(), record.getOpeningMessageText(),
                 record.getFeedbackText(), record.getAppliedAt(), record.getNextFollowUpAt(), record.getVersion(),
-                record.getCreatedAt(), record.getUpdatedAt());
+                record.getCreatedAt(), record.getUpdatedAt(), history);
+    }
+
+    private List<ApplicationStatusHistoryResponse> readHistory(Long applicationId) {
+        if (historyRepository == null) return List.of();
+        return historyRepository.findByApplicationRecordIdOrderByChangedAtAscIdAsc(applicationId).stream()
+                .map(item -> new ApplicationStatusHistoryResponse(item.getId(), item.getFromStatus(), item.getToStatus(),
+                        item.getNote(), item.getChangedAt()))
+                .toList();
+    }
+
+    private void recordHistory(Long applicationId, ApplicationStatus from, ApplicationStatus to,
+                               String note, LocalDateTime changedAt) {
+        if (historyRepository == null) return;
+        com.intelligentresume.application.domain.ApplicationStatusHistory history =
+                new com.intelligentresume.application.domain.ApplicationStatusHistory();
+        history.setApplicationRecordId(applicationId);
+        history.setFromStatus(from);
+        history.setToStatus(to);
+        history.setNote(note == null || note.isBlank() ? null : note);
+        history.setChangedAt(changedAt);
+        historyRepository.save(history);
     }
 
     /** #50：列表摘要——草稿长文本不进列表（按需从详情接口拉取），用 draftCount 支撑「n/3」标记。 */
