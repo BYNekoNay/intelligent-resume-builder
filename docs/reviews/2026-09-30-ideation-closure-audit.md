@@ -1485,15 +1485,17 @@ TS 对象字面量四处均曾出现）。
 
 > 缺陷 3 是**本批真实发生**的漏改：架构师在收口阶段复核发现，且当场指出「e2e 此刻是绿的**不能**作为该边完成的证据」——因为 UI 与断言同为旧 6 项、自洽所以绿。这条直接促成了下面的跨端矩阵门禁。
 
-**新增门禁（两条，均做过红判定）**：
+**新增门禁锚点（三处，均做过红判定）**：
 - `ApplicationStatusHistoryBackfillTest`：先 Flyway 迁移到 `target=35` → 插两条存量行（`stage_entered_at` 有值 / 为 NULL 各一）→ 再迁移到最新，断言「每行存量恰好 1 条历史、`from_status` 全 NULL、`changed_at` 分别取 `stage_entered_at` / `created_at`」，并用 `assertFalse(changedAt.equals(createdAt))` **反向**钉住 `COALESCE` 参数顺序。红判定：把 `COALESCE(stage_entered_at, created_at)` 改成 `COALESCE(created_at, stage_entered_at)` → `Tests run 2, Failures 1`，还原后 md5 一致。
 - `ApplicationStatusMatrixContractTest`：解析前端 `ApplicationsView.vue` 的 `transitions` 字面量，与后端 `TRANSITIONS` **逐格**比对（反射读 private 字段，不把字段改 public、不为测试扩大生产 API 面）；解析失败必须 fail 不得 skip，并自检「解析出 9 个状态且每集合非空」防空转。双向红判定：真实缺陷方向（后端有边、前端无）与反向注入（临时把后端退回 5 边）均能精确报出「哪个状态、哪条边、哪一侧」。**归因边界**：`21:46` 那次运行的产物已随报告目录清理，**其具体归因不作断言**——此处只认可复现结论「两个方向都能输出可定位差集」，不把不同时刻的状态拼成因果（架构师自查后撤回了该归因，采纳）。
 
-**验证（双源交叉，两套独立运行数字完全一致）**：
+- `ApplicationServiceTest.stats_screeningCountedInAppliedAndFunnel_hiredExcludedFromTotalToOffer`（A11）：QA 用**注入**证明的缺口 —— 原有 stats 用例一条 `SCREENING` 记录都没有，把 `ApplicationService` 里三处 `SCREENING` 口径删掉后本类 31 项全绿、全仓 987 也不红；文档（§9.2/§9.6）与代码互相印证，但两份都没有判据。补三条断言：`SCREENING` 计入 applied 停留（2.0 天）、`SCREENING`+`HIRED` 同时计入漏斗两侧（A=4 / I=3 → 0.75，四格口径各自被钉住）、`HIRED` 不计入 `totalToOffer`（null）。红判定：删掉 A 集合的 `HIRED` → `expected 0.75 but was 1.0`；**这个红判定当场纠正了我自己的错误推断**（我先按 0.5 写，实际 I 集合也含 `HIRED`，应为 0.75）。
+
+**验证（三源交叉）**：
 
 | 项 | 主仓运行（收口方） | 隔离副本运行（QA） |
 |---|---|---|
-| 后端全量 | **987 tests / 0 failures / 0 errors / 5 skipped**，BUILD SUCCESS，2:06（清空报告目录后重跑，含收口阶段新增的两条门禁用例） | **985 / 0 / 0 / 5**，1:23，156 份报告，`grep FAILURE!` 零命中（该次早于收口阶段最后两条用例） |
+| 后端全量 | **988 tests / 0 failures / 0 errors / 5 skipped**，BUILD SUCCESS（清空报告目录后重跑，代码最终版含 `StatusMatrixSources` 与 A11 锚点） | **987 / 0 / 0 / 5**（2:21，早于 A11 锚点；该次窗口内 `server/src` 零写入、md5 与实时仓一致） |
 | 前端 build | — | i18n 16/16 + guard 48 Vue/29 TS/2 locales、draft-fields 6/6、vue-tsc 无输出、`✓ built in 6.47s` |
 | e2e 全量 | — | **155 passed / 0 failed / 7 skipped**（7 = local-services 6 + PDF-recovery 1，均 `LOCAL_E2E` 门控） |
 | MySQL 5.7 | — | V36 真跑：`Successfully applied 17 migrations … now at version v36`，1/0/0 |
@@ -1507,6 +1509,8 @@ TS 对象字面量四处均曾出现）。
 **收口过程暴露的流程缺陷（值得单独记）**：并发 `mvn` 共用 `server/target/` 会互相清空报告，造成「mvn 汇总 0 失败、目录里躺着 FAILURE 报告」的自相矛盾状态，QA 连续两次踩到。根因是我让前后端并行时未隔离构建目录；另有两个 21:48 启动的 mvn + surefire fork 僵尸进程挂到 22:26（39 分钟仅 13s/37s CPU）。**终局认证必须隔离构建目录或串行执行**，已记为流程约束。
 
 **已知不合规与技术债（不在本批修，均已登记）**：
+- **CI 触发分支缺新分支**：`ci.yml` 的 `push.branches` 只列 `master` 与 `codex/resume-loop-enhancements`，**不含 `codex/web-business-flow`** → 推送到该分支不会触发任何流水线（本批两次 CI 均为 `workflow_dispatch` 手动触发）。这意味着此前在该分支上的所有推送都没有 CI 保护。`functional.yml` 更是只支持手动触发。**下批应把活跃分支纳入触发名单，或改为 `push: branches-ignore` 的反向写法**。
+- **注入实验纪律**：本批发生过两次实时仓注入（一次 `|| true`，一次 A 集合删 `HIRED`，后者是本总监做红判定时未声明）。规矩定为：注入只在副本做；若必须在实时仓，须先声明 + 文件头留 `// INJECTED-FOR-RED-TEST` + 还原后核 md5。违反者（含总监）同样记录。
 - `ApplicationService.java`：HEAD **288 行** → 当前 **352 行**，本批累计 **+64**。**归属必须分开记**：`288 → 350`（**+62**）发生在本批前期（9 态扩展、`ApplicationStatusHistory` 读写、`note` 透传、`statusHistory` 装配、统计口径），**越线动作发生在这一步**；`350 → 352`（**+2**）是收口阶段补 `NO_RESPONSE → REJECTED` 出边与注释。**本批把它推过了 300 行规范，但责任落点是 +62 那一阶段，不是收口阶段的 +2**。未拆分：拆分属结构性重构，会让已通过的 980 测试失去参照；且仓内**无行数判据**，CI 不会红。下批首项按「状态机 / 统计口径 / CRUD」拆分。
 - 300 行规范当前**无 CI 判据**——同一类「规则写了但无判据」问题（与 §2.46「声明即虚构」、§2.64 门禁承重性同族）。
 - `findDurationRowsByUserId` 的 IN 列表无 `@DataJpaTest` 钉住（缺陷 1 的回归保护缺口）；现状由矩阵门禁与 code review 保证。
@@ -1517,11 +1521,12 @@ TS 对象字面量四处均曾出现）。
 - 矩阵门禁自身可维护性：`ApplicationStatusMatrixContractTest` 已从 320 行抽出解析器为 `StatusMatrixSources`（199 行），门禁本体 **109 行**。若再加第四来源（如 e2e 期望文案），应先评估 `StatusMatrixSources` 是否也该按来源拆分。
 - **注入实验纪律（流程）**：红判定若必须在实时仓做，须在文件头留 `// INJECTED-FOR-RED-TEST` 标记、还原后核 md5。本批 QA 在 22:08 抓到实时仓 `DraftCommitService:202` 曾出现 `|| true`（会让所有素材不写引用 → `career_material` 加速落 A 档物理删除），而**当版用例只断言 `never()`，测试全绿也发现不了**。已核实清除（`grep '|| true'` 零命中，md5 `98e6d432…`）。此形态风险等同 P0：不改变测试结果，但改变生产数据留存判据。
 
-**提交拆分（四笔，按回滚独立性切分）**：
+**提交拆分（五笔，按回滚独立性切分）**：
 1. `docs(decisions)`：桌面方向 + 需求基线 + ADR-011 + `README` / `OPEN-DECISIONS`
 2. `feat(ai)`：`DraftCommitService` 来源引用口径变更（REJECT 不写引用、EDIT 改引用 `USER_EDITED` 副本）——**ADR-011 的理由正是它必须独立**：`resume_material_reference` 是留存 A/B 分档唯一判据，改它等于改 `docs/04 §7.1` 的覆盖范围，代码能回滚但**已物理删除的资料回不来**
 3. `feat(applications)`：本批主线（9 态 + V36 + 状态历史 + 导出复验 + Purge 23 表 + `docs/04`/`docs/05`/plans）
 4. `docs(review)`：本报告 §2.72 + §5 变更记录
+5. `test(applications)`：A11 统计口径锚点 + `docs/05` §9.6 补正
 
 ## 3. 已闭环（不再重复提报）
 
