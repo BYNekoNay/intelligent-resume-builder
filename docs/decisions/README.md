@@ -41,3 +41,9 @@ plans/reviews 面向"某次工作怎么做、结果如何"，本目录面向**�
 | [ADR-008](./ADR-008-configuration-binding-via-configuration-properties.md) | 配置绑定一律用 `@ConfigurationProperties`，禁止 `@Value` + SpEL map 字面量 | Accepted |
 | [ADR-009](./ADR-009-ai-task-idempotency-state-machine.md) | ai_task 幂等状态机（幂等键 + 内容指纹 + 租约） | Accepted |
 | [ADR-010](./ADR-010-interview-attempt-lifecycle.md) | interview_ai_attempt 生命周期（双层唯一约束 + 短事务 + 陈旧丢弃） | Accepted |
+| [ADR-011](./ADR-011-draft-commit-reference-provenance.md) | 草稿确认落库的材料引用只记录真实被使用的关系（改引用口径 = 改留存分档覆盖范围） | Accepted |
+
+## 待定方向
+
+- [Windows 桌面版方向](./DESKTOP-OFFLINE-DIRECTION.md)：离线优先、本地数据、用户自配 AI API；业务流程分析完成后再定架构与实施。
+- [Windows 离线求职工作台需求规格](../plans/2026-10-20-001-feat-windows-offline-career-workspace-plan.md)：个人求职者从资料导入、岗位简历到投递、面试与结果复盘的需求基线。
