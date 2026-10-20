@@ -37,8 +37,18 @@ final class StatusMatrixSources {
     /** 前端镜像表所在文件（仓库相对路径）。 */
     private static final String FRONTEND_FILE = "web/src/views/ApplicationsView.vue";
 
-    /** 前端矩阵字面量的定位锚点（局部常量名）。 */
-    private static final String FRONTEND_ANCHOR = "const transitions";
+    /**
+     * 前端矩阵字面量的定位锚点 —— **整行匹配**（与 {@link #DOCS_TABLE_HEADER} 同构），绝不用全文 {@code indexOf}。
+     *
+     * <p>为什么：裸子串 {@code "const transitions"} 会命中 {@code const transitionsByStatus} 这类改名后的变体，
+     * 也会命中注释里抄写的同款文本 —— 解析器随后在「错的那一行」之后再找第一个 {@code {}，得到半截块，
+     * 报出来的失败位置看起来完全正常，误导排查。整行匹配 + 显式 {@code :} 分隔 + 行尾 {@code {} 三重约束
+     * 把这两种误命中一起挡掉。
+     *
+     * <p>只用 {@code [ \t]} 而不用 {@code \s}：后者含换行，会让"整行"约束失效。
+     */
+    private static final Pattern FRONTEND_ANCHOR = Pattern.compile(
+            "(?m)^[ \\t]*const[ \\t]+transitions[ \\t]*(?::[^=\\n]*)?=[ \\t]*\\{[ \\t\\r]*$");
 
     /** 前端一行一个状态：{@code NO_RESPONSE: ['NO_RESPONSE', 'APPLIED', ...],}。 */
     private static final Pattern FRONTEND_ROW = Pattern.compile(
@@ -77,15 +87,33 @@ final class StatusMatrixSources {
         }
     }
 
-    /** 前端 {@code const transitions = { STATUS: [...], ... }} 字面量块。 */
+    /** 前端 {@code const transitions: Record<...> = { STATUS: [...], ... }} 字面量块。 */
     static Map<ApplicationStatus, Set<ApplicationStatus>> frontend() throws Exception {
         String source = SourceText.read(repoFile(FRONTEND_FILE));
-        int anchor = source.indexOf(FRONTEND_ANCHOR);
-        if (anchor < 0) {
-            fail("在 " + FRONTEND_FILE + " 中找不到 `" + FRONTEND_ANCHOR + "` —— "
-                    + "前端结构可能已变更，请同步更新门禁解析逻辑（不允许跳过）");
+
+        // 逐处整行匹配：先判重复、再判缺失，且都在「取用」之前 —— 顺序理由同 docs()：
+        // 一旦先解析就已经"猜了一个"，而猜对时 assertParsed 的 9 行断言会直接绿，重复再也看不见。
+        Matcher anchor = FRONTEND_ANCHOR.matcher(source);
+        int anchorCount = 0;
+        int blockOpen = -1;
+        while (anchor.find()) {
+            anchorCount++;
+            if (blockOpen < 0) {
+                // 正则已保证该行最后一个非空白字符是 '{'，回退到它即可；不再 indexOf 去找"别人的 {"。
+                blockOpen = source.lastIndexOf('{', anchor.end() - 1);
+            }
         }
-        String block = objectLiteralAfter(source, anchor);
+        if (anchorCount > 1) {
+            fail(FRONTEND_FILE + " 中匹配到 " + anchorCount + " 处整行锚点 `const transitions … = {` —— "
+                    + "锚点不唯一（矩阵块被复制，或出现了第二个同名局部常量）。"
+                    + "请确认唯一定义后重跑；门禁不允许在多义时猜一个（不允许跳过）");
+        }
+        if (anchorCount == 0) {
+            fail("在 " + FRONTEND_FILE + " 中找不到整行匹配 " + FRONTEND_ANCHOR.pattern()
+                    + " 的矩阵锚点 —— 前端结构可能已变更（局部常量改名同样视为变更），"
+                    + "请同步更新门禁解析逻辑（不允许跳过）");
+        }
+        String block = objectLiteralAfter(source, blockOpen);
 
         Map<ApplicationStatus, Set<ApplicationStatus>> matrix = new LinkedHashMap<>();
         Matcher row = FRONTEND_ROW.matcher(block);
@@ -96,10 +124,12 @@ final class StatusMatrixSources {
             while (literal.find()) {
                 targets.add(parseStatus(literal.group(1)));
             }
+            // 重复 from 不在此拦截：块内重复键由 vue-tsc 的 TS1117 在 npm run build 阶段先红，
+            // 「重复挤掉另一状态」则由 assertParsed 的 9 行断言兜底；本处的独特职责是锚点唯一性。
             matrix.put(from, targets);
         }
         if (matrix.isEmpty()) {
-            fail("未能从 " + FRONTEND_FILE + " 的 `" + FRONTEND_ANCHOR + "` 块解析出任何迁移行 —— "
+            fail("未能从 " + FRONTEND_FILE + " 的 `const transitions … = {` 块解析出任何迁移行 —— "
                     + "前端结构可能已变更，请同步更新门禁解析逻辑（不允许跳过）");
         }
         return matrix;
@@ -160,25 +190,21 @@ final class StatusMatrixSources {
         return matrix;
     }
 
-    /** 取 {@code anchor} 之后第一个 {@code {} 块的内容（brace 计数）。 */
-    private static String objectLiteralAfter(String source, int anchor) {
-        int open = source.indexOf('{', anchor);
-        if (open < 0) {
-            fail("`" + FRONTEND_ANCHOR + "` 之后没有对象字面量 —— 前端结构可能已变更，请同步更新门禁解析逻辑");
-        }
+    /** 取以 {@code openBrace} 起始的 {@code {...}} 块的内容（brace 计数）。 */
+    private static String objectLiteralAfter(String source, int openBrace) {
         int depth = 0;
-        for (int i = open; i < source.length(); i++) {
+        for (int i = openBrace; i < source.length(); i++) {
             char ch = source.charAt(i);
             if (ch == '{') {
                 depth++;
             } else if (ch == '}') {
                 depth--;
                 if (depth == 0) {
-                    return source.substring(open + 1, i);
+                    return source.substring(openBrace + 1, i);
                 }
             }
         }
-        fail("`" + FRONTEND_ANCHOR + "` 的对象字面量未闭合 —— 前端结构可能已变更，请同步更新门禁解析逻辑");
+        fail("`const transitions … = {` 的对象字面量未闭合 —— 前端结构可能已变更，请同步更新门禁解析逻辑");
         return "";
     }
 

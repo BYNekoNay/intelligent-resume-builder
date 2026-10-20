@@ -268,6 +268,9 @@ async function save() {
 }
 
 function allowedStatuses(status: ApplicationStatus): ApplicationStatus[] {
+  // 本行是机器可读契约的锚点（整行匹配 `const transitions … = {`）：ApplicationStatusMatrixContractTest
+  // 解析本块并与后端 ApplicationService.TRANSITIONS、docs/05 §2.7 表格逐格对账。
+  // 改常量名 / 改行首写法 / 复制本块 都会让门禁变红，必须先同步解析器。
   const transitions: Record<ApplicationStatus, ApplicationStatus[]> = {
     DRAFT: ['DRAFT', 'APPLIED', 'WITHDRAWN'],
     APPLIED: ['APPLIED', 'SCREENING', 'INTERVIEWING', 'OFFERED', 'REJECTED', 'WITHDRAWN', 'NO_RESPONSE'],
