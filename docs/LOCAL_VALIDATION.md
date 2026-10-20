@@ -101,15 +101,39 @@ Remove-Item Env:BAILIAN_LIVE_TEST
 
 The gate uses synthetic prompts, validates structured responses, and prints field/count summaries rather than source content.
 
-## MySQL 5.7 migration gate
+## MySQL 持久化门禁（云服务器，双口径）
 
-With the local MySQL 5.7 service running, execute the disposable migration gate from the repository root:
+生产基线是 MySQL **8.4**（见 `docs/04`）；本机的 5.7 只是开发环境副产品，不是支持目标——V18 迁移用了只有 8.0+ 才有的窗口函数。因此门禁分两个口径，都在云服务器上执行：
 
-```powershell
-.\scripts\Invoke-MySql57MigrationGate.ps1
+| 口径 | 数据库 | 起点 | 证明什么 |
+|---|---|---|---|
+| `mysql84`（默认，生产口径） | 宿主 MySQL 8.4.11，建临时库 | **V1 全量** | V1→V36 的 **36 条**迁移都能在 8.4 上跑通 |
+| `mysql57`（存量升级） | Docker `mysql:5.7.44`，临时容器，只绑 `127.0.0.1:3307` | V19 基线快照 | 停在 V19 的 5.7 老库能升级到 V36 的 **17 条**迁移 |
+
+用法（本地 Git Bash；打包/上传/构建都发生在服务器上，服务器已有 JDK 17 + Maven 3.9 + `.m2` 缓存）：
+
+```bash
+bash scripts/Invoke-PersistenceGate.sh                  # 两个口径都跑
+GATE=mysql84 bash scripts/Invoke-PersistenceGate.sh     # 只跑生产口径（热跑约 30s）
+GATE=mysql57 bash scripts/Invoke-PersistenceGate.sh     # 只跑存量升级（首次含拉镜像 3-6 分钟）
 ```
 
-The gate creates a randomly named schema and least-scope temporary user, loads a data-free V19 schema fixture, baselines it at V19, applies V20 and V21, verifies the AI interview table, both uniqueness constraints, and the output-language column, then removes the exact schema and user in a `finally` block. It proves the V19-to-V21 upgrade path on MySQL 5.7; it does not claim that a fresh MySQL 5.7 database can execute every historical migration. It does not print generated credentials.
+**退出码语义**（不要混用）：
+
+| 码 | 含义 |
+|---|---|
+| `0` | 绿 —— 用例**真实执行**且通过 |
+| `1` | 红 —— 测试失败，或检测到「用例被 JUnit 跳过」 |
+| `3` | 未测量 —— 镜像拉不到 / 容器起不来 / 内存不足 / 版本不符（结论未知，**不是通过**） |
+| `75` | 并发占用 —— 另一次门禁正在跑 |
+
+**「被跳过」不等于「通过」**：两个测试类都由 `@EnabledIfEnvironmentVariable` 门控。环境变量没生效时 `mvn` 仍返回 0，而 surefire 报告里是 `tests=1 skipped=1`。门禁脚本会解析 surefire XML 并当场判红——这是它与只看退出码的旧脚本（`Invoke-MySql57MigrationGate.ps1`）的关键区别，已用注入实验验证（把 `MYSQL84_LIVE_TEST` 置为 `false` → 门禁退出 1）。
+
+**安全护栏**：`mysql84` 在与**生产库同实例**上建临时库，脚本要求库名匹配 `^intelligent_resume_gate84_[a-f0-9]{16}$`、`DROP` 前二次校验正则、并在运行前后各确认一次生产库 `intelligent_resume` 仍存在。`mysql57` 整个实例随容器消失，不需要 `DROP DATABASE`。
+
+新增 Flyway 迁移时必须**同步改三处数字**：`MySql84FreshMigrationIT` 的 `36`、`MySql57MigrationLiveIT` 的 `17`、以及 `MySql57BaselineContractTest` 的静态对账，否则测试会红。
+
+本机若已装 5.7，仍可使用 `.\scripts\Invoke-MySql57MigrationGate.ps1` 做快速校验；它假定本机 3306 已有 5.7，**官方入口是上面的 `.sh`**。
 
 ## Browser local-services smoke
 

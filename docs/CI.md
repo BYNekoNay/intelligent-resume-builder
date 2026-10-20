@@ -18,9 +18,11 @@
 
 触发条件：
 
-- 向 `master` 推送提交；
+- 向**除 `gh-pages`、`dependabot/**`、`renovate/**` 之外的任意分支**推送提交（新分支默认纳入，不需要改 YAML）；
 - 以 `master` 为目标分支创建或更新 Pull Request；
 - 在 GitHub Actions 页面手动运行。
+
+> 历史教训：早期 `push.branches` 只列了 `master` 与 `codex/resume-loop-enhancements`，导致在若干开发分支上的推送**从来没有 CI 保护**，而 `ci.yml` 与本地静态检查都不会因此报错。现改为 `branches-ignore` 排除法。之所以不用 `branches: ['**']` 配合 `paths` 过滤：被路径过滤而未触发时，必需检查会停在 **Pending** 而非 Skipped，只改文档的 PR 会永远等不到结论而无法合并。
 
 流水线使用只读仓库权限，并发运行三个独立 Job：
 
@@ -53,7 +55,7 @@ GitHub 仓库需要配置以下 Actions Secrets：
 - Playwright 安装或启动失败：确认 `Install Chromium` 步骤成功，查看系统依赖安装日志。
 - 后端 IT 失败：先确认测试使用 `application-test.yml`，没有注入生产数据库或真实 AI Key。
 - 发布工作流缺少变量：在仓库 Actions Secrets 中补齐缺失项，不要把值写入 workflow、日志或提交。
-- 工作流没有触发：确认 PR 的目标分支或推送分支是 `master`，并检查仓库是否启用 GitHub Actions。
+- 工作流没有触发：确认推送分支不在 `branches-ignore` 列表（`gh-pages` / `dependabot/**` / `renovate/**`）内、PR 的目标分支是 `master`，并检查仓库是否启用 GitHub Actions。若只改了 `functional.yml` 之外的文档类路径，`Functional Regression` 不触发是**预期行为**（它有 `paths` 过滤）。
 
 ## GitHub 与 Gitee 的职责边界
 
