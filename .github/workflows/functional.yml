@@ -16,7 +16,12 @@ on:
         type: boolean
         default: false
   push:
-    branches: [master, codex/resume-loop-enhancements]
+    # 与 ci.yml 同口径（见该文件注释）：新分支自动纳入，机器人分支与托管分支除外。
+    # paths 过滤保留 —— functional 起库较慢，只在可能影响服务的路径变化时才跑。
+    branches-ignore:
+      - gh-pages
+      - "dependabot/**"
+      - "renovate/**"
     paths:
       - "server/**"
       - "pdf-service/**"

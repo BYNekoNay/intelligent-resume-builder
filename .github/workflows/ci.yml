@@ -2,9 +2,15 @@ name: CI
 
 on:
   push:
-    branches:
-      - master
-      - codex/resume-loop-enhancements
+    # branches-ignore 而不是 branches：新分支不再需要改 YAML 才有 CI。
+    # 第七十五批时曾在 codex/web-business-flow 上白跑了两轮"实际没触发"的认知——
+    # branches 白名单只列 master 与 codex/resume-loop-enhancements，新分支被静默漏掉。
+    # 也不用 "branches: ['**'] + paths 过滤"：被过滤未触发时，必需检查会停在 Pending
+    # 而非 Skipped，只改文档的 PR 会永远等不到 server 结论而无法合并。
+    branches-ignore:
+      - gh-pages
+      - "dependabot/**"
+      - "renovate/**"
   pull_request:
     branches:
       - master
