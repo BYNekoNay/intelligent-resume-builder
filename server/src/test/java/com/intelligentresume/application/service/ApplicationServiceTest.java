@@ -563,6 +563,55 @@ class ApplicationServiceTest {
     }
 
     @Test
+    @DisplayName("stats 口径锚点：SCREENING 计入 applied 停留与漏斗分母，HIRED 不计入 totalToOffer（A11）")
+    void stats_screeningCountedInAppliedAndFunnel_hiredExcludedFromTotalToOffer() {
+        // 为什么要有这条（A11）：本类原有 stats 用例**一条 SCREENING 记录都没有**，于是
+        // 「SCREENING 计入 applied 停留 / 计入漏斗分母」这两个口径没有任何测试判据 ——
+        // 实测把 ApplicationService:231 的 `|| SCREENING` 删掉后，本类 31 项全绿、全仓 987 也不红。
+        // 文档（§9.2/§9.6）与代码互相印证，但两份都没被断言保护，属「同一事实多处维护」漏网。
+        //
+        // 计数：APPLIED 1 / SCREENING 1 / INTERVIEWING 1 / HIRED 1 —— 同时用于钉住 byStatus 与漏斗分母。
+        // HIRED 也在 A 集合（录用仍属「投递及以后」），把它计入分母是为了钉住这一项：
+        // 把 A 里的 HIRED 删掉，分母会从 4 变 3，下面的 0.5 断言即红（此前无任何测试能发现）。
+        when(repository.countGroupByStatus(USER_ID)).thenReturn(List.of(
+                count(ApplicationStatus.APPLIED, 1L),
+                count(ApplicationStatus.SCREENING, 1L),
+                count(ApplicationStatus.INTERVIEWING, 1L),
+                count(ApplicationStatus.HIRED, 1L)));
+        LocalDateTime now = LocalDateTime.now();
+        // 一条 SCREENING（2 天前投递）+ 一条 HIRED（时间戳齐全，用于证明 totalToOffer 排除它）
+        when(repository.findDurationRowsByUserId(USER_ID)).thenReturn(List.of(
+                projection(ApplicationStatus.SCREENING, now.minusDays(2), now.minusDays(1), now),
+                projection(ApplicationStatus.HIRED, now.minusDays(10), now.minusDays(3), now)));
+
+        var stats = service.stats(USER_ID);
+
+        // ① SCREENING 计入 applied 阶段停留时长：唯一可算的样本就是那条 2 天前投递的 SCREENING。
+        //    若过滤只剩 APPLIED，样本为空 → applied() 变 null。先断言非 null 再比值，
+        //    这样注入后得到的是一条自解释的断言失败，而不是一个 NullPointerException。
+        Double appliedDays = stats.avgStageDurationDays().applied();
+        assertNotNull(appliedDays, "SCREENING 必须计入 applied 阶段停留时长："
+                + "结果为 null 说明过滤条件漏掉了 SCREENING（只剩 APPLIED）");
+        assertEquals(2.0, appliedDays, 0.05);
+
+        // ② SCREENING 与 HIRED 同时计入漏斗两侧：
+        //    A = APPLIED+SCREENING+INTERVIEWING+OFFERED+HIRED = 4（本 fixture 无 OFFERED）
+        //    I = SCREENING+INTERVIEWING+OFFERED+HIRED        = 3
+        //    → 3/4 = 0.75。四格口径各自被钉住：漏 SCREENING 于 A → 3/3=1.0；
+        //    漏 SCREENING 于 I → 2/4=0.5；漏 HIRED 于 A → 3/3=1.0；漏 HIRED 于 I → 2/4=0.5。
+        var screening = stats.byStatus().stream()
+                .filter(item -> item.status() == ApplicationStatus.SCREENING).findFirst().orElseThrow();
+        assertEquals(1L, screening.count());
+        assertEquals(0.75, stats.conversionRates().appliedToInterviewing(), 0.001);
+
+        // ③ HIRED 不计入 totalToOffer：没有 OFFERED 行，故必须为 null。
+        //    注：findDurationRowsByUserId 已在查询侧排除 HIRED，本断言守的是 service 侧那道
+        //    filter(== OFFERED)（纵深防御）。若该 filter 放宽成 (OFFERED||HIRED)，这条 HIRED 行
+        //    会算出 7.0 天（10 天前投递、3 天前入职），本断言即红。
+        assertNull(stats.avgStageDurationDays().totalToOffer());
+    }
+
+    @Test
     @DisplayName("stats: 无记录时 total=0 且各值为 null")
     void stats_emptyRecords_returnsNulls() {
         when(repository.countGroupByStatus(USER_ID)).thenReturn(List.of());
