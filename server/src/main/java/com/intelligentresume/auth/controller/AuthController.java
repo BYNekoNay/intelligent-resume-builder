@@ -146,6 +146,18 @@ public class AuthController {
 
     @DeleteMapping("/me")
     public ResponseEntity<ApiResponse<Void>> deleteAccount(HttpServletRequest httpRequest) {
+        // 桌面本地工作区（ADR-012 D3）：删号必须被拒绝。
+        // 在线版的删号是「7 天撤销窗口 → 级联硬删该用户全部数据」，在桌面语境下等于
+        // 「点一下删号 → 整个本地工作区被物理清空」，且不可撤销。
+        // 清空数据的正确路径是备份/恢复（恢复前会自动留安全备份，见 ADR-012 D6/R39）。
+        if (desktopLocalUserService.isEnabled()) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .header(HttpHeaders.SET_COOKIE, expiredRefreshCookie().toString())
+                    .body(ApiResponse.failure(ErrorCode.CONFLICT.code(),
+                            "桌面本地工作区不支持删除账号：如需清空数据，请使用「恢复备份」"
+                                    + "（恢复前会自动创建当前工作区的安全备份）",
+                            traceId(httpRequest)));
+        }
         authService.deleteAccount(currentUserId(httpRequest));
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, expiredRefreshCookie().toString())
