@@ -46,6 +46,31 @@ public class DesktopImportController {
         }
     }
 
+    @PostMapping("/apply")
+    public ApiResponse<DesktopImportService.ImportResult> apply(
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        if (!properties.isEnabled()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "资源不存在");
+        }
+        Object pkg = body.get("package");
+        if (!(pkg instanceof Map<?, ?>)) {
+            throw new BusinessException(ErrorCode.VALIDATION, "请求体缺少 package（工作区包）");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> workspacePackage = (Map<String, Object>) pkg;
+        Object rawResolutions = body.get("resolutions");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> resolutions = rawResolutions instanceof Map<?, ?> map
+                ? (Map<String, Object>) map
+                : Map.of();
+        try {
+            return ApiResponse.success(importService.apply(workspacePackage, resolutions), traceId(request));
+        } catch (IllegalStateException | IllegalArgumentException ex) {
+            throw new BusinessException(ErrorCode.VALIDATION, ex.getMessage());
+        }
+    }
+
     private String traceId(HttpServletRequest request) {
         Object traceId = request.getAttribute(
                 com.intelligentresume.common.api.TraceIdFilter.TRACE_ID_ATTRIBUTE);

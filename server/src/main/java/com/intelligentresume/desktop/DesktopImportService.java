@@ -5,9 +5,13 @@ import com.intelligentresume.config.DesktopLocalUserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -25,28 +29,54 @@ import java.util.Set;
  * <p>R38 的顺序是硬约束：**先校验 → 再预览（新增/跳过/冲突）→ 用户确认 → 原子应用**。
  * 取消 = 不调用 apply，工作区一个字节都不动。
  *
- * <p>本版支持的集合刻意收窄为 4 个核心集合（简历、职业资料、JD、投递）；
- * 包里若出现其它集合的记录，预览阶段**直接拒绝整份导入** —— 静默丢弃用户数据是不可接受的。
- *
- * <p><b>本版只提供「预览与分类」，不提供写入</b>：写入需要把 Web 侧主键重映射到本地主键，
- * 并沿 岗位→简历→版本→投递 的依赖链逐级改写外键 —— 这部分留到下一批，
- * 与其先做一个会整批回滚的半成品，不如先把 R37 的判断逻辑（新增/跳过/冲突）做扎实。
+ * <p>写入的关键是**主键重映射与外键链**：包里的记录带的是 Web 侧主键，
+ * 而本地库的主键是自增的，且投递记录引用的是 Web 侧的 JD / 简历版本 ID。
+ * 因此导入按依赖顺序（岗位 → 简历 → 版本 → 投递 → 状态历史）执行，
+ * 用 {@code idMap} 把「Web 主键」映射成「本地主键」，并逐级改写外键。
  */
 @Service
 public class DesktopImportService {
 
     private static final Logger log = LoggerFactory.getLogger(DesktopImportService.class);
 
+    /** 导入顺序 = 依赖顺序：先岗位，再简历（含版本），最后投递（含状态历史）。 */
+    private static final List<String> SUPPORTED_ORDER = List.of(
+            "jobDescriptions", "resumes", "applications");
+
     /** 导出集合 → 本地表名。 */
     private static final Map<String, String> SUPPORTED_TABLES = Map.of(
+            "jobDescriptions", "job_description",
             "resumes", "resume",
             "careerMaterials", "career_material",
-            "jobDescriptions", "job_description",
             "applications", "application_record");
 
-    /** 归一化比对时忽略的字段（R37：内容没变就不该算冲突，时间戳变了不算内容变化）。 */
+    /** 嵌套集合：父集合 → (子集合, 子表, 外键列)。 */
+    private static final Map<String, List<String[]>> CHILD_COLLECTIONS = Map.<String, List<String[]>>of(
+            "resumes", List.<String[]>of(new String[]{"versions", "resume_version", "resume_id"}),
+            "applications", List.<String[]>of(new String[]{"statusHistory", "application_status_history", "application_record_id"}));
+
+    /** 归一化比对时要忽略的字段（R37：内容没变就不该算冲突，时间戳变了不算内容变化）。 */
     private static final Set<String> VOLATILE_FIELDS = Set.of(
             "id", "stableId", "userId", "createdAt", "updatedAt", "deletedAt", "version");
+
+    /**
+     * 嵌套集合字段：它们**不是父表的列**，而是子记录（简历版本 / 投递状态历史）。
+     * 比较父记录时必须跳过 —— 否则本地永远取不到这个键，每条记录都会被判成冲突。
+     * 子记录各自带 stableId，由它们自己的比较负责。
+     */
+    private static final Set<String> NESTED_FIELDS = Set.of("versions", "statusHistory");
+
+    /**
+     * 引用类字段：包里存的是 **Web 侧主键**，本地存的是**本地主键**，值本来就不相等。
+     * 它们描述的是「指向谁」，而不是「内容是什么」—— 对应关系由 stableId 映射保证，
+     * 所以**不参与内容比较**（否则每条记录都会被判成冲突）。
+     */
+    private static final Set<String> REFERENCE_FIELDS = Set.of(
+            "currentVersionId", "jobDescriptionId", "resumeId", "resumeVersionId",
+            "createdBy", "parentTaskId", "resultResumeVersionId");
+
+    /** 插入时必须跳过的字段：自增主键、稳定 ID、乐观锁版本（本地从 0 起算）。 */
+    private static final Set<String> SKIPPED_ON_INSERT = Set.of("id", "stableId", "version");
 
     private final JdbcTemplate jdbcTemplate;
     private final DesktopLocalUserService localUserService;
@@ -106,10 +136,9 @@ public class DesktopImportService {
         String packageId = String.valueOf(manifest.getOrDefault("packageId", "unknown"));
 
         List<PreviewItem> items = new ArrayList<>();
-        for (Map.Entry<String, String> entry : SUPPORTED_TABLES.entrySet()) {
-            String collection = entry.getKey();
-            String table = entry.getValue();
-            for (Map<String, Object> record : recordsOf(pkg, collection)) {
+        for (String collection : SUPPORTED_ORDER) {
+            String table = SUPPORTED_TABLES.get(collection);
+            for (Map<String, Object> record : recordsOf(pkg.get(collection))) {
                 String stableId = stableIdOf(record);
                 if (stableId == null) {
                     throw new IllegalStateException(
@@ -137,7 +166,112 @@ public class DesktopImportService {
                 unsupportedCollections(pkg), List.copyOf(items));
     }
 
-    // ------------------------------------------------------------------ 内部
+    // ------------------------------------------------------------------ 应用
+
+    /**
+     * 原子应用导入（R38：确认后一次性写入；中途失败整体回滚）。
+     *
+     * @param resolutions 每个稳定 ID 的解决方式：
+     *                    {@code "KEEP_LOCAL"} / {@code "USE_IMPORTED"}，
+     *                    或一个「字段 → 值」的 Map（手动合并，只改这些字段）
+     */
+    @Transactional
+    public ImportResult apply(Map<String, Object> pkg, Map<String, Object> resolutions) {
+        ImportPreview preview = preview(pkg);
+        if (!preview.unsupportedCollections().isEmpty()) {
+            throw new IllegalStateException("包内含本版不支持的集合：" + preview.unsupportedCollections()
+                    + " —— 为避免静默丢数据，整份导入已被拒绝");
+        }
+        Map<String, Object> decisions = resolutions == null ? Map.of() : resolutions;
+
+        // Web 主键 → 本地主键
+        Map<String, Long> idMap = new LinkedHashMap<>();
+        int inserted = 0;
+        int updated = 0;
+        int skipped = 0;
+        int keptLocal = 0;
+        List<String> insertedIds = new ArrayList<>();
+
+        for (String collection : SUPPORTED_ORDER) {
+            String table = SUPPORTED_TABLES.get(collection);
+            for (Map<String, Object> record : recordsOf(pkg.get(collection))) {
+                String stableId = stableIdOf(record);
+                PreviewItem item = findItem(preview, stableId);
+                if (item == null) {
+                    continue;
+                }
+                switch (item.decision()) {
+                    case SKIP -> skipped++;
+                    case ADD -> {
+                        Long localId = insertRecord(table, record, idMap, null);
+                        idMap.put(idMapKey(collection, record), localId);
+                        rememberMapping(table, localId, stableId);
+                        inserted++;
+                        insertedIds.add(stableId);
+                        insertChildren(collection, record, idMap);
+                    }
+                    case CONFLICT -> {
+                        Object resolution = decisions.get(stableId);
+                        if (resolution == null || "KEEP_LOCAL".equals(resolution)) {
+                            keptLocal++;
+                        } else if ("USE_IMPORTED".equals(resolution)) {
+                            updateRecord(table, item.localId(), record, idMap);
+                            updated++;
+                        } else if (resolution instanceof Map<?, ?> merged) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> mergedFields = (Map<String, Object>) merged;
+                            updateRecord(table, item.localId(), mergedFields, idMap);
+                            updated++;
+                        } else {
+                            keptLocal++;
+                        }
+                    }
+                    default -> throw new IllegalStateException("未知决策 " + item.decision());
+                }
+            }
+        }
+        log.info("桌面工作区导入完成：新增 {}、更新 {}、跳过 {}、保留本地 {}", inserted, updated, skipped, keptLocal);
+        return new ImportResult(inserted, updated, skipped, keptLocal, List.copyOf(insertedIds));
+    }
+
+    /** 插入嵌套记录（简历版本 / 投递状态历史），并把子记录的外键指向本地父 ID。 */
+    private void insertChildren(String collection, Map<String, Object> parentRecord, Map<String, Long> idMap) {
+        List<String[]> children = CHILD_COLLECTIONS.get(collection);
+        if (children == null) {
+            return;
+        }
+        for (String[] child : children) {
+            String childCollection = child[0];
+            String childTable = child[1];
+            for (Map<String, Object> childRecord : recordsOf(parentRecord.get(childCollection))) {
+                Long childLocalId = insertRecord(childTable, childRecord, idMap, parentRecord);
+                idMap.put(idMapKey(childCollection, childRecord), childLocalId);
+                rememberMapping(childTable, childLocalId, stableIdOf(childRecord));
+                // 简历的 current_version_id 指向刚插入的版本（循环外键，只能事后回填）
+                if ("resume_version".equals(childTable)) {
+                    backfillCurrentVersion(collection, parentRecord, childLocalId);
+                }
+            }
+        }
+    }
+
+    private void backfillCurrentVersion(String collection, Map<String, Object> parentRecord, Long versionLocalId) {
+        Long parentLocalId = localIdOf(String.valueOf(parentRecord.get("stableId")));
+        if (parentLocalId == null) {
+            return;
+        }
+        jdbcTemplate.update("UPDATE " + SUPPORTED_TABLES.get(collection) + " SET current_version_id = ? WHERE id = ?",
+                versionLocalId, parentLocalId);
+    }
+
+    private PreviewItem findItem(ImportPreview preview, String stableId) {
+        for (PreviewItem item : preview.items()) {
+            if (item.stableId().equals(stableId)) {
+                return item;
+            }
+        }
+        return null;
+    }
 
     // ------------------------------------------------------------------ 内部
 
@@ -176,8 +310,7 @@ public class DesktopImportService {
         return unsupported;
     }
 
-    private List<Map<String, Object>> recordsOf(Map<String, Object> pkg, String collection) {
-        Object value = pkg.get(collection);
+    private List<Map<String, Object>> recordsOf(Object value) {
         List<Map<String, Object>> records = new ArrayList<>();
         if (value instanceof Collection<?> list) {
             for (Object element : list) {
@@ -194,6 +327,11 @@ public class DesktopImportService {
     private String stableIdOf(Map<String, Object> record) {
         Object value = record.get("stableId");
         return value == null ? null : String.valueOf(value);
+    }
+
+    /** idMap 的键：集合 + Web 主键。 */
+    private String idMapKey(String collection, Map<String, Object> record) {
+        return collection + ":" + record.get("id");
     }
 
     private Long localIdOf(String stableId) {
@@ -230,10 +368,17 @@ public class DesktopImportService {
         Map<String, Object> left = new LinkedHashMap<>();
         Map<String, Object> right = new LinkedHashMap<>();
         imported.forEach((key, value) -> {
-            if (VOLATILE_FIELDS.contains(key) || "stableId".equals(key)) {
+            if (VOLATILE_FIELDS.contains(key) || "stableId".equals(key)
+                    || NESTED_FIELDS.contains(key) || REFERENCE_FIELDS.contains(key)) {
                 return;
             }
             String normalizedKey = normalizeKey(key);
+            // 本地表**没有这一列** → 该字段不可比（不是「值不同」）。
+            // 例如投递记录的公司列在本地表里并不叫 companyName。
+            // 判成冲突会误报，必须跳过。
+            if (!localView.containsKey(normalizedKey)) {
+                return;
+            }
             right.put(normalizedKey, normalizeValue(value));
             left.put(normalizedKey, normalizeValue(localView.get(normalizedKey)));
         });
@@ -245,15 +390,18 @@ public class DesktopImportService {
         return key.replace("_", "").toLowerCase();
     }
 
-    private Map<String, Object> normalize(Map<String, Object> record) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        record.forEach((key, value) -> {
-            if (VOLATILE_FIELDS.contains(key) || key.equals("stableId")) {
-                return;
+    /** 驼峰 → 下划线：包里的字段名要转成本地表列名才能插入。 */
+    private String toSnakeCase(String key) {
+        StringBuilder builder = new StringBuilder(key.length() + 4);
+        for (int i = 0; i < key.length(); i++) {
+            char ch = key.charAt(i);
+            if (Character.isUpperCase(ch)) {
+                builder.append('_').append(Character.toLowerCase(ch));
+            } else {
+                builder.append(ch);
             }
-            result.put(key, normalizeValue(value));
-        });
-        return result;
+        }
+        return builder.toString();
     }
 
     private Object normalizeValue(Object value) {
@@ -279,6 +427,156 @@ public class DesktopImportService {
      * 插入一条导入记录：自增主键由数据库分配，{@code user_id} 换成本地用户，
      * 外键值用父记录的本地 ID 替换。返回本地新 ID。
      */
+    private Long insertRecord(String table, Map<String, Object> record, Map<String, Long> idMap,
+                              Map<String, Object> parentRecord) {
+        Map<String, Object> values = prepareValues(table, record, idMap, parentRecord);
+        List<String> columns = new ArrayList<>();
+        List<Object> args = new ArrayList<>();
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            String column = entry.getKey();
+            if (!localColumns(table).contains(column)) {
+                continue;   // 包里可能有本地表没有的字段（如嵌套结构），跳过
+            }
+            columns.add(column);
+            args.add(entry.getValue());
+        }
+        if (columns.isEmpty()) {
+            throw new IllegalStateException("记录没有可导入的列（表 " + table + "）");
+        }
+        StringBuilder placeholderBuilder = new StringBuilder();
+        for (int i = 0; i < columns.size(); i++) {
+            if (i > 0) {
+                placeholderBuilder.append(',');
+            }
+            placeholderBuilder.append('?');
+        }
+        String placeholders = placeholderBuilder.toString();
+        String sql = "INSERT INTO " + table + " (" + String.join(",", columns) + ") VALUES (" + placeholders + ")";
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+            for (int i = 0; i < args.size(); i++) {
+                ps.setObject(i + 1, args.get(i));
+            }
+            return ps;
+        }, keyHolder);
+        // H2 的 RETURN_GENERATED_KEYS 会把**整行**返回（多列），getKey() 会抛
+        // 「should only be used when a single key is returned」—— 按列名取主键。
+        Map<String, Object> keys = keyHolder.getKeys();
+        Object id = null;
+        if (keys != null) {
+            for (Map.Entry<String, Object> entry : keys.entrySet()) {
+                if ("id".equalsIgnoreCase(entry.getKey())) {
+                    id = entry.getValue();
+                    break;
+                }
+            }
+        }
+        return id instanceof Number number ? number.longValue() : null;
+    }
+
+    private void updateRecord(String table, Long localId, Map<String, Object> source, Map<String, Long> idMap) {
+        Map<String, Object> values = prepareValues(table, source, idMap, null);
+        List<String> sets = new ArrayList<>();
+        List<Object> args = new ArrayList<>();
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            String column = entry.getKey();
+            if (!localColumns(table).contains(column) || column.equals("id")) {
+                continue;
+            }
+            sets.add(column + " = ?");
+            args.add(entry.getValue());
+        }
+        if (sets.isEmpty()) {
+            return;
+        }
+        args.add(localId);
+        jdbcTemplate.update("UPDATE " + table + " SET " + String.join(",", sets) + " WHERE id = ?",
+                args.toArray());
+    }
+
+    /**
+     * 把包里的记录整理成「可直接插入本地表」的值集合：
+     * 键转成下划线列名、跳过自增主键与乐观锁版本、{@code user_id} 换成本地用户、外键改写为本地主键。
+     */
+    private Map<String, Object> prepareValues(String table, Map<String, Object> record, Map<String, Long> idMap,
+                                              Map<String, Object> parentRecord) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        record.forEach((key, value) -> {
+            if (SKIPPED_ON_INSERT.contains(key) || "userId".equals(key)) {
+                return;
+            }
+            values.put(toSnakeCase(key), value);
+        });
+        Long localUserId = localUserService.localUserId();
+        if (localUserId == null) {
+            throw new IllegalStateException("本地用户尚未初始化，无法导入");
+        }
+        values.put("user_id", localUserId);
+
+        // 外键改写：包里是 Web 侧主键，本地要用映射后的本地主键
+        switch (table) {
+            case "resume" -> {
+                // 循环外键：resume.current_version_id 指向自己的版本行，
+                // 而版本行此刻还不存在 —— 带着 Web 侧的值插入必然违反外键约束。
+                // 先置空，等版本插入后再回填本地版本 ID（见 backfillCurrentVersion）。
+                values.remove("current_version_id");
+            }
+            case "resume_version" -> {
+                Long parent = parentRecord == null ? null
+                        : idMap.get(idMapKey("resumes", parentRecord));
+                if (parent != null) {
+                    values.put("resume_id", parent);
+                }
+            }
+            case "application_record" -> {
+                replaceForeignKey(values, "job_description_id", idMap, "jobDescriptions");
+                replaceForeignKey(values, "resume_version_id", idMap, "versions");
+                replaceForeignKey(values, "resume_id", idMap, "resumes");
+            }
+            case "application_status_history" -> {
+                Long parent = parentRecord == null ? null
+                        : idMap.get(idMapKey("applications", parentRecord));
+                if (parent != null) {
+                    values.put("application_record_id", parent);
+                }
+            }
+            default -> {
+                // 无外键的表（岗位、职业资料）
+            }
+        }
+        return values;
+    }
+
+    /** 用 idMap 把外键列里的 Web 主键换成本地主键（取不到就保留原值，由外键约束兜底）。 */
+    private void replaceForeignKey(Map<String, Object> values, String column, Map<String, Long> idMap,
+                                   String collection) {
+        Object webId = values.get(column);
+        if (webId == null) {
+            return;
+        }
+        Long local = idMap.get(collection + ":" + webId);
+        if (local != null) {
+            values.put(column, local);
+        }
+    }
+
+    /** 本地表列名缓存（用数据库元数据，避免硬编码列清单随 schema 漂移）。 */
+    private final Map<String, Set<String>> columnCache = new LinkedHashMap<>();
+
+    private Set<String> localColumns(String table) {
+        return columnCache.computeIfAbsent(table, key -> {
+            List<String> names = jdbcTemplate.queryForList(
+                    "SELECT column_name FROM information_schema.columns WHERE lower(table_name) = ?",
+                    String.class, key.toLowerCase());
+            // H2 的 information_schema 返回的列名是**大写**（TITLE / USER_ID），
+            // 而包里的字段转成下划线后是小写 —— 不统一成小写就一列都匹配不上。
+            Set<String> columns = new LinkedHashSet<>();
+            names.forEach(name -> columns.add(name.toLowerCase()));
+            return columns;
+        });
+    }
+
     private Map<String, Object> asMap(Object value) {
         return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
     }
