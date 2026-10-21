@@ -56,9 +56,30 @@ class DesktopImportServiceIT {
     private DesktopModeProperties properties;
 
     /**
-     * 每个用例从干净状态开始：本类的用例共享同一个 H2 file 库，
-     * 上一个用例导入的记录与映射会让下一个用例的「本地为空」前提不成立。
+     * 每个用例从干净状态开始：本类的用例共享同一个 H2 file 库（见 {@link #properties}），
+     * 上一个用例写下的映射会让下一个用例「本地没有这条记录」的前提不成立。
+     *
+     * <p>必须清的是映射表而不是数据行：{@code preview}/{@code apply} 的
+     * ADD/SKIP/CONFLICT 判据**只看**「本地有没有这条 stableId 的映射」
+     * （见 {@code DesktopImportService#localIdOf}），所以清掉映射就等于把判据拉回初始态，
+     * 且不必触碰有环外键（resume ↔ resume_version）的数据行。
      */
+    @BeforeEach
+    void forgetMappingsWrittenByPreviousTests() {
+        List<String> stableIds = new java.util.ArrayList<>(
+                List.of("web:jobDescriptions:77", "web:jobDescriptions:78"));
+        for (int base : PACKAGE_BASES) {
+            stableIds.add("web:jobDescriptions:" + base);
+            stableIds.add("web:resumes:" + (base + 100));
+            stableIds.add("web:resumes:" + (base + 100) + ":versions:" + (base + 101));
+            stableIds.add("web:applications:" + (base + 200));
+            stableIds.add("web:applications:" + (base + 200) + ":statusHistory:3");
+        }
+        for (String stableId : stableIds) {
+            jdbcTemplate.update("DELETE FROM desktop_import_map WHERE source_stable_id = ?", stableId);
+        }
+    }
+
     @Test
     void unknownRecordIsClassifiedAsAdd() {
         DesktopImportService.ImportPreview preview = importService.preview(packageOf(jobDescription(77, "Java Backend legacy")));
@@ -175,12 +196,14 @@ class DesktopImportServiceIT {
         assertEquals(1, jdCount, "重复导入不能产生重复记录");
     }
 
-    @org.junit.jupiter.api.Disabled("本地内容比较在 H2 file 库下不稳定（同一 file 库被本类用例共享，"
-            + "内容比较受存储编码与残留数据影响）；冲突解决的端到端验证留下一批，本批只保留分类与写入验证")
     @Test
     void conflictCanBeResolvedByUsingTheImportedVersion() {
         Map<String, Object> pkg = fullPackage(503);
         importService.apply(pkg, Map.<String, Object>of());
+        Long localId = localIdOfStableId("web:jobDescriptions:503");
+        assertNotNull(localId, "首次导入必须留下「稳定 ID → 本地 ID」的映射");
+        assertEquals("Java Backend-503", titleOfJobDescription(localId),
+                "首次导入后本地记录应是导入版本的内容");
 
         // 同一 stableId，但内容变了 → 冲突
         Map<String, Object> changed = fullPackage(503);
@@ -190,21 +213,32 @@ class DesktopImportServiceIT {
 
         DesktopImportService.ImportPreview preview = importService.preview(changed);
         assertEquals(1, preview.conflicts(), "内容变化应判为冲突");
+        assertEquals(0, preview.added(), "已有映射的记录不该被重复算成新增");
+        assertEquals("Java Backend-503", titleOfJobDescription(localId),
+                "预览阶段不得改动本地记录（R38：先预览、用户确认后才写）");
 
         DesktopImportService.ImportResult result = importService.apply(changed,
                 Map.<String, Object>of("web:jobDescriptions:503", "USE_IMPORTED"));
         assertEquals(1, result.updated(), "USE_IMPORTED 应覆盖本地那条");
+        assertEquals(0, result.inserted(), "冲突解决是覆盖本地记录，不是再插一份");
 
-        Integer updated = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM job_description WHERE id = ?", Integer.class, localIdOfStableId("web:jobDescriptions:503"));
-        assertEquals(1, updated, "本地记录应仍存在（被导入版本覆盖）");
+        assertEquals("Java Backend (changed)", titleOfJobDescription(localId),
+                "USE_IMPORTED 后本地那条必须是导入版本的内容");
+        Integer localRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM job_description WHERE id = ?", Integer.class, localId);
+        assertEquals(1, localRows, "本地记录应仍在（被导入版本覆盖），而不是被删掉或复制");
+        assertEquals(localId, localIdOfStableId("web:jobDescriptions:503"),
+                "覆盖不得改变「稳定 ID → 本地 ID」的映射");
     }
 
-    @org.junit.jupiter.api.Disabled("同上：冲突解决的端到端验证留下一批")
     @Test
     void keepingLocalLeavesTheLocalRecordUntouched() {
         Map<String, Object> pkg = fullPackage(504);
         importService.apply(pkg, Map.<String, Object>of());
+        Long localId = localIdOfStableId("web:jobDescriptions:504");
+        assertNotNull(localId, "首次导入必须留下「稳定 ID → 本地 ID」的映射");
+        assertEquals("Java Backend-504", titleOfJobDescription(localId),
+                "首次导入后本地记录应是导入版本的内容");
 
         Map<String, Object> changed = fullPackage(504);
         @SuppressWarnings("unchecked")
@@ -214,13 +248,24 @@ class DesktopImportServiceIT {
         DesktopImportService.ImportResult result = importService.apply(changed,
                 Map.<String, Object>of("web:jobDescriptions:504", "KEEP_LOCAL"));
         assertEquals(1, result.keptLocal(), "KEEP_LOCAL 应保留本地记录");
+        assertEquals(0, result.updated(), "KEEP_LOCAL 不得改动本地记录");
+        assertEquals(0, result.inserted(), "KEEP_LOCAL 不得写入导入版本");
 
-        Integer original = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM job_description WHERE title = ?", Integer.class, "Java 后端-502");
-        assertEquals(1, original, "本地记录不应被改动");
+        // 用映射里的本地 ID 定位那条记录（不用中文字面量做查询键，也不按标题反查）
+        assertEquals("Java Backend-504", titleOfJobDescription(localId),
+                "KEEP_LOCAL 后本地标题必须仍是导入前的原文");
+        Integer overwritten = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM job_description WHERE id = ? AND title = ?",
+                Integer.class, localId, "Java Backend (changed)");
+        assertEquals(0, overwritten, "KEEP_LOCAL 不得把本地记录改成导入版本的标题");
+        assertEquals(localId, localIdOfStableId("web:jobDescriptions:504"),
+                "KEEP_LOCAL 不得改变「稳定 ID → 本地 ID」的映射");
     }
 
     // ------------------------------------------------------------------ 包构造
+
+    /** 各用例专属的主键段（{@code fullPackage} 的 base），也是 {@link #forgetMappingsWrittenByPreviousTests} 的清理范围。 */
+    private static final int[] PACKAGE_BASES = {501, 502, 503, 504};
 
     /**
      * 构造一个工作区包。{@code base} 让每个用例用**专属的主键段** ——
@@ -331,6 +376,16 @@ class DesktopImportServiceIT {
         List<Long> ids = jdbcTemplate.queryForList(
                 "SELECT local_id FROM desktop_import_map WHERE source_stable_id = ?", Long.class, stableId);
         return ids.isEmpty() ? null : ids.get(0);
+    }
+
+    /**
+     * 按本地 ID 读岗位标题 —— 冲突解决的断言必须压在**这条记录的内容**上，
+     * 而不是「按标题反查有几行」（后者在标题写错时永远数不到行，是假的通过）。
+     */
+    private String titleOfJobDescription(Long localId) {
+        List<String> titles = jdbcTemplate.queryForList(
+                "SELECT title FROM job_description WHERE id = ?", String.class, localId);
+        return titles.isEmpty() ? null : titles.get(0);
     }
 
     private void rememberMapping(String entityType, Long localId, String stableId) {
