@@ -1,110 +1,196 @@
 # 智历
 
-智历是面向求职者的岗位定制简历平台。用户维护一份可复用的个人档案和职业资料库，选择或粘贴 JD 后，系统先用真实百炼 AI 进行资料选材，用户确认后再生成可编辑、可追溯的结构化岗位简历。
+面向求职者的**岗位定制简历平台**。你维护一份可复用的个人档案与职业资料库，选定目标 JD 后，系统先用真实大模型做资料选材、由你确认，再生成可编辑、可追溯的结构化简历——AI 负责选材与表达，**最终决定权始终在你手上**。
 
-生成过程不会直接用 AI 覆盖用户资料：岗位简历保留独立版本，草稿中的内容可追溯到已确认的资料；用户可以审核、编辑、归档和恢复版本。
+![version](https://img.shields.io/badge/version-0.4.1-2f6f4f?style=flat-square)
+![tests](https://img.shields.io/badge/backend%20tests-1019%20passing-2f6f4f?style=flat-square)
+![stack](https://img.shields.io/badge/Java%2017%20%C2%B7%20Spring%20Boot%203.3%20%C2%B7%20Vue%203-2f6f4f?style=flat-square)
+![deploy](https://img.shields.io/badge/deploy-systemd%20%2B%20nginx%2C%20no%20Docker-2f6f4f?style=flat-square)
+
+![登录页](docs/assets/readme/login.png)
+
+---
+
+## 为什么做这个
+
+市面上的简历工具大多是一条"上传 → 一键美化"的黑箱：它改写你写不清楚的地方，也改写你本来写对的地方；改完之后你既不知道它加了什么，也没法证明那句话真发生过。
+
+智历的设计反过来——**先有可追溯的真实资料，再有简历**：
+
+- 简历里的每一段经历都必须能指回你确认过的资料条目；
+- AI 只做两件事：挑资料、组织表达，**不编造事实**；
+- 每次保存都产生独立版本，归档、恢复、对比都可回退；
+- 投递之后的状态、沟通草稿、面试复盘接在同一条链路上，而不是散在几个工具里。
+
+## 产品一览
+
+以下截图取自 [在线测试环境](http://101.35.239.218:8088/) 的真实运行状态（v0.4.1）。
+
+### 求职工作台
+
+进入后先看"下一步该做什么"，而不是一堆待填表单。最近编辑的简历、待跟进的投递、AI 授权状态都收在这一页。
+
+![求职工作台](docs/assets/readme/home.png)
+
+### 简历创作台
+
+左侧章节导航实时显示完成度，右侧逐字段编辑。内容、版式、模板三者分离：换模板不会动内容，改内容也不会打乱版式。
+
+![简历创作台](docs/assets/readme/resume-editor.png)
+
+### 岗位定制生成
+
+三步走：锁定目标岗位 → 限定可用资料范围 → AI 选材并给出理由。**未经你确认的资料不会进入生成链路**，未覆盖的岗位要求也会如实列出。
+
+![岗位定制](docs/assets/readme/generate.png)
+
+### 投递看板
+
+投递状态机从草稿一路走到入职，共 9 态；每次状态迁移都写入状态历史（`from` / `to` / `note` / 时间），可以回看这条投递究竟发生过什么。看板同时给出转化率与各阶段平均停留天数。
+
+![投递看板](docs/assets/readme/applications.png)
+
+### ATS 检查
+
+先用稳定的本地规则核对结构完整性与关键词覆盖度，再由 AI 深入分析岗位语义与简历证据。规则分与 AI 建议分开呈现，**规则结果不依赖 AI 可用性**——模型挂了也不会让检查变成空白。
+
+![ATS 检查](docs/assets/readme/ats-result.png)
 
 ## 核心能力
 
-- **个人档案与职业目标**：维护联系方式、个人简介、目标职位、职级、行业和工作方式偏好。
-- **可复用职业资料库**：工作、项目、教育、技能、证书等基础资料，以及量化成果、管理/协作经历和单技能证据卡。
-- **JD 智能选材**：按资料偏好和 JD 规则预筛，AI 给出推荐理由、未采用资料和未覆盖要求，用户确认后才进入生成。
-- **结构化岗位简历**：仅使用确认快照生成标准简历字段；联系方式由服务端合并，量化成果按展示口径脱敏。
-- **审核、版本与导出**：草稿逐项审核，岗位简历独立保存；支持版本归档/恢复、规则覆盖度分析和私有 PDF 导出。
-- **求职闭环**：提供 ATS 规则检查、投递看板与统计、事实约束的沟通草稿与模板库、简历版本对比、简历导入、有限轮次模拟面试、薄弱项练习和面试答案资产；所有用户资源均执行归属校验。
+| 能力 | 说明 |
+| --- | --- |
+| 个人档案与职业目标 | 联系方式、简介、目标职位、职级、行业与工作方式偏好，一次维护多处复用 |
+| 职业资料库 | 工作、项目、教育、技能、证书、量化成果、管理经历、单技能证据卡等 13 类可复用资料 |
+| JD 解析与选材 | 关键词抽取 + 规则预筛，再由 AI 给出推荐理由、未采用原因与未覆盖要求 |
+| 结构化简历 | 七套模板共享同一套排版引擎；联系方式由服务端合并，量化成果按展示口径脱敏 |
+| 版本管理 | 每次保存生成新版本，支持归档、恢复、跨版本对比，当前版本受保护不可归档 |
+| 私有 PDF 导出 | 在线走独立渲染服务，桌面端走纯 Java 渲染；导出前需二次验证密码 |
+| ATS 检查 | 规则评分与 AI 分析双通道，AI 不可用时自动降级并明确告知原因 |
+| 投递闭环 | 9 态状态机 + 状态历史 + 跟进提醒 + 转化率统计 |
+| 沟通草稿 | 基于已确认事实生成求职信、邮件与开场白，附情绪与事实边界校验 |
+| 模拟面试 | 有限轮次问答、逐题评估、复盘报告与答案资产沉淀 |
+| Windows 桌面模式 | 本地 H2 文件库、免登录、纯 Java PDF，数据不出本机 |
+
+## 技术架构
+
+```mermaid
+flowchart LR
+  B["浏览器 / 桌面壳"] --> W["Vue 3 + TypeScript<br/>Vite 构建"]
+  W -->|"/api"| A["Spring Boot 3.3 API<br/>Java 17 · 分层架构"]
+  A --> DB[("MySQL 8.4<br/>Flyway V1–V37")]
+  A --> WK["AI 任务工作器<br/>HEAVY / LIGHT 双队列"]
+  WK --> LLM["百炼模型链<br/>7 个模型顺序降级"]
+  A --> PDF["PDF 渲染"]
+  PDF --> P1["Puppeteer 服务<br/>在线"]
+  PDF --> P2["PDFBox<br/>桌面端"]
+```
+
+| 层 | 选型 | 版本锚定 |
+| --- | --- | --- |
+| 前端 | Vue 3 + TypeScript + Vite | Vue 3 / Element Plus |
+| 后端 | Spring Boot + JPA + Flyway | 3.3.2 / Java 17 |
+| 数据库 | MySQL（生产权威）/ H2 file（桌面） | 8.4 / 2.x |
+| PDF | Puppeteer 渲染服务 · PDFBox 本地渲染 | Node 20+ / PDFBox 2.0.32 |
+| 部署 | systemd + nginx 直连部署（无 Docker） | — |
+
+几条贯穿全局的工程约定：
+
+- **schema 权威只有一份**：MySQL 8.4 上跑通全部迁移才算数，桌面端 H2 跟着它走；
+- **AI 一律异步**：长任务进工作队列，前端拿 `taskId` 轮询，避免"提交后干等两分钟"；
+- **AI 调用受同意约束**：没有用户显式授权，不把简历内容发往模型；
+- **失败必须可见**：AI 降级、超时、授权不足都会在界面上说清原因，而不是静默返回空结果。
+
+## 快速开始
+
+### 在线体验
+
+直接打开 **<http://101.35.239.218:8088/>**，注册即可（用户名 + 邮箱 + 密码，无需邮箱验证）。
+
+> 这是**可随时重置的测试环境**，不要放真实隐私数据；AI 相关功能需要环境侧配置模型密钥。
+
+### 本地开发（三个进程）
+
+前置：Java 17、Maven 3.9+、Node.js 20+、本地 MySQL 8。复制 `.env.example` 为 `.env` 并填写数据库连接，在 `.env.live-ai` 中配置 `BAILIAN_API_KEY`（不配则 AI 功能降级、规则功能不受影响）。
+
+```bash
+# 1. 后端 API
+cd server && mvn spring-boot:run -Dspring-boot.run.profiles=local-mysql
+#    → http://localhost:8080/api/system/health
+
+# 2. 前端
+cd web && npm install && npm run dev
+#    → http://localhost:5173
+
+# 3. PDF 渲染服务
+cd pdf-service && npm install && npm start
+#    → http://localhost:3001/health
+```
+
+`PDF_SERVICE_TOKEN` 需在根 `.env` 与 `pdf-service/.env` 两侧保持一致。Windows 上也可用 `.\scripts\Start-LocalValidation.ps1` 一键拉起三个服务（详见 [本地验证指南](docs/LOCAL_VALIDATION.md)）。
+
+### 桌面模式（单进程、免登录）
+
+```bash
+java -jar intelligent-resume-server-0.4.1.jar \
+  --spring.profiles.active=desktop \
+  --server.port=8082 --server.address=127.0.0.1
+```
+
+打开 <http://127.0.0.1:8082> 即进入本地工作区：H2 文件库落在 `./desktop-data`，PDF 由纯 Java 渲染（不依赖 Node 与 Chromium），无需登录。`--server.address` 必须是回环地址，否则服务**拒绝启动**——这是防止本地数据被局域网访问的护栏。
+
+### 部署
+
+```bash
+bash scripts/deploy-direct.sh
+```
+
+本机打包源码 → 上传 → 服务器端构建 → 同步产物 → 重启服务 → 自动执行 17 项部署后探针（安全头、配置一致性、监听范围、模型链一致性等）。**探针失败脚本以非零码退出**，不会给出"部署成功"的假结论。详见 [直连部署手册](docs/DEPLOYMENT_DIRECT.md)。
 
 ## 工程结构
 
 ```text
-server/       Spring Boot API（Java 17、Flyway、MySQL、AI 任务工作器）
-web/          Vue 3 + TypeScript Web 应用
-pdf-service/  Node.js + Puppeteer 私有 PDF 渲染服务
-scripts/      本地真实 AI、PDF 故障恢复和全流程验证脚本
-docs/         产品、架构、接口、测试与运维文档
+server/            Spring Boot API（分层：controller / service / repository / domain）
+  └─ db/migration/ Flyway 迁移 V1–V37
+web/               Vue 3 + TypeScript 前端（views / components / api / stores）
+pdf-service/       Node.js + Puppeteer 私有 PDF 渲染服务
+scripts/           部署、探针、持久化门禁、全流程验证
+functional-tests/  黑盒功能回归（4 套件）
+docs/              产品、架构、接口、测试、运维与决策记录
+deploy/            nginx 站点配置与 systemd 单元（随部署幂等同步）
 ```
 
-## 本地启动
+## 质量与验证
 
-本地验收不依赖 Docker。前置条件为 Java 17、Maven 3.9+、Node.js 20+ 和本地 MySQL。
+当前基线：**后端 1019 个测试全绿**（含集成测试真跑全部 Flyway 迁移）、前端构建与浏览器 E2E、PDF 服务用例，以及部署后 17 项探针与 18 项状态机探针。
 
-1. 将根目录 [`.env.example`](.env.example) 复制为忽略的 `.env`，填写本地 MySQL 连接信息。
-2. 在忽略的 `.env.live-ai` 中配置 `BAILIAN_API_KEY`。真实 AI 验收脚本会强制使用百炼，不会回退到替代模型。
-3. 为 PDF 服务准备 `pdf-service/.env`，其中的 `PDF_SERVICE_TOKEN` 应与根 `.env` 保持一致；`Start-LocalValidation.ps1` 会在启动前自动创建该文件并从根 `.env` 注入令牌，保证两侧一致。
-4. 启动本地验证拓扑：
+比"测试数量"更值得说的是——这个仓库对**门禁本身**下了功夫，因为"永远返回通过"的检查比没有检查更危险：
 
-```powershell
-.\scripts\Start-LocalValidation.ps1
-```
+| 门禁 | 拦的是什么 |
+| --- | --- |
+| 版本号一致性 | 同一版本号有 11 处独立副本（含 jar 名），任一处不一致即红 |
+| 单文件行数棘轮 | 超 300 行的文件必须登记并锁定上限，只许下调；扫不到文件也算失败，防门禁空转 |
+| API 文档覆盖 | 新增端点未写入接口文档即红 |
+| Schema 文档契约 | 新增表未写入数据库文档即红 |
+| 持久化双口径 | MySQL 8.4（全新安装）与 5.7（存量升级）分别真跑迁移，退出码区分"未测量"与"通过" |
+| 状态矩阵三方一致 | 后端枚举 / 前端数组 / 文档表格逐格比对 |
 
-服务地址：
+每个门禁都用**已知坏样本**验证过它会失败；验证不了的检查不会进主干。
 
-- Web：`http://127.0.0.1:5173`
-- API 健康检查：`http://127.0.0.1:8080/api/system/health`
-- PDF 服务健康检查：`http://127.0.0.1:3001/health`
+## 已知边界
 
-停止由脚本启动的本地服务：
+- **AI 能力需要模型密钥**。未配置时 AI 链路降级为规则结果，界面会明确标注降级原因，不会假装成功。
+- **职业资料导入**目前只对 4 类核心集合做冲突分类，包内嵌套集合（简历版本、状态历史）的变化暂不参与冲突判定，已在决策登记册中排队。
+- **桌面端**已有本地库、备份恢复与纯 Java PDF，但尚无安装包与桌面壳（需要双击安装的部分未做）。
+- 单用户单工作区，**不支持团队协作与多租户**。
 
-```powershell
-.\scripts\Stop-LocalValidation.ps1
-```
+## 文档
 
-完整 MySQL 配置、浏览器验收和故障恢复步骤见 [本地验证指南](docs/LOCAL_VALIDATION.md)。
-
-## 配置与安全
-
-以下敏感信息只能存放在忽略的 `.env`、`.env.live-ai`、服务密钥管理系统或部署环境变量中，禁止提交到仓库：
-
-- `BAILIAN_API_KEY`
-- `JWT_SECRET`
-- `SPRING_DATASOURCE_PASSWORD`、`MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`
-- `PDF_SERVICE_TOKEN`
-
-真实 AI 使用 `AI_PROVIDER=bailian` 与 `BAILIAN_API_KEY`。`.env.live-ai` 仅用于本地真实调用验证；生产环境应通过部署环境变量或密钥管理系统提供同类配置。不要依赖任何开发默认 JWT 密钥或数据库密码。
-
-## 验证命令
-
-```powershell
-Set-Location server
-mvn test
-
-Set-Location ..\web
-npm run build
-npx playwright test
-
-Set-Location ..\pdf-service
-npm run check
-npm test
-```
-
-后端集成测试使用 H2/MySQL 兼容模式执行全部 Flyway 迁移，并覆盖 ATS、投递、沟通、导入、面试及答案资产的真实控制器契约。常规 Web E2E 使用可控路由数据；需要验证三个服务真实联调时，使用下方本地全流程脚本。
-
-真实百炼端到端验证会创建临时账号和测试数据，并在结束时清理：
-
-```powershell
-.\scripts\Test-LocalFullFlow.ps1
-```
-
-如需同时验证 PDF 服务故障后的重试恢复：
-
-```powershell
-.\scripts\Test-LocalFullFlow.ps1 -VerifyPdfRecovery
-```
-
-## 云端部署
-
-推送到 `master` 与面向 `master` 的 Pull Request 由 GitHub Actions 验证后端测试、Web 构建与浏览器 E2E、PDF 服务检查；ACR 镜像发布保持手动触发。配置、检查名称和分支保护建议见 [GitHub CI/CD 流水线](docs/CI.md)。
-
-当前可复现发布链路为 GitHub Actions 构建 Linux/amd64 镜像、阿里云 ACR 保存成品镜像、ECS 仅拉取运行。Edge Nginx 是唯一公网入口，Web、API、PDF 和 MySQL 保持在容器私有网络中。
-
-无域名测试环境可以使用公网 IP 与自签名 HTTPS；正式环境仍应配置可信域名证书、备份策略与告警接收渠道。完整操作、回滚、故障排查和注销 ECS 前备份要求见[部署运行手册](docs/DEPLOYMENT.md)。
-
-## 文档入口
-
-- [项目上下文（后续 AI / 新开发者先读）](PROJECT_CONTEXT.md)
+- [项目上下文](PROJECT_CONTEXT.md)（新人与 AI 协作的第一入口）
 - [文档索引](docs/README.md)
-- [部署运行手册](docs/DEPLOYMENT.md)
-- [本地验证指南](docs/LOCAL_VALIDATION.md)
-- [系统架构设计](docs/03-系统架构设计说明书.md)
-- [接口设计](docs/05-接口设计说明书.md)
-- [测试计划与验收](docs/07-测试计划与验收说明书.md)
-- [部署与运维](docs/08-部署与运维说明书.md)
+- [系统架构设计](docs/03-系统架构设计说明书.md) · [数据库设计](docs/04-数据库设计说明书.md) · [接口设计](docs/05-接口设计说明书.md)
+- [测试计划与验收](docs/07-测试计划与验收说明书.md) · [部署与运维](docs/08-部署与运维说明书.md)
+- [架构决策记录](docs/decisions/) · [悬而未决登记册](docs/decisions/OPEN-DECISIONS.md)
+- [发布说明 v0.4.1](docs/RELEASES/v0.4.1.md)
+
+English: [README.en.md](README.en.md)
