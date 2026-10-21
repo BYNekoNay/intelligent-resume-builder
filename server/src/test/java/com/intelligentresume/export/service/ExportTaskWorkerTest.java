@@ -46,7 +46,8 @@ class ExportTaskWorkerTest {
         when(userRepository.findById(100L)).thenReturn(Optional.of(disabled));
 
         ExportTaskWorker worker = new ExportTaskWorker(
-                versionRepository, userRepository, pdfServiceClient, storageService, leaseService,
+                versionRepository, userRepository, pdfServiceClient, new com.intelligentresume.export.pdf.JavaResumePdfRenderer(), desktopProperties(),
+                storageService, leaseService,
                 3, observability, classifier);
 
         worker.poll();
@@ -88,7 +89,8 @@ class ExportTaskWorkerTest {
         when(leaseService.releaseSuccess(eq(task), eq(stored))).thenReturn(false);
 
         ExportTaskWorker worker = new ExportTaskWorker(
-                versionRepository, userRepository, pdfServiceClient, storageService, leaseService,
+                versionRepository, userRepository, pdfServiceClient, new com.intelligentresume.export.pdf.JavaResumePdfRenderer(), desktopProperties(),
+                storageService, leaseService,
                 3, observability, classifier);
 
         worker.poll();
@@ -127,11 +129,22 @@ class ExportTaskWorkerTest {
         when(leaseService.releaseSuccess(eq(task), eq(stored))).thenReturn(true);
 
         ExportTaskWorker worker = new ExportTaskWorker(
-                versionRepository, userRepository, pdfServiceClient, storageService, leaseService,
+                versionRepository, userRepository, pdfServiceClient, new com.intelligentresume.export.pdf.JavaResumePdfRenderer(), desktopProperties(),
+                storageService, leaseService,
                 3, observability, new FailureCategoryClassifier());
 
         worker.poll();
 
         verify(storageService, never()).delete(anyString());
+    }
+
+    /**
+     * 桌面模式关闭：测试要继续走 pdf-service 路径（在线版行为），而不是纯 Java 渲染器。
+     */
+    private com.intelligentresume.config.DesktopModeProperties desktopProperties() {
+        com.intelligentresume.config.DesktopModeProperties properties =
+                new com.intelligentresume.config.DesktopModeProperties();
+        properties.setEnabled(false);
+        return properties;
     }
 }

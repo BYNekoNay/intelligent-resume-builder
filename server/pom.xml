@@ -67,6 +67,13 @@
             <artifactId>h2</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!--
+          桌面本地工作区的纯 Java PDF 渲染（ADR-012 D4）复用下方已有的 pdfbox 2.0.32 依赖
+          （原本用于简历导入的 PDF 解析），不再引入第二份 pdfbox —— 两个版本同时存在会
+          让 Maven 取到先声明的那个，编译期报"找不到 org.apache.pdfbox 程序包"。
+          字体不随包分发：模板用的 Microsoft YaHei / Songti SC 属商业字体不可再分发，
+          但 Windows 10/11 自带，渲染时直接引用系统字体文件。
+        -->
 
         <!-- T02 认证 -->
         <dependency>
@@ -144,6 +151,22 @@
                         <include>**/*Test.java</include>
                         <include>**/*IT.java</include>
                     </includes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <configuration>
+                    <filesets>
+                        <!--
+                          前端产物被拷进 target/classes/static，而资源目录**不会**被增量清理：
+                          连续两次构建会在 jar 里留下两代 assets（实测旧文件仍在 2026-10-20 的时间戳）。
+                          这里显式让 `mvn clean` 一并清掉，避免包体膨胀与旧 chunk 残留。
+                        -->
+                        <fileset>
+                            <directory>${project.build.directory}/classes/static</directory>
+                        </fileset>
+                    </filesets>
                 </configuration>
             </plugin>
         </plugins>

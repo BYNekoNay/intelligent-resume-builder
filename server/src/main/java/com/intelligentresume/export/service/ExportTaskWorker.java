@@ -30,6 +30,8 @@ public class ExportTaskWorker {
     private final ResumeVersionRepository resumeVersionRepository;
     private final UserRepository userRepository;
     private final PdfServiceClient pdfServiceClient;
+    private final com.intelligentresume.export.pdf.JavaResumePdfRenderer javaResumePdfRenderer;
+    private final com.intelligentresume.config.DesktopModeProperties desktopModeProperties;
     private final ExportStorageService storageService;
     private final ExportTaskLeaseService leaseService;
     private final int batchSize;
@@ -39,6 +41,8 @@ public class ExportTaskWorker {
     public ExportTaskWorker(ResumeVersionRepository resumeVersionRepository,
                             UserRepository userRepository,
                             PdfServiceClient pdfServiceClient,
+                            com.intelligentresume.export.pdf.JavaResumePdfRenderer javaResumePdfRenderer,
+                            com.intelligentresume.config.DesktopModeProperties desktopModeProperties,
                             ExportStorageService storageService,
                             ExportTaskLeaseService leaseService,
                             @Value("${app.pdf.worker.batch-size:1}") int batchSize,
@@ -47,6 +51,8 @@ public class ExportTaskWorker {
         this.resumeVersionRepository = resumeVersionRepository;
         this.userRepository = userRepository;
         this.pdfServiceClient = pdfServiceClient;
+        this.javaResumePdfRenderer = javaResumePdfRenderer;
+        this.desktopModeProperties = desktopModeProperties;
         this.storageService = storageService;
         this.leaseService = leaseService;
         this.batchSize = batchSize;
@@ -88,7 +94,12 @@ public class ExportTaskWorker {
                     return;
                 }
 
-                byte[] pdfBytes = pdfServiceClient.render(task.getTemplateCode(), payload);
+                // 桌面本地工作区（ADR-012 D4）：不依赖 Node + Chromium，改用纯 Java 渲染器，
+                // 这样安装包不必带约 292MB 的 Chromium 与 Node 运行时。
+                // 在线版继续走 pdf-service（Chrome 打印），两条路径各自有回归。
+                byte[] pdfBytes = desktopModeProperties.isEnabled()
+                        ? javaResumePdfRenderer.render(task.getTemplateCode(), payload)
+                        : pdfServiceClient.render(task.getTemplateCode(), payload);
                 ExportStorageService.StoredFile stored = storageService.store(pdfBytes, "pdf");
                 if (!leaseService.releaseSuccess(task, stored)) {
                     // #30：租约已被接管时结果被丢弃，本 worker 渲染出的文件没有任何任务引用，
