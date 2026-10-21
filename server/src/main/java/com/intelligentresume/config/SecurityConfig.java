@@ -35,15 +35,18 @@ public class SecurityConfig {
     private final RateLimitFilter rateLimitFilter;
     private final ObjectMapper objectMapper;
     private final DesktopModeProperties desktopModeProperties;
+    private final SpaFallbackFilter spaFallbackFilter;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
                           RateLimitFilter rateLimitFilter,
                           ObjectMapper objectMapper,
-                          DesktopModeProperties desktopModeProperties) {
+                          DesktopModeProperties desktopModeProperties,
+                          SpaFallbackFilter spaFallbackFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.rateLimitFilter = rateLimitFilter;
         this.objectMapper = objectMapper;
         this.desktopModeProperties = desktopModeProperties;
+        this.spaFallbackFilter = spaFallbackFilter;
     }
 
     @Bean
@@ -91,7 +94,10 @@ public class SecurityConfig {
                 response.getWriter().write(objectMapper.writeValueAsString(body));
             }))
             .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            // SPA 回落挂在 security chain 内（而不是依赖 servlet 容器的隐式 filter 注册）：
+            // 隐式注册并不保证它在 DispatcherServlet 之前生效，实测深路由会直接 404。
+            .addFilterAfter(spaFallbackFilter, JwtAuthenticationFilter.class);
         return http.build();
     }
 }
