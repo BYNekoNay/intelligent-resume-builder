@@ -311,6 +311,36 @@ def main():
             code, raw = call("PATCH", f"/api/applications/{apid}/status",
                              {"status": "APPLIED", "version": ver + 1}, tok=tok_a)
             observe("G3 status 迁移", code, raw)
+            cur = data_of(raw) or {}
+            ver = cur.get("version", ver + 1)
+
+            # G3b 九态推进：SCREENING / NO_RESPONSE 是本版新增状态；
+            # NO_RESPONSE → REJECTED 是一步收尾边（不经 APPLIED 中转，
+            # 否则会在审计时间线里留下一条从未发生的 NO_RESPONSE→APPLIED 事件）。
+            for target, label in (("SCREENING", "APPLIED→SCREENING"),
+                                  ("NO_RESPONSE", "SCREENING→NO_RESPONSE"),
+                                  ("REJECTED", "NO_RESPONSE→REJECTED 一步收尾")):
+                code, raw = call("PATCH", f"/api/applications/{apid}/status",
+                                 {"status": target, "version": ver}, tok=tok_a)
+                cur = data_of(raw) or {}
+                check(f"G3b 状态迁移 {label}", code == 200 and cur.get("status") == target,
+                      f"HTTP {code} status={cur.get('status')}")
+                ver = cur.get("version", ver + 1)
+
+            # G3c 状态历史必须逐条落库（创建首条 + 每次实际变化一条）
+            code, raw = call("GET", f"/api/applications/{apid}", tok=tok_a)
+            hist = (data_of(raw) or {}).get("statusHistory") or []
+            pairs = [(h.get("fromStatus"), h.get("toStatus")) for h in hist]
+            check("G3c 状态历史逐条落库且含一步收尾边", code == 200 and ("NO_RESPONSE", "REJECTED") in pairs,
+                  f"HTTP {code} 条数={len(hist)} 边={pairs}")
+            check("G3d 状态历史不含伪造的 NO_RESPONSE→APPLIED 中转",
+                  ("NO_RESPONSE", "APPLIED") not in pairs, f"实际={pairs}")
+
+            # G3e 终态不可回退
+            code, raw = call("PATCH", f"/api/applications/{apid}/status",
+                             {"status": "SCREENING", "version": ver}, tok=tok_a)
+            check("G3e 终态 REJECTED 不可回退", code in (400, 409, 422), f"HTTP {code}")
+
             code, raw = call("GET", "/api/applications/stats", tok=tok_a)
             check("G4 stats", code == 200 and (data_of(raw) or {}).get("total") is not None,
                   f"HTTP {code} total={(data_of(raw) or {}).get('total')}")
