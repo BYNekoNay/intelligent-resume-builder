@@ -14,8 +14,6 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -36,18 +34,16 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final RateLimitFilter rateLimitFilter;
     private final ObjectMapper objectMapper;
+    private final DesktopModeProperties desktopModeProperties;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
                           RateLimitFilter rateLimitFilter,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper,
+                          DesktopModeProperties desktopModeProperties) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.rateLimitFilter = rateLimitFilter;
         this.objectMapper = objectMapper;
-    }
-
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        this.desktopModeProperties = desktopModeProperties;
     }
 
     @Bean
@@ -58,9 +54,8 @@ public class SecurityConfig {
             .formLogin(AbstractHttpConfigurer::disable)
             .httpBasic(AbstractHttpConfigurer::disable)
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authorizeHttpRequests(auth -> auth
-                // 仅匿名端点放行；其余 /api/auth/**（/me、/logout-all 等）与所有业务接口要求认证
-                .requestMatchers(
+            .authorizeHttpRequests(auth -> {
+                auth.requestMatchers(
                         "/api/auth/register",
                         "/api/auth/login",
                         // 删除撤销（D2 阶段 3）：删号后会话已全撤，恢复入口必须匿名可达（凭密码验证）
@@ -73,9 +68,17 @@ public class SecurityConfig {
                         "/actuator/health/**",
                         "/actuator/info",
                         "/actuator/prometheus"
-                ).permitAll()
-                .anyRequest().authenticated()
-            )
+                ).permitAll();
+                if (desktopModeProperties.isEnabled()) {
+                    // 桌面本地工作区（ADR-012 D1/D3）：**API 仍然受认证保护**（过滤器注入本地用户，
+                    // 越权面不变），但前端 SPA 壳必须匿名可达 —— 否则刷新任何前端路由都会被 401 拦下，
+                    // 而 index.html 与构建产物本身不含用户数据。
+                    auth.requestMatchers("/api/**").authenticated()
+                            .anyRequest().permitAll();
+                } else {
+                    auth.anyRequest().authenticated();
+                }
+            })
             .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, authException) -> {
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                 response.setContentType(MediaType.APPLICATION_JSON_VALUE);

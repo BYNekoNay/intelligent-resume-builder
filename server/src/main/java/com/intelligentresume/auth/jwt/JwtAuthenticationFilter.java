@@ -1,6 +1,7 @@
 package com.intelligentresume.auth.jwt;
 
 import com.intelligentresume.auth.service.ActiveUserCache;
+import com.intelligentresume.config.DesktopLocalUserService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,15 +30,32 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final TokenService tokenService;
     private final ActiveUserCache activeUserCache;
+    private final DesktopLocalUserService desktopLocalUserService;
 
-    public JwtAuthenticationFilter(TokenService tokenService, ActiveUserCache activeUserCache) {
+    public JwtAuthenticationFilter(TokenService tokenService,
+                                   ActiveUserCache activeUserCache,
+                                   DesktopLocalUserService desktopLocalUserService) {
         this.tokenService = tokenService;
         this.activeUserCache = activeUserCache;
+        this.desktopLocalUserService = desktopLocalUserService;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
+        // 桌面本地工作区（ADR-012 D3）：恒定本地用户直接注入，**不解析客户端令牌**。
+        // 桌面端只有一个工作区，令牌指向别的账号没有意义，统一收敛到本地用户更安全。
+        if (desktopLocalUserService.isEnabled()) {
+            Long localUserId = desktopLocalUserService.localUserId();
+            if (localUserId != null) {
+                request.setAttribute(CURRENT_USER_ID_ATTRIBUTE, localUserId);
+                UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                        localUserId, null, List.of());
+                SecurityContextHolder.getContext().setAuthentication(auth);
+            }
+            chain.doFilter(request, response);
+            return;
+        }
         String header = request.getHeader("Authorization");
         if (header != null && header.startsWith(BEARER_PREFIX)) {
             String token = header.substring(BEARER_PREFIX.length()).trim();

@@ -1,6 +1,7 @@
 package com.intelligentresume.auth.controller;
 
 import com.intelligentresume.auth.dto.CurrentUserResponse;
+import com.intelligentresume.config.DesktopLocalUserService;
 import com.intelligentresume.auth.dto.ChangeEmailRequest;
 import com.intelligentresume.auth.dto.ChangePasswordRequest;
 import com.intelligentresume.auth.dto.ExportDataRequest;
@@ -46,6 +47,7 @@ public class AuthController {
     private final AuthService authService;
     private final AccountExportService accountExportService;
     private final ClientIpResolver clientIpResolver;
+    private final DesktopLocalUserService desktopLocalUserService;
     private final String refreshCookieName;
     private final long refreshCookieMaxAge;
     private final boolean refreshCookieSecure;
@@ -53,12 +55,14 @@ public class AuthController {
     public AuthController(AuthService authService,
                           AccountExportService accountExportService,
                           ClientIpResolver clientIpResolver,
+                          DesktopLocalUserService desktopLocalUserService,
                           @Value("${app.jwt.refresh-cookie.name}") String refreshCookieName,
                           @Value("${app.jwt.refresh-cookie.max-age}") long refreshCookieMaxAge,
                           @Value("${app.jwt.refresh-cookie.secure}") boolean refreshCookieSecure) {
         this.authService = authService;
         this.accountExportService = accountExportService;
         this.clientIpResolver = clientIpResolver;
+        this.desktopLocalUserService = desktopLocalUserService;
         this.refreshCookieName = refreshCookieName;
         this.refreshCookieMaxAge = refreshCookieMaxAge;
         this.refreshCookieSecure = refreshCookieSecure;
@@ -87,6 +91,12 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<TokenResponse>> refresh(HttpServletRequest httpRequest) {
+        // 桌面本地工作区（ADR-012 D3）：无需 refresh cookie，直接为本地用户签发令牌。
+        // 前端沿用在线版启动流程（先 refresh 再拉当前用户），这条分支就是「免登录」的协议落点。
+        if (desktopLocalUserService.isEnabled()) {
+            return ResponseEntity.ok()
+                    .body(ApiResponse.success(desktopLocalUserService.issueToken(), traceId(httpRequest)));
+        }
         String refresh = extractRefreshToken(httpRequest);
         String ua = httpRequest.getHeader(HttpHeaders.USER_AGENT);
         String ip = clientIpResolver.resolve(httpRequest);

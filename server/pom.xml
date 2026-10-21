@@ -116,6 +116,21 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!--
+              桌面本地工作区（ADR-012 D1）需要把前端产物打进 jar，由本地 Spring Boot 直接托管。
+              目录不存在时资源插件会跳过（CI 的 server job 不构建前端，因此不受影响）。
+              构建顺序：先 cd web && npm run build，再 cd server && mvn package。
+            -->
+            <resource>
+                <directory>${project.basedir}/../web/dist</directory>
+                <targetPath>static</targetPath>
+                <filtering>false</filtering>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
