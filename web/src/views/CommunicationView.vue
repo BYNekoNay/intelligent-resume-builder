@@ -30,6 +30,7 @@ import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
+import { newIdempotencyKey } from '@/utils/idempotency'
 
 const route = useRoute()
 const router = useRouter()
@@ -190,7 +191,7 @@ async function generateAi() {
   stopPolling()
   resetResult()
   loadingMode.value = 'AI'
-  const key = `communication:${crypto.randomUUID()}`
+  const key = newIdempotencyKey('communication')
   try {
     const task = (await generateCommunicationWithAi(
       Number(resumeVersionId.value), Number(jobId.value), type.value, outputLanguage.value, key,

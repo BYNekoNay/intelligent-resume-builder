@@ -8,6 +8,7 @@ import { AiTaskTimeoutError } from '@/api/ai'
 import { createResume } from '@/api/resume'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
+import { newIdempotencyKey } from '@/utils/idempotency'
 
 const { t } = useLocale()
 const raw = ref(''); const result = ref<MaterialGenerationResponse | null>(null); const association = ref<MaterialAssociationResponse | null>(null); const error = ref(''); const consentRequired = ref(false); const loading = ref(false); const associating = ref(false); const title = ref('From raw materials'); const saving = ref(false)
@@ -22,7 +23,7 @@ function idempotencyKeyFor(action: string, payload: unknown) {
   const fingerprint = JSON.stringify(payload)
   const pending = pendingIdempotency.get(action)
   if (pending && pending.fingerprint === fingerprint) return pending.idempotencyKey
-  const idempotencyKey = crypto.randomUUID()
+  const idempotencyKey = newIdempotencyKey()
   pendingIdempotency.set(action, { fingerprint, idempotencyKey })
   return idempotencyKey
 }

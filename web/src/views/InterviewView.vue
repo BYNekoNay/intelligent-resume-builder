@@ -14,6 +14,7 @@ import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
+import { newIdempotencyKey } from '@/utils/idempotency'
 
 const { locale, t } = useLocale()
 const route = useRoute()
@@ -161,7 +162,7 @@ async function start() {
   }
   const pending = pendingStart.value && samePayload(pendingStart.value.payload, payload)
     ? pendingStart.value
-    : { payload, idempotencyKey: crypto.randomUUID() }
+    : { payload, idempotencyKey: newIdempotencyKey() }
   pendingStart.value = pending
   try {
     const result = (await startInterview(payload, pending.idempotencyKey)).data.data
@@ -184,7 +185,7 @@ async function submit() {
   const payload = { interviewId: interviewId.value, answer: answer.value.trim() }
   const pending = pendingAnswer.value && samePayload(pendingAnswer.value.payload, payload)
     ? pendingAnswer.value
-    : { payload, idempotencyKey: crypto.randomUUID() }
+    : { payload, idempotencyKey: newIdempotencyKey() }
   pendingAnswer.value = pending
   error.value = ''
   submitting.value = true
@@ -302,7 +303,7 @@ async function generatePractice(weakness: string) {
   practiceError.value = ''
   practiceLoading.value = true
   try {
-    const key = `follow-up:${crypto.randomUUID()}`
+    const key = newIdempotencyKey('follow-up')
     const task = (await createFollowUp(interviewId.value, weakness, key)).data.data
     if (!acceptFollowUpTask(task)) {
       startFollowUpPolling({
@@ -377,7 +378,7 @@ async function startPractice(candidateIndex: number) {
       outputLanguage: session?.outputLanguage ?? (locale.value === 'zh-CN' ? 'ZH_CN' : 'EN'),
       initialQuestion: question,
     }
-    const result = (await startInterview(payload, `practice:${crypto.randomUUID()}`)).data.data
+    const result = (await startInterview(payload, newIdempotencyKey('practice'))).data.data
     practiceCandidates.value = []
     practiceWeakness.value = ''
     stopFollowUpPolling()

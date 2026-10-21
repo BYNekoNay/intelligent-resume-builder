@@ -6,6 +6,7 @@ import { createMaterial, type MaterialType } from '@/api/careerMaterial'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useLocale } from '@/i18n'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
+import { newIdempotencyKey } from '@/utils/idempotency'
 
 const { t } = useLocale()
 const resumeVersionId = ref('')
@@ -29,7 +30,7 @@ async function guide() {
   const fingerprint = JSON.stringify(payload)
   if (fingerprint !== lastGuideFingerprint) {
     lastGuideFingerprint = fingerprint
-    lastGuideIdempotencyKey = crypto.randomUUID()
+    lastGuideIdempotencyKey = newIdempotencyKey()
   }
   try {
     const task = (await guideAchievement(payload, lastGuideIdempotencyKey)).data.data

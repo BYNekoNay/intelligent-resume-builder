@@ -20,6 +20,7 @@ import DraftRestoreBanner from '@/components/resume/DraftRestoreBanner.vue'
 import { useResumeEditorDraft } from '@/composables/useResumeEditorDraft'
 import { SECTION_KEYS, DEFAULT_SECTION_ORDER, mapAtsSection, resolveSectionOrder, type SectionKey, type ContentSectionKey } from '@/resume/sectionRegistry'
 import { listInterviewAssets, type InterviewAsset } from '@/api/interviewAsset'
+import { newIdempotencyKey } from '@/utils/idempotency'
 
 const { t } = useLocale()
 function message(key: string, values: Record<string, string | number> = {}) {
@@ -466,7 +467,7 @@ async function applyAtsArrival() {
 
 async function openAiAssistant(scope: 'field' | 'section', label: string, section: string, value: unknown, apply?: (value: string) => void) {
   const contentValue = Array.isArray(value) ? value.filter(Boolean).join('\n') : String(value ?? '').trim()
-  const assistant = { idempotencyKey: crypto.randomUUID(), scope, label, section, content: contentValue, loading: false, result: null, error: '', needsConsent: false, apply }
+  const assistant = { idempotencyKey: newIdempotencyKey(), scope, label, section, content: contentValue, loading: false, result: null, error: '', needsConsent: false, apply }
   aiAssistant.value = assistant
   if (!contentValue || !currentVersionId.value) return
   const epoch = editorContextEpoch

@@ -1,4 +1,5 @@
 import { apiClient, type ApiResponse } from './client'
+import { newIdempotencyKey } from '@/utils/idempotency'
 
 export interface AtsCheckResponse {
   id: number
@@ -34,7 +35,7 @@ export interface AtsFallbackInfo {
   consentRequired: boolean
 }
 
-export function runAtsCheck(resumeVersionId: number, jobDescriptionId: number, useAi = true, idempotencyKey = crypto.randomUUID()) {
+export function runAtsCheck(resumeVersionId: number, jobDescriptionId: number, useAi = true, idempotencyKey = newIdempotencyKey()) {
   return apiClient.post<ApiResponse<AtsCheckResponse>>('/api/ats/check', { resumeVersionId, jobDescriptionId, useAi }, {
     headers: { 'Idempotency-Key': idempotencyKey },
   })
