@@ -15,9 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -172,102 +169,14 @@ public class ApplicationService {
 
     @Transactional(readOnly = true)
     public ApplicationStatsResponse stats(Long userId) {
+        // 本方法只负责两次仓储调用与事务边界；统计口径与算法见 ApplicationStatsCalculator
+        // （纯函数，可单测钉住，也避免本类继续变胖）。
         // #3：计数在 SQL 聚合（group by），只有需要逐行时间戳的三个阶段才读行；
         // 时长聚合在 Java 侧计算，兼容 MySQL 与 H2（不依赖 TIMESTAMPDIFF）。
-        Map<ApplicationStatus, Long> counts = new EnumMap<>(ApplicationStatus.class);
-        for (ApplicationStatus status : ApplicationStatus.values()) {
-            counts.put(status, 0L);
-        }
-        long total = 0L;
-        for (ApplicationRecordRepository.StatusCountProjection row : repository.countGroupByStatus(userId)) {
-            counts.put(row.getStatus(), row.getCount());
-            total += row.getCount();
-        }
-        List<ApplicationRecordRepository.StatsProjection> records = repository.findDurationRowsByUserId(userId);
-
-        // byStatus：各状态数量 + count/total*100（保留 1 位小数）
-        List<ApplicationStatsResponse.StatusCount> byStatus = new ArrayList<>();
-        for (ApplicationStatus status : ApplicationStatus.values()) {
-            long count = counts.get(status);
-            Double percent = total == 0 ? null : Math.round(count * 1000.0 / total) / 10.0;
-            byStatus.add(new ApplicationStatsResponse.StatusCount(status, count, percent));
-        }
-
-        // 转化率：排除 REJECTED/WITHDRAWN 对分母的干扰
-        long appliedOrFurther = countIn(counts, ApplicationStatus.APPLIED, ApplicationStatus.SCREENING,
-                ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.HIRED);
-        long interviewingOrFurther = countIn(counts, ApplicationStatus.SCREENING,
-                ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.HIRED);
-        long offered = countIn(counts, ApplicationStatus.OFFERED, ApplicationStatus.HIRED);
-        Double appliedToInterviewing = ratio(interviewingOrFurther, appliedOrFurther);
-        Double interviewingToOffered = ratio(offered, interviewingOrFurther);
-        Double appliedToOffered = ratio(offered, appliedOrFurther);
-
-        // 平均停留（近似）：分母 0 → null
-        Double appliedDuration = avgAppliedDuration(records, LocalDateTime.now());
-        Double interviewingDuration = avgInterviewingDuration(records, LocalDateTime.now());
-        Double totalToOffer = avgTotalToOffer(records);
-
-        return new ApplicationStatsResponse((int) total, byStatus,
-                new ApplicationStatsResponse.ConversionRates(appliedToInterviewing, interviewingToOffered, appliedToOffered),
-                new ApplicationStatsResponse.StageDurations(appliedDuration, interviewingDuration, totalToOffer));
-    }
-
-    private long countIn(Map<ApplicationStatus, Long> counts, ApplicationStatus... statuses) {
-        long sum = 0L;
-        for (ApplicationStatus status : statuses) {
-            sum += counts.get(status);
-        }
-        return sum;
-    }
-
-    private Double ratio(long numerator, long denominator) {
-        if (denominator == 0) return null;
-        return Math.round(numerator * 1000.0 / denominator) / 1000.0;
-    }
-
-    private Double avgAppliedDuration(List<ApplicationRecordRepository.StatsProjection> records, LocalDateTime now) {
-        List<Double> days = records.stream()
-                .filter(record -> record.getStatus() == ApplicationStatus.APPLIED || record.getStatus() == ApplicationStatus.SCREENING)
-                .map(record -> {
-                    LocalDateTime base = record.getAppliedAt() != null ? record.getAppliedAt() : record.getCreatedAt();
-                    return base == null ? null : ChronoUnit.MINUTES.between(base, now) / 1440.0;
-                })
-                .filter(java.util.Objects::nonNull)
-                .toList();
-        return days.isEmpty() ? null : Math.round(days.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10.0) / 10.0;
-    }
-
-    private Double avgInterviewingDuration(List<ApplicationRecordRepository.StatsProjection> records, LocalDateTime now) {
-        List<Double> days = records.stream()
-                .filter(record -> record.getStatus() == ApplicationStatus.INTERVIEWING)
-                .map(record -> {
-                    // 修复 P1-4（模块核实报告）：进入面试时刻改用 stageEnteredAt
-                    // （状态迁移时写入），不再用 updatedAt（任何字段更新都会刷新它，
-                    // 导致停留时长被静默重置）。stageEnteredAt 为 NULL 的历史行
-                    // （V26 回填未覆盖的极端情况）回退 updatedAt 近似。
-                    LocalDateTime base = record.getStageEnteredAt() != null
-                            ? record.getStageEnteredAt() : record.getUpdatedAt();
-                    return base == null ? null : ChronoUnit.MINUTES.between(base, now) / 1440.0;
-                })
-                .filter(java.util.Objects::nonNull)
-                .toList();
-        return days.isEmpty() ? null : Math.round(days.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10.0) / 10.0;
-    }
-
-    private Double avgTotalToOffer(List<ApplicationRecordRepository.StatsProjection> records) {
-        List<Double> days = records.stream()
-                .filter(record -> record.getStatus() == ApplicationStatus.OFFERED)
-                .map(record -> {
-                    LocalDateTime base = record.getAppliedAt() != null ? record.getAppliedAt() : record.getCreatedAt();
-                    LocalDateTime offeredAt = record.getStageEnteredAt() != null
-                            ? record.getStageEnteredAt() : record.getUpdatedAt();
-                    if (base == null || offeredAt == null) return null;
-                    return ChronoUnit.MINUTES.between(base, offeredAt) / 1440.0;
-                })
-                .filter(java.util.Objects::nonNull)
-                .toList();
-        return days.isEmpty() ? null : Math.round(days.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10.0) / 10.0;
+        return ApplicationStatsCalculator.calculate(
+                repository.countGroupByStatus(userId),
+                repository.findDurationRowsByUserId(userId),
+                LocalDateTime.now());
     }
 
     private String normalizeFollowUp(String followUp) {
