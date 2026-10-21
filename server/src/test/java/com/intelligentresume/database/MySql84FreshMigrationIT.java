@@ -38,10 +38,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MySql84FreshMigrationIT {
 
     /** 迁移总数（V1~V36）。新增迁移时同步改这里。 */
-    private static final int EXPECTED_MIGRATIONS = 36;
+    private static final int EXPECTED_MIGRATIONS = 37;
 
     /** 最新版本号（V36）。新增迁移时同步改这里。 */
-    private static final String EXPECTED_LATEST_VERSION = "36";
+    private static final String EXPECTED_LATEST_VERSION = "37";
 
     @Test
     void freshInstallRunsEveryMigrationOnMySql84() throws Exception {

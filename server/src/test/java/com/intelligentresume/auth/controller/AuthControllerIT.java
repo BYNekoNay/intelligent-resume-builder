@@ -379,7 +379,7 @@ class AuthControllerIT {
 
         JsonNode root = objectMapper.readTree(body);
         // 导出物是数据文档（非统一 ApiResponse 信封），带结构版本与导出时间
-        assertEquals(2, root.path("formatVersion").asInt());
+        assertEquals(3, root.path("formatVersion").asInt());
         assertTrue(root.path("exportedAt").isTextual());
         assertTrue(root.path("code").isMissingNode());
         assertEquals("export_a", root.path("account").path("username").asText());

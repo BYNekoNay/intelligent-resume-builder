@@ -41,9 +41,9 @@ class MySql57MigrationLiveIT {
                     .cleanDisabled(true)
                     .load();
 
-            // V20~V36 共 17 条迁移必须全部在 MySQL 5.7 上成功（V23~V36 的 5.7 兼容由本门禁证明）
-            assertEquals(17, flyway.migrate().migrationsExecuted);
-            assertEquals("36", scalar(statement,
+            // V20~V37 共 18 条迁移必须全部在 MySQL 5.7 上成功（V23~V37 的 5.7 兼容由本门禁证明）
+            assertEquals(18, flyway.migrate().migrationsExecuted);
+            assertEquals("37", scalar(statement,
                     "SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success = 1"));
             assertEquals("1", scalar(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='19' AND type='BASELINE' AND success=1"));

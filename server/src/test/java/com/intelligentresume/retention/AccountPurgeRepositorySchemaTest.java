@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 分档清扫防「误删被引用者」，账户清扫防「漏删该删者」。判据取自迁移的机器可读反查：
  *
  * <ol>
- *   <li>全部迁移中**含 user_id 列**的表（18 张）必须各有直接 {@code DELETE … WHERE user_id = ?}；</li>
+ *   <li>全部迁移中**含 user_id 列**的表（19 张）必须各有直接 {@code DELETE … WHERE user_id = ?}；</li>
  *   <li>5 张无 user_id 的关联表（application_status_history / resume_version /
  *       resume_material_reference / match_result / interview_record）必须以
  *       {@code IN (SELECT …)} 子查询形态覆盖；</li>
@@ -72,7 +72,7 @@ class AccountPurgeRepositorySchemaTest {
         assertTrue(missing.isEmpty(),
                 "以下无 user_id 的关联表缺少 IN 子查询形态的 DELETE：" + missing
                         + "（清单来源：docs/plans/2026-10-01-001 §7 与迁移外键链）");
-        assertEquals(18, coveredDirect.size(), "直接覆盖的 user_id 表数应与迁移反查一致");
+        assertEquals(19, coveredDirect.size(), "直接覆盖的 user_id 表数应与迁移反查一致");
         assertEquals(5, coveredViaSubquery.size(), "经链覆盖的关联表数应为 5");
     }
 

@@ -48,6 +48,8 @@ public class AccountPurgeRepository {
             "DELETE FROM ai_task WHERE user_id = ?",
             "DELETE FROM export_task WHERE user_id = ?",
             "DELETE FROM application_status_history WHERE application_record_id IN (SELECT id FROM application_record WHERE user_id = ?)",
+            // 桌面端导入映射：指向已删记录留着没有意义，必须一起清掉
+            "DELETE FROM desktop_import_map WHERE user_id = ?",
             "DELETE FROM application_record WHERE user_id = ?",
             "DELETE FROM inline_optimization_record WHERE user_id = ?",
             "DELETE FROM communication_draft WHERE user_id = ?",

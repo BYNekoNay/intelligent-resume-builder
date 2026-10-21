@@ -35,6 +35,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,7 +57,16 @@ import java.util.stream.Collectors;
 public class AccountExportService {
 
     /** 导出文档结构版本：字段增删时递增，便于消费者识别格式。 */
-    private static final int FORMAT_VERSION = 2;
+    private static final int FORMAT_VERSION = 3;
+
+    /** 导出来源标识：稳定记录 ID 的命名空间前缀，桌面端据此避免与本地记录撞号。 */
+    private static final String EXPORT_SOURCE = "web";
+
+    /** 参与稳定 ID 的集合（顺序即 manifest 中的顺序）。 */
+    private static final List<String> EXPORT_COLLECTIONS = List.of(
+            "resumes", "careerMaterials", "jobDescriptions", "applications",
+            "interviewSessions", "interviewAnswerAssets",
+            "communicationTemplates", "communicationDrafts", "aiConsents");
 
     private final UserRepository userRepository;
     private final PersonalProfileRepository personalProfileRepository;
@@ -153,7 +164,89 @@ public class AccountExportService {
         payload.put("communicationTemplates", communicationTemplateRepository.findByUserIdOrderByUpdatedAtDesc(userId));
         payload.put("communicationDrafts", communicationDraftRepository.findByUserIdOrderByCreatedAtDesc(userId));
         payload.put("aiConsents", aiConsentRepository.findByUserIdOrderByCreatedAtDesc(userId));
+        payload.put("source", EXPORT_SOURCE);
+        injectStableIds(payload);
+        payload.put("manifest", buildManifest(payload));
         return payload;
+    }
+
+    /**
+     * 给每条记录注入**稳定记录 ID**（R37）。
+     *
+     * <p>形如 {@code web:resume:123}；嵌套记录带父前缀（{@code web:resume:123:versions:456}），
+     * 保证不同来源、不同层级的主键不会互相撞号 —— 桌面端正是靠它判断「这条是不是上次导入的那条」。
+     */
+    private void injectStableIds(Map<String, Object> payload) {
+        for (String collection : EXPORT_COLLECTIONS) {
+            Object value = payload.get(collection);
+            if (!(value instanceof List<?> list)) {
+                continue;
+            }
+            for (Object element : list) {
+                if (!(element instanceof Map<?, ?> raw)) {
+                    continue;
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> record = (Map<String, Object>) raw;
+                Object id = record.get("id");
+                if (id == null) {
+                    continue;
+                }
+                record.put("stableId", EXPORT_SOURCE + ":" + collection + ":" + id);
+                if ("resumes".equals(collection)) {
+                    injectChildStableIds(record, "versions");
+                } else if ("applications".equals(collection)) {
+                    injectChildStableIds(record, "statusHistory");
+                }
+            }
+        }
+    }
+
+    private void injectChildStableIds(Map<String, Object> parent, String childCollection) {
+        Object children = parent.get(childCollection);
+        if (!(children instanceof List<?> list)) {
+            return;
+        }
+        String parentStableId = String.valueOf(parent.get("stableId"));
+        for (Object element : list) {
+            if (!(element instanceof Map<?, ?> raw)) {
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> child = (Map<String, Object>) raw;
+            Object id = child.get("id");
+            if (id != null) {
+                child.put("stableId", parentStableId + ":" + childCollection + ":" + id);
+            }
+        }
+    }
+
+    /**
+     * 包的清单（R37）：格式版本、来源、记录计数，以及每类记录的稳定 ID 列表。
+     * 桌面端导入前先校验它 —— 没有清单的包无法判断「重复导入」与「同 ID 冲突」。
+     */
+    private Map<String, Object> buildManifest(Map<String, Object> payload) {
+        Map<String, Object> collections = new LinkedHashMap<>();
+        int total = 0;
+        for (String collection : EXPORT_COLLECTIONS) {
+            Object value = payload.get(collection);
+            List<?> list = value instanceof List<?> l ? l : List.of();
+            List<String> stableIds = new ArrayList<>();
+            for (Object element : list) {
+                if (element instanceof Map<?, ?> raw && raw.get("stableId") != null) {
+                    stableIds.add(String.valueOf(raw.get("stableId")));
+                }
+            }
+            collections.put(collection, Map.of("count", list.size(), "stableIds", stableIds));
+            total += list.size();
+        }
+        Map<String, Object> manifest = new LinkedHashMap<>();
+        manifest.put("packageId", EXPORT_SOURCE + "-export-"
+                + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")));
+        manifest.put("source", EXPORT_SOURCE);
+        manifest.put("recordCount", total);
+        manifest.put("collections", collections);
+        return manifest;
     }
 
     /** 账户标识信息白名单：不导出 {@code passwordHash} 等凭据字段。 */
