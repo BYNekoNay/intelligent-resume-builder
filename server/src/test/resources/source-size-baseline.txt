@@ -1,0 +1,31 @@
+# 单文件行数棘轮基线。
+#
+# 口径：**总物理行数**（Files.readAllLines().size()，空行与注释都算）。
+# 为什么是这个口径：项目规则原话是「单文件 ≤ 300 行」，判据必须与规则字面一致；
+# 若按「非空行」量，694 行的 JavaResumePdfRenderer 会被记成 629，同一事实两份口径。
+# 判据实现：src/test/java/com/intelligentresume/contract/SourceFileSizeRatchetContractTest.java
+#
+# 格式：<相对 server/ 的路径>=<允许的最大总行数>，一行一条，路径用正斜杠。
+#
+# 四条规则（由门禁强制）：
+#   1. src/main/java 下**未登记**的文件，行数 > 300 → 红（不许欠新债）。
+#   2. 已登记文件**只允许下调**：实际行数 > 登记值 → 红（旧债不许涨）。
+#   3. 条目**失效** → 红：文件已不存在，或已降到 ≤ 300 行时必须删除该行（否则基线留空档，
+#      「拆干净了又长回去」不会被发现）。
+#   4. 基线必须可解析、无重复条目、路径为相对 server/ 的正斜杠路径；基线文件缺失 → 红。
+#
+# 登记 = 承认欠债并锁定上限，不是豁免。登记值取登记时的实测总行数。
+src/main/java/com/intelligentresume/export/pdf/JavaResumePdfRenderer.java=694
+src/main/java/com/intelligentresume/ai/provider/BailianAiProvider.java=597
+src/main/java/com/intelligentresume/desktop/DesktopImportService.java=569
+src/main/java/com/intelligentresume/ai/generation/service/JobGenerationService.java=527
+src/main/java/com/intelligentresume/interview/service/InterviewAiService.java=403
+src/main/java/com/intelligentresume/careermaterial/service/CareerMaterialService.java=394
+src/main/java/com/intelligentresume/auth/service/AuthService.java=380
+src/main/java/com/intelligentresume/ai/confirmation/service/DraftCommitService.java=378
+src/main/java/com/intelligentresume/resume/service/ResumeVersionService.java=364
+src/main/java/com/intelligentresume/auth/service/AccountExportService.java=334
+src/main/java/com/intelligentresume/ai/worker/TaskExecutionService.java=326
+src/main/java/com/intelligentresume/ats/service/AtsService.java=314
+src/main/java/com/intelligentresume/interview/service/InterviewFollowUpAiService.java=307
+src/main/java/com/intelligentresume/interview/service/InterviewAnswerService.java=301
