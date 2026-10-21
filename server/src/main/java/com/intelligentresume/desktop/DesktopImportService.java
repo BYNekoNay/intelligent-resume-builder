@@ -81,6 +81,7 @@ public class DesktopImportService {
     private final JdbcTemplate jdbcTemplate;
     private final DesktopLocalUserService localUserService;
     private final ObjectMapper objectMapper;
+    private final ImportColumnBinder columnBinder;
 
     public DesktopImportService(JdbcTemplate jdbcTemplate,
                                 DesktopLocalUserService localUserService,
@@ -88,6 +89,7 @@ public class DesktopImportService {
         this.jdbcTemplate = jdbcTemplate;
         this.localUserService = localUserService;
         this.objectMapper = objectMapper;
+        this.columnBinder = new ImportColumnBinder(jdbcTemplate);
     }
 
     /** 一条记录的预览结论。 */
@@ -434,7 +436,7 @@ public class DesktopImportService {
         List<Object> args = new ArrayList<>();
         for (Map.Entry<String, Object> entry : values.entrySet()) {
             String column = entry.getKey();
-            if (!localColumns(table).contains(column)) {
+            if (!columnBinder.owns(table, column)) {
                 continue;   // 包里可能有本地表没有的字段（如嵌套结构），跳过
             }
             columns.add(column);
@@ -448,7 +450,7 @@ public class DesktopImportService {
             if (i > 0) {
                 placeholderBuilder.append(',');
             }
-            placeholderBuilder.append('?');
+            placeholderBuilder.append(columnBinder.placeholder(table, columns.get(i), args.get(i)));
         }
         String placeholders = placeholderBuilder.toString();
         String sql = "INSERT INTO " + table + " (" + String.join(",", columns) + ") VALUES (" + placeholders + ")";
@@ -481,10 +483,10 @@ public class DesktopImportService {
         List<Object> args = new ArrayList<>();
         for (Map.Entry<String, Object> entry : values.entrySet()) {
             String column = entry.getKey();
-            if (!localColumns(table).contains(column) || column.equals("id")) {
+            if (!columnBinder.owns(table, column) || column.equals("id")) {
                 continue;
             }
-            sets.add(column + " = ?");
+            sets.add(column + " = " + columnBinder.placeholder(table, column, entry.getValue()));
             args.add(entry.getValue());
         }
         if (sets.isEmpty()) {
@@ -559,22 +561,6 @@ public class DesktopImportService {
         if (local != null) {
             values.put(column, local);
         }
-    }
-
-    /** 本地表列名缓存（用数据库元数据，避免硬编码列清单随 schema 漂移）。 */
-    private final Map<String, Set<String>> columnCache = new LinkedHashMap<>();
-
-    private Set<String> localColumns(String table) {
-        return columnCache.computeIfAbsent(table, key -> {
-            List<String> names = jdbcTemplate.queryForList(
-                    "SELECT column_name FROM information_schema.columns WHERE lower(table_name) = ?",
-                    String.class, key.toLowerCase());
-            // H2 的 information_schema 返回的列名是**大写**（TITLE / USER_ID），
-            // 而包里的字段转成下划线后是小写 —— 不统一成小写就一列都匹配不上。
-            Set<String> columns = new LinkedHashSet<>();
-            names.forEach(name -> columns.add(name.toLowerCase()));
-            return columns;
-        });
     }
 
     private Map<String, Object> asMap(Object value) {

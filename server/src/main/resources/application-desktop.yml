@@ -22,6 +22,11 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.H2Dialect
+        type:
+          # H2 会把 setString 写进 JSON 列的内容存成「JSON 字符串标量」（双编码），
+          # 默认 mapper 读回时抛 JsonJavaType。宽容 mapper 只对双编码文本多解一层，
+          # 详见 LenientJsonFormatMapper 的类注释；生产（MySQL）profile 不使用它。
+          json_format_mapper: com.intelligentresume.config.LenientJsonFormatMapper
   flyway:
     enabled: true
     locations: classpath:db/migration

@@ -77,13 +77,12 @@ class LeaseNativeSqlH2IT {
         seedUser();
         seedAiTask("PENDING");
 
-        // ⚠ 这里**刻意用 JDBC 直执行**而不是 `aiTaskRepository.claimableTasksByTypes(...)`：
-        // `ai_task.input_snapshot_json` 是 JSON 列，H2 把它当字符串存储，Hibernate 回读时抛
-        // 「Could not deserialize string to java type: JsonJavaType」——
-        // 这是 **H2 与 MySQL 的 JSON 存储差异**（ADR-012 D2 已列为待处理风险），与本次要验证的
-        // 「租约 SQL 能否在 H2 上执行」是两件事。
-        // 因此本用例只验证 SQL 语法本身（LIMIT ... FOR UPDATE + NOW()）在 H2 上可执行；
-        // JSON 映射差异另案处理，不要在这里用实体读取掩盖它。
+        // 这里用 JDBC 直执行而不是 `aiTaskRepository.claimableTasksByTypes(...)`，是为了让本用例
+        // 只验证「租约 SQL 在 H2 上可执行」这一件事，不与 JSON 列读写混在一起。
+        // `ai_task.input_snapshot_json` 曾经在 H2 上因双编码（字符串标量）导致 Hibernate 回读抛
+        // 「Could not deserialize string to java type: JsonJavaType」—— 该缺陷已修复
+        // （读侧宽容 mapper + 写侧 `? FORMAT JSON` 规范化），由
+        // `com.intelligentresume.desktop.JsonColumnH2ReadbackIT` 守住；本用例不必再兼职守它。
         var rows = jdbcTemplate.queryForList("SELECT id FROM ai_task WHERE status = 'PENDING'"
                 + " OR (status = 'RUNNING' AND lease_expires_at < NOW()) ORDER BY id ASC LIMIT 10 FOR UPDATE");
         assertFalse(rows.isEmpty(), "ai_task 的领取 SQL（含 FOR UPDATE + NOW()）应在 H2 上可执行");

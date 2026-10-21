@@ -32,6 +32,15 @@
 - 已识别需处理的三处方言差：4 处 `nativeQuery` 租约 SQL（`LIMIT ... FOR UPDATE` + `NOW()`）从未在 H2 真跑过
   → 本批补专项 IT，跑不通则改写为 JPQL；`CareerMaterial` 的 JSON/MEDIUMTEXT 依赖隐式转换 →
   桌面库与 MySQL 的字节序列可能不同，导入比对与摘要场景需注意；H2 无库级字符集概念，中文种子依赖 JVM 默认编码。
+- **已修复（JSON 列，读侧宽容 + 写侧规范化）**：H2 的 JSON 列对**参数绑定方式**敏感——`setString` /
+  普通 `?` 绑定的字符串会被存成 JSON **字符串标量**（双编码，`byte[35]="{\"a\":1}"`），而 Hibernate 自己
+  写的是 JSON **对象**（`byte[29]={"a":1}`）；`CAST(? AS JSON)` 实测同为字符串标量，只有 `? FORMAT JSON`
+  才得到对象。双编码行被 Hibernate 回读时抛 `Could not deserialize string to java type: JsonJavaType(Map)`，
+  表现为桌面端 AI 任务链路与简历版本不可读。修法：读侧 `LenientJsonFormatMapper`（仅 `desktop` profile
+  启用，只对双编码文本多解一层，非 JSON 文本仍报错）兼容存量行；写侧 `DesktopImportService` 经
+  `ImportColumnBinder` 对 JSON 列用 `? FORMAT JSON` 绑定，新行即规范对象。两半由
+  `JsonColumnH2ReadbackIT` 守住（含「真实 apply 后 JPA 可读回」与物理形态断言）。MySQL 侧行为零变化，
+  生产 profile 不启用该 mapper。
 
 ### D3 认证：本地模式注入恒定本地用户，不做「免登录放行」
 
