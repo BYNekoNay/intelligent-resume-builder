@@ -6,14 +6,18 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -91,7 +95,118 @@ class ImportCollectionContractTest {
         assertEquals(4, mapped.size(), "本版应映射 4 张本地表，实际：" + mapped);
     }
 
-    // ------------------------------------------------------------------ 解析
+    // ------------------------------------------------------------------ 嵌套集合（批次 1.4）
+
+    @Test
+    @DisplayName("嵌套子集合必须与声明完全一致（少一条 = 该集合既不预览也不写入）")
+    void childCollectionsMatchDeclaredNested() throws IOException {
+        Map<String, Set<String>> actual = childCollectionsByParent();
+        Map<String, Set<String>> expected = new TreeMap<>();
+        expected.put("applications", Set.of("statusHistory/application_status_history/application_record_id"));
+        expected.put("resumes", Set.of("versions/resume_version/resume_id"));
+        assertEquals(expected, actual,
+                "嵌套集合声明与预期不一致。少一条 = 子记录既不参与预览也不被写入（批次 1.4 修的缺陷形态）；"
+                        + "子表名/外键列写错 = 写入落到不存在的列。实际：" + actual);
+    }
+
+    @Test
+    @DisplayName("嵌套子表必须在迁移里存在，且子表里有声明的外键列")
+    void childTablesAndForeignKeysExistInMigrations() throws IOException {
+        Map<String, String> blocks = createTableBlocks();
+        Map<String, Set<String>> children = childCollectionsByParent();
+        Set<String> childTables = new TreeSet<>();
+        children.values().forEach(rows -> rows.forEach(row -> childTables.add(row.split("/")[1])));
+        assertEquals(2, childTables.size(), "本版应有 2 张子表，实际：" + childTables);
+
+        for (Map.Entry<String, Set<String>> parent : children.entrySet()) {
+            for (String row : parent.getValue()) {
+                String[] parts = row.split("/");
+                String table = parts[1];
+                String foreignKey = parts[2];
+                String block = blocks.get(table);
+                assertTrue(block != null, "迁移里找不到子表的建表语句：" + table);
+                assertTrue(block.contains(foreignKey),
+                        "子表 " + table + " 的建表语句里没有外键列 " + foreignKey + "（导入会写不存在的列）");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("导入计划必须遍历注册表的 children()，且不得另写一份嵌套字段清单")
+    void importPlannerWalksRegistryChildren() throws IOException {
+        String planner = SourceText.read(repoFile(
+                "server/src/main/java/com/intelligentresume/desktop/DesktopImportPlanner.java"));
+        assertTrue(planner.contains(".children()"),
+                "导入计划没有遍历 registry.children() —— 嵌套集合会被漏掉（回到批次 1.4 之前的缺陷）");
+
+        // 嵌套字段清单只能从注册表派生。另写一份 Set.of("versions","statusHistory") 就是
+        // careerMaterials 同型缺陷（同一事实两份副本，改一处忘一处）。
+        for (Path file : desktopSources()) {
+            String source = SourceText.read(file);
+            assertFalse(source.contains("NESTED_FIELDS = Set.of"),
+                    "不允许在 " + file.getFileName() + " 里手写嵌套字段清单，必须由 ImportCollectionRegistry 派生");
+        }
+    }
+
+    // ------------------------------------------------------------------ 嵌套集合解析
+
+    private static final Pattern COLLECTION_START = Pattern.compile("new\\s+ImportCollection\\(\\s*\"([A-Za-z0-9]+)\"");
+
+    private static final Pattern CHILD_ENTRY = Pattern.compile(
+            "new\\s+ChildCollection\\(\\s*\"([A-Za-z0-9]+)\"\\s*,\\s*\"([a-z_][a-z0-9_]*)\"\\s*,\\s*\"([a-z_][a-z0-9_]*)\"");
+
+    /** 父集合 → {子集合/子表/外键列}。按 {@code new ImportCollection(...)} 切段后逐段解析。 */
+    private Map<String, Set<String>> childCollectionsByParent() throws IOException {
+        String source = SourceText.read(repoFile(
+                "server/src/main/java/com/intelligentresume/desktop/ImportCollectionRegistry.java"));
+        Matcher starts = COLLECTION_START.matcher(source);
+        List<int[]> positions = new ArrayList<>();
+        List<String> parents = new ArrayList<>();
+        while (starts.find()) {
+            positions.add(new int[]{starts.start(), starts.end()});
+            parents.add(starts.group(1));
+        }
+        assertTrue(!parents.isEmpty(), "没能从 ImportCollectionRegistry 解析出顶层集合，门禁自身失效");
+
+        Map<String, Set<String>> result = new TreeMap<>();
+        for (int i = 0; i < positions.size(); i++) {
+            int end = i + 1 < positions.size() ? positions.get(i + 1)[0] : source.length();
+            String segment = source.substring(positions.get(i)[0], end);
+            Set<String> children = new TreeSet<>();
+            Matcher child = CHILD_ENTRY.matcher(segment);
+            while (child.find()) {
+                children.add(child.group(1) + "/" + child.group(2) + "/" + child.group(3));
+            }
+            if (!children.isEmpty()) {
+                result.put(parents.get(i), children);
+            }
+        }
+        return result;
+    }
+
+    /** 表名 → 该表的 CREATE TABLE 语句块（到分号为止）。 */
+    private Map<String, String> createTableBlocks() throws IOException {
+        String text = migrationsText();
+        Map<String, String> blocks = new TreeMap<>();
+        Matcher matcher = CREATE_TABLE.matcher(text);
+        while (matcher.find()) {
+            int start = matcher.start();
+            int end = text.indexOf(';', start);
+            blocks.put(matcher.group(1).toLowerCase(java.util.Locale.ROOT),
+                    text.substring(start, end < 0 ? text.length() : end));
+        }
+        return blocks;
+    }
+
+    private List<Path> desktopSources() throws IOException {
+        List<Path> files = new ArrayList<>();
+        try (Stream<Path> stream = Files.list(
+                repoFile("server/src/main/java/com/intelligentresume/desktop"))) {
+            stream.filter(path -> path.toString().endsWith(".java")).forEach(files::add);
+        }
+        return files;
+    }
+
 
     /** 集合名 → 本地表名。 */
     private java.util.Map<String, String> registryEntries() throws IOException {
