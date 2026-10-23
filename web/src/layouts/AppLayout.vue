@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { AlertTriangle, FilePenLine, LogIn, LogOut, Menu, Sparkles, UserRound, UserRoundPlus, X } from 'lucide-vue-next'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
 import NavDropdown from '@/components/NavDropdown.vue'
 import { useLocale } from '@/i18n'
+import { useDesktopMode } from '@/composables/useDesktopMode'
 import { navigationGroupKeys, navigationGroups, type NavigationGroupKey } from '@/navigation/registry'
 
 const auth = useAuthStore()
@@ -13,6 +14,15 @@ const router = useRouter()
 const route = useRoute()
 const { t } = useLocale()
 const mobileMenuOpen = ref(false)
+
+// 「桌面工作区」入口只在桌面版存在：后端端点在在线部署下返回 404/401，
+// 因此挂载后异步探测一次，结果出来前不渲染该入口（不阻塞首屏）。
+const { available: desktopAvailable, probe: probeDesktop } = useDesktopMode()
+onMounted(() => { void probeDesktop() })
+
+function visibleItems(groupKey: NavigationGroupKey) {
+  return navigationGroups[groupKey].items.filter(item => !item.requiresDesktop || desktopAvailable.value)
+}
 
 const activeGroup = computed<NavigationGroupKey | null>(() => {
   for (const groupKey of navigationGroupKeys) {
@@ -60,7 +70,7 @@ async function retrySession() {
           :active="activeGroup === groupKey"
         >
           <RouterLink
-            v-for="item in navigationGroups[groupKey].items"
+            v-for="item in visibleItems(groupKey)"
             :key="item.key"
             :to="item.to"
           >
@@ -117,7 +127,7 @@ async function retrySession() {
       <nav :aria-label="t('navigation.label')">
           <section v-for="groupKey in navigationGroupKeys" :key="groupKey">
           <p>{{ t(navigationGroups[groupKey].labelKey) }}</p>
-          <RouterLink v-for="item in navigationGroups[groupKey].items" :key="item.key" :to="item.to">
+          <RouterLink v-for="item in visibleItems(groupKey)" :key="item.key" :to="item.to">
             <component :is="item.icon" :size="16" />
             <span class="nav-item-copy">
               <span>{{ t(item.labelKey) }}</span>

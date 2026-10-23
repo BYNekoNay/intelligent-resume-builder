@@ -9,6 +9,7 @@ import RouteLoadErrorView from '@/views/RouteLoadErrorView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { lazyChunkRetryKey } from './lazyChunkRecovery'
 import { navigationTargets, validateNavigationTargets } from '@/navigation/registry'
+import { useDesktopMode } from '@/composables/useDesktopMode'
 
 const ResumeListView = () => import('@/views/ResumeListView.vue')
 const ResumeDetailView = () => import('@/views/ResumeDetailView.vue')
@@ -32,6 +33,7 @@ const CommunicationView = () => import('@/views/CommunicationView.vue')
 const InterviewAssetsView = () => import('@/views/InterviewAssetsView.vue')
 const AchievementGuidanceView = () => import('@/views/AchievementGuidanceView.vue')
 const AccountView = () => import('@/views/AccountView.vue')
+const DesktopWorkspaceView = () => import('@/views/DesktopWorkspaceView.vue')
 
 const dynamicImportFailure = /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk .* failed|ChunkLoadError/i
 
@@ -85,6 +87,7 @@ const router = createRouter({
         { path: 'achievement-guidance', name: 'achievement-guidance', component: AchievementGuidanceView, meta: { requiresAuth: true } },
         { path: 'match/:matchResultId', name: 'match-result', component: MatchResultView, props: true, meta: { requiresAuth: true } },
         { path: 'exports/:exportTaskId', name: 'export', component: ExportView, props: true, meta: { requiresAuth: true } },
+        { path: 'desktop', name: 'desktop-workspace', component: DesktopWorkspaceView, meta: { requiresAuth: true, requiresDesktop: true } },
       ],
     },
     { path: '/login', name: 'login', component: LoginView },
@@ -109,6 +112,13 @@ router.beforeEach(async (to) => {
   }
   if ((to.name === 'login' || to.name === 'register') && auth.accessToken) {
     return { name: 'home' }
+  }
+  if (to.meta.requiresDesktop) {
+    // 桌面端点在在线部署下不存在，探测失败就把用户送回工作台，而不是让页面报一堆 404。
+    // 这里 await 是刻意的：只有访问桌面页面时才阻塞，其他页面在布局挂载后异步探测。
+    const { probe } = useDesktopMode()
+    const desktopAvailable = await probe()
+    if (!desktopAvailable) return { name: 'home' }
   }
 })
 

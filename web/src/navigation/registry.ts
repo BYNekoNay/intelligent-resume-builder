@@ -4,6 +4,7 @@ import {
   BriefcaseBusiness,
   FilePenLine,
   FileText,
+  HardDrive,
   LayoutDashboard,
   LibraryBig,
   NotebookPen,
@@ -22,6 +23,13 @@ export interface NavigationItem {
   icon: Component
   labelKey: string
   descriptionKey?: string
+  /**
+   * 仅在桌面版（本地工作区）可用。
+   *
+   * <p>对应的后端端点只在 `desktop` profile 下存在，在线部署会是 404/401，
+   * 所以入口必须按运行时探测结果隐藏 —— 见 `composables/useDesktopMode`。
+   */
+  requiresDesktop?: boolean
 }
 
 export interface NavigationGroup {
@@ -36,6 +44,7 @@ export const navigationGroups: Record<NavigationGroupKey, NavigationGroup> = {
       { to: '/', key: 'home', icon: LayoutDashboard, labelKey: 'navGroups.career.home' },
       { to: '/career-materials', key: 'materials', icon: Sparkles, labelKey: 'navGroups.career.materials' },
       { to: '/resume-import', key: 'imports', icon: FileText, labelKey: 'navGroups.career.imports' },
+      { to: '/desktop', key: 'desktop', icon: HardDrive, labelKey: 'navGroups.career.desktop', descriptionKey: 'navGroups.career.desktopDesc', requiresDesktop: true },
     ],
   },
   resume: {
