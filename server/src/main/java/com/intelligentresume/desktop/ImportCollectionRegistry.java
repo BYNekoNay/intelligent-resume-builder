@@ -19,6 +19,11 @@ import java.util.Optional;
  * {@code AccountExportService} 的导出集合**精确相等** —— 少一类或漏一类都红。
  *
  * <p><b>声明顺序即依赖顺序</b>：先岗位与资料（无外键依赖），再简历（含版本），最后投递（引用岗位与版本）。
+ *
+ * <p><b>{@code children()} 是嵌套关系的唯一来源</b>：导入计划（{@code DesktopImportPlanner} 的遍历）、
+ * 写入（子表与外键列）、内容比较器（哪些字段是嵌套集合、必须跳过比较）三处都从这里派生。
+ * <b>禁止</b>在别处另写一份 {@code Set.of("versions", "statusHistory")} —— 同一事实两份副本，
+ * 改一处忘一处就会重演 {@code careerMaterials} 那种「schema 里有、只实现一部分、且完全静默」的缺陷。
  */
 final class ImportCollectionRegistry {
 

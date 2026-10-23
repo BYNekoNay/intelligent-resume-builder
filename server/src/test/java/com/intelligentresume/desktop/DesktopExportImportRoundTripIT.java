@@ -153,6 +153,47 @@ class DesktopExportImportRoundTripIT {
         Long jobLocalId = localIdOfStableId("web:jobDescriptions:" + seed.jobId());
         assertNotNull(jobLocalId, "岗位没有落地");
         assertNotDoubleEncoded("job_description", "parsed_keywords_json", jobLocalId);
+
+        // 期望 D（批次 1.4）：嵌套记录也必须参与预览并逐条落库
+        assertTrue(previewedCollections.contains("resumes.versions"),
+                "简历版本必须作为独立条目参与预览，实际：" + previewedCollections);
+        assertTrue(previewedCollections.contains("applications.statusHistory"),
+                "投递状态历史必须作为独立条目参与预览，实际：" + previewedCollections);
+
+        Long applicationLocalId = localIdOfStableId("web:applications:" + seed.applicationId());
+        assertNotNull(applicationLocalId, "投递没有落地");
+        assertEquals(1, countOf("SELECT COUNT(*) FROM application_status_history"
+                        + " WHERE application_record_id = ? AND to_status = 'APPLIED' AND note = ?",
+                applicationLocalId, "round trip"),
+                "状态历史必须挂到本地投递 id 上（挂到 Web id 上要么 FK 失败要么挂错父）");
+
+        // 期望 E：当前版本指针跟随包内值（不是「最后插入的那条」）
+        Long resumeLocalId = localIdOfStableId("web:resumes:" + seed.resumeId());
+        assertEquals(versionLocalId, longOf("SELECT current_version_id FROM resume WHERE id = ?", resumeLocalId),
+                "current_version_id 必须指向包里的当前版本");
+
+        // 期望 F：版本的 created_by 指向本地用户（包内是 Web 用户 id，跨用户导入会 FK 失败）
+        assertEquals(longOf("SELECT MIN(id) FROM user"),
+                longOf("SELECT created_by FROM resume_version WHERE id = ?", versionLocalId),
+                "created_by 必须是本地用户");
+    }
+
+    @Test
+    @DisplayName("同一个真实导出包再预览一次：不应新增、更不应满屏冲突")
+    void reimportingTheSameRealPackageReportsNoConflicts() throws Exception {
+        long userId = localUserId();
+        seedWorkspace(userId);
+        Map<String, Object> packageOnDisk = exportThenReadBack(userId);
+
+        importService.apply(packageOnDisk, Map.<String, Object>of());
+
+        DesktopImportService.ImportPreview second = importService.preview(packageOnDisk);
+        // 这条钉住「值归一化」：resume_json 本地读回是 byte[]、包里是 Map；
+        // changed_at / applied_at 本地是 Timestamp、包里是 ISO 字符串；数字本地 Long、包里 Integer。
+        // 不归一的话这里会整片 CONFLICT —— 真实用户第二次迁移就会看到满屏「内容不同」。
+        assertEquals(0, second.added(), "第二次预览不应有新增");
+        assertEquals(0, second.conflicts(), "第二次预览不应有冲突（内容其实没变，只是类型不同）");
+        assertEquals(second.items().size(), second.skipped(), "第二次预览应全部跳过");
     }
 
     // ------------------------------------------------------------------ 真实链路
@@ -223,10 +264,10 @@ class DesktopExportImportRoundTripIT {
         history.setChangedAt(LocalDateTime.now());
         statusHistoryRepository.saveAndFlush(history);
 
-        return new Seeded(jobId, resumeId, versionId, materialId);
+        return new Seeded(jobId, resumeId, versionId, materialId, applicationId);
     }
 
-    private record Seeded(Long jobId, Long resumeId, Long versionId, Long materialId) {
+    private record Seeded(Long jobId, Long resumeId, Long versionId, Long materialId, Long applicationId) {
     }
 
     // ------------------------------------------------------------------ 辅助
@@ -255,6 +296,16 @@ class DesktopExportImportRoundTripIT {
     private long localUserId() {
         Long id = jdbcTemplate.queryForObject("SELECT MIN(id) FROM user", Long.class);
         return id == null ? -1L : id;
+    }
+
+    private Long longOf(String sql, Object... args) {
+        List<Long> values = jdbcTemplate.queryForList(sql, Long.class, args);
+        return values.isEmpty() ? null : values.get(0);
+    }
+
+    private int countOf(String sql, Object... args) {
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class, args);
+        return value == null ? 0 : value;
     }
 
     private Long localIdOfStableId(String stableId) {

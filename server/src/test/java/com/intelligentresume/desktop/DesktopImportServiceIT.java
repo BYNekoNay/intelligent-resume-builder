@@ -11,6 +11,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -18,6 +19,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -63,21 +65,13 @@ class DesktopImportServiceIT {
      * ADD/SKIP/CONFLICT 判据**只看**「本地有没有这条 stableId 的映射」
      * （见 {@code DesktopImportService#localIdOf}），所以清掉映射就等于把判据拉回初始态，
      * 且不必触碰有环外键（resume ↔ resume_version）的数据行。
+     *
+     * <p>清整表而不是按 stableId 白名单删：白名单是手工维护的第二份清单 ——
+     * 每加一个用例就要记得扩它，忘了就会留下跨用例污染（批次 1.4 改用整表清空）。
      */
     @BeforeEach
     void forgetMappingsWrittenByPreviousTests() {
-        List<String> stableIds = new java.util.ArrayList<>(
-                List.of("web:jobDescriptions:77", "web:jobDescriptions:78"));
-        for (int base : PACKAGE_BASES) {
-            stableIds.add("web:jobDescriptions:" + base);
-            stableIds.add("web:resumes:" + (base + 100));
-            stableIds.add("web:resumes:" + (base + 100) + ":versions:" + (base + 101));
-            stableIds.add("web:applications:" + (base + 200));
-            stableIds.add("web:applications:" + (base + 200) + ":statusHistory:3");
-        }
-        for (String stableId : stableIds) {
-            jdbcTemplate.update("DELETE FROM desktop_import_map WHERE source_stable_id = ?", stableId);
-        }
+        jdbcTemplate.update("DELETE FROM desktop_import_map");
     }
 
     @Test
@@ -188,7 +182,8 @@ class DesktopImportServiceIT {
 
         DesktopImportService.ImportResult second = importService.apply(pkg, Map.<String, Object>of());
         assertEquals(0, second.inserted(), "重复导入不应再写入");
-        assertEquals(3, second.skipped(), "重复导入应全部跳过");
+        // 5 = 岗位 + 简历 + 版本 + 投递 + 状态历史：批次 1.4 起嵌套记录逐条计入（口径：计数 == items.size()）
+        assertEquals(5, second.skipped(), "重复导入应全部跳过，且嵌套记录也计入");
 
         Integer jdCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM desktop_import_map WHERE source_stable_id = ?",
@@ -262,10 +257,243 @@ class DesktopImportServiceIT {
                 "KEEP_LOCAL 不得改变「稳定 ID → 本地 ID」的映射");
     }
 
-    // ------------------------------------------------------------------ 包构造
+    // ------------------------------------------------------------------ 嵌套集合（批次 1.4）
 
-    /** 各用例专属的主键段（{@code fullPackage} 的 base），也是 {@link #forgetMappingsWrittenByPreviousTests} 的清理范围。 */
-    private static final int[] PACKAGE_BASES = {501, 502, 503, 504};
+    @Test
+    void nestedCollectionsAppearInPreviewInParentBeforeChildOrder() {
+        DesktopImportService.ImportPreview preview = importService.preview(fullPackage(505));
+
+        List<String> collections = preview.items().stream()
+                .map(DesktopImportService.PreviewItem::collection).toList();
+        assertTrue(collections.contains("resumes.versions"),
+                "简历版本必须参与预览（旧实现完全不下钻），实际：" + collections);
+        assertTrue(collections.contains("applications.statusHistory"),
+                "投递状态历史必须参与预览，实际：" + collections);
+        assertEquals(5, preview.items().size(), "岗位 + 简历 + 版本 + 投递 + 状态历史 = 5 条");
+        assertEquals(5, preview.added(), "计数必须计入嵌套记录");
+        assertEquals(preview.items().size(), preview.added() + preview.skipped() + preview.conflicts(),
+                "三个计数之和必须等于 items.size()");
+
+        assertTrue(collections.indexOf("resumes") < collections.indexOf("resumes.versions"),
+                "父记录必须排在子记录之前（items 顺序即写入顺序）");
+        assertEquals("resume_version",
+                preview.items().get(collections.indexOf("resumes.versions")).entityType());
+        assertEquals("application_status_history",
+                preview.items().get(collections.indexOf("applications.statusHistory")).entityType());
+    }
+
+    @Test
+    void childRecordIsWrittenEvenWhenParentIsSkipped() {
+        importService.apply(fullPackage(506), Map.<String, Object>of());
+        Long parentLocal = localIdOfStableId("web:resumes:606");
+        assertNotNull(parentLocal, "首次导入后必须有简历映射");
+
+        // 父记录内容一字不改，只在包内多带一条版本
+        Map<String, Object> second = fullPackage(506);
+        Map<String, Object> extra = new LinkedHashMap<>(versionsOf(second).get(0));
+        extra.put("id", 1606);
+        extra.put("stableId", "web:resumes:606:versions:1606");
+        extra.put("versionNo", 2);
+        firstResume(second).put("versions", List.of(versionsOf(second).get(0), extra));
+
+        DesktopImportService.ImportPreview preview = importService.preview(second);
+        assertEquals(DesktopImportService.Decision.SKIP, findItem(preview, "web:resumes:606").decision(),
+                "父记录内容未变应跳过");
+        assertEquals(DesktopImportService.Decision.ADD, findItem(preview, "web:resumes:606:versions:1606").decision(),
+                "父记录跳过不得导致新版本不参与分类");
+
+        DesktopImportService.ImportResult result = importService.apply(second, Map.<String, Object>of());
+        assertEquals(1, result.inserted(), "只有新增的那条版本被写入");
+
+        Long newVersion = localIdOfStableId("web:resumes:606:versions:1606");
+        assertNotNull(newVersion, "父记录跳过时子记录仍必须写入 —— 旧实现只在父 ADD 分支写子，等于丢数据");
+        assertEquals(parentLocal, longOf("SELECT resume_id FROM resume_version WHERE id = ?", newVersion),
+                "子记录外键必须指向本地父记录，而不是包里的 Web 主键");
+    }
+
+    @Test
+    void versionNumberCollisionIsSkippedNotFatal() {
+        importService.apply(fullPackage(507), Map.<String, Object>of());
+        Long parentLocal = localIdOfStableId("web:resumes:607");
+
+        // 父内容不变；新版本换了 stableId，但 versionNo=1 与本地已有版本撞 uk_resume_version_no
+        Map<String, Object> second = fullPackage(507);
+        Map<String, Object> collision = new LinkedHashMap<>(versionsOf(second).get(0));
+        collision.put("id", 1707);
+        collision.put("stableId", "web:resumes:607:versions:1707");
+        collision.put("versionNo", 1);
+        firstResume(second).put("versions", List.of(collision));
+
+        DesktopImportService.PreviewItem item = findItem(importService.preview(second),
+                "web:resumes:607:versions:1707");
+        assertEquals(DesktopImportService.Decision.SKIP, item.decision(),
+                "同编号版本必须降级为跳过，否则 INSERT 撞唯一键会让整批回滚");
+        assertTrue(item.reason().contains("同编号"), "reason 要点明原因，实际：" + item.reason());
+
+        DesktopImportService.ImportResult result = importService.apply(second, Map.<String, Object>of());
+        assertEquals(0, result.inserted());
+        assertEquals(1, countOf("SELECT COUNT(*) FROM resume_version WHERE resume_id = ?", parentLocal),
+                "撞号不得改动本地版本行");
+        assertNull(localIdOfStableId("web:resumes:607:versions:1707"), "跳过的版本不得写映射");
+    }
+
+    @Test
+    void currentVersionIdFollowsThePackageNotTheLastInsertedVersion() {
+        Map<String, Object> pkg = fullPackage(508);
+        Map<String, Object> v1 = versionsOf(pkg).get(0);
+        Map<String, Object> v2 = new LinkedHashMap<>(v1);
+        v2.put("id", 1618);
+        v2.put("stableId", "web:resumes:608:versions:1618");
+        v2.put("versionNo", 2);
+        firstResume(pkg).put("versions", List.of(v1, v2));
+        assertEquals(609, firstResume(pkg).get("currentVersionId"), "包里的当前版本仍是 v1");
+
+        importService.apply(pkg, Map.<String, Object>of());
+
+        Long resumeLocal = localIdOfStableId("web:resumes:608");
+        Long v1Local = localIdOfStableId("web:resumes:608:versions:609");
+        Long v2Local = localIdOfStableId("web:resumes:608:versions:1618");
+        assertEquals(2, countOf("SELECT COUNT(*) FROM resume_version WHERE resume_id = ?", resumeLocal));
+        assertEquals(v1Local, longOf("SELECT current_version_id FROM resume WHERE id = ?", resumeLocal),
+                "当前版本指针必须等于包里的 currentVersionId，而不是「最后插入的那条」");
+        assertNotEquals(v2Local, longOf("SELECT current_version_id FROM resume WHERE id = ?", resumeLocal));
+    }
+
+    @Test
+    void createdByIsRemappedToTheLocalUser() {
+        Map<String, Object> pkg = fullPackage(509);
+        versionsOf(pkg).get(0).put("createdBy", 987654);   // 桌面工作区里不存在的 Web 用户
+
+        importService.apply(pkg, Map.<String, Object>of());
+
+        Long versionLocal = localIdOfStableId("web:resumes:609:versions:610");
+        assertNotNull(versionLocal, "createdBy 未重映射会让 FK 失败，整批回滚");
+        assertEquals(longOf("SELECT MIN(id) FROM user"),
+                longOf("SELECT created_by FROM resume_version WHERE id = ?", versionLocal),
+                "版本的 created_by 必须是本地用户，否则真实跨用户导入必然违反 fk_resume_version_user");
+    }
+
+    @Test
+    void restoredFromVersionIdIsRemappedWithinPackage() {
+        Map<String, Object> pkg = fullPackage(510);
+        Map<String, Object> v2 = new LinkedHashMap<>(versionsOf(pkg).get(0));
+        v2.put("id", 712);
+        v2.put("stableId", "web:resumes:610:versions:712");
+        v2.put("versionNo", 2);
+        v2.put("restoredFromVersionId", 611);   // v1 的 Web 主键
+        firstResume(pkg).put("versions", List.of(versionsOf(pkg).get(0), v2));
+
+        importService.apply(pkg, Map.<String, Object>of());
+
+        Long v1Local = localIdOfStableId("web:resumes:610:versions:611");
+        Long v2Local = localIdOfStableId("web:resumes:610:versions:712");
+        assertNotNull(v2Local);
+        assertEquals(v1Local, longOf("SELECT restored_from_version_id FROM resume_version WHERE id = ?", v2Local),
+                "包内可解析的还原来源必须映射成本地版本 id");
+    }
+
+    @Test
+    void restoredFromVersionIdMissingFromPackageBecomesNull() {
+        Map<String, Object> pkg = fullPackage(511);
+        versionsOf(pkg).get(0).put("restoredFromVersionId", 999999);   // 包内不存在
+
+        importService.apply(pkg, Map.<String, Object>of());
+
+        Long versionLocal = localIdOfStableId("web:resumes:611:versions:612");
+        assertNotNull(versionLocal);
+        assertNull(longOf("SELECT restored_from_version_id FROM resume_version WHERE id = ?", versionLocal),
+                "解析不到的还原来源必须置空：保留 Web id 会 FK 失败，命中本地无关行则产生错误血缘");
+    }
+
+    @Test
+    void resumeJobDescriptionIdIsRemapped() {
+        Map<String, Object> pkg = fullPackage(512);
+        firstResume(pkg).put("jobDescriptionId", 512);   // 包内岗位的 Web 主键
+
+        importService.apply(pkg, Map.<String, Object>of());
+
+        Long resumeLocal = localIdOfStableId("web:resumes:612");
+        Long jdLocal = localIdOfStableId("web:jobDescriptions:512");
+        assertNotNull(resumeLocal);
+        assertNotNull(jdLocal);
+        assertEquals(jdLocal, longOf("SELECT job_description_id FROM resume WHERE id = ?", resumeLocal),
+                "岗位定制简历的 job_description_id 必须映射成本地岗位（V12 外键）");
+    }
+
+    @Test
+    void danglingMappingIsRecreatedInsteadOfSkipped() {
+        // 用状态历史做样本：它只被 application_record 引用、自身不引用别人，
+        // 删行不会撞外键，能真实复现「行没了但映射还在」（留存清扫会这样）。
+        Map<String, Object> pkg = fullPackage(513);
+        importService.apply(pkg, Map.<String, Object>of());
+        String stableId = "web:applications:713:statusHistory:3";
+        Long historyLocal = localIdOfStableId(stableId);
+        assertNotNull(historyLocal);
+        jdbcTemplate.update("DELETE FROM application_status_history WHERE id = ?", historyLocal);
+
+        assertEquals(DesktopImportService.Decision.ADD,
+                findItem(importService.preview(pkg), stableId).decision(),
+                "映射还在但本地行已不存在时必须按新增处理，否则这条记录永久无法再导入");
+
+        importService.apply(pkg, Map.<String, Object>of());
+        Long recreated = localIdOfStableId(stableId);
+        assertNotNull(recreated);
+        assertNotEquals(historyLocal, recreated, "映射必须被修正到新插入的行");
+        assertEquals(1, countOf("SELECT COUNT(*) FROM application_status_history WHERE id = ?", recreated));
+    }
+
+    @Test
+    void duplicateStableIdInPackageIsRejected() {
+        Map<String, Object> jd = jobDescription(77, "Java Backend dup");
+        Map<String, Object> pkg = packageOf(jd, new LinkedHashMap<>(jd));
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> importService.preview(pkg), "包内稳定 ID 重复时不能静默取第一条");
+        assertTrue(failure.getMessage().contains("重复"),
+                "报错要点明稳定 ID 重复，实际：" + failure.getMessage());
+    }
+
+    @Test
+    void parentAndChildCanConflictTogether() {
+        importService.apply(fullPackage(514), Map.<String, Object>of());
+        Long resumeLocal = localIdOfStableId("web:resumes:614");
+
+        Map<String, Object> changed = fullPackage(514);
+        firstResume(changed).put("title", "Backend Resume-614-changed");
+        versionsOf(changed).get(0).put("resumeJson", "{\"basics\":{\"name\":\"Li Si\"}}");
+
+        assertEquals(2, importService.preview(changed).conflicts(), "父与子各一条冲突");
+
+        DesktopImportService.ImportResult result = importService.apply(changed, Map.<String, Object>of(
+                "web:resumes:614", "USE_IMPORTED",
+                "web:resumes:614:versions:615", "USE_IMPORTED"));
+        assertEquals(2, result.updated(), "两条 USE_IMPORTED 都应被更新");
+        assertEquals("Backend Resume-614-changed",
+                stringOf("SELECT title FROM resume WHERE id = ?", resumeLocal));
+        assertEquals(1, countOf("SELECT COUNT(*) FROM resume_version WHERE resume_id = ?", resumeLocal),
+                "覆盖不得新增版本行");
+    }
+
+    @Test
+    void childConflictKeepLocalLeavesChildUntouched() {
+        importService.apply(fullPackage(515), Map.<String, Object>of());
+        Long versionLocal = localIdOfStableId("web:resumes:615:versions:616");
+        assertNotNull(versionLocal);
+        String before = rawOf("SELECT resume_json FROM resume_version WHERE id = ?", versionLocal);
+
+        Map<String, Object> changed = fullPackage(515);
+        versionsOf(changed).get(0).put("resumeJson", "{\"basics\":{\"name\":\"Wang Wu\"}}");
+
+        DesktopImportService.ImportResult result = importService.apply(changed,
+                Map.<String, Object>of("web:resumes:615:versions:616", "KEEP_LOCAL"));
+
+        assertEquals(1, result.keptLocal(), "子记录的 KEEP_LOCAL 必须被接受");
+        assertEquals(0, result.updated(), "KEEP_LOCAL 不得改动本地版本");
+        assertEquals(before, rawOf("SELECT resume_json FROM resume_version WHERE id = ?", versionLocal),
+                "本地版本内容必须一字未改");
+    }
+
+    // ------------------------------------------------------------------ 包构造
 
     /**
      * 构造一个工作区包。{@code base} 让每个用例用**专属的主键段** ——
@@ -358,6 +586,47 @@ class DesktopImportServiceIT {
 
     private String stableIdOf(Map<String, Object> record) {
         return String.valueOf(record.get("stableId"));
+    }
+
+    private DesktopImportService.PreviewItem findItem(DesktopImportService.ImportPreview preview, String stableId) {
+        return preview.items().stream()
+                .filter(item -> item.stableId().equals(stableId))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("预览里没有这条记录：" + stableId));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> firstResume(Map<String, Object> pkg) {
+        return ((List<Map<String, Object>>) pkg.get("resumes")).get(0);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> versionsOf(Map<String, Object> pkg) {
+        return (List<Map<String, Object>>) firstResume(pkg).get("versions");
+    }
+
+    private Long longOf(String sql, Object... args) {
+        List<Long> values = jdbcTemplate.queryForList(sql, Long.class, args);
+        return values.isEmpty() ? null : values.get(0);
+    }
+
+    private int countOf(String sql, Object... args) {
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class, args);
+        return value == null ? 0 : value;
+    }
+
+    private String stringOf(String sql, Object... args) {
+        List<String> values = jdbcTemplate.queryForList(sql, String.class, args);
+        return values.isEmpty() ? null : values.get(0);
+    }
+
+    /** 读原始列值（H2 的 JSON 列可能回成 byte[]，统一按 UTF-8 文本比较）。 */
+    private String rawOf(String sql, Object... args) {
+        Object value = jdbcTemplate.queryForObject(sql, Object.class, args);
+        if (value instanceof byte[] bytes) {
+            return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+        }
+        return value == null ? null : String.valueOf(value);
     }
 
     private void seedLocalJobDescription(int id, String title) {

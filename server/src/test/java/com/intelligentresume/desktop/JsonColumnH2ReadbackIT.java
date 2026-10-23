@@ -147,13 +147,18 @@ class JsonColumnH2ReadbackIT {
         Long localJd = localIdOfStableId("web:jobDescriptions:903");
         assertNotNull(localJd, "导入后必须留下岗位的映射");
 
-        // 同一 stableId、JSON 列内容变了 → 冲突 → USE_IMPORTED 走 updateRecord 的 SET 分支。
-        // 注：只改顶层记录，因为嵌套集合（versions/statusHistory）当前不参与 preview，
-        // 那是导入器的独立既有限制，不在本次 JSON 读写修复范围内。
+        // 同一 stableId、JSON 列内容变了 → 冲突 → USE_IMPORTED 走 UPDATE 的 SET 分支。
+        // 注：本夹具只改顶层记录。嵌套集合自批次 1.4 起**也参与预览**（见 DesktopImportServiceIT），
+        // 因此这里先断言「除岗位外其余条目都判跳过」，否则「其余条目被误判成冲突」不会让本用例变红。
         Map<String, Object> changed = workspacePackage(903);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> jobDescriptions = (List<Map<String, Object>>) changed.get("jobDescriptions");
         jobDescriptions.get(0).put("parsedKeywordsJson", "{\"keywords\":[\"spring\"]}");
+
+        DesktopImportService.ImportPreview preview = importService.preview(changed);
+        assertEquals(0, preview.added(), "第二次导入不应有新增");
+        assertEquals(1, preview.conflicts(), "只有岗位的 JSON 内容变了");
+        assertEquals(preview.items().size() - 1, preview.skipped(), "其余条目（简历 + 版本）应判跳过");
 
         DesktopImportService.ImportResult result = importService.apply(changed,
                 Map.<String, Object>of("web:jobDescriptions:903", "USE_IMPORTED"));
