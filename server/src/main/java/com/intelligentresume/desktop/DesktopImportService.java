@@ -39,21 +39,8 @@ public class DesktopImportService {
 
     private static final Logger log = LoggerFactory.getLogger(DesktopImportService.class);
 
-    /** 导入顺序 = 依赖顺序：先岗位，再简历（含版本），最后投递（含状态历史）。 */
-    private static final List<String> SUPPORTED_ORDER = List.of(
-            "jobDescriptions", "resumes", "applications");
-
-    /** 导出集合 → 本地表名。 */
-    private static final Map<String, String> SUPPORTED_TABLES = Map.of(
-            "jobDescriptions", "job_description",
-            "resumes", "resume",
-            "careerMaterials", "career_material",
-            "applications", "application_record");
-
-    /** 嵌套集合：父集合 → (子集合, 子表, 外键列)。 */
-    private static final Map<String, List<String[]>> CHILD_COLLECTIONS = Map.<String, List<String[]>>of(
-            "resumes", List.<String[]>of(new String[]{"versions", "resume_version", "resume_id"}),
-            "applications", List.<String[]>of(new String[]{"statusHistory", "application_status_history", "application_record_id"}));
+    // 可导入的集合清单只有一份：ImportCollectionRegistry（声明顺序即依赖顺序）。
+    // 曾把「遍历顺序」与「集合→表名」拆成两个常量，导致 careerMaterials 落在夹缝里被静默丢弃。
 
     /** 归一化比对时要忽略的字段（R37：内容没变就不该算冲突，时间戳变了不算内容变化）。 */
     private static final Set<String> VOLATILE_FIELDS = Set.of(
@@ -89,7 +76,7 @@ public class DesktopImportService {
         this.jdbcTemplate = jdbcTemplate;
         this.localUserService = localUserService;
         this.objectMapper = objectMapper;
-        this.columnBinder = new ImportColumnBinder(jdbcTemplate);
+        this.columnBinder = new ImportColumnBinder(jdbcTemplate, objectMapper);
     }
 
     /** 一条记录的预览结论。 */
@@ -138,23 +125,24 @@ public class DesktopImportService {
         String packageId = String.valueOf(manifest.getOrDefault("packageId", "unknown"));
 
         List<PreviewItem> items = new ArrayList<>();
-        for (String collection : SUPPORTED_ORDER) {
-            String table = SUPPORTED_TABLES.get(collection);
-            for (Map<String, Object> record : recordsOf(pkg.get(collection))) {
+        for (ImportCollectionRegistry.ImportCollection collection : ImportCollectionRegistry.collections()) {
+            String table = collection.table();
+            for (Map<String, Object> record : recordsOf(pkg.get(collection.name()))) {
                 String stableId = stableIdOf(record);
                 if (stableId == null) {
                     throw new IllegalStateException(
-                            "包内记录缺少 stableId（集合 " + collection + "）—— 无法判断是否重复导入，已拒绝整份导入");
+                            "包内记录缺少 stableId（集合 " + collection.name()
+                                    + "）—— 无法判断是否重复导入，已拒绝整份导入");
                 }
                 Long localId = localIdOf(stableId);
                 if (localId == null) {
-                    items.add(new PreviewItem(collection, stableId, Decision.ADD, table, null,
+                    items.add(new PreviewItem(collection.name(), stableId, Decision.ADD, table, null,
                             "本地没有这条记录，将新增", null, record));
                     continue;
                 }
                 Map<String, Object> local = loadLocal(table, localId);
                 boolean same = sameContent(local, record);
-                items.add(new PreviewItem(collection, stableId,
+                items.add(new PreviewItem(collection.name(), stableId,
                         same ? Decision.SKIP : Decision.CONFLICT, table, localId,
                         same ? "本地已有且内容一致，将跳过" : "本地已有但内容不同，需要你选择保留哪一版",
                         local, record));
@@ -194,9 +182,9 @@ public class DesktopImportService {
         int keptLocal = 0;
         List<String> insertedIds = new ArrayList<>();
 
-        for (String collection : SUPPORTED_ORDER) {
-            String table = SUPPORTED_TABLES.get(collection);
-            for (Map<String, Object> record : recordsOf(pkg.get(collection))) {
+        for (ImportCollectionRegistry.ImportCollection collection : ImportCollectionRegistry.collections()) {
+            String table = collection.table();
+            for (Map<String, Object> record : recordsOf(pkg.get(collection.name()))) {
                 String stableId = stableIdOf(record);
                 PreviewItem item = findItem(preview, stableId);
                 if (item == null) {
@@ -206,11 +194,11 @@ public class DesktopImportService {
                     case SKIP -> skipped++;
                     case ADD -> {
                         Long localId = insertRecord(table, record, idMap, null);
-                        idMap.put(idMapKey(collection, record), localId);
+                        idMap.put(idMapKey(collection.name(), record), localId);
                         rememberMapping(table, localId, stableId);
                         inserted++;
                         insertedIds.add(stableId);
-                        insertChildren(collection, record, idMap);
+                        insertChildren(collection.name(), record, idMap);
                     }
                     case CONFLICT -> {
                         Object resolution = decisions.get(stableId);
@@ -238,19 +226,17 @@ public class DesktopImportService {
 
     /** 插入嵌套记录（简历版本 / 投递状态历史），并把子记录的外键指向本地父 ID。 */
     private void insertChildren(String collection, Map<String, Object> parentRecord, Map<String, Long> idMap) {
-        List<String[]> children = CHILD_COLLECTIONS.get(collection);
-        if (children == null) {
+        ImportCollectionRegistry.ImportCollection definition = ImportCollectionRegistry.byName(collection).orElse(null);
+        if (definition == null) {
             return;
         }
-        for (String[] child : children) {
-            String childCollection = child[0];
-            String childTable = child[1];
-            for (Map<String, Object> childRecord : recordsOf(parentRecord.get(childCollection))) {
-                Long childLocalId = insertRecord(childTable, childRecord, idMap, parentRecord);
-                idMap.put(idMapKey(childCollection, childRecord), childLocalId);
-                rememberMapping(childTable, childLocalId, stableIdOf(childRecord));
+        for (ImportCollectionRegistry.ChildCollection child : definition.children()) {
+            for (Map<String, Object> childRecord : recordsOf(parentRecord.get(child.name()))) {
+                Long childLocalId = insertRecord(child.table(), childRecord, idMap, parentRecord);
+                idMap.put(idMapKey(child.name(), childRecord), childLocalId);
+                rememberMapping(child.table(), childLocalId, stableIdOf(childRecord));
                 // 简历的 current_version_id 指向刚插入的版本（循环外键，只能事后回填）
-                if ("resume_version".equals(childTable)) {
+                if ("resume_version".equals(child.table())) {
                     backfillCurrentVersion(collection, parentRecord, childLocalId);
                 }
             }
@@ -262,7 +248,10 @@ public class DesktopImportService {
         if (parentLocalId == null) {
             return;
         }
-        jdbcTemplate.update("UPDATE " + SUPPORTED_TABLES.get(collection) + " SET current_version_id = ? WHERE id = ?",
+        String parentTable = ImportCollectionRegistry.byName(collection)
+                .map(ImportCollectionRegistry.ImportCollection::table)
+                .orElseThrow(() -> new IllegalStateException("未知集合 " + collection));
+        jdbcTemplate.update("UPDATE " + parentTable + " SET current_version_id = ? WHERE id = ?",
                 versionLocalId, parentLocalId);
     }
 
@@ -296,16 +285,10 @@ public class DesktopImportService {
 
     /** 包里出现但本版不支持的集合（必须让用户知道，而不是静默丢掉）。 */
     private List<String> unsupportedCollections(Map<String, Object> pkg) {
-        Set<String> known = new LinkedHashSet<>(SUPPORTED_TABLES.keySet());
-        known.add("account");
-        known.add("personalProfile");
-        known.add("manifest");
-        known.add("formatVersion");
-        known.add("exportedAt");
-        known.add("source");
         List<String> unsupported = new ArrayList<>();
         for (String key : pkg.keySet()) {
-            if (!known.contains(key) && pkg.get(key) instanceof Collection<?> collection && !collection.isEmpty()) {
+            if (!ImportCollectionRegistry.isKnownKey(key) && pkg.get(key) instanceof Collection<?> collection
+                    && !collection.isEmpty()) {
                 unsupported.add(key);
             }
         }
@@ -508,7 +491,8 @@ public class DesktopImportService {
             if (SKIPPED_ON_INSERT.contains(key) || "userId".equals(key)) {
                 return;
             }
-            values.put(toSnakeCase(key), value);
+            String column = toSnakeCase(key);
+            values.put(column, columnBinder.valueFor(table, column, value));
         });
         Long localUserId = localUserService.localUserId();
         if (localUserId == null) {

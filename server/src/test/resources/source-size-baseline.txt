@@ -17,14 +17,13 @@
 # 登记 = 承认欠债并锁定上限，不是豁免。登记值取登记时的实测总行数。
 src/main/java/com/intelligentresume/export/pdf/JavaResumePdfRenderer.java=694
 src/main/java/com/intelligentresume/ai/provider/BailianAiProvider.java=597
-src/main/java/com/intelligentresume/desktop/DesktopImportService.java=569
+src/main/java/com/intelligentresume/desktop/DesktopImportService.java=554
 src/main/java/com/intelligentresume/ai/generation/service/JobGenerationService.java=527
 src/main/java/com/intelligentresume/interview/service/InterviewAiService.java=403
 src/main/java/com/intelligentresume/careermaterial/service/CareerMaterialService.java=394
 src/main/java/com/intelligentresume/auth/service/AuthService.java=380
 src/main/java/com/intelligentresume/ai/confirmation/service/DraftCommitService.java=378
 src/main/java/com/intelligentresume/resume/service/ResumeVersionService.java=364
-src/main/java/com/intelligentresume/auth/service/AccountExportService.java=334
 src/main/java/com/intelligentresume/ai/worker/TaskExecutionService.java=326
 src/main/java/com/intelligentresume/ats/service/AtsService.java=314
 src/main/java/com/intelligentresume/interview/service/InterviewFollowUpAiService.java=307
