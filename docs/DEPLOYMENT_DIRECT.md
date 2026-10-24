@@ -604,3 +604,83 @@ curl -s http://127.0.0.1:3001/health
 
 `/opt/intelligent-resume/secrets.env`、`/opt/intelligent-resume/live-ai.env`、
 `/opt/intelligent-resume/app/api/.env`、`/opt/intelligent-resume/app/pdf-service/.env`
+
+---
+
+## 12. 数据库备份与监控（2026-10-24 · 批次 2 兑现）
+
+> 本节记录的每一项都**已在测试环境实测**（2026-10-24 部署，探针 24/24 通过）。
+> 在此之前，"每日备份 + 保留 14 天"只写在文档里：`scripts/`、`deploy/` 下没有任何备份脚本，
+> 也没有 timer；监控抓的是 compose 服务名 `api:8080`，直连部署下永远解析不到。
+
+### 12.1 数据库备份
+
+| 项 | 值 |
+| --- | --- |
+| 脚本 | 仓库 `deploy/backup-database.sh`（**唯一来源**）→ 部署时安装到 `/opt/intelligent-resume/bin/backup-database.sh`（700） |
+| 触发 | `intelligent-resume-backup.timer`：每日 **03:30**，`Persistent=true`（停机错过的窗口启动后补跑），随机延迟 5 分钟避开同机另一项目的定时任务 |
+| 落盘 | `/var/backups/intelligent-resume/intelligent_resume-YYYYmmdd-HHmmss.sql.gz`，权限 **600**、目录 700（转储含简历 PII，刻意不让同机其他用户读） |
+| 一致性 | `mysqldump --single-transaction --quick --routines --triggers --no-tablespaces` |
+| 校验 | 三道：`gzip -t` → 文件 > 1KB → **dump 内 `CREATE TABLE` 数 == `information_schema` 表数**（只比大小会把截断的 dump 当成成功） |
+| 保留 | 14 天；只删本目录下 `intelligent_resume-*.sql.gz`，绝不递归删除 |
+| 失败 | 校验不过会删掉半成品并返回非零 → systemd 记 `failed` |
+
+手工执行：
+
+```bash
+sudo /opt/intelligent-resume/bin/backup-database.sh          # 立刻备份一次
+sudo /opt/intelligent-resume/bin/backup-database.sh --check   # 只自检：读凭据 + 连库 + 表数下限，不落文件
+systemctl list-timers intelligent-resume-backup.timer         # 看下次触发
+journalctl -u intelligent-resume-backup -n 30                 # 看最近一次结果
+```
+
+凭据只从 `/opt/intelligent-resume/app/api/.env` 读取（运行期唯一生效来源），写进 `600` 的临时
+`--defaults-extra-file`，**不出现在 `ps` 的命令行里**。
+
+**恢复步骤**（演练过的流程）：
+
+```bash
+# 1) 停写：停 API，避免恢复过程中有新写入
+sudo systemctl stop intelligent-resume-api
+# 2) 恢复（会覆盖同名库的数据；先按 12.3 的说明确认这是你要的那份快照）
+sudo sh -c 'gzip -dc /var/backups/intelligent-resume/intelligent_resume-YYYYmmdd-HHmmss.sql.gz | mysql intelligent_resume'
+# 3) 起服务并核对
+sudo systemctl start intelligent-resume-api
+curl -fsS http://127.0.0.1:8080/actuator/health/readiness
+```
+
+> 2026-10-24 首次恢复演练：把当日快照导入临时库 `restore_drill`，恢复出 **27 张表 / 127 份简历 /
+> 82 条职业资料**，比对无误后删除演练库。**下次演练请按季度执行**，并把结果记在
+> `docs/08-部署与运维说明书.md` §10.1 的时间线上。
+
+### 12.2 监控（只上 Prometheus 单进程）
+
+| 项 | 值 |
+| --- | --- |
+| 单元 | `intelligent-resume-prometheus.service`（`User=prometheus`，`MemoryMax=256M`） |
+| 配置 | 仓库 `deploy/prometheus/prometheus.yml` → `/opt/intelligent-resume/monitoring/prometheus.yml` |
+| 监听 | **仅 `127.0.0.1:9090`**（探针第 7 节会断言只绑回环） |
+| 抓取 | `job=intelligent-resume-api` → `127.0.0.1:8080/actuator/prometheus`，间隔 30s；另抓自身 |
+| 保留 | 7 天（宿主机磁盘与内存都紧张，不做长期存储） |
+
+**为什么不上 Grafana / alertmanager**：本机 3.6GB 内存、swap 已吃 979MB，且与另一个项目共用同一台服务器。
+全栈常驻 300–500MB 会挤占对方；先保证"指标真的在被采集"这件事成立，可视化与告警另行评估。
+发行版自带的 `prometheus.service` 会被部署脚本 `disable --now`（否则它用自己的配置抢 9090，
+表现为"服务 active 但抓的不是我们的配置"）。
+
+查指标（无需 Grafana）：
+
+```bash
+# 目标是否在抓
+curl -s 'http://127.0.0.1:9090/api/v1/query?query=up' | head -c 400
+# AI 模型链可用性（R27 的核心指标）
+curl -s http://127.0.0.1:8080/actuator/prometheus | grep resume_ai_model_chain_available
+```
+
+### 12.3 已知边界（诚实清单，别当成已完成）
+
+1. **备份与数据库同机** —— 能防误删/误升级，**防不了整机或磁盘故障**。异地/对象存储备份未做。
+2. **未加密** —— 依赖文件权限（文件 600 / 目录 700 / 同机其他项目用户读不到）。若后续要传出去，需先加密。
+3. **无告警通道** —— alertmanager 未部署，备份失败只能靠 `systemctl --failed`、`journalctl` 或部署探针发现；
+   没有人会在凌晨 03:30 收到通知。
+4. **恢复演练没有自动化** —— 2026-10-24 手工做过一次并记录；季度节奏目前靠人记。
