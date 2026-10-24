@@ -219,3 +219,31 @@ AI 凭据属本地 AI 设置，不属工作区内容：加密后存于数据目�
    而在 `preview()` 就被整份拒绝。三个缺陷与修复见
    `docs/reviews/2026-10-23-export-import-roundtrip.md`，
    守护用例 `DesktopExportImportRoundTripIT` + `ImportCollectionContractTest`。
+
+---
+
+## 阶段五/六 状态确认（2026-10-24，追加，不改写上文正文）
+
+> 按 `docs/README.md` §4.2：ADR 正文不可改写，进度以追加形式记录。
+
+**阶段五（AI 设置）—— 部分完成，只做了 R31/R34 与 DPAPI 落盘**：
+
+- 已落地：V38 `local_ai_setting`（**只有非敏感设置**，密钥刻意不入表）；密钥用 Windows DPAPI
+  （`CryptProtectData`，用户级 + 应用/用户派生 entropy）加密到 `<dataDir>/ai-credentials/`，
+  因此在工作区库之外，天然不进备份 / Web 导出包 / 桌面迁移包（D8、R34）；
+  四个端点 `GET/PUT/DELETE /api/desktop/ai-settings` 与 `POST .../test`（R31 的增改删测，测试是真发请求）。
+- **未完成**：设置尚未接入任务链路 —— `BailianAiProvider` 仍是构造期读取配置，
+  改设置不会影响实际生成。这项已登记 `OPEN-DECISIONS`。
+- **未做**：R32「发送前预览」、R33「失败保留与降级」（AE2/AE6 的其余部分）。
+- 口径说明：D8 说"DPAPI 加密落盘"已实现，但**只在 Windows 可用**；非 Windows 不降级为明文，直接判不可用。
+  真 DPAPI 往返由 `WindowsDpapiProtectorTest` 在本机（Windows）验证，CI（Linux）整类跳过 ——
+  所以「CI 绿」不等于「DPAPI 已验证」，这一点在测试类注释里写明了。
+
+**阶段六（桌面壳）—— 骨架完成，交付物与验证边界**：
+
+- 已落地：`desktop-shell/`（`backend.js` 编排 + `main.js` 主进程 + `scripts/smoke.mjs`）。
+  加载策略 `loadURL('http://127.0.0.1:8082/')` —— 前端由同一个 jar 托管，前端零改动。
+- **已验证**（本机实测）：jar 能起、22s 就绪、SPA 首页 200、`/api/desktop/ai-settings` 200、
+  未被 `SERVER__PORT` 劫持、退出无孤儿进程。
+- **未验证**：Electron 窗口本身（本机无头）、安装包（electron-builder/NSIS/签名未做）。
+- **未做**：R36 Windows Toast（「关闭应用也能提醒」是阶段六的另一半验收项）。
