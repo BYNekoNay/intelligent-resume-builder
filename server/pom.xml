@@ -110,6 +110,13 @@
             <version>5.3.0</version>
         </dependency>
 
+        <!-- Windows DPAPI（ADR-012 D8）：本地 AI 凭据必须用 CryptProtectData 加密落盘。
+             jna-platform 提供 Crypt32Util 封装；非 Windows 环境下降级为"功能不可用"而不是抛 UnsatisfiedLinkError。 -->
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna-platform</artifactId>
+            <version>5.14.0</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

@@ -50,6 +50,9 @@ public class AccountPurgeRepository {
             "DELETE FROM application_status_history WHERE application_record_id IN (SELECT id FROM application_record WHERE user_id = ?)",
             // 桌面端导入映射：指向已删记录留着没有意义，必须一起清掉
             "DELETE FROM desktop_import_map WHERE user_id = ?",
+            // 桌面端本地 AI 设置（含 credential_present 标记）：随账号一并清理，
+            // 密钥本体在数据目录的 DPAPI 文件里，不在这张表（ADR-012 D8 / R34）
+            "DELETE FROM local_ai_setting WHERE user_id = ?",
             "DELETE FROM application_record WHERE user_id = ?",
             "DELETE FROM inline_optimization_record WHERE user_id = ?",
             "DELETE FROM communication_draft WHERE user_id = ?",

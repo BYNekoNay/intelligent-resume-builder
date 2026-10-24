@@ -72,7 +72,7 @@ class AccountPurgeRepositorySchemaTest {
         assertTrue(missing.isEmpty(),
                 "以下无 user_id 的关联表缺少 IN 子查询形态的 DELETE：" + missing
                         + "（清单来源：docs/plans/2026-10-01-001 §7 与迁移外键链）");
-        assertEquals(19, coveredDirect.size(), "直接覆盖的 user_id 表数应与迁移反查一致");
+        assertEquals(20, coveredDirect.size(), "直接覆盖的 user_id 表数应与迁移反查一致");
         assertEquals(5, coveredViaSubquery.size(), "经链覆盖的关联表数应为 5");
     }
 
