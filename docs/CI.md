@@ -29,7 +29,7 @@
 | Job | 环境 | 命令与覆盖范围 |
 | --- | --- | --- |
 | `Server tests` | Temurin Java 17、Maven 缓存 | `mvn test`；Surefire 配置会执行 `*Test.java` 和 `*IT.java`，测试 profile 使用 H2/MySQL 兼容模式并关闭自动 worker 调度 |
-| `MySQL 8.4 fresh migration` | `mysql:8.4` service container（`utf8mb4 / utf8mb4_unicode_ci`）、Temurin Java 17 | 建库 `intelligent_resume_gate84_ci` → `mvn -Dtest=MySql84FreshMigrationIT test`（37 条迁移从零跑）→ `python3 scripts/assert-tests-ran.py` 断言**用例真跑了**（被跳过不算通过）。补的是此前空白：CI 里唯一的 MySQL 是 `functional.yml` 的 8.0，而生产口径是 8.4 |
+| `MySQL 8.4 fresh migration` | `mysql:8.4` service container（`utf8mb4 / utf8mb4_unicode_ci`）、Temurin Java 17 | 用 `docker exec` 显式建库 `intelligent_resume_gate84_ci`（`utf8mb4_unicode_ci`）→ `mvn -Dtest=MySql84FreshMigrationIT test`（37 条迁移从零跑）→ `python3 scripts/assert-tests-ran.py` 断言**用例真跑了**（被跳过不算通过）。补的是此前空白：CI 里唯一的 MySQL 是 `functional.yml` 的 8.0，而生产口径是 8.4 |
 | `Web build and browser tests` | Node.js 22、Chromium | `npm ci`、**`npm run test:unit`**（vitest，纯逻辑单测）、`npm run build`、`npm run test:e2e`；覆盖 i18n 守卫、TypeScript、生产构建和 mock API 浏览器流程 |
 | `PDF service checks` | Node.js 22 | `npm ci`、`npm run check`、`npm test`；覆盖 Node 语法、模板解析和 PDF 服务单测 |
 

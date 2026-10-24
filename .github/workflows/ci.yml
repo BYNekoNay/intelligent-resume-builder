@@ -61,18 +61,17 @@ jobs:
         image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: root
-          # 库名与排序规则都是被测类的断言对象（DATABASE() 前缀 + @@collation_database）。
-          # 由镜像 init 创建时会继承下面的 --collation-server，所以能对上 utf8mb4_unicode_ci。
-          MYSQL_DATABASE: intelligent_resume_gate84_ci
         ports:
           - 3306:3306
+        # ⚠ services.options 是传给 `docker create` 的 **docker 参数**，不是 mysqld 参数。
+        # 首版把 --character-set-server/--collation-server 写在这里，CI 直接报
+        # `unknown flag: --character-set-server`，容器根本没被创建（已实测）。
+        # 排序规则改由后面那步用 docker exec 在库里显式指定。
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
-          --character-set-server=utf8mb4
-          --collation-server=utf8mb4_unicode_ci
     defaults:
       run:
         working-directory: server
@@ -86,6 +85,19 @@ jobs:
           java-version: '17'
           cache: maven
           cache-dependency-path: server/pom.xml
+      # 库名与排序规则都是被测类的断言对象（DATABASE() 前缀 + @@collation_database）。
+      # 不用 MYSQL_DATABASE 让镜像建库：8.4 默认排序规则是 utf8mb4_0900_ai_ci，
+      # 而测试断言 utf8mb4_unicode_ci —— 由镜像建库会直接红，所以显式建。
+      - name: Create gate schema with the collation the test asserts
+        run: |
+          container_id="$(docker ps --filter "name=mysql" --format '{{.ID}}' | head -1)"
+          test -n "$container_id" || { echo "找不到 mysql service 容器" >&2; exit 1; }
+          docker exec "$container_id" mysql -uroot -proot -e "
+            CREATE DATABASE IF NOT EXISTS intelligent_resume_gate84_ci
+              CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          docker exec "$container_id" mysql -uroot -proot -N -B -e "
+            SELECT @@collation_database FROM DUAL;" intelligent_resume_gate84_ci
+
       - name: Run MySQL 8.4 fresh-install migration gate
         env:
           MYSQL84_LIVE_TEST: 'true'
@@ -100,6 +112,12 @@ jobs:
         if: always()
         working-directory: .
         run: |
+          # 容器初始化失败时 GH 会跳过 checkout，本步（if: always）会在空目录里跑 ——
+          # 明确报出来，而不是抛一个 python 的 "No such file"
+          if [ ! -f scripts/assert-tests-ran.py ]; then
+            echo "checkout 未执行（前序步骤在构建/容器初始化阶段就失败了）—— 门禁无法复核，判失败" >&2
+            exit 1
+          fi
           python3 scripts/assert-tests-ran.py \
             server/target/surefire-reports/TEST-com.intelligentresume.database.MySql84FreshMigrationIT.xml \
             "MySQL 8.4 fresh migration"
