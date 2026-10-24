@@ -24,17 +24,18 @@
 
 > 历史教训：早期 `push.branches` 只列了 `master` 与 `codex/resume-loop-enhancements`，导致在若干开发分支上的推送**从来没有 CI 保护**，而 `ci.yml` 与本地静态检查都不会因此报错。现改为 `branches-ignore` 排除法。之所以不用 `branches: ['**']` 配合 `paths` 过滤：被路径过滤而未触发时，必需检查会停在 **Pending** 而非 Skipped，只改文档的 PR 会永远等不到结论而无法合并。
 
-流水线使用只读仓库权限，并发运行三个独立 Job：
+流水线使用只读仓库权限，并发运行**四个**独立 Job（2026-10-24 起新增 `MySQL 8.4 fresh migration`）：
 
 | Job | 环境 | 命令与覆盖范围 |
 | --- | --- | --- |
 | `Server tests` | Temurin Java 17、Maven 缓存 | `mvn test`；Surefire 配置会执行 `*Test.java` 和 `*IT.java`，测试 profile 使用 H2/MySQL 兼容模式并关闭自动 worker 调度 |
-| `Web build and browser tests` | Node.js 20、Chromium | `npm ci`、`npm run build`、`npm run test:e2e`；覆盖 i18n 守卫、TypeScript、生产构建和 mock API 浏览器流程 |
-| `PDF service checks` | Node.js 20 | `npm ci`、`npm run check`、`npm test`；覆盖 Node 语法、模板解析和 PDF 服务单测 |
+| `MySQL 8.4 fresh migration` | `mysql:8.4` service container（`utf8mb4 / utf8mb4_unicode_ci`）、Temurin Java 17 | 建库 `intelligent_resume_gate84_ci` → `mvn -Dtest=MySql84FreshMigrationIT test`（37 条迁移从零跑）→ `python3 scripts/assert-tests-ran.py` 断言**用例真跑了**（被跳过不算通过）。补的是此前空白：CI 里唯一的 MySQL 是 `functional.yml` 的 8.0，而生产口径是 8.4 |
+| `Web build and browser tests` | Node.js 22、Chromium | `npm ci`、**`npm run test:unit`**（vitest，纯逻辑单测）、`npm run build`、`npm run test:e2e`；覆盖 i18n 守卫、TypeScript、生产构建和 mock API 浏览器流程 |
+| `PDF service checks` | Node.js 22 | `npm ci`、`npm run check`、`npm test`；覆盖 Node 语法、模板解析和 PDF 服务单测 |
 
-PR 合并前应将三个 Job 都配置为必需检查。路径：`Settings -> Branches -> Branch protection rules -> master`，启用 `Require status checks to pass before merging`，选择上述三个检查。
+PR 合并前应将上述 Job（`MySQL 8.4 fresh migration` 建议一并纳入）都配置为必需检查。路径：`Settings -> Branches -> Branch protection rules -> master`，启用 `Require status checks to pass before merging`，选择上述三个检查。
 
-CI 不运行真实百炼调用、本地 MySQL 三服务联调、ACR 推送或 ECS 部署。这些能力分别由本地验证脚本和手动发布工作流负责，避免在不可信 PR 中暴露 Secret 或消耗外部额度。
+CI 不运行真实百炼调用、本地 MySQL 三服务联调、ACR 推送或 ECS 部署。MySQL 5.7 存量升级口径（`MySql57MigrationLiveIT`）仍只在 `scripts/persistence-gate.remote.sh` 里跑，因为它需要 Docker + 5.7 基线快照，成本高于 8.4 全新安装。这些能力分别由本地验证脚本和手动发布工作流负责，避免在不可信 PR 中暴露 Secret 或消耗外部额度。
 
 ## 镜像发布
 

@@ -13,7 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 生产口径的持久化门禁：在真实 MySQL 8.4 上从零执行全部迁移（V1 → V36）。
+ * 生产口径的持久化门禁：在真实 MySQL 8.4 上从零执行全部迁移（V1 → V37）。
+ *
+ * <p>CI：`ci.yml` 的 `migration-84` job 会起 mysql:8.4 并跑本类，随后用
+ * `scripts/assert-tests-ran.py` 断言它**真的执行**（被跳过不算通过）。
  *
  * <p>为什么需要它：仓库里 39 个 {@code *IT} 跑 H2 的 MySQL 兼容模式，
  * {@code functional.yml} 起的也是 {@code mysql:8.0}（落后于生产的 8.4），
@@ -22,8 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>与 {@link MySql57MigrationLiveIT} 的分工：
  * <ul>
- *   <li>本类 = <b>全新安装</b>（V1→V36，36 条），对齐生产版本 8.4；</li>
- *   <li>5.7 类 = <b>存量升级</b>（V19 基线→V36，17 条），只证明老库能升上来，
+ *   <li>本类 = <b>全新安装</b>（V1→V37，37 条），对齐生产版本 8.4；</li>
+ *   <li>5.7 类 = <b>存量升级</b>（V19 基线→V37，18 条），只证明老库能升上来，
  *       不宣称「5.7 可以全新安装」（V18 的窗口函数在 5.7 上不存在）。</li>
  * </ul>
  *
@@ -37,10 +40,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @EnabledIfEnvironmentVariable(named = "MYSQL84_LIVE_TEST", matches = "true")
 class MySql84FreshMigrationIT {
 
-    /** 迁移总数（V1~V36）。新增迁移时同步改这里。 */
+    /** 迁移总数（V1~V37）。新增迁移时同步改这里。 */
     private static final int EXPECTED_MIGRATIONS = 37;
 
-    /** 最新版本号（V36）。新增迁移时同步改这里。 */
+    /** 最新版本号（V37）。新增迁移时同步改这里。 */
     private static final String EXPECTED_LATEST_VERSION = "37";
 
     @Test

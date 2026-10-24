@@ -47,6 +47,63 @@ jobs:
         working-directory: deploy
         run: docker compose --env-file production.env.example -f docker-compose.prod.yml config --quiet
 
+  migration-84:
+    name: MySQL 8.4 fresh migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 生产口径是 MySQL 8.4（deploy/docker-compose.prod.yml），而此前 CI 里唯一的 MySQL 是
+    # functional.yml 的 8.0，迁移测试则全靠 @EnabledIfEnvironmentVariable 门控 ——
+    # 环境变量没人设，整类被 JUnit 跳过，而 mvn 退出码仍是 0。这个 job 补上那段空白：
+    # 起一个 8.4、按被测类的断言建对库名与排序规则，并用 scripts/assert-tests-ran.py
+    # 明确拒绝「跳过 = 通过」。
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          # 库名与排序规则都是被测类的断言对象（DATABASE() 前缀 + @@collation_database）。
+          # 由镜像 init 创建时会继承下面的 --collation-server，所以能对上 utf8mb4_unicode_ci。
+          MYSQL_DATABASE: intelligent_resume_gate84_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+          --character-set-server=utf8mb4
+          --collation-server=utf8mb4_unicode_ci
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: server/pom.xml
+      - name: Run MySQL 8.4 fresh-install migration gate
+        env:
+          MYSQL84_LIVE_TEST: 'true'
+          MYSQL84_JDBC_URL: jdbc:mysql://127.0.0.1:3306/intelligent_resume_gate84_ci?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8
+          MYSQL84_USER: root
+          MYSQL84_PASSWORD: root
+        run: |
+          # 先删旧报告：否则类没跑成功时，下一步会读到上一次的陈旧 XML 而假绿
+          rm -rf target/surefire-reports
+          mvn --batch-mode --no-transfer-progress -Dtest=MySql84FreshMigrationIT test
+      - name: Assert the migration test really ran (skip is not a pass)
+        if: always()
+        working-directory: .
+        run: |
+          python3 scripts/assert-tests-ran.py \
+            server/target/surefire-reports/TEST-com.intelligentresume.database.MySql84FreshMigrationIT.xml \
+            "MySQL 8.4 fresh migration"
+
   web:
     name: Web build and browser tests
     runs-on: ubuntu-latest
@@ -65,6 +122,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Install dependencies
         run: npm ci
+      # 单测放在 Chromium 安装之前：失败时不必先等浏览器下载完
+      - name: Run unit tests
+        run: npm run test:unit
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Build web application
