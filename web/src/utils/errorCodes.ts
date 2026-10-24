@@ -6,8 +6,9 @@
  * fallback 文案兜底（resolveApiError），不会透传服务端 message——服务端 message
  * 仅中文，透传会破坏 en-US 界面。
  *
- * 本文件保持零依赖（纯常量 + 纯函数），web/scripts/errorCodes.test.mjs 通过
- * node --experimental-strip-types 直接测试本文件。
+ * 本文件保持零依赖（纯常量 + 纯函数）。测试在 `web/tests/unit/errorCodes.test.ts`（vitest，已进 CI）；
+ * 该测试会**直接读后端 ErrorCode.java 对账**，两边任一侧漏加码都会变红。
+ * （原先的 `web/scripts/errorCodes.test.mjs` 没有接入任何 script/CI，已随批次 3 迁走。）
  */
 export const ERROR_CODE_KEYS: Readonly<Record<number, string>> = {
   40001: 'errors.validation',
