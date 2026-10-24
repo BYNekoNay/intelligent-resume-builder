@@ -1,6 +1,7 @@
 # 单文件行数棘轮基线。
 #
 # 口径：**总物理行数**（Files.readAllLines().size()，空行与注释都算）。
+# 上限：src/main/java = 300 行；src/test/java = 400 行（2026-10-24 起，理由见契约类 javadoc）。
 # 为什么是这个口径：项目规则原话是「单文件 ≤ 300 行」，判据必须与规则字面一致；
 # 若按「非空行」量，694 行的 JavaResumePdfRenderer 会被记成 629，同一事实两份口径。
 # 判据实现：src/test/java/com/intelligentresume/contract/SourceFileSizeRatchetContractTest.java
@@ -8,11 +9,12 @@
 # 格式：<相对 server/ 的路径>=<允许的最大总行数>，一行一条，路径用正斜杠。
 #
 # 四条规则（由门禁强制）：
-#   1. src/main/java 下**未登记**的文件，行数 > 300 → 红（不许欠新债）。
+#   1. **未登记**的文件，行数超过**所在根的上限**（main 300 / test 400）→ 红（不许欠新债）。
 #   2. 已登记文件**只允许下调**：实际行数 > 登记值 → 红（旧债不许涨）。
 #   3. 条目**失效** → 红：文件已不存在，或已降到 ≤ 300 行时必须删除该行（否则基线留空档，
 #      「拆干净了又长回去」不会被发现）。
-#   4. 基线必须可解析、无重复条目、路径为相对 server/ 的正斜杠路径；基线文件缺失 → 红。
+#   4. 基线必须可解析、无重复条目、路径为相对 server/ 的正斜杠路径、且必须落在某个扫描根下；
+#      基线文件缺失 → 红。每个扫描根另有**扫描下限**（main 250 / test 120），任一根扫空即红。
 #
 # 登记 = 承认欠债并锁定上限，不是豁免。登记值取登记时的实测总行数。
 src/main/java/com/intelligentresume/export/pdf/JavaResumePdfRenderer.java=694
@@ -27,3 +29,21 @@ src/main/java/com/intelligentresume/ai/worker/TaskExecutionService.java=326
 src/main/java/com/intelligentresume/ats/service/AtsService.java=314
 src/main/java/com/intelligentresume/interview/service/InterviewFollowUpAiService.java=307
 src/main/java/com/intelligentresume/interview/service/InterviewAnswerService.java=301
+
+# ---- 测试代码（上限 400 行；2026-10-24 批次 3 纳入）----
+# 这 14 条是纳入时的实测值，只许下调。测试侧放宽到 400 的理由见契约类 javadoc：
+# IT 超长多为「同一业务链的 N 个场景」，拆开要复制整份 @SpringBootTest 装配与 fixture。
+src/test/java/com/intelligentresume/interview/controller/InterviewControllerIT.java=708
+src/test/java/com/intelligentresume/desktop/DesktopImportServiceIT.java=667
+src/test/java/com/intelligentresume/application/service/ApplicationServiceTest.java=660
+src/test/java/com/intelligentresume/interview/service/InterviewAiServiceTest.java=597
+src/test/java/com/intelligentresume/auth/controller/AuthControllerIT.java=557
+src/test/java/com/intelligentresume/careermaterial/controller/CareerMaterialControllerIT.java=538
+src/test/java/com/intelligentresume/auth/service/AuthServiceTest.java=508
+src/test/java/com/intelligentresume/careermaterial/service/CareerMaterialServiceTest.java=496
+src/test/java/com/intelligentresume/ai/task/service/AiTaskServiceTest.java=461
+src/test/java/com/intelligentresume/interview/service/InterviewOperationSupportTest.java=451
+src/test/java/com/intelligentresume/interview/service/InterviewContextSanitizerTest.java=449
+src/test/java/com/intelligentresume/ai/generation/service/JobGenerationServiceTest.java=418
+src/test/java/com/intelligentresume/resume/service/ResumeVersionServiceTest.java=417
+src/test/java/com/intelligentresume/database/FlywayMigrationIT.java=402

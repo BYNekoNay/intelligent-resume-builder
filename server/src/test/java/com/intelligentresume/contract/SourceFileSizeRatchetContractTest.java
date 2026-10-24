@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,8 +36,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * **字面一致**；按非空行量，会把 694 行的 {@code JavaResumePdfRenderer} 记成 629，
  * 同一事实出现两份口径——本仓已经为此吃过亏。宁可判据比规则更严，也不要口径漂移。
  *
- * <p><b>范围：{@code src/main/java}</b>。本门禁只管生产代码；测试类是否纳入是独立决策，
- * 纳入时把 {@link #SCAN_ROOT} 扩到 {@code src/test/java} 并在基线里登记即可。
+ * <p><b>范围：生产代码 + 测试代码</b>（2026-10-24 起，批次 3）。两侧**上限不同**：
+ * <ul>
+ *   <li>{@code src/main/java}：**300 行**（原口径不变）；</li>
+ *   <li>{@code src/test/java}：**400 行**。理由已由用户拍板：IT 类超长往往是「同一业务链的 N 个场景」，
+ *       拆开要复制整份 {@code @SpringBootTest} 装配与 fixture，成本与收益不成比例。
+ *       但**必须有上限**：扩根前 18 个 → 扩根前实测已是 **22 个**、最大从 623 涨到 **708 行**，
+ *       正是「没门禁盯着就会一直长」的实证。</li>
+ * </ul>
+ *
+ * <p><b>每个根各自有扫描下限</b>（{@link ScanRoot#minFiles()}）：不能用全局单一阈值 ——
+ * 两个根合计约 499 个文件，若测试根被改名/移走，总数仍远超 250，测试侧棘轮会**一声不响地关掉**
+ * 而断言依旧绿。这正是本文件反复强调的「门禁假绿」。
  *
  * <p><b>门禁必须真的会红</b>：{@link #scanFindsAPlausibleNumberOfFiles()} 兜住「glob 写错 →
  * 一个文件都没扫到 → 三条断言全部空转 → 永远绿」这种最典型的失效（见
@@ -44,25 +55,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class SourceFileSizeRatchetContractTest {
 
-    /** 行数上限（总物理行数）。 */
-    private static final int LIMIT = 300;
+    /** 一个被扫描的源码根：上限（总物理行数）+ 扫描下限（防该根静默失效）。 */
+    private record ScanRoot(String path, int limit, int minFiles) {
+    }
 
-    /** 被扫描的源码根（相对 server/）。 */
-    private static final String SCAN_ROOT = "src/main/java";
+    /**
+     * 被扫描的源码根（相对 server/）。
+     *
+     * <p>下限取值：main 当前 331 个（留出拆分类余量取 250）；test 当前 168 个（取 120）。
+     * 任一根扫不到下限即红 —— 不能只校验总数。
+     */
+    private static final List<ScanRoot> SCAN_ROOTS = List.of(
+            new ScanRoot("src/main/java", 300, 250),
+            new ScanRoot("src/test/java", 400, 120));
 
     /** 棘轮基线（相对 server/）。删掉这个文件 → 门禁红，不允许「摘掉基线求绿」。 */
     private static final String BASELINE = "src/test/resources/source-size-baseline.txt";
 
-    /** 扫描下限：低于此数说明 glob/路径解析坏了，门禁会假绿。当前 322 个，留出拆分类的余量。 */
-    private static final int MIN_EXPECTED_FILES = 250;
-
     @Test
-    @DisplayName("扫描必须真的扫到源码：一个文件都没扫到时门禁必须红（防 glob 假绿）")
+    @DisplayName("每个扫描根都必须真的扫到文件：任一根扫空即红（防单根静默失效）")
     void scanFindsAPlausibleNumberOfFiles() throws IOException {
-        int scanned = javaFiles().size();
-        assertTrue(scanned >= MIN_EXPECTED_FILES,
-                "只扫到 " + scanned + " 个 .java 文件（下限 " + MIN_EXPECTED_FILES + "），"
-                        + "行数门禁等于空转：检查 " + SCAN_ROOT + " 是否存在、路径解析是否失效");
+        Map<String, String> problems = new TreeMap<>();
+        for (ScanRoot root : SCAN_ROOTS) {
+            int scanned = filesIn(root).size();
+            if (scanned < root.minFiles()) {
+                problems.put(root.path(), "只扫到 " + scanned + " 个 .java 文件（下限 " + root.minFiles()
+                        + "）—— 该根的行数门禁等于空转：检查目录是否存在、路径解析是否失效");
+            }
+        }
+        assertTrue(problems.isEmpty(),
+                () -> "以下扫描根的扫描数量不足（只校验总数会让某一根静默失效）：\n" + report(problems));
     }
 
     @Test
@@ -71,12 +93,13 @@ class SourceFileSizeRatchetContractTest {
         Map<String, Integer> baseline = baseline();
         Map<String, String> problems = new TreeMap<>();
         lineCounts().forEach((relative, lines) -> {
-            if (lines > LIMIT && !baseline.containsKey(relative)) {
-                problems.put(relative, "实际 " + lines + " 行 > 允许 " + LIMIT + " 行，且不在 " + BASELINE
-                        + " 登记：请按子功能拆文件（controller/service/repository 分层），不要把它登记进基线");
+            int limit = limitOf(relative);
+            if (lines > limit && !baseline.containsKey(relative)) {
+                problems.put(relative, "实际 " + lines + " 行 > 允许 " + limit + " 行（" + rootOf(relative).path()
+                        + "），且不在 " + BASELINE + " 登记：请拆文件（生产按分层拆、测试拆场景类），不要登记进基线");
             }
         });
-        assertTrue(problems.isEmpty(), () -> "以下生产源文件超过 " + LIMIT + " 行且未登记：\n" + report(problems));
+        assertTrue(problems.isEmpty(), () -> "以下源文件超过各自上限且未登记：\n" + report(problems));
     }
 
     @Test
@@ -108,8 +131,8 @@ class SourceFileSizeRatchetContractTest {
         Map<String, String> problems = new TreeMap<>();
         for (Map.Entry<String, Integer> entry : baseline.entrySet()) {
             Integer current = counts.get(entry.getKey());
-            if (current != null && current <= LIMIT) {
-                problems.put(entry.getKey(), "实际 " + current + " 行已达标（≤ " + LIMIT
+            if (current != null && current <= limitOf(entry.getKey())) {
+                problems.put(entry.getKey(), "实际 " + current + " 行已达标（≤ " + limitOf(entry.getKey())
                         + "）：请从 " + BASELINE + " 删除该行，让棘轮收紧");
             }
         }
@@ -140,6 +163,9 @@ class SourceFileSizeRatchetContractTest {
         assertEquals(seen.size(), baseline.size(), "基线行数与解析结果不一致：" + BASELINE + " 可能有一行格式非法");
         assertTrue(baseline.keySet().stream().noneMatch(key -> key.startsWith("/") || key.contains("\\")),
                 "基线路径必须是相对 server/ 的正斜杠路径，实际为：" + baseline.keySet());
+        assertTrue(baseline.keySet().stream().allMatch(key -> SCAN_ROOTS.stream()
+                        .anyMatch(root -> key.startsWith(root.path() + "/"))),
+                "基线条目必须落在某个扫描根下（否则它永远不参与判定，等于一条死条目）：" + baseline.keySet());
     }
 
     // ------------------------------------------------------------------ 内部
@@ -170,16 +196,38 @@ class SourceFileSizeRatchetContractTest {
         return counts;
     }
 
-    /** {@code src/main/java} 下的全部 .java 文件。 */
+    /** 全部扫描根下的 .java 文件。 */
     private List<Path> javaFiles() throws IOException {
-        Path root = serverFile(SCAN_ROOT);
-        try (Stream<Path> stream = Files.walk(root)) {
+        List<Path> files = new ArrayList<>();
+        for (ScanRoot root : SCAN_ROOTS) {
+            files.addAll(filesIn(root));
+        }
+        return files;
+    }
+
+    /** 某一个扫描根下的 .java 文件。 */
+    private List<Path> filesIn(ScanRoot root) throws IOException {
+        Path base = serverFile(root.path());
+        try (Stream<Path> stream = Files.walk(base)) {
             return stream.filter(Files::isRegularFile)
                     .filter(file -> file.getFileName().toString().endsWith(".java"))
                     .map(Path::normalize)
                     .sorted()
                     .toList();
         }
+    }
+
+    /** 该路径属于哪个扫描根（也用于把"写错路径的基线条目"暴露出来）。 */
+    private ScanRoot rootOf(String relativePath) {
+        return SCAN_ROOTS.stream()
+                .filter(root -> relativePath.startsWith(root.path() + "/"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "基线条目不在任何扫描根下（" + relativePath + "）：它永远不会参与判定，请修正路径或删除"));
+    }
+
+    private int limitOf(String relativePath) {
+        return rootOf(relativePath).limit();
     }
 
     /** 总物理行数（空行与注释都算 —— 见类注释里的口径理由）。 */
@@ -203,15 +251,18 @@ class SourceFileSizeRatchetContractTest {
         return target;
     }
 
+    private boolean existsAnyRoot(Path base) {
+        return SCAN_ROOTS.stream().anyMatch(root -> Files.isDirectory(base.resolve(root.path())));
+    }
+
     /** 测试从 server/ 运行；兼容从仓库根运行（此时源码在 server/ 之下）。 */
     private Path serverRoot() {
         Path workingDir = Path.of("").toAbsolutePath();
-        if (Files.isDirectory(workingDir.resolve(SCAN_ROOT))) {
+        if (existsAnyRoot(workingDir)) {
             return workingDir;
         }
         Path nested = workingDir.resolve("server");
-        assertTrue(Files.isDirectory(nested.resolve(SCAN_ROOT)),
-                "定位不到 " + SCAN_ROOT + "：当前工作目录 " + workingDir);
+        assertTrue(existsAnyRoot(nested), "定位不到任何扫描根：" + workingDir);
         return nested;
     }
 }
