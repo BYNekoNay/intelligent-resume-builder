@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily backup of the Intelligent Resume database
+Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
+
+[Timer]
+# 03:30 本地时间；Persistent=true 让停机期间错过的窗口在启动后补跑一次
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+# 随机延迟 5 分钟：避免与同机另一个项目的定时任务撞在同一秒
+RandomizedDelaySec=300
+Unit=intelligent-resume-backup.service
+
+[Install]
+WantedBy=timers.target

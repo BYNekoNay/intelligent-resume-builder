@@ -14,7 +14,7 @@
 #   A. 行为断言   —— 从 HTTP 可观察的事实反推配置是否生效（gzip / 体积 / 安全头 / 收敛），
 #                    以及**在服务器上**直接看监听地址（服务是否只绑回环）；
 #   B. 配置一致性 —— 把**服务器生效的 nginx 配置**与仓库 `deploy/nginx/host.conf`、
-#                    以及**生效的 systemd 单元**与仓库 `deploy/systemd/*.service` 归一化后逐行对比，
+#                    以及**生效的 systemd 单元/定时器**与仓库 `deploy/systemd/*.service|*.timer` 归一化后逐行对比，
 #                    能通用地发现任何"配置改了但没部署"的漂移（不限于已知的几条）。
 #
 # 用法：
@@ -141,7 +141,7 @@ printf '\n=== 6. systemd 单元一致性（生效单元 vs 仓库 deploy/systemd
 if [ -z "${SSH_HOST:-}" ]; then
   printf '  [SKIP] 未提供 SSH_HOST，跳过\n'
 else
-  for unit_src in "$REPO_ROOT"/deploy/systemd/*.service; do
+  for unit_src in "$REPO_ROOT"/deploy/systemd/*.service "$REPO_ROOT"/deploy/systemd/*.timer; do
     [ -f "$unit_src" ] || continue
     unit_name="$(basename "$unit_src")"
     if sshq "sudo cat /etc/systemd/system/$unit_name" > "$TMP/unit.remote" 2>/dev/null; then
@@ -185,6 +185,7 @@ else
   }
   check_loopback_only "API 8080" 8080
   check_loopback_only "PDF 3001" 3001
+  check_loopback_only "Prometheus 9090" 9090
 fi
 
 # ---------- 8. 应用实际加载的配置 vs 磁盘上的 .env（抓「改了配置没重启」）----------
@@ -209,6 +210,44 @@ else
     pass "应用加载的链与 app/api/.env 一致（$(printf '%s' "$env_chain" | tr ',' ' ' | wc -w) 个模型）"
   else
     fail "应用加载的链与磁盘 .env 不一致 —— 极可能「改了 .env 但没重启」：磁盘=$env_chain，进程=$loaded_chain"
+  fi
+fi
+
+# ---------- 9. 备份与监控（批次 2 兑现）----------
+# 这一节存在的理由：本批之前，"每日备份 + 保留 14 天"只写在文档里 —— scripts/ 与 deploy/ 下
+# 没有任何备份脚本，也没有 timer；监控则抓的是 compose 服务名 `api:8080`，直连部署永远解析不到。
+# 三项都验证**运行时事实**（脚本能连库/定时器真启用/目标真被抓到），不看配置文件是否存在。
+printf '\n=== 9. 备份与监控 ===\n'
+if [ -z "${SSH_HOST:-}" ]; then
+  printf '  [SKIP] 未提供 SSH_HOST，跳过\n'
+else
+  # 9.1 备份脚本自带前置自检（读凭据 + 连库 + 表数下限），能过说明"备份真的能跑"
+  if sshq "sudo test -x $REMOTE_ROOT/bin/backup-database.sh" 2>/dev/null; then
+    if backup_check="$(sshq "sudo $REMOTE_ROOT/bin/backup-database.sh --check" 2>&1)"; then
+      pass "备份脚本自检通过：$(printf '%s' "$backup_check" | tail -1)"
+    else
+      fail "备份脚本 --check 失败：$(printf '%s' "$backup_check" | tail -3 | tr '\n' ' ')"
+    fi
+  else
+    fail "备份脚本未安装（$REMOTE_ROOT/bin/backup-database.sh 不存在或不可执行）"
+  fi
+
+  # 9.2 定时器必须 enabled（只放 unit 文件不 enable，重启后就不会跑）
+  timer_state="$(sshq "sudo systemctl is-enabled intelligent-resume-backup.timer" 2>/dev/null | tr -d '\r')"
+  if [ "$timer_state" = "enabled" ]; then
+    next_run="$(sshq "systemctl list-timers intelligent-resume-backup.timer --no-pager" 2>/dev/null \
+      | sed -n '2p' | awk '{print $1, $2, $3}')"
+    pass "备份定时器已 enabled（下次触发：${next_run:-未知}）"
+  else
+    fail "备份定时器未 enabled（当前：${timer_state:-unknown}）—— 备份永远不会自动执行"
+  fi
+
+  # 9.3 prometheus 抓取目标必须为 up（配置文件存在 ≠ 真的在抓）
+  prom_resp="$(sshq "curl -fsS 'http://127.0.0.1:9090/api/v1/query?query=up%7Bjob%3D%22intelligent-resume-api%22%7D'" 2>/dev/null)"
+  if printf '%s' "$prom_resp" | grep -q '"value":\[[^]]*"1"\]'; then
+    pass "prometheus 抓取目标 up（job=intelligent-resume-api）"
+  else
+    fail "prometheus 未抓到 API（目标 down 或 prometheus 未运行）：$(printf '%s' "$prom_resp" | head -c 160)"
   fi
 fi
 

@@ -51,18 +51,18 @@ if [ ! -d "$SRC/server" ]; then
   exit 1
 fi
 
-log "1/7 后端构建（Maven，跳过测试）"
+log "1/8 后端构建（Maven，跳过测试）"
 cd "$SRC"
 mvn -f server/pom.xml -B -DskipTests clean package
 test -f "$SRC/server/target/$JAR_NAME"
 
-log "2/7 前端构建（npm ci + build）"
+log "2/8 前端构建（npm ci + build）"
 cd "$SRC/web"
 npm ci --no-audit --no-fund
 npm run build
 test -f "$SRC/web/dist/index.html"
 
-log "3/7 PDF 服务依赖（Chromium 由预置脚本提供 + 真实启动自检）"
+log "3/8 PDF 服务依赖（Chromium 由预置脚本提供 + 真实启动自检）"
 cd "$SRC/pdf-service"
 # 为什么先跳过 puppeteer 自带的浏览器下载（实测结论，非推测）：
 #   puppeteer 25 的安装脚本只认 PUPPETEER_* 环境变量，源码里**不存在** PUPPETEER_DOWNLOAD_BASE_URL，
@@ -85,7 +85,7 @@ if (pdf.length < 1000) throw new Error("PDF 输出异常，字节数=" + pdf.len
 console.log("Chromium 自检通过:", version, "| PDF", pdf.length, "字节");
 '
 
-log "4/7 同步产物到运行目录"
+log "4/8 同步产物到运行目录"
 install -d "$APP/api" "$APP/api/pdf-output"
 
 cp "$SRC/server/target/$JAR_NAME" "$APP/api/$JAR_NAME"
@@ -149,7 +149,7 @@ fi
 # 避免每次部署都重启造成抖动。安装前剥离 CR（防工作区 CRLF 落进单元导致 systemd 解析异常）。
 if [ -d "$SRC/deploy/systemd" ]; then
   UNITS_CHANGED=0
-  for unit_src in "$SRC"/deploy/systemd/*.service; do
+  for unit_src in "$SRC"/deploy/systemd/*.service "$SRC"/deploy/systemd/*.timer; do
     [ -f "$unit_src" ] || continue
     unit_name="$(basename "$unit_src")"
     unit_tmp="/tmp/$unit_name.$$"
@@ -169,16 +169,92 @@ if [ -d "$SRC/deploy/systemd" ]; then
   else
     echo "systemd 单元已是最新，无需变更"
   fi
+
+  # ⚠ 只把 .timer 文件放进 /etc/systemd/system **不会让它生效**：必须 enable（否则重启后不跑）。
+  # 这是本批修掉的第二个链路洞 —— 原同步逻辑只 glob *.service，`.timer` 连安装都不会发生，
+  # 于是「每日备份」这类承诺永远停在文档里。enable 是幂等的，所以放在"仅变更时安装"之外。
+  for timer_src in "$SRC"/deploy/systemd/*.timer; do
+    [ -f "$timer_src" ] || continue
+    timer_name="$(basename "$timer_src")"
+    if $SUDO systemctl enable --now "$timer_name" >/dev/null 2>&1; then
+      echo "systemd 定时器已启用：$timer_name"
+    else
+      echo "警告：$timer_name 启用失败（见 systemctl status $timer_name）" >&2
+    fi
+  done
 else
   echo "警告：源码包缺少 deploy/systemd/，跳过单元同步（旧单元继续生效）" >&2
 fi
 
-log "5/7 重启服务"
+# ---------- 运维资产：备份脚本与 prometheus 配置（仓库是唯一来源）----------
+# 与 systemd 单元同源同问题：这些文件不随部署同步，改了也不会在真实环境生效。
+# 约定：仅在内容变化时安装，避免无意义的抖动。
+if [ -f "$SRC/deploy/backup-database.sh" ]; then
+  $SUDO install -d -m 755 "$ROOT/bin" "$ROOT/monitoring"
+  backup_tmp="/tmp/backup-database.sh.$$"
+  sed 's/\r$//' "$SRC/deploy/backup-database.sh" > "$backup_tmp"
+  if cmp -s "$backup_tmp" "$ROOT/bin/backup-database.sh" 2>/dev/null; then
+    rm -f "$backup_tmp"
+  else
+    $SUDO install -m 700 "$backup_tmp" "$ROOT/bin/backup-database.sh"
+    rm -f "$backup_tmp"
+    echo "备份脚本已更新：$ROOT/bin/backup-database.sh"
+  fi
+else
+  echo "警告：源码包缺少 deploy/backup-database.sh，跳过备份脚本安装" >&2
+fi
+
+if [ -f "$SRC/deploy/prometheus/prometheus.yml" ]; then
+  prom_tmp="/tmp/prometheus.yml.$$"
+  sed 's/\r$//' "$SRC/deploy/prometheus/prometheus.yml" > "$prom_tmp"
+  if cmp -s "$prom_tmp" "$ROOT/monitoring/prometheus.yml" 2>/dev/null; then
+    rm -f "$prom_tmp"
+  else
+    $SUDO install -m 644 "$prom_tmp" "$ROOT/monitoring/prometheus.yml"
+    rm -f "$prom_tmp"
+    echo "prometheus 配置已更新：$ROOT/monitoring/prometheus.yml"
+  fi
+else
+  echo "警告：源码包缺少 deploy/prometheus/prometheus.yml，跳过" >&2
+fi
+
+
+log "5/8 监控与备份运行时（prometheus 安装 + 定时器启用）"
+# 容量决定：**只上 prometheus 单进程**（不上 Grafana / alertmanager）。
+# 宿主机 3.6G 且与另一个项目共用（swap 已吃 979M），全栈常驻 300~500M 风险太大。
+if ! command -v prometheus >/dev/null 2>&1; then
+  echo "未安装 prometheus，尝试通过发行版仓库安装…"
+  DEBIAN_FRONTEND=noninteractive $SUDO apt-get update -qq >/dev/null 2>&1 || true
+  DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq prometheus >/dev/null 2>&1 || true
+fi
+if command -v prometheus >/dev/null 2>&1; then
+  echo "prometheus: $(prometheus --version 2>&1 | head -1)"
+  # 数据目录必须在**用户已存在**之后建（apt 包会创建 prometheus 用户）。
+  # 属主不对时单元启动即 Permission denied，而"服务没起来"只有探针能发现。
+  $SUDO install -d -m 750 -o prometheus -g prometheus /var/lib/intelligent-resume/prometheus
+  # 发行版自带的 prometheus.service 会用自己的配置抢 127.0.0.1:9090，先停掉；
+  # 否则我们的单元会和它抢端口，表现为"服务 active 但抓的不是我们的配置"。
+  $SUDO systemctl disable --now prometheus.service >/dev/null 2>&1 || true
+  if $SUDO systemctl is-active --quiet intelligent-resume-prometheus; then
+    $SUDO systemctl restart intelligent-resume-prometheus
+  else
+    $SUDO systemctl enable --now intelligent-resume-prometheus
+  fi
+  echo "prometheus 单元已启动（127.0.0.1:9090，保留 7 天）"
+else
+  echo "警告：prometheus 安装失败，监控未生效（探针会把这一项判失败）" >&2
+fi
+
+$SUDO systemctl enable --now intelligent-resume-backup.timer >/dev/null 2>&1 \
+  && echo "备份定时器已启用（每日 03:30，保留 14 天）" \
+  || echo "警告：备份定时器启用失败" >&2
+
+log "6/8 重启服务"
 $SUDO systemctl restart intelligent-resume-pdf
 sleep 5
 $SUDO systemctl restart intelligent-resume-api
 
-log "6/7 等待 API 就绪（最长 120s）"
+log "7/8 等待 API 就绪（最长 120s）"
 ready=0
 for i in $(seq 1 40); do
   if curl -fsS http://127.0.0.1:8080/actuator/health/readiness >/dev/null 2>&1; then
@@ -194,8 +270,8 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
-log "7/7 健康检查"
-for unit in intelligent-resume-api intelligent-resume-pdf nginx mysql; do
+log "8/8 健康检查"
+for unit in intelligent-resume-api intelligent-resume-pdf intelligent-resume-prometheus nginx mysql; do
   printf '%-28s %s\n' "$unit" "$($SUDO systemctl is-active "$unit" || true)"
 done
 printf '%-28s ' 'API readiness:'; curl -fsS http://127.0.0.1:8080/actuator/health/readiness; echo

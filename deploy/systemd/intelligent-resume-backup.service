@@ -1,0 +1,14 @@
+[Unit]
+Description=Intelligent Resume MySQL backup (single transaction dump + verify + retention)
+Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
+After=network-online.target mysql.service
+Requires=mysql.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/intelligent-resume/bin/backup-database.sh
+# 备份是磁盘密集的；降到 idle 优先级，避免白天被手工触发时挤压 API 的 IO
+Nice=10
+IOSchedulingClass=idle
+# 失败要留痕：systemd 记 failed，`systemctl --failed` 与探针都能看到
+TimeoutStartSec=15min

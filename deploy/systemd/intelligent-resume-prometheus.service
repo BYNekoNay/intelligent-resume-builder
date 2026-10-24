@@ -1,0 +1,26 @@
+[Unit]
+Description=Prometheus (single instance, scrapes 127.0.0.1:8080 only)
+Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
+After=network-online.target intelligent-resume-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# apt 包会创建 prometheus 用户；用它跑，避免以 root 身份长期驻留
+User=prometheus
+Group=prometheus
+ExecStart=/usr/bin/prometheus \
+  --config.file=/opt/intelligent-resume/monitoring/prometheus.yml \
+  --storage.tsdb.path=/var/lib/intelligent-resume/prometheus \
+  --storage.tsdb.retention.time=7d \
+  --web.listen-address=127.0.0.1:9090
+Restart=on-failure
+RestartSec=5
+
+# 容量红线：宿主机 3.6G 且与另一个项目共用（swap 已吃 979M）。
+# 只抓一个目标 + 7 天保留，实测常驻在 100~150M 量级；上限卡死防止异常增长拖垮同机服务。
+MemoryMax=256M
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target
