@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
@@ -20,6 +20,17 @@ export const DEFAULT_PORT = 8082
  * 不接受任意路径：shell 只认 `server/target` 下带版本号的那个产物，
  * 避免误把旧 jar 或半成品启动起来（"跑起来了但不是这次构建的产物"最难查）。
  */
+export function findJarIn(dir) {
+  if (!existsSync(dir)) {
+    throw new Error(`jar 目录不存在：${dir}`)
+  }
+  const name = readdirSync(dir).find(entry => /^intelligent-resume-server-\d.*\.jar$/.test(entry))
+  if (!name) {
+    throw new Error(`${dir} 下找不到 intelligent-resume-server-<version>.jar`)
+  }
+  return join(dir, name)
+}
+
 export function resolveJar(repoRoot) {
   const targetDir = join(repoRoot, 'server', 'target')
   const candidates = [

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DEFAULT_PORT, resolveJar, startBackend, stopBackend, waitForHealth } from './backend.js'
+import { DEFAULT_PORT, findJarIn, resolveJar, startBackend, stopBackend, waitForHealth } from './backend.js'
 
 /**
  * Electron 主进程（ADR-012 阶段六）。
@@ -36,7 +36,11 @@ async function boot() {
   const dataDir = join(app.getPath('userData'), 'workspace')
   const logLines = []
   try {
-    const jarPath = resolveJar(repoRoot)
+    // 打包后 jar 在 resources/server 下（由 electron-builder 的 extraResources 放进去）；
+    // 开发态仍从 server/target 找 —— 两条路径都要能跑，否则"装完打不开"要到用户手里才发现。
+    const jarPath = app.isPackaged
+      ? findJarIn(join(process.resourcesPath, 'server'))
+      : resolveJar(repoRoot)
     backend = startBackend({
       jarPath,
       dataDir,

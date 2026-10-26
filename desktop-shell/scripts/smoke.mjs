@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DEFAULT_PORT, resolveJar, startBackend, stopBackend, waitForHealth } from '../src/backend.js'
+import { DEFAULT_PORT, findJarIn, resolveJar, startBackend, stopBackend, waitForHealth } from '../src/backend.js'
 
 /**
  * 桌面壳的编排冒烟测试（纯 Node，不需要 Electron / 图形会话）。
@@ -15,6 +15,11 @@ import { DEFAULT_PORT, resolveJar, startBackend, stopBackend, waitForHealth } fr
  * 前置：web 已构建、server 已打包（脚本会自己检查并给出命令）。
  */
 const repoRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..')
+// --packaged <dir>：验证**打包后**的路径（jar 在 <dir>/resources/server 下）。
+// 为什么需要它：GUI 进程在无头会话里起不来，但"打包后能不能找到 jar 并起后端"是可以单独验证的，
+// 而这恰恰是最容易错的一环（jar 路径 / 版本 / 旧包残留）。
+const packagedIndex = process.argv.indexOf('--packaged')
+const packagedDir = packagedIndex > 0 ? process.argv[packagedIndex + 1] : null
 const dataDir = mkdtempSync(join(tmpdir(), 'resume-desktop-smoke-'))
 const failures = []
 
@@ -38,7 +43,7 @@ async function fetchStatus(url) {
 
 let backend = null
 try {
-  const jarPath = resolveJar(repoRoot)
+  const jarPath = packagedDir ? findJarIn(join(packagedDir, 'resources', 'server')) : resolveJar(repoRoot)
   console.log(`jar: ${jarPath}`)
   console.log(`dataDir: ${dataDir}`)
 

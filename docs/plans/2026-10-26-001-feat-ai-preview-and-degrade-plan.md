@@ -87,13 +87,15 @@
 | AC-R32-3 | ✅ | `AiTaskPreviewProtocolIT#createWithoutTokenRejected`（含"不落库"断言） |
 | AC-R32-4 | ✅ | `AiTaskPreviewProtocolIT#staleTokenRejected`（含"不落库"断言） |
 | AC-R32-5 | ✅ | `AiTaskPreviewProtocolIT#previewIsReadOnly` |
-| AC-R32-6 | ⬜ 待做 | 前端预览确认流（P2） |
-| AC-R32-7 | ⬜ 待做 | 前端「包含联系方式」开关（P2） |
+| AC-R32-6 | ✅ | `e2e/ai-preview.spec.ts`「取消预览则一条任务都不发」（断言 `/api/ai/tasks` 零调用） |
+| AC-R32-7 | ✅ | `e2e/ai-preview.spec.ts`「勾选后重新预览并带新令牌提交」 |
 | AC-R33-1 | ✅ | `TaskLeaseServiceTest#releaseFailed_retryable_stillMarksFailed`（断言 FAILED，改回 PENDING 即红） |
 | AC-R33-2 | ✅ | 既有行为已满足，由 `AiTaskControllerIT`/`TaskLeaseServiceTest` 覆盖保留语义 |
 | AC-R33-3 | ✅ | `BailianAiProviderChainTest#fallbackSuccessRecordsModelAttempts` + `AiTaskResults` 落结果 |
 | AC-R33-4 | ✅ | 手动重试入口未改动（`InlineOptimizeController#retry`，仅 FAILED 可重试） |
-| AC-SHELL-1/2/3 | ⬜ 待做 | Electron 窗口验证、安装包、包内无密钥检查（P4） |
+| AC-SHELL-1 | ⚠️ **未验证** | 窗口本身在无头会话里起不来（进程即退、日志为空）—— 需人工在有图形会话的 Windows 上 `npm install && npm start` |
+| AC-SHELL-2 | ✅ 产出 + ⚠️ 安装流程未点 | NSIS 安装包已产出（162MB）；打包后的编排用 `smoke --packaged` 验证（16s 就绪、SPA 200、`/api/desktop/ai-settings` 200）；**安装器点完能启动未验证** |
+| AC-SHELL-3 | ✅ | 包内只有 0.4.2 一个 jar；扫描无 `.env`/`secrets.env`/`resume.mv.db`；asar 内无 `ai-credentials` 字样 |
 
 **本轮范围说明**：R32 的强制校验落在**通用任务端点**（`POST /api/ai/tasks`）。
 `JOB_GENERATION` / `JOB_MATERIAL_SELECTION` / `COMMUNICATION_GENERATE` / `ATS_ANALYSIS` / `INTERVIEW_COACH`

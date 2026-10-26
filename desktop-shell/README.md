@@ -27,9 +27,27 @@ cd ../server && mvn -DskipTests package
 # 2) 冒烟：验证编排（不需要 Electron、不需要图形界面）
 cd .. && node desktop-shell/scripts/smoke.mjs
 
-# 3) 真开窗口（需要先装 Electron，约 100MB；本仓默认不装）
+# 3) 真开窗口
 cd desktop-shell && npm install && npm start
+
+# 4) 打 Windows 安装包（NSIS）。stage-jar 会把**当前版本**的 jar 暂存到 vendor/
+cd desktop-shell && npm install && npm run dist
 ```
+
+**国内网络注意**：`electron` 与 NSIS 二进制从 GitHub 下载会 502。实测可用镜像：
+
+```bash
+ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run dist
+```
+
+**为什么不启用 `signAndEditExecutable`**：electron-builder 默认要解压 `winCodeSign` 去改 exe 的图标/版本，
+而那个包里含有 macOS 的符号链接，Windows 非开发者模式**无权创建**，解压直接失败。
+本仓在 `build.win.signAndEditExecutable=false` 下打包，代价是 exe 保持 Electron 默认图标与版本信息。
+要恢复的话，需要开发者模式或管理员权限。
+
+**为什么需要 `scripts/stage-jar.mjs`**：2026-10-26 实测踩到 —— `server/target` 里躺着 0.4.0/0.4.1 两代旧 jar，
+`extraResources` 通配符把它们**一起打进安装包**，而取 jar 的逻辑取第一个匹配项，装出来跑的是旧版本。
+现在构建入口只暂存当前版本那一个，`vendor/` 里也只允许存在它。
 
 ## backend.js 里三条必须做对的事（都对应真实踩过的坑）
 
@@ -54,7 +72,10 @@ cd desktop-shell && npm install && npm start
 **未验证（不要当成已完成）**
 
 - **Electron 窗口本身没起过**：本机是无头会话，`npm install && npm start` 留给有图形会话时验；
-- **没有安装包**：`electron-builder` / NSIS / 图标 / 代码签名都没做，安装流程完全没跑过；
+- **安装器点完能启动**没验过：NSIS 安装包已产出（`release-v042/Zhili Setup 0.1.0.exe`，162MB），
+  但"双击安装 → 启动"需要人工在图形会话里走一遍。打包后的**编排**已用
+  `node scripts/smoke.mjs --packaged release-v042/win-unpacked` 验证（16s 就绪、SPA 200、桌面端点 200）；
+- **代码签名没做**（无证书），exe 会是"未知发布者"；图标仍是 Electron 默认；
 - **没有 Windows Toast**（R36）：「关闭应用也能提醒」是阶段六的另一半，一行未写；
 - ~~本地 AI 设置还没接到任务链路上~~ —— 2026-10-26 已接：`AiRuntimeOverlay` 在 provider 的 6 个
   决策点生效，保存即生效、关闭/删除回落配置文件（见 `OPEN-DECISIONS` 同日 RESOLVED）。

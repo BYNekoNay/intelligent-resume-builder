@@ -54,7 +54,8 @@ __pycache__/
 
 # 桌面壳（ADR-012 阶段六）：Electron 依赖与打包产物不入库
 desktop-shell/node_modules/
-desktop-shell/release/
+desktop-shell/release*/
+desktop-shell/vendor/
 desktop-shell/dist/
 
 # 桌面模式的数据目录（H2 文件库 + 备份 + DPAPI 凭据）。在仓库根跑桌面模式就会生成
