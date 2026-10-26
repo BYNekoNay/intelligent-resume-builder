@@ -54,7 +54,7 @@ cd pdf-service && npm install && npm start                                # :300
 Desktop mode (single process, no login, local H2 file database):
 
 ```bash
-java -jar intelligent-resume-server-0.4.1.jar \
+java -jar intelligent-resume-server-0.4.2.jar \
   --spring.profiles.active=desktop --server.port=8082 --server.address=127.0.0.1
 ```
 

@@ -48,7 +48,7 @@ public class SystemController {
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
         List<SystemHealthResponse.CapabilityStatus> checks = checks();
         SystemHealthResponse payload = new SystemHealthResponse(
-                SERVICE_NAME, overallStatus(checks), "0.4.1",
+                SERVICE_NAME, overallStatus(checks), "0.4.2",
                 SystemCapabilityRegistry.codes(), checks);
         return ApiResponse.success(payload, traceId);
     }
