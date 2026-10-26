@@ -41,7 +41,7 @@ ExecStart=/usr/bin/java \
   -XX:+ExitOnOutOfMemoryError \
   -Dfile.encoding=UTF-8 \
   -Duser.timezone=Asia/Shanghai \
-  -jar /opt/intelligent-resume/app/api/intelligent-resume-server-0.4.2.jar
+  -jar /opt/intelligent-resume/app/api/intelligent-resume-server-0.4.3.jar
 
 Restart=on-failure
 RestartSec=10
