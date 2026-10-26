@@ -147,3 +147,41 @@
 4. `INTERVIEW_COACH`
 
 每片做完就跑一次后端全量 + e2e；任一片未完成时，**不能**单独启用该片的强制校验（否则前端会直接坏掉）。
+
+### 7.5 第 1 片完成情况（选材）
+
+- 抽 `MaterialSelectionContextBuilder`（候选筛选 + prompt 组装），worker 与预览共用；
+  `JobMaterialSelectionService` 298 → 199 行。
+- `POST /api/ai/select-materials-for-job/preview`（只读）+ create 端 `X-AI-Preview-Token` 强制
+  （缺令牌 40001 / 令牌失效 40901，均不落库）。
+- 前端 `GenerationWorkbenchView` 接入预览确认；`materialSelectionBody` 由预览与创建共用。
+- 测试：`JobGenerationControllerIT` 3 条（happy path 走真实预览 + 两条拒绝用例）+ e2e 83 passed。
+
+### 7.6 第 2 片执行要点（生成 / JOB_GENERATION）—— 已勘察，未实施
+
+勘察结论（省下一半力气）：
+
+1. **`confirm-materials` 走的是快照路径，不读库**：`JobGenerationService.executeTask` 开头判断
+   `snapshot.containsKey("jobSnapshot")`，命中后由 `jobFromSnapshot` / `materialsFromSnapshot` /
+   `personalProfileSnapshot` 重建实体（`:88-97`），再调 `promptBuilder.build(...)`（`:199`）。
+   → **预览不需要查库，只要拿到同一份 snapshot 即可**，同源天然成立。
+2. 现成入口：`MaterialSelectionConfirmationService.confirm`（`:52-138`）里在创建 JOB_GENERATION 前
+   已把 snapshot 拼好（`snapshot(job)` / `snapshot(material)` / `snapshot(profile)` 三个私有方法在
+   `:208/:218/:229`）。**要做的第一件事是把它抽成 `buildGenerationInput(selection, request, userId)`**，
+   confirm 与预览都调这一个方法。
+
+执行步骤：
+
+1. 抽 `buildGenerationInput(...)`（250 行文件，还有余量）；confirm 改为调用它。
+2. `JobGenerationService` 加包级 `providerInputFromSnapshot(Map snapshot)`：把 `:87-131` 的
+   "重建实体 + promptBuilder.build + 装 `_systemPrompt/_taskPrompt/_dataPrompt`" 抽出来，
+   `executeTask` 与预览共用（这条是 AC-R32-8 的关键）。
+3. 端点 `POST /api/ai/tasks/{selectionTaskId}/confirm-materials/preview`：
+   校验归属 → `buildGenerationInput` 干跑 → `providerInputFromSnapshot` → `AiPreviewService.preview`。
+4. create 端（`confirm` 入口）加 `X-AI-Preview-Token` 头校验，令牌由预览返回。
+5. 前端 `MaterialSelectionConfirmView`：确认选材后先弹预览。
+6. 测试：镜像第 1 片的四条（happy path 走真实预览 + 缺令牌 + 令牌失效）+ docs/05 补端点
+   （`ApiDocCoverageGateTest` 会卡）。
+
+第 3-5 片同理：沟通（`CommunicationAiPromptBuilder` 已是独立 builder，最省力）、
+ATS（按 `checkId` 预览）、面试（接 `InterviewContextSanitizer`）。
