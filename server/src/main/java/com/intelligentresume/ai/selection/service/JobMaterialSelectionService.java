@@ -25,26 +25,23 @@ import java.util.stream.Collectors;
 @Service
 public class JobMaterialSelectionService {
 
-    private static final int MAX_CANDIDATES = 60;
     private static final int MAX_RECOMMENDED = 12;
-    private static final Pattern TOKEN_SPLIT = Pattern.compile("[^\\p{L}\\p{N}+#.]+");
-    private static final Pattern CJK_SEQUENCE = Pattern.compile("[\\p{IsHan}]+");
 
     private final CareerMaterialRepository materialRepository;
     private final JobDescriptionRepository jobRepository;
     private final PersonalProfileRepository profileRepository;
-    private final MaterialSelectionPromptBuilder promptBuilder;
+    private final MaterialSelectionContextBuilder contextBuilder;
     private final AiProviderRegistry providerRegistry;
 
     public JobMaterialSelectionService(CareerMaterialRepository materialRepository,
                                        JobDescriptionRepository jobRepository,
                                        PersonalProfileRepository profileRepository,
-                                       MaterialSelectionPromptBuilder promptBuilder,
+                                       MaterialSelectionContextBuilder contextBuilder,
                                        AiProviderRegistry providerRegistry) {
         this.materialRepository = materialRepository;
         this.jobRepository = jobRepository;
         this.profileRepository = profileRepository;
-        this.promptBuilder = promptBuilder;
+        this.contextBuilder = contextBuilder;
         this.providerRegistry = providerRegistry;
     }
 
@@ -56,61 +53,21 @@ public class JobMaterialSelectionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Job description not found"));
         Map<String, Object> input = snapshot.get("input") instanceof Map<?, ?> raw
                 ? (Map<String, Object>) raw : Map.of();
-        Set<Long> manuallyExcluded = longSet(input.get("excludedMaterialIds"));
-        Set<Long> forced = longSet(input.get("includedMaterialIds"));
-        forced.removeAll(manuallyExcluded);
-        if (forced.size() > 30) {
-            throw new BusinessException(ErrorCode.VALIDATION, "At most 30 materials can be required");
-        }
-        Set<Long> preferred = longSet(input.get("preferredMaterialIds"));
-        preferred.removeAll(manuallyExcluded);
 
-        List<CareerMaterial> all = materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(task.getUserId());
-        Map<Long, CareerMaterial> byId = all.stream().collect(Collectors.toMap(CareerMaterial::getId, m -> m));
-        validateOwned(forced, byId);
-        validateOwned(preferred, byId);
-
-        Set<Long> unusableIds = all.stream()
-                .filter(material -> !CareerMaterialEvidence.isReady(material))
-                .map(CareerMaterial::getId)
-                .collect(Collectors.toSet());
-        if (!Collections.disjoint(forced, unusableIds)) {
-            throw new BusinessException(ErrorCode.VALIDATION,
-                    "必须使用的资料需要包含来源原文或有意义的结构化内容");
+        // 候选筛选与 prompt 组装走 MaterialSelectionContextBuilder —— 预览端点用的是同一个类，
+        // 所以"预览看到的 prompt"与"这里实际发送的"必然同一份（R32 AC-R32-8）。
+        MaterialSelectionContextBuilder.Context ctx = contextBuilder.build(task.getUserId(), job, input);
+        if (!ctx.hasCandidates()) {
+            return result(List.of(), List.of(), List.of("No eligible career materials"),
+                    ctx.excluded(), ctx.manuallyExcluded());
         }
-
-        List<CareerMaterial> excluded = all.stream()
-                .filter(m -> manuallyExcluded.contains(m.getId())
-                        || unusableIds.contains(m.getId())
-                        || (m.getUsagePreference() == UsagePreference.EXCLUDED && !forced.contains(m.getId())))
-                .toList();
-        Set<String> jobTokens = tokens(job.getTitle() + " " + job.getJdText());
-        List<CareerMaterial> candidates = all.stream()
-                .filter(m -> !unusableIds.contains(m.getId()))
-                .filter(m -> !manuallyExcluded.contains(m.getId()))
-                .filter(m -> m.getUsagePreference() != UsagePreference.EXCLUDED || forced.contains(m.getId()))
-                .sorted(Comparator.<CareerMaterial>comparingInt(m -> score(m, jobTokens, forced, preferred)).reversed()
-                        .thenComparing(CareerMaterial::getUpdatedAt, Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(CareerMaterial::getId, Comparator.reverseOrder()))
-                .limit(MAX_CANDIDATES)
-                .toList();
-        Set<Long> candidateIds = candidates.stream().map(CareerMaterial::getId).collect(Collectors.toSet());
-        if (!candidateIds.containsAll(forced)) {
-            throw new BusinessException(ErrorCode.VALIDATION, "Too many required materials; candidate limit exceeded");
-        }
-        if (candidates.isEmpty()) {
-            return result(List.of(), List.of(), List.of("No eligible career materials"), excluded,
-                    manuallyExcluded);
-        }
-
-        Map<String, Object> profileContext = profileRepository.findByUserId(task.getUserId())
-                .map(this::profileContext).orElseGet(Map::of);
-        MaterialSelectionPromptBuilder.Prompt prompt = promptBuilder.build(job, candidates,
-                new ArrayList<>(forced), profileContext);
-        Map<String, Object> providerInput = new LinkedHashMap<>();
-        providerInput.put("_systemPrompt", prompt.system());
-        providerInput.put("_taskPrompt", prompt.task());
-        providerInput.put("_dataPrompt", prompt.data());
+        Set<Long> candidateIds = ctx.candidateIds();
+        Set<Long> forced = ctx.forced();
+        Map<Long, CareerMaterial> byId = ctx.byId();
+        List<CareerMaterial> candidates = ctx.candidates();
+        List<CareerMaterial> excluded = ctx.excluded();
+        Set<Long> manuallyExcluded = ctx.manuallyExcluded();
+        Map<String, Object> providerInput = ctx.providerInput();
         AiCallResult response = providerRegistry.route(AiTaskType.JOB_MATERIAL_SELECTION)
                 .call(new AiCallContext(AiTaskType.JOB_MATERIAL_SELECTION, providerInput));
         if (!response.success()) {
@@ -216,62 +173,6 @@ public class JobMaterialSelectionService {
         value.put("materialType", material.getMaterialType().name());
         value.put("usagePreference", material.getUsagePreference().name());
         return value;
-    }
-
-    private int score(CareerMaterial material, Set<String> jobTokens, Set<Long> forced, Set<Long> preferred) {
-        if (forced.contains(material.getId())) return 100_000;
-        int score = preferred.contains(material.getId()) || material.getUsagePreference() == UsagePreference.PREFERRED
-                ? 10_000 : 0;
-        Set<String> materialTokens = tokens(material.getTitle() + " "
-                + Objects.toString(material.getSourceText(), "") + " "
-                + Objects.toString(material.getContentJson(), ""));
-        for (String token : materialTokens) {
-            if (jobTokens.contains(token)) score += Math.min(100, token.length() * 5);
-        }
-        return score;
-    }
-
-    private Set<String> tokens(String text) {
-        String normalized = Objects.toString(text, "").toLowerCase(Locale.ROOT);
-        Set<String> result = Arrays.stream(TOKEN_SPLIT.split(normalized))
-                .filter(token -> token.length() >= 2 && token.chars().anyMatch(ch -> ch < 128))
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        Matcher matcher = CJK_SEQUENCE.matcher(normalized);
-        while (matcher.find()) {
-            String sequence = matcher.group();
-            for (int size : List.of(2, 3)) {
-                for (int i = 0; i + size <= sequence.length(); i++) {
-                    result.add(sequence.substring(i, i + size));
-                }
-            }
-        }
-        return result;
-    }
-
-    /** Excludes all contact details: the model only receives career-positioning facts. */
-    private Map<String, Object> profileContext(PersonalProfile profile) {
-        Map<String, Object> context = new LinkedHashMap<>();
-        putNonBlank(context, "profileSummary", profile.getProfileSummary());
-        putNonEmpty(context, "targetRoleTitles", profile.getTargetRoleTitles());
-        putNonBlank(context, "targetSeniority", profile.getTargetSeniority());
-        putNonEmpty(context, "targetIndustries", profile.getTargetIndustries());
-        putNonEmpty(context, "targetWorkPreferences", profile.getTargetWorkPreferences());
-        putNonBlank(context, "careerPositioningSummary", profile.getCareerPositioningSummary());
-        return context;
-    }
-
-    private void putNonBlank(Map<String, Object> target, String key, String value) {
-        if (value != null && !value.isBlank()) target.put(key, value);
-    }
-
-    private void putNonEmpty(Map<String, Object> target, String key, Collection<String> value) {
-        if (value != null && !value.isEmpty()) target.put(key, value);
-    }
-
-    private void validateOwned(Set<Long> ids, Map<Long, CareerMaterial> byId) {
-        if (!byId.keySet().containsAll(ids)) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "Career material not found");
-        }
     }
 
     private int boundedScore(Object value) {

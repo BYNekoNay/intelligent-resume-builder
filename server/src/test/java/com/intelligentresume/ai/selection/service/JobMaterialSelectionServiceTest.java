@@ -114,7 +114,9 @@ class JobMaterialSelectionServiceTest {
             when(profileRepository.findByUserId(7L)).thenReturn(Optional.empty());
             when(provider.supports(AiTaskType.JOB_MATERIAL_SELECTION)).thenReturn(true);
             service = new JobMaterialSelectionService(materialRepository, jobRepository,
-                    profileRepository, new MaterialSelectionPromptBuilder(new ObjectMapper()),
+                    profileRepository,
+                    new MaterialSelectionContextBuilder(materialRepository, profileRepository,
+                            new MaterialSelectionPromptBuilder(new ObjectMapper())),
                     new AiProviderRegistry(List.of(provider)));
         }
 

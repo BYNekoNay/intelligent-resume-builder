@@ -1880,6 +1880,15 @@ test('resumes the pending job generation after granting AI consent', async ({ pa
     }
     return route.fulfill({ json: response(consentGranted ? grantedConsent : null) })
   })
+  await page.route('**/api/ai/select-materials-for-job/preview', route => route.fulfill({
+    json: response({
+      taskType: 'JOB_MATERIAL_SELECTION',
+      messages: [{ role: 'system', content: 'system prompt' }, { role: 'user', content: 'materials + job' }],
+      includeContact: false,
+      redactions: [],
+      previewToken: 'e2e-material-selection-token',
+    }),
+  }))
   await page.route('**/api/ai/select-materials-for-job', route => {
     generationPayload = route.request().postDataJSON()
     return route.fulfill({
@@ -1907,6 +1916,10 @@ test('resumes the pending job generation after granting AI consent', async ({ pa
 
   await expect(page).toHaveURL(/\/ai-consent\?redirect=/)
   await page.getByRole('button', { name: '同意并启用 AI' }).click()
+
+  // R32：确认发送前预览（取消则不会发起任务）
+  await expect(page.getByTestId('ai-preview-overlay')).toBeVisible()
+  await page.getByTestId('ai-preview-confirm').click()
 
   await expect.poll(() => generationPayload).toMatchObject({
     jobDescriptionId: job.id,

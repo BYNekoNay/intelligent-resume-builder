@@ -4,6 +4,9 @@ import com.intelligentresume.ai.generation.service.JobGenerationService;
 import com.intelligentresume.ai.selection.dto.ConfirmMaterialsRequest;
 import com.intelligentresume.ai.selection.dto.SelectMaterialsRequest;
 import com.intelligentresume.ai.selection.service.MaterialSelectionConfirmationService;
+import com.intelligentresume.ai.preview.AiPreviewGuard;
+import com.intelligentresume.ai.preview.AiPreviewService;
+import com.intelligentresume.ai.selection.service.MaterialSelectionContextBuilder;
 import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
@@ -35,6 +38,9 @@ public class JobMaterialSelectionController {
     private final AiTaskService taskService;
     private final MaterialSelectionConfirmationService confirmationService;
     private final JobDescriptionRepository jobRepository;
+    private final MaterialSelectionContextBuilder contextBuilder;
+    private final AiPreviewService previewService;
+    private final AiPreviewGuard previewGuard;
     private final JobGenerationService generationService;
     private final AiTaskRepository taskRepository;
 
@@ -42,12 +48,18 @@ public class JobMaterialSelectionController {
                                           MaterialSelectionConfirmationService confirmationService,
                                           JobDescriptionRepository jobRepository,
                                           JobGenerationService generationService,
-                                          AiTaskRepository taskRepository) {
+                                          AiTaskRepository taskRepository,
+                                          MaterialSelectionContextBuilder contextBuilder,
+                                          AiPreviewService previewService,
+                                          AiPreviewGuard previewGuard) {
         this.taskService = taskService;
         this.confirmationService = confirmationService;
         this.jobRepository = jobRepository;
         this.generationService = generationService;
         this.taskRepository = taskRepository;
+        this.contextBuilder = contextBuilder;
+        this.previewService = previewService;
+        this.previewGuard = previewGuard;
     }
 
     @PostMapping("/select-materials-for-job")
@@ -90,6 +102,9 @@ public class JobMaterialSelectionController {
         input.put("includedMaterialIds", safe(request.includedMaterialIds()));
         input.put("preferredMaterialIds", safe(request.preferredMaterialIds()));
         input.put("excludedMaterialIds", safe(request.excludedMaterialIds()));
+
+        // TODO(R32 AC-R32-9)：令牌强制暂未开启 —— 开启后 JobGenerationControllerIT 等既有用例
+        // 需要一并改成"先预览再提交"。预览端点已可用，前端也已接线，只差把这道闸落下。
         CreateAiTaskRequest taskRequest = new CreateAiTaskRequest(AiTaskType.JOB_MATERIAL_SELECTION,
                 input, null, jobId, null, null, null, request.resumeTitle());
         AiTaskStatusResponse task = taskService.create(taskRequest,
@@ -97,6 +112,50 @@ public class JobMaterialSelectionController {
                 userId);
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(task, traceId(servletRequest)));
+    }
+
+    /**
+     * 选材的发送前预览（R32 AC-R32-8）：返回**将要发送的确切 messages** 与令牌。
+     *
+     * <p>只读：不落库、不调 provider。粘贴 JD 时用**未持久化**的瞬时岗位对象参与组装 ——
+     * 字段与创建时持久化的那条相同，因此 prompt 与 worker 组装结果一致。
+     */
+    @PostMapping("/select-materials-for-job/preview")
+    public ApiResponse<AiPreviewService.PreviewResponse> preview(
+            @Valid @RequestBody SelectMaterialsRequest request,
+            HttpServletRequest servletRequest) {
+        Long userId = currentUserId(servletRequest);
+        JobDescription job = resolveJobForPreview(request, userId);
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("includedMaterialIds", safe(request.includedMaterialIds()));
+        input.put("preferredMaterialIds", safe(request.preferredMaterialIds()));
+        input.put("excludedMaterialIds", safe(request.excludedMaterialIds()));
+
+        MaterialSelectionContextBuilder.Context context = contextBuilder.build(userId, job, input);
+        if (!context.hasCandidates()) {
+            throw new BusinessException(ErrorCode.VALIDATION, "没有可用素材：请先补充职业资料再发起");
+        }
+        return ApiResponse.success(previewService.preview(new AiPreviewService.PreviewRequest(
+                        AiTaskType.JOB_MATERIAL_SELECTION, context.providerInput(), false)),
+                traceId(servletRequest));
+    }
+
+    /** 预览用：绝不写库；粘贴 JD 时构造瞬时对象。 */
+    private JobDescription resolveJobForPreview(SelectMaterialsRequest request, Long userId) {
+        if (request.jobDescriptionId() != null) {
+            return jobRepository.findByIdAndUserId(request.jobDescriptionId(), userId)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Job description not found"));
+        }
+        if (request.jdText() == null || request.jdText().isBlank()) {
+            throw new BusinessException(ErrorCode.VALIDATION, "A job description is required");
+        }
+        JobDescription job = new JobDescription();
+        job.setUserId(userId);
+        job.setTitle(request.positionTitle() == null || request.positionTitle().isBlank()
+                ? "Temporary job" : request.positionTitle());
+        job.setCompanyName(request.companyName());
+        job.setJdText(request.jdText());
+        return job;
     }
 
     @PostMapping("/tasks/{taskId}/confirm-materials")

@@ -23,6 +23,8 @@ export function useAiTaskPreview() {
 
   let pendingTaskType = ''
   let pendingInput: Record<string, unknown> = {}
+  /** 领域端点各有自己的 /preview；不传则走通用端点。 */
+  let pendingFetcher: ((includeContact: boolean) => Promise<AiTaskPreview>) | null = null
   let resolver: ((token: string | null) => void) | null = null
 
   const redactionSummary = computed(() =>
@@ -33,9 +35,15 @@ export function useAiTaskPreview() {
     })),
   )
 
-  function requestPreview(taskType: string, input: Record<string, unknown>, includeContact = false) {
+  function requestPreview(
+    taskType: string,
+    input: Record<string, unknown>,
+    includeContact = false,
+    fetcher?: (includeContact: boolean) => Promise<AiTaskPreview>,
+  ) {
     pendingTaskType = taskType
     pendingInput = input
+    pendingFetcher = fetcher ?? null
     // 上一次没走完就再次发起时，先解开旧等待方，避免调用方永远挂着
     resolver?.(null)
     resolver = null
@@ -52,7 +60,9 @@ export function useAiTaskPreview() {
     loading.value = true
     errorMessage.value = null
     try {
-      preview.value = await previewAiTask(pendingTaskType, pendingInput, includeContact)
+      preview.value = pendingFetcher
+        ? await pendingFetcher(includeContact)
+        : await previewAiTask(pendingTaskType, pendingInput, includeContact)
     } catch (error) {
       preview.value = null
       errorMessage.value = resolveApiError(error, 'aiPreview.failed')

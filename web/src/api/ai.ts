@@ -155,8 +155,8 @@ export function withdrawConsent() {
   return apiClient.delete<ApiResponse<ConsentResponse>>('/api/ai/consent')
 }
 
-export function selectMaterialsForJob(payload: MaterialSelectionRequest, idempotencyKey: string) {
-  const request = {
+function materialSelectionBody(payload: MaterialSelectionRequest) {
+  return {
     jobDescriptionId: payload.jobDescriptionId,
     jdText: payload.jdText,
     companyName: payload.companyName,
@@ -166,8 +166,22 @@ export function selectMaterialsForJob(payload: MaterialSelectionRequest, idempot
     excludedMaterialIds: payload.input?.excludedMaterialIds ?? [],
     resumeTitle: payload.resumeTitle,
   }
-  return apiClient.post<ApiResponse<AiTask>>('/api/ai/select-materials-for-job', request, {
-    headers: { 'Idempotency-Key': idempotencyKey },
+}
+
+/**
+ * 选材的发送前预览（R32）。只读：不落库、不调模型。
+ *
+ * 与创建共用 `materialSelectionBody` —— 字段一旦漂移，令牌就会对不上（后端会用自己组装的结果重算）。
+ */
+export function previewMaterialSelection(payload: MaterialSelectionRequest) {
+  return apiClient
+    .post<ApiResponse<AiTaskPreview>>('/api/ai/select-materials-for-job/preview', materialSelectionBody(payload))
+    .then(response => response.data.data)
+}
+
+export function selectMaterialsForJob(payload: MaterialSelectionRequest, idempotencyKey: string, previewToken: string) {
+  return apiClient.post<ApiResponse<AiTask>>('/api/ai/select-materials-for-job', materialSelectionBody(payload), {
+    headers: { 'Idempotency-Key': idempotencyKey, 'X-AI-Preview-Token': previewToken },
   })
 }
 

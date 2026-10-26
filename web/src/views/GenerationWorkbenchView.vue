@@ -5,10 +5,12 @@ import { ArrowLeft, ArrowRight, BriefcaseBusiness, Check, Database, FileText, Sh
 import { useCareerMaterialStore } from '@/stores/careerMaterial'
 import { useJobDescriptionStore } from '@/stores/jobDescription'
 import { useAiTaskStore } from '@/stores/aiTask'
-import { getConsent, hasJobGenerationConsent, selectMaterialsForJob, type MaterialSelectionRequest } from '@/api/ai'
+import { getConsent, hasJobGenerationConsent, previewMaterialSelection, selectMaterialsForJob, type MaterialSelectionRequest } from '@/api/ai'
 import type { CareerMaterialSummary, MaterialType } from '@/api/careerMaterial'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
+import { useAiTaskPreview } from '@/composables/useAiTaskPreview'
+import AiPreviewDialog from '@/components/ai/AiPreviewDialog.vue'
 
 const { t } = useLocale()
 
@@ -169,8 +171,26 @@ function restoreGenerationForm(payload: MaterialSelectionRequest) {
   step.value = 3
 }
 
+/** R32：选材前先让用户看清将要发送的 prompt。令牌只能从这里拿到。 */
+const {
+  visible: previewVisible,
+  loading: previewLoading,
+  errorMessage: previewError,
+  preview: previewPayload,
+  redactionSummary: previewRedactions,
+  requestPreview,
+  confirm: confirmPreview,
+  cancel: cancelPreview,
+  toggleContact: togglePreviewContact,
+} = useAiTaskPreview()
+
 async function submitGeneration(payload: MaterialSelectionRequest, idempotencyKey: string) {
-  const res = await selectMaterialsForJob(payload, idempotencyKey)
+  // 取消 → 一条都不发（不调创建端点）
+  const token = await requestPreview('JOB_MATERIAL_SELECTION', {}, false,
+    () => previewMaterialSelection(payload))
+  if (!token) return
+
+  const res = await selectMaterialsForJob(payload, idempotencyKey, token)
   const task = res.data.data
   taskStore.remember(task.id)
   sessionStorage.removeItem(PENDING_GENERATION_KEY)
@@ -376,6 +396,16 @@ const TYPE_LABELS = computed<Record<MaterialType, string>>(() => ({
       </div>
     </section>
   </main>
+  <AiPreviewDialog
+    :visible="previewVisible"
+    :loading="previewLoading"
+    :error-message="previewError"
+    :preview="previewPayload"
+    :redactions="previewRedactions"
+    @confirm="confirmPreview"
+    @cancel="cancelPreview"
+    @toggle-contact="togglePreviewContact"
+  />
 </template>
 
 <style scoped>
