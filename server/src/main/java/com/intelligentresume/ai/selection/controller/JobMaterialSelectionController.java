@@ -67,6 +67,7 @@ public class JobMaterialSelectionController {
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> select(
             @Valid @RequestBody SelectMaterialsRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = AiPreviewGuard.HEADER, required = false) String previewToken,
             HttpServletRequest servletRequest) {
         Long userId = currentUserId(servletRequest);
         String provided = idempotencyKey == null ? null : idempotencyKey.trim();
@@ -94,7 +95,7 @@ public class JobMaterialSelectionController {
             jobId = jobRepository.save(job).getId();
         }
         if (jobId == null) throw new BusinessException(ErrorCode.VALIDATION, "A job description is required");
-        jobRepository.findByIdAndUserId(jobId, userId)
+        JobDescription previewJob = jobRepository.findByIdAndUserId(jobId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Job description not found"));
         generationService.validateMaterialIds(userId, request.includedMaterialIds(),
                 request.preferredMaterialIds(), request.excludedMaterialIds());
@@ -103,8 +104,10 @@ public class JobMaterialSelectionController {
         input.put("preferredMaterialIds", safe(request.preferredMaterialIds()));
         input.put("excludedMaterialIds", safe(request.excludedMaterialIds()));
 
-        // TODO(R32 AC-R32-9)：令牌强制暂未开启 —— 开启后 JobGenerationControllerIT 等既有用例
-        // 需要一并改成"先预览再提交"。预览端点已可用，前端也已接线，只差把这道闸落下。
+        // R32 AC-R32-9：必须先看过 /select-materials-for-job/preview 的确切内容并确认。
+        // 校验用服务端**自己组装**的 providerInput 重算令牌 —— 客户端伪造不了"预览过"。
+        MaterialSelectionContextBuilder.Context previewContext = contextBuilder.build(userId, previewJob, input);
+        previewGuard.require(AiTaskType.JOB_MATERIAL_SELECTION, previewContext.providerInput(), previewToken);
         CreateAiTaskRequest taskRequest = new CreateAiTaskRequest(AiTaskType.JOB_MATERIAL_SELECTION,
                 input, null, jobId, null, null, null, request.resumeTitle());
         AiTaskStatusResponse task = taskService.create(taskRequest,
