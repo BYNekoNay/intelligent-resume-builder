@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.settings;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.ai.provider.AiRuntimeOverlay;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.config.DesktopModeProperties;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,6 +61,7 @@ class LocalAiSettingServiceIT {
 
     private LocalAiCredentialStore credentials;
     private LocalAiSettingService service;
+    private AiRuntimeOverlay overlay;
 
     @BeforeEach
     void setUp() {
@@ -67,7 +69,8 @@ class LocalAiSettingServiceIT {
         DesktopModeProperties properties = new DesktopModeProperties();
         properties.setDataDir(dataDir.toString());
         credentials = new LocalAiCredentialStore(properties, new AlwaysAvailable());
-        service = new LocalAiSettingService(repository, credentials, new ObjectMapper());
+        overlay = new AiRuntimeOverlay();
+        service = new LocalAiSettingService(repository, credentials, new ObjectMapper(), overlay);
     }
 
     /** 假保护器：把明文反转当密文，足够验证"存的是密文、能读回、能删掉"。 */
@@ -181,5 +184,34 @@ class LocalAiSettingServiceIT {
         // 整行序列化后不得出现密钥明文（表里根本没有密钥列，这条断言防止将来有人"顺手加一列"）
         String row = saved.getId() + saved.getBaseUrl() + saved.getModel() + saved.getProviderCode();
         assertFalse(row.contains("sk-zzz"), "密钥不得出现在设置行里（R34：会进整库备份）");
+    }
+
+    @Test
+    void savingEnabledSettingPublishesToRuntimeOverlay() {
+        service.save(USER, new LocalAiSettingService.UpdateRequest("https://local.test/v1", "my-model", true, "sk-live"));
+
+        assertTrue(overlay.active(), "保存后必须立即生效（否则就是「填了设置但任务还用旧配置」）");
+        assertEquals("sk-live", overlay.apiKeyOr("configured-key"));
+        assertEquals(List.of("my-model"), overlay.candidatesOr(List.of("qwen-plus", "glm-4")));
+    }
+
+    @Test
+    void disablingSettingClearsOverlay() {
+        service.save(USER, new LocalAiSettingService.UpdateRequest("https://local.test/v1", "m", true, "sk-live"));
+        assertTrue(overlay.active());
+
+        service.save(USER, new LocalAiSettingService.UpdateRequest("https://local.test/v1", "m", false, null));
+
+        assertFalse(overlay.active(), "关闭本地设置后应回落到配置文件/环境变量");
+    }
+
+    @Test
+    void deleteClearsOverlay() {
+        service.save(USER, new LocalAiSettingService.UpdateRequest("https://local.test/v1", "m", true, "sk-live"));
+        assertTrue(overlay.active());
+
+        service.delete(USER);
+
+        assertFalse(overlay.active());
     }
 }

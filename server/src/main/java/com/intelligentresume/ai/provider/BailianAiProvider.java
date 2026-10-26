@@ -58,9 +58,6 @@ import java.util.regex.Pattern;
 public class BailianAiProvider implements AiProvider {
 
     private static final Logger log = LoggerFactory.getLogger(BailianAiProvider.class);
-    private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```(?:json)?\\s*\\n?([\\s\\S]*?)\\n?```");
-    private static final Pattern JSON_OBJECT_PATTERN = Pattern.compile("\\{[\\s\\S]*}");
-    private static final Pattern JSON_ARRAY_PATTERN = Pattern.compile("\\[[\\s\\S]*]");
 
     private final RestClient restClient;
     private final String apiKey;
@@ -75,6 +72,16 @@ public class BailianAiProvider implements AiProvider {
      * 单调时钟，用于链总预算判定。抽成字段便于单测注入，避免测试里真的等待。
      */
     private LongSupplier nanoTime = System::nanoTime;
+
+    private final int connectTimeout;
+    private final int readTimeout;
+
+    /**
+     * 运行时覆盖（桌面端用户在设置里改的 baseUrl / key / model）。
+     * 刻意用 setter 注入而不是构造参数：本类的 12 处测试构造点都不需要关心它，
+     * 为空时行为与改造前完全一致。
+     */
+    private AiRuntimeOverlay runtimeOverlay;
 
     public BailianAiProvider(
             @Value("${app.ai.bailian.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String baseUrl,
@@ -104,20 +111,9 @@ public class BailianAiProvider implements AiProvider {
                 Clock.systemUTC());
         this.chainTotalBudget = Duration.ofSeconds(Math.max(chainTotalBudgetSeconds, readTimeout));
 
-        // 使用 JDK HttpClient 请求工厂：HttpURLConnection 默认强制 Accept-Encoding: gzip，
-        // 百炼对 gzip 响应会以 application/octet-stream 返回导致 RestClient 无法反序列化；
-        // JDK HttpClient 默认不发送 gzip 头，配合 Accept-Encoding: identity 双保险避免压缩。
-        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(connectTimeout)).build());
-        factory.setReadTimeout(Duration.ofSeconds(readTimeout));
-
-        this.restClient = RestClient.builder()
-                .baseUrl(baseUrl)
-                .requestFactory(factory)
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .defaultHeader(HttpHeaders.ACCEPT_ENCODING, "identity")
-                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-                .build();
+        this.connectTimeout = connectTimeout;
+        this.readTimeout = readTimeout;
+        this.restClient = buildClient(baseUrl, apiKey);
 
         if (observability != null) {
             observability.registerModelChainAvailabilityGauge(this::availableModelCount);
@@ -127,6 +123,31 @@ public class BailianAiProvider implements AiProvider {
                         + "quotaCooldown={}s, transientCooldown={}s, chainTotalBudget={}s, thinkingDisabledFor={}",
                 baseUrl, chain.models(), connectTimeout, readTimeout, quotaCooldownSeconds, transientCooldownSeconds,
                 chainTotalBudget.toSeconds(), thinkingDisabledTaskTypes);
+    }
+
+    /**
+     * 建 RestClient。抽出来是因为有两条路径要用：构造期（配置值）与运行时覆盖（用户设置值）。
+     *
+     * <p>用 JDK HttpClient 请求工厂：HttpURLConnection 默认强制 Accept-Encoding: gzip，
+     * 百炼对 gzip 响应会以 application/octet-stream 返回导致反序列化失败；
+     * JDK HttpClient 默认不发 gzip 头，配合 Accept-Encoding: identity 双保险。
+     */
+    private RestClient buildClient(String baseUrl, String apiKey) {
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(connectTimeout)).build());
+        factory.setReadTimeout(Duration.ofSeconds(readTimeout));
+        return RestClient.builder()
+                .baseUrl(baseUrl)
+                .requestFactory(factory)
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader(HttpHeaders.ACCEPT_ENCODING, "identity")
+                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                .build();
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setRuntimeOverlay(AiRuntimeOverlay runtimeOverlay) {
+        this.runtimeOverlay = runtimeOverlay;
     }
 
     /**
@@ -180,23 +201,26 @@ public class BailianAiProvider implements AiProvider {
     /** 审计字段：链首模型。实际服务模型见调用日志与 {@code resume_ai_provider_calls} 指标。 */
     @Override
     public String modelCode() {
-        return chain.primary();
+        List<String> candidates = modelChain();
+        // 空链也要能返回：本方法在每次调用与指标上报里都会走，越界会把"没配模型"变成 500
+        return candidates.isEmpty() ? "" : candidates.get(0);
     }
 
     @Override
     public boolean isAvailable() {
-        return apiKey != null && !apiKey.isBlank();
+        String key = runtimeOverlay == null ? apiKey : runtimeOverlay.apiKeyOr(apiKey);
+        return key != null && !key.isBlank();
     }
 
     /** 当前可调度的模型数量：链上未处于冷却期的模型数。 */
     @Override
     public int availableModelCount() {
-        return isAvailable() ? chain.availableCount() : 0;
+        return isAvailable() ? (runtimeOverlay == null ? chain.availableCount() : runtimeOverlay.candidatesOr(chain.models()).size()) : 0;
     }
 
     /** 供健康检查与排障读取模型链快照，不含任何敏感信息。 */
     public List<String> modelChain() {
-        return chain.models();
+        return runtimeOverlay == null ? chain.models() : runtimeOverlay.candidatesOr(chain.models());
     }
 
     /** 对哪些任务类型关闭模型推理（可配置）。 */
@@ -260,7 +284,8 @@ public class BailianAiProvider implements AiProvider {
     public AiCallResult call(AiCallContext ctx) {
         String requestId = UUID.randomUUID().toString();
 
-        if (apiKey == null || apiKey.isBlank()) {
+        String effectiveKey = runtimeOverlay == null ? apiKey : runtimeOverlay.apiKeyOr(apiKey);
+        if (effectiveKey == null || effectiveKey.isBlank()) {
             AiCallResult result = AiCallResult.fail("百炼 API Key 未配置 (app.ai.bailian.api-key)", false, requestId);
             observability.recordAiProviderCall(ctx.type(), code(), modelCode(), false,
                     AiFailureCategory.PROVIDER_4XX, Duration.ZERO);
@@ -281,7 +306,7 @@ public class BailianAiProvider implements AiProvider {
      * @return 成功结果，或全部候选失败后的聚合失败结果
      */
     AiCallResult callChain(AiCallContext ctx, String requestId, ModelInvoker invoker) {
-        List<String> candidates = chain.candidates();
+        List<String> candidates = runtimeOverlay == null ? chain.candidates() : runtimeOverlay.candidatesOr(chain.candidates());
         if (candidates.isEmpty()) {
             Instant availableAgainAt = chain.availableAgainAt();
             log.warn("Model chain has no schedulable candidate: taskType={}, chainSize={}, earliestRecovery={}",
@@ -394,7 +419,7 @@ public class BailianAiProvider implements AiProvider {
             List<Map<String, String>> messages = buildMessages(ctx);
             Map<String, Object> requestBody = buildRequestBody(model, ctx, messages);
 
-            Map<String, Object> response = restClient.post()
+            Map<String, Object> response = (runtimeOverlay == null ? restClient : runtimeOverlay.clientOr(restClient, this::buildClient)).post()
                     .uri("/chat/completions")
                     .header(TraceIdFilter.TRACE_ID_HEADER, traceId())
                     .body(requestBody)
@@ -538,7 +563,7 @@ public class BailianAiProvider implements AiProvider {
      */
     @SuppressWarnings("unchecked")
     private Map<String, Object> parseResponseContent(String content, AiTaskType taskType) {
-        String json = extractJson(content);
+        String json = AiResponseJson.extract(content);
 
         try {
             Object parsed = objectMapper.readValue(json, Object.class);
@@ -558,40 +583,4 @@ public class BailianAiProvider implements AiProvider {
         }
     }
 
-    /**
-     * 从 LLM 输出中提取 JSON 字符串。
-     * 优先级:markdown code block → 整体 JSON → 嵌入的 JSON 对象/数组。
-     */
-    private String extractJson(String content) {
-        if (content == null || content.isBlank()) {
-            return "{}";
-        }
-        String trimmed = content.trim();
-
-        // 1. 尝试提取 markdown code block 中的内容
-        Matcher blockMatcher = JSON_BLOCK_PATTERN.matcher(trimmed);
-        if (blockMatcher.find()) {
-            return blockMatcher.group(1).trim();
-        }
-
-        // 2. 如果整体以 { 或 [ 开头,直接返回
-        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            return trimmed;
-        }
-
-        // 3. 尝试找嵌入的 JSON 对象
-        Matcher objMatcher = JSON_OBJECT_PATTERN.matcher(trimmed);
-        if (objMatcher.find()) {
-            return objMatcher.group();
-        }
-
-        // 4. 尝试找嵌入的 JSON 数组
-        Matcher arrMatcher = JSON_ARRAY_PATTERN.matcher(trimmed);
-        if (arrMatcher.find()) {
-            return arrMatcher.group();
-        }
-
-        // 5. 无法提取,返回原文(会在 parseResponseContent 中 fallback)
-        return trimmed;
-    }
 }

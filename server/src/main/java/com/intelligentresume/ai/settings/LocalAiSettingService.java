@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.settings;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.ai.provider.AiRuntimeOverlay;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 import org.slf4j.Logger;
@@ -45,13 +46,16 @@ public class LocalAiSettingService {
     private final LocalAiSettingRepository repository;
     private final LocalAiCredentialStore credentials;
     private final ObjectMapper objectMapper;
+    private final AiRuntimeOverlay runtimeOverlay;
 
     LocalAiSettingService(LocalAiSettingRepository repository,
                           LocalAiCredentialStore credentials,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper,
+                          AiRuntimeOverlay runtimeOverlay) {
         this.repository = repository;
         this.credentials = credentials;
         this.objectMapper = objectMapper;
+        this.runtimeOverlay = runtimeOverlay;
     }
 
     /** 对外视图：**没有**密钥字段（只有"是否已保存"）。 */
@@ -116,13 +120,17 @@ public class LocalAiSettingService {
             credentials.save(userId, apiKey);
             setting.setCredentialPresent(true);
         }
-        return toView(repository.save(setting));
+        LocalAiSetting saved = repository.save(setting);
+        // 保存后立即同步到运行时覆盖 —— 否则"改了设置不生效"（本类存在的意义就在这一步）
+        publishToRuntime(saved);
+        return toView(saved);
     }
 
     @Transactional
     public void delete(Long userId) {
         repository.deleteByUserId(userId);
         credentials.delete(userId);
+        runtimeOverlay.clear();
         // 刻意不打 userId：LogPrivacyGateTest 禁止日志记录用户标识（排查靠时间点与操作类型即可）
         log.info("本地 AI 设置已删除（含加密凭据）");
     }
@@ -148,6 +156,25 @@ public class LocalAiSettingService {
 
         TestResult result = callProvider(baseUrl, model, apiKey);
         return recordTestResult(setting, result.ok(), result.message());
+    }
+
+    /**
+     * 把设置同步到运行时覆盖。
+     *
+     * <p>三条分支都要覆盖到：未启用 → 清空；启用但解不出密钥 → 清空（宁可回落到配置文件，
+     * 也不要用半个配置去请求）；启用且有密钥 → 整份替换。
+     */
+    public void publishToRuntime(LocalAiSetting setting) {
+        if (setting == null || !setting.isEnabled()) {
+            runtimeOverlay.clear();
+            return;
+        }
+        String apiKey = credentials.load(setting.getUserId()).orElse(null);
+        if (apiKey == null || apiKey.isBlank()) {
+            runtimeOverlay.clear();
+            return;
+        }
+        runtimeOverlay.apply(new AiRuntimeOverlay.Snapshot(setting.getBaseUrl(), apiKey, setting.getModel()));
     }
 
     // ------------------------------------------------------------------ 内部
