@@ -56,6 +56,5 @@ cd desktop-shell && npm install && npm start
 - **Electron 窗口本身没起过**：本机是无头会话，`npm install && npm start` 留给有图形会话时验；
 - **没有安装包**：`electron-builder` / NSIS / 图标 / 代码签名都没做，安装流程完全没跑过；
 - **没有 Windows Toast**（R36）：「关闭应用也能提醒」是阶段六的另一半，一行未写；
-- **本地 AI 设置还没接到任务链路上**：设置能存、能测连接、密钥 DPAPI 加密落盘，但
-  `BailianAiProvider` 仍只读配置文件/环境变量 —— 也就是说"改了设置，实际任务还是用旧配置"。
-  见 `docs/decisions/OPEN-DECISIONS.md` 里 2026-10-24 的登记项。
+- ~~本地 AI 设置还没接到任务链路上~~ —— 2026-10-26 已接：`AiRuntimeOverlay` 在 provider 的 6 个
+  决策点生效，保存即生效、关闭/删除回落配置文件（见 `OPEN-DECISIONS` 同日 RESOLVED）。

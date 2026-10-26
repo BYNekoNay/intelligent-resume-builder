@@ -247,3 +247,15 @@ AI 凭据属本地 AI 设置，不属工作区内容：加密后存于数据目�
   未被 `SERVER__PORT` 劫持、退出无孤儿进程。
 - **未验证**：Electron 窗口本身（本机无头）、安装包（electron-builder/NSIS/签名未做）。
 - **未做**：R36 Windows Toast（「关闭应用也能提醒」是阶段六的另一半验收项）。
+
+### 阶段五补记（2026-10-26）：设置已接进任务链路
+
+上一段记的「设置尚未接入任务链路」已解决，做法与代价：
+
+- 新增 `AiRuntimeOverlay`（不可变快照 + volatile 换引用），provider 在 6 个决策点读取
+  （isAvailable / key 判空 / 候选模型 / primary / models / RestClient）；覆盖为空时**逐字节等于改造前**。
+- 保存设置立即生效（未启用或解不出密钥则清空、回落到配置文件）；启动时把已存设置装回去。
+- 覆盖生效时**只用用户那一个模型**，不把配置里的模型链混进来（D7：单 endpoint + model + key）。
+- 为了塞进行数棘轮：JSON 提取抽成 `AiResponseJson`，解析逻辑放进 overlay，
+  `BailianAiProvider` 597 → 584 行，基线同步下调（棘轮只许下调）。
+- 仍未做：R32 发送前预览、R33 失败保留/降级 —— 阶段五整体**还不是**「完成」。
