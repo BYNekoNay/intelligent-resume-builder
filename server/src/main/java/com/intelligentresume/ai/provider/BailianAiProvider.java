@@ -321,6 +321,7 @@ public class BailianAiProvider implements AiProvider {
         boolean sawQuotaExhausted = false;
         boolean budgetExhausted = false;
         int attempted = 0;
+        List<AiCallResult.ModelAttempt> attempts = new ArrayList<>();
         long chainStartedAt = nanoTime.getAsLong();
 
         for (int index = 0; index < candidates.size(); index++) {
@@ -344,11 +345,14 @@ public class BailianAiProvider implements AiProvider {
                             ctx.type(), model, index);
                 }
                 chain.markSuccess(model);
-                return outcome.result();
+                // R33：把"顺延过几个模型"变成结果里的事实，而不是只留一行日志
+                return outcome.result().withAttempts(attempts);
             }
 
             lastCategory = outcome.category();
             lastMessage = outcome.result().errorMessage();
+            attempts.add(new AiCallResult.ModelAttempt(model, outcome.category().name(),
+                    abbreviate(outcome.result().errorMessage())));
             if (outcome.category() == AiFailureCategory.QUOTA_EXHAUSTED
                     || BailianFailureClassifier.isQuotaExhausted(outcome.errorCode())) {
                 sawQuotaExhausted = true;
@@ -384,7 +388,15 @@ public class BailianAiProvider implements AiProvider {
                 ? "百炼模型链已达总时间预算（已尝试 " + attempted + " 个模型，预算 "
                         + chainTotalBudget.toSeconds() + "s）；" + describeLastMessage(lastMessage)
                 : buildAggregateMessage(attempted, lastMessage);
-        return AiCallResult.fail(message, true, requestId);
+        return AiCallResult.fail(message, true, requestId).withAttempts(attempts);
+    }
+
+    /** 尝试轨迹里只放短摘要：错误原文可能有几 KB，装进任务结果会把响应撑大。 */
+    private static String abbreviate(String message) {
+        if (message == null) {
+            return "";
+        }
+        return message.length() <= 160 ? message : message.substring(0, 160) + "…";
     }
 
     private long elapsedSecondsSince(long startedAtNanos) {
@@ -528,29 +540,9 @@ public class BailianAiProvider implements AiProvider {
      * <p>包级可见以便单测直接断言 prompt 组装结果，无需发起真实网络调用。
      */
     List<Map<String, String>> buildMessages(AiCallContext ctx) {
-        Map<String, Object> input = ctx.input() != null ? ctx.input() : Map.of();
-
-        // 如果上游传入了构建好的 prompt(JOB_GENERATION 路径)
-        String systemPrompt = (String) input.get("_systemPrompt");
-        String taskPrompt = (String) input.get("_taskPrompt");
-        String dataPrompt = (String) input.get("_dataPrompt");
-
-        List<Map<String, String>> messages = new ArrayList<>();
-
-        if (systemPrompt != null) {
-            messages.add(Map.of("role", "system", "content", systemPrompt));
-            String userContent = (taskPrompt != null ? taskPrompt + "\n\n" : "")
-                    + (dataPrompt != null ? dataPrompt : "");
-            messages.add(Map.of("role", "user", "content", userContent));
-        } else {
-            // 通用任务类型:使用内置模板
-            String system = PromptTemplates.systemFor(ctx.type(), input);
-            String userPrompt = PromptTemplates.userPromptFor(ctx.type(), input);
-            messages.add(Map.of("role", "system", "content", system));
-            messages.add(Map.of("role", "user", "content", userPrompt));
-        }
-
-        return messages;
+        // 委托给 AiMessageAssembler：**预览与实际发送共用同一实现**（R32 的前提）。
+        // 这里保留包级方法只是因为既有单测直接调它；逻辑本身不再重复一遍。
+        return AiMessageAssembler.assemble(ctx.type(), ctx.input());
     }
 
     /**

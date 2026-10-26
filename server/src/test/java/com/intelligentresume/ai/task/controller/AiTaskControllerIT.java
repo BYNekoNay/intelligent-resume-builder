@@ -104,12 +104,7 @@ class AiTaskControllerIT {
                         .header("Authorization", "Bearer " + tokenA)
                         .header("Idempotency-Key", "test-idem-key-001")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "taskType": "RESUME_OPTIMIZE",
-                                  "input": {"prompt": "生成简历"}
-                                }
-                                """))
+                        .content(previewed(tokenA, "RESUME_OPTIMIZE", "{\"prompt\": \"生成简历\"}")))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.id").isNumber())
@@ -130,9 +125,7 @@ class AiTaskControllerIT {
         mockMvc.perform(post("/api/ai/tasks")
                         .header("Authorization", "Bearer " + tokenB)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"taskType": "RESUME_OPTIMIZE"}
-                                """))
+                        .content(previewed(tokenA, "RESUME_OPTIMIZE", null)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(40302));
     }
@@ -159,12 +152,7 @@ class AiTaskControllerIT {
                         .header("Authorization", "Bearer " + tokenA)
                         .header("Idempotency-Key", "test-idem-key-001")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "taskType": "RESUME_OPTIMIZE",
-                                  "input": {"prompt": "生成简历"}
-                                }
-                                """))
+                        .content(previewed(tokenA, "RESUME_OPTIMIZE", "{\"prompt\": \"生成简历\"}")))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn();
@@ -196,9 +184,7 @@ class AiTaskControllerIT {
     void withoutAuth_40101() throws Exception {
         mockMvc.perform(post("/api/ai/tasks")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"taskType": "RESUME_OPTIMIZE"}
-                                """))
+                        .content(previewed(tokenA, "RESUME_OPTIMIZE", null)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(40101));
     }
@@ -248,7 +234,7 @@ class AiTaskControllerIT {
                         .header("Idempotency-Key", "k".repeat(129))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"taskType": "RESUME_OPTIMIZE", "input": {"prompt": "超长键"}}
+                                """ + previewed(tokenA, "RESUME_OPTIMIZE", "{\"prompt\": \"超长键\"}") + """
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(40001));
@@ -258,12 +244,7 @@ class AiTaskControllerIT {
                         .header("Authorization", "Bearer " + tokenA)
                         .header("Idempotency-Key", "  test-idem-key-001  ")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "taskType": "RESUME_OPTIMIZE",
-                                  "input": {"prompt": "生成简历"}
-                                }
-                                """))
+                        .content(previewed(tokenA, "RESUME_OPTIMIZE", "{\"prompt\": \"生成简历\"}")))
                 .andExpect(status().isAccepted())
                 .andReturn();
         Long returnedId = objectMapper.readTree(replay.getResponse().getContentAsString())
@@ -356,4 +337,32 @@ class AiTaskControllerIT {
         task.setRetryCount(0);
         return taskRepository.saveAndFlush(task);
     }
+
+
+    /**
+     * 先走一遍真实预览拿令牌，再拼出创建请求体（R32：创建必须带 previewToken）。
+     * 用 HTTP 而不是直接算哈希，是为了让 IT 走的是**客户端真实协议**。
+     */
+    private String previewed(String bearer, String taskType, String inputJson) throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode input = inputJson == null
+                ? objectMapper.createObjectNode()
+                : (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.readTree(inputJson);
+        com.fasterxml.jackson.databind.node.ObjectNode previewBody = objectMapper.createObjectNode();
+        previewBody.put("taskType", taskType);
+        previewBody.set("input", input.deepCopy());
+        MvcResult preview = mockMvc.perform(post("/api/ai/tasks/preview")
+                        .header("Authorization", "Bearer " + bearer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(previewBody)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String token = objectMapper.readTree(preview.getResponse().getContentAsString())
+                .get("data").get("previewToken").asText();
+        input.put("_previewToken", token);
+        com.fasterxml.jackson.databind.node.ObjectNode body = objectMapper.createObjectNode();
+        body.put("taskType", taskType);
+        body.set("input", input);
+        return objectMapper.writeValueAsString(body);
+    }
+
 }

@@ -6,6 +6,7 @@ import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.dto.AiTaskContinuationResponse;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
+import com.intelligentresume.ai.preview.AiPreviewService;
 import com.intelligentresume.ai.task.service.AiTaskService;
 import com.intelligentresume.ai.task.service.AiTaskCapabilityRegistry;
 import com.intelligentresume.common.api.ApiResponse;
@@ -35,14 +36,35 @@ import java.util.UUID;
 public class AiTaskController {
 
     private final AiTaskService taskService;
+    private final AiPreviewService previewService;
     private final ObjectMapper objectMapper;
     private final long maxInputJsonBytes;
 
-    public AiTaskController(AiTaskService taskService, ObjectMapper objectMapper,
+    public AiTaskController(AiTaskService taskService, AiPreviewService previewService,
+                            ObjectMapper objectMapper,
                             @Value("${app.ai.max-input-json-bytes:262144}") long maxInputJsonBytes) {
         this.taskService = taskService;
+        this.previewService = previewService;
         this.objectMapper = objectMapper;
         this.maxInputJsonBytes = maxInputJsonBytes;
+    }
+
+    /**
+     * 发送前预览（R32）：返回**将要发送的确切 messages** 与预览令牌。
+     *
+     * <p>只读：不写库、不调 provider。想真正发起任务，必须带上看完这份预览后拿到的
+     * {@code previewToken}（见 {@link #createTask}）。
+     */
+    @PostMapping("/tasks/preview")
+    public ApiResponse<AiPreviewService.PreviewResponse> previewTasks(
+            @RequestBody AiPreviewService.PreviewRequest request, HttpServletRequest servletRequest) {
+        if (request == null || request.taskType() == null) {
+            throw new BusinessException(ErrorCode.VALIDATION, "taskType 不能为空");
+        }
+        AiTaskCapabilityRegistry.requireRegistered(request.taskType());
+        requireInputWithinSizeLimit(request.input());
+        return ApiResponse.success(previewService.preview(request),
+                (String) servletRequest.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
     }
 
     @PostMapping("/tasks")
@@ -56,6 +78,7 @@ public class AiTaskController {
                     "This AI task must start from its domain endpoint");
         }
         requireInputWithinSizeLimit(request.input());
+        requirePreviewConfirmed(request.taskType(), request.input());
         String provided = idempotencyKey == null ? null : idempotencyKey.trim();
         if (provided != null && !provided.isEmpty() && provided.length() > 128) {
             throw new BusinessException(ErrorCode.VALIDATION, "Idempotency-Key 最长 128 字符");
@@ -88,6 +111,23 @@ public class AiTaskController {
     public ApiResponse<Integer> clearHistory(HttpServletRequest request) {
         return ApiResponse.success(taskService.deleteHistory(currentUserId(request)),
                 (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
+    }
+
+    /**
+     * R32：「需显式确认」。没有预览令牌或令牌与当前载荷不符，一律拒绝，且**不落库** ——
+     * 拒绝发生在 service 之前，所以不会产生 ai_task 行。
+     */
+    private void requirePreviewConfirmed(com.intelligentresume.ai.task.domain.AiTaskType taskType,
+                                         java.util.Map<String, Object> input) {
+        AiPreviewService.TokenCheck check = previewService.verify(taskType, input);
+        if (check == AiPreviewService.TokenCheck.MISSING) {
+            throw new BusinessException(ErrorCode.VALIDATION,
+                    "请先调用 /api/ai/tasks/preview 预览将要发送的内容并确认（缺少 previewToken）");
+        }
+        if (check == AiPreviewService.TokenCheck.STALE) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                    "预览内容与本次提交不一致（输入或脱敏选项已改变）：请重新预览后再提交");
+        }
     }
 
     private Long currentUserId(HttpServletRequest request) {

@@ -37,6 +37,7 @@ class DatabaseTaskWorkerIT {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private DatabaseTaskWorker worker;
     @Autowired private AiTaskRepository taskRepository;
+    @Autowired private com.intelligentresume.ai.preview.AiPreviewService previewService;
 
     private static String token;
 
@@ -56,9 +57,7 @@ class DatabaseTaskWorkerIT {
         MvcResult result = mockMvc.perform(post("/api/ai/tasks")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"taskType": "%s", "input": {"prompt": "test"}}
-                                """.formatted(taskType)))
+                        .content(createTaskBody(taskType)))
                 .andExpect(status().isAccepted())
                 .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString())
@@ -146,5 +145,21 @@ class DatabaseTaskWorkerIT {
 
     private static boolean isTerminal(AiTaskStatus status) {
         return status == AiTaskStatus.SUCCESS || status == AiTaskStatus.FAILED;
+    }
+
+    /**
+     * R32：创建任务必须带 previewToken。测试里直接算（同一份组装逻辑），
+     * 不额外起一次 HTTP 往返。
+     */
+    private String createTaskBody(String taskType) throws Exception {
+        java.util.Map<String, Object> input = new java.util.LinkedHashMap<>();
+        input.put("prompt", "test");
+        com.intelligentresume.ai.task.domain.AiTaskType type =
+                com.intelligentresume.ai.task.domain.AiTaskType.valueOf(taskType);
+        input.put(com.intelligentresume.ai.preview.AiPreviewService.TOKEN_KEY, previewService.tokenFor(type, input));
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("taskType", taskType);
+        body.put("input", input);
+        return objectMapper.writeValueAsString(body);
     }
 }
