@@ -100,3 +100,50 @@
 **本轮范围说明**：R32 的强制校验落在**通用任务端点**（`POST /api/ai/tasks`）。
 `JOB_GENERATION` / `JOB_MATERIAL_SELECTION` / `COMMUNICATION_GENERATE` / `ATS_ANALYSIS` / `INTERVIEW_COACH`
 走各自的领域端点，且本来就已排除联系方式、本身带确认步骤 —— 把它们接进预览协议是下一批的事（不在本轮声称完成）。
+
+---
+
+## 7. P5：把预览协议覆盖到 5 个领域端点（2026-10-26 追加）
+
+### 7.1 问题
+
+上一批只在**通用端点**（`POST /api/ai/tasks`）上强制了"必须先预览"。
+其余 5 类任务走各自领域端点，仍然可以**不带任何预览**直接发起：
+
+| 任务类型 | 端点 | 现状 |
+| --- | --- | --- |
+| `JOB_MATERIAL_SELECTION` | `POST /api/ai/select-materials-for-job` | 无预览 |
+| `JOB_GENERATION` | `POST /api/ai/tasks/{id}/confirm-materials` | 无预览（"确认选材"页展示的是素材，不是发给模型的确切内容） |
+| `COMMUNICATION_GENERATE` | `POST /api/communications/ai-generate` | 无预览 |
+| `ATS_ANALYSIS` | `POST /api/ats/check`、`/api/ats/checks/{id}/ai-retry` | 无预览 |
+| `INTERVIEW_COACH` | `POST /api/interviews/{id}/follow-up` | 无预览 |
+
+这 5 类**本来就已经排除联系方式**，所以缺的不是脱敏，而是"用户看得到将要发送的确切内容"。
+
+### 7.2 设计
+
+| 编号 | 决策 | 理由 |
+| --- | --- | --- |
+| D-AI-7 | 预览令牌走**请求头** `X-AI-Preview-Token`，不加进各自 DTO | 5 个 DTO 都改会连带改 20+ 处构造点；请求头不侵入领域模型，且语义上它本来就是"传输层协商" |
+| D-AI-8 | 服务端用它**自己组装出的 input** 重算令牌，与客户端回传的比对 | 客户端无法伪造成"预览过"——它拿不到服务端组装结果的哈希 |
+| D-AI-9 | 每个领域加一个 `/preview` 端点，复用**同一个** input 组装函数（dry-run，不落库） | 预览与实际必须同源，否则又是"两份实现" |
+| D-AI-10 | 令牌进 `AiPreviewService` 的统一入口，5 个领域共用一个 `AiPreviewGuard` | 避免 5 份校验逻辑各自漂移 |
+
+### 7.3 验收标准
+
+| AC | 验收标准（可测） |
+| --- | --- |
+| AC-R32-8 | 5 个领域的 `/preview` 端点返回的 `messages` 与 worker 实际交给 provider 的 `messages` **逐字节相等**（同一组装函数） |
+| AC-R32-9 | 5 个领域的创建端点不带 `X-AI-Preview-Token` → `40001`，且**不落库**（`ai_task` 零新增） |
+| AC-R32-10 | 令牌与当前请求不符（预览后改了参数）→ `40901`，不落库 |
+| AC-R32-11 | 5 个前端入口在发起前都展示预览弹窗；取消则**零请求**（e2e 断言创建端点未调用） |
+| AC-R32-12 | 预览端点本身只读：不落库、不调 provider |
+
+### 7.4 实施顺序（每片都必须独立可交付、可验证）
+
+1. `JOB_MATERIAL_SELECTION` + `JOB_GENERATION`（主链路，两段相连）
+2. `COMMUNICATION_GENERATE`
+3. `ATS_ANALYSIS`
+4. `INTERVIEW_COACH`
+
+每片做完就跑一次后端全量 + e2e；任一片未完成时，**不能**单独启用该片的强制校验（否则前端会直接坏掉）。
