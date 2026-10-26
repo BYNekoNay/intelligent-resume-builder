@@ -115,7 +115,7 @@ public class TaskLeaseService {
 
     /**
      * 释放失败:根据是否可重试和重试次数决定状态。
-     * 可重试且未超过最大重试次数 → PENDING(等待下次领取);否则 → FAILED。
+     * 无论是否可重试，一律 → FAILED（R33：不自动重试，重试只能由用户发起）。
      */
     @Transactional
     public boolean releaseFailed(AiTask task, String owner, String errorMessage, boolean retryable) {
@@ -124,14 +124,16 @@ public class TaskLeaseService {
             log.warn("Discarding stale failure for task {} from owner {}", task.getId(), owner);
             return false;
         }
-        if (retryable && stored.getRetryCount() < properties.getMaxRetries()) {
-            stored.setStatus(AiTaskStatus.PENDING);
-            log.debug("Task {} failed (retryable), reset to PENDING (retry {}/{})",
-                    task.getId(), stored.getRetryCount(), properties.getMaxRetries());
-        } else {
-            stored.setStatus(AiTaskStatus.FAILED);
-            log.debug("Task {} failed permanently: {}", task.getId(), errorMessage);
+        // R33：**一律置 FAILED，不再自动重试**。
+        // 理由：失败任务照样占配额，自动重试会在用户不知情时消耗额度；而"换个时刻再试一次"
+        // 这个判断本来就该由人做。retryable 仍保留在入参里（供应商确实区分瞬时/永久失败），
+        // 这里只用于日志，并把"是否可重试"通过文案/前端重试按钮交回给用户。
+        if (retryable) {
+            log.info("AI task failed (retryable category, not auto-retried per R33): taskId={}, retryCount={}",
+                    stored.getId(), stored.getRetryCount());
         }
+        stored.setStatus(AiTaskStatus.FAILED);
+        log.debug("Task {} failed: {}", task.getId(), errorMessage);
         stored.setErrorMessage(AsyncFailureMessages.persisted(errorMessage));
         stored.setLeaseOwner(null);
         stored.setLeaseExpiresAt(null);

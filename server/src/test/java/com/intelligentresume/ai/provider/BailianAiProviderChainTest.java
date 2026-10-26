@@ -336,4 +336,22 @@ class BailianAiProviderChainTest {
         assertFalse(result.retryable());
         assertTrue(result.errorMessage().contains("API Key"));
     }
+
+    @Test
+    @DisplayName("R33：顺延换模型必须留下可核对的轨迹，而不是只写日志")
+    void fallbackSuccessRecordsModelAttempts() {
+        BailianAiProvider provider = providerWithChain("model-a,model-b");
+
+        AiCallResult result = provider.callChain(CTX, "req-attempts", model -> {
+            invoked.add(model);
+            return model.equals("model-a") ? transportTimeout() : succeeded();
+        });
+
+        assertTrue(result.success(), "第二个模型成功后整体应成功");
+        assertEquals(List.of("model-a", "model-b"), invoked);
+        assertEquals(1, result.modelAttempts().size(), "失败过一次 → 轨迹里应有 1 条记录");
+        assertEquals("model-a", result.modelAttempts().get(0).model());
+        assertEquals("TIMEOUT", result.modelAttempts().get(0).failureCategory());
+        assertTrue(result.modelAttempts().get(0).reason().length() <= 161, "轨迹里的原因必须是短摘要");
+    }
 }

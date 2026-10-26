@@ -74,16 +74,17 @@ class TaskLeaseServiceTest {
     }
 
     @Test
-    @DisplayName("可重试失败 + retryCount < maxRetries → 重置 PENDING")
-    void releaseFailed_retryable_underMaxRetries_resetsPending() {
-        when(properties.getMaxRetries()).thenReturn(3);
+    @DisplayName("可重试失败也不再自动重试：一律 FAILED（R33）")
+    void releaseFailed_retryable_stillMarksFailed() {
         AiTask task = task(1L, AiTaskStatus.RUNNING, 1);
         task.setLeaseOwner("worker-1");
         when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.of(task));
 
         service.releaseFailed(task, "worker-1", "timeout", true);
 
-        assertEquals(AiTaskStatus.PENDING, task.getStatus());
+        // R33：以前这里会回 PENDING 让 worker 再跑一次；现在必须停在这里等用户决定。
+        // 这条断言就是「不自动重试」的守护点 —— 改动者若把它改回去，这条会红。
+        assertEquals(AiTaskStatus.FAILED, task.getStatus());
         assertEquals("timeout", task.getErrorMessage());
         assertNull(task.getLeaseOwner());
         assertNull(task.getLeaseExpiresAt());
@@ -91,9 +92,8 @@ class TaskLeaseServiceTest {
     }
 
     @Test
-    @DisplayName("可重试失败 + retryCount >= maxRetries → FAILED")
+    @DisplayName("已达最大重试次数的可重试失败 → 同样 FAILED（无差别）")
     void releaseFailed_retryable_overMaxRetries_marksFailed() {
-        when(properties.getMaxRetries()).thenReturn(3);
         AiTask task = task(1L, AiTaskStatus.RUNNING, 3);
         task.setLeaseOwner("worker-1");
         when(taskRepository.findRunningByIdAndOwnerForUpdate(1L, "worker-1")).thenReturn(java.util.Optional.of(task));

@@ -230,7 +230,7 @@ public class TaskExecutionService {
                 Map<String, Object> taskResult = task.getTaskType() == AiTaskType.INLINE_OPTIMIZE
                         ? inlineOptimizeResultFormatter.format(providerInput(task), result.data())
                         : result.data();
-                leaseService.releaseSuccess(task, owner, taskResult);
+                leaseService.releaseSuccess(task, owner, AiTaskResults.withModelAttempts(taskResult, result));
             } else {
                 leaseService.releaseFailed(task, owner, result.errorMessage(), result.retryable());
             }
