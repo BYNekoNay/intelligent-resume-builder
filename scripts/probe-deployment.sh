@@ -243,11 +243,23 @@ else
   fi
 
   # 9.3 prometheus 抓取目标必须为 up（配置文件存在 ≠ 真的在抓）
-  prom_resp="$(sshq "curl -fsS 'http://127.0.0.1:9090/api/v1/query?query=up%7Bjob%3D%22intelligent-resume-api%22%7D'" 2>/dev/null)"
-  if printf '%s' "$prom_resp" | grep -q '"value":\[[^]]*"1"\]'; then
-    pass "prometheus 抓取目标 up（job=intelligent-resume-api）"
+  # ⚠ 必须重试：部署会重启 API，而抓取间隔是 30s —— 重启后立刻单次查询必然拿到 up=0。
+  # 2026-10-26 实测踩到：部署后探针报 FAIL，一分钟后再查就是 up=1。
+  # 一个会随机红的门禁很快就会被人无视，所以这里等到 60s。
+  prom_resp=""
+  prom_ok=0
+  for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+    prom_resp="$(sshq "curl -fsS 'http://127.0.0.1:9090/api/v1/query?query=up%7Bjob%3D%22intelligent-resume-api%22%7D'" 2>/dev/null)"
+    if printf '%s' "$prom_resp" | grep -q '"value":\[[^]]*"1"\]'; then
+      prom_ok=1
+      break
+    fi
+    sleep 6
+  done
+  if [ "$prom_ok" -eq 1 ]; then
+    pass "prometheus 抓取目标 up（job=intelligent-resume-api，第 ${_attempt} 次查询）"
   else
-    fail "prometheus 未抓到 API（目标 down 或 prometheus 未运行）：$(printf '%s' "$prom_resp" | head -c 160)"
+    fail "prometheus 60s 内仍未抓到 API（目标 down 或 prometheus 未运行）：$(printf '%s' "$prom_resp" | head -c 160)"
   fi
 fi
 
