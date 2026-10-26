@@ -4,6 +4,8 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight, Check, FileInput, Lightbulb, ShieldCheck, Sparkles } from 'lucide-vue-next'
 import { generateMaterialAssociation, generateResumeFromAssociation, generateResumeFromMaterial, type MaterialAssociationResponse, type MaterialGenerationResponse } from '@/api/materialGeneration'
+import { useAiTaskPreview } from '@/composables/useAiTaskPreview'
+import AiPreviewDialog from '@/components/ai/AiPreviewDialog.vue'
 import { AiTaskTimeoutError } from '@/api/ai'
 import { createResume } from '@/api/resume'
 import { useLocale } from '@/i18n'
@@ -30,6 +32,19 @@ function idempotencyKeyFor(action: string, payload: unknown) {
 
 function clearIdempotencyKey(action: string) { pendingIdempotency.delete(action) }
 
+/** R32 发送前预览：确认后才返回令牌，取消返回 null。 */
+const {
+  visible: previewVisible,
+  loading: previewLoading,
+  errorMessage: previewError,
+  preview: previewPayload,
+  redactionSummary: previewRedactions,
+  requestPreview,
+  confirm: confirmPreview,
+  cancel: cancelPreview,
+  toggleContact: togglePreviewContact,
+} = useAiTaskPreview()
+
 async function generate() {
   error.value = ''; consentRequired.value = false; result.value = null
   if (!raw.value.trim()) { error.value = t('materialGeneration.errorEmpty'); return }
@@ -53,9 +68,12 @@ function createLocalDraft(text: string, candidates: Record<string, unknown> | nu
 async function generateWithAi() {
   error.value = ''; consentRequired.value = false; result.value = null
   if (!raw.value.trim()) { error.value = t('materialGeneration.errorEmpty'); return }
+  // R32：先让用户看到将要发送的确切内容；取消则一条都不发
+  const token = await requestPreview('MATERIAL_IMPORT', { rawMaterialText: raw.value })
+  if (!token) return
   loading.value = true
   const idempotencyKey = idempotencyKeyFor('generate', { text: raw.value })
-  try { result.value = (await generateResumeFromMaterial(raw.value, undefined, undefined, idempotencyKey)).data.data; clearIdempotencyKey('generate') }
+  try { result.value = (await generateResumeFromMaterial(raw.value, undefined, undefined, idempotencyKey, token)).data.data; clearIdempotencyKey('generate') }
   catch (cause) { showGenerationError(cause, 'errorGenerate') }
   finally { loading.value = false }
 }
@@ -63,18 +81,27 @@ async function generateWithAi() {
 async function associate() {
   error.value = ''; consentRequired.value = false; association.value = null
   if (!raw.value.trim()) { error.value = t('materialGeneration.errorEmpty'); return }
+  const token = await requestPreview('MATERIAL_IMPORT', { rawMaterialText: raw.value, generationMode: 'ASSOCIATIVE_EXPANSION' })
+  if (!token) return
   associating.value = true
   const idempotencyKey = idempotencyKeyFor('associate', { text: raw.value })
-  try { association.value = (await generateMaterialAssociation(raw.value, idempotencyKey)).data.data; clearIdempotencyKey('associate') }
+  try { association.value = (await generateMaterialAssociation(raw.value, idempotencyKey, token)).data.data; clearIdempotencyKey('associate') }
   catch (cause) { showGenerationError(cause, 'errorAssociation') }
   finally { associating.value = false }
 }
 
 async function generateFromAssociation() {
   if (!association.value?.expandedMaterial.trim()) return
-  error.value = ''; consentRequired.value = false; result.value = null; loading.value = true
+  error.value = ''; consentRequired.value = false; result.value = null
+  const token = await requestPreview('MATERIAL_IMPORT', {
+    rawMaterialText: raw.value,
+    generationMode: 'ASSOCIATIVE_STRUCTURED_DRAFT',
+    associationReference: association.value.expandedMaterial,
+  })
+  if (!token) return
+  loading.value = true
   const idempotencyKey = idempotencyKeyFor('generate-from-association', { text: raw.value, association: association.value.expandedMaterial })
-  try { result.value = (await generateResumeFromAssociation(raw.value, association.value.expandedMaterial, idempotencyKey)).data.data; clearIdempotencyKey('generate-from-association') }
+  try { result.value = (await generateResumeFromAssociation(raw.value, association.value.expandedMaterial, idempotencyKey, token)).data.data; clearIdempotencyKey('generate-from-association') }
   catch (cause) { showGenerationError(cause, 'errorGenerate') }
   finally { loading.value = false }
 }
@@ -159,6 +186,16 @@ onMounted(() => {
       <footer><span><ShieldCheck :size="15" />{{ t('materialGeneration.createHint') }}</span><button class="btn-neon btn-secondary" type="button" :disabled="saving || !title.trim()" @click="createDraft">{{ saving ? t('materialGeneration.creating') : t('materialGeneration.createButton') }}<ArrowRight v-if="!saving" :size="16" /></button></footer>
     </article>
   </section>
+  <AiPreviewDialog
+    :visible="previewVisible"
+    :loading="previewLoading"
+    :error-message="previewError"
+    :preview="previewPayload"
+    :redactions="previewRedactions"
+    @confirm="confirmPreview"
+    @cancel="cancelPreview"
+    @toggle-contact="togglePreviewContact"
+  />
 </template>
 
 <style scoped>

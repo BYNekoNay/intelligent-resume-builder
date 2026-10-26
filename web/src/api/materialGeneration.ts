@@ -26,8 +26,9 @@ export async function generateResumeFromMaterial(
   jobDescriptionId: number | undefined,
   associationReference: string | undefined,
   idempotencyKey: string,
+  previewToken: string,
 ) {
-  const taskId = await createMaterialTask({ rawMaterialText, ...(jobDescriptionId ? { jobDescriptionId } : {}), ...(associationReference ? { generationMode: 'ASSOCIATIVE_STRUCTURED_DRAFT', associationReference } : {}) }, idempotencyKey)
+  const taskId = await createMaterialTask({ rawMaterialText, ...(jobDescriptionId ? { jobDescriptionId } : {}), ...(associationReference ? { generationMode: 'ASSOCIATIVE_STRUCTURED_DRAFT', associationReference } : {}) }, idempotencyKey, previewToken)
   const task = await waitForTask(taskId)
   const r = task.resultJson as Record<string, unknown>
   return { data: { data: { taskId, rawMaterialText, generatedResumeJson: normalizeResumeJson((r.generatedResumeJson ?? r.draftResumeJson ?? r) as Record<string, unknown>), suggestions: Array.isArray(r.suggestions) ? r.suggestions as string[] : [], requiresManualConfirmation: true } } } as { data: ApiResponse<MaterialGenerationResponse> }
@@ -37,19 +38,31 @@ function normalizeResumeJson(value: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(value).filter(([section]) => RESUME_SECTIONS.has(section)))
 }
 
-export function generateResumeFromAssociation(rawMaterialText: string, associationReference: string, idempotencyKey: string) {
-  return generateResumeFromMaterial(rawMaterialText, undefined, associationReference, idempotencyKey)
+export function generateResumeFromAssociation(
+  rawMaterialText: string,
+  associationReference: string,
+  idempotencyKey: string,
+  previewToken: string,
+) {
+  return generateResumeFromMaterial(rawMaterialText, undefined, associationReference, idempotencyKey, previewToken)
 }
 
-export async function generateMaterialAssociation(rawMaterialText: string, idempotencyKey: string) {
-  const taskId = await createMaterialTask({ rawMaterialText, generationMode: 'ASSOCIATIVE_EXPANSION' }, idempotencyKey)
+export async function generateMaterialAssociation(rawMaterialText: string, idempotencyKey: string, previewToken: string) {
+  const taskId = await createMaterialTask({ rawMaterialText, generationMode: 'ASSOCIATIVE_EXPANSION' }, idempotencyKey, previewToken)
   const task = await waitForTask(taskId)
   const r = task.resultJson as Record<string, unknown>
   return { data: { data: { taskId, expandedMaterial: typeof r.expandedMaterial === 'string' ? r.expandedMaterial : '', verificationQuestions: Array.isArray(r.verificationQuestions) ? r.verificationQuestions as string[] : [], disclaimer: typeof r.disclaimer === 'string' ? r.disclaimer : '' } } } as { data: ApiResponse<MaterialAssociationResponse> }
 }
 
-async function createMaterialTask(input: Record<string, unknown>, idempotencyKey: string) {
-  const createResp = await apiClient.post<ApiResponse<{ id: number; status: string }>>('/api/ai/tasks', { taskType: 'MATERIAL_IMPORT', input }, {
+/**
+ * R32：创建任务必须带上预览令牌（放进 input._previewToken，后端会重算比对）。
+ * 令牌只能从「预览 → 用户确认」这条路径拿到，因此这里不做兜底。
+ */
+async function createMaterialTask(input: Record<string, unknown>, idempotencyKey: string, previewToken: string) {
+  const createResp = await apiClient.post<ApiResponse<{ id: number; status: string }>>(
+    '/api/ai/tasks',
+    { taskType: 'MATERIAL_IMPORT', input: { ...input, _previewToken: previewToken } },
+    {
     headers: { 'Idempotency-Key': idempotencyKey },
   })
   return createResp.data.data.id

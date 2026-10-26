@@ -186,6 +186,37 @@ export function confirmMaterials(
   })
 }
 
+/** 预览里被替换掉的一类联系方式（R32）。 */
+export interface AiPreviewRedaction {
+  category: 'EMAIL' | 'PHONE'
+  count: number
+}
+
+export interface AiPreviewMessage {
+  role: string
+  content: string
+}
+
+export interface AiTaskPreview {
+  taskType: string
+  messages: AiPreviewMessage[]
+  includeContact: boolean
+  redactions: AiPreviewRedaction[]
+  previewToken: string
+}
+
+/**
+ * 发送前预览（R32）：拿到**将要发送的确切内容**与预览令牌。
+ *
+ * 只读接口：后端不写库、不调模型。确认后要把 `previewToken` 放进创建请求的
+ * `input._previewToken`，否则后端会以 40001/40901 拒绝。
+ */
+export function previewAiTask(taskType: string, input: Record<string, unknown>, includeContact = false) {
+  return apiClient
+    .post<ApiResponse<AiTaskPreview>>('/api/ai/tasks/preview', { taskType, input, includeContact })
+    .then(response => response.data.data)
+}
+
 export function getTask(id: number) {
   return apiClient.get<ApiResponse<AiTask>>(`/api/ai/tasks/${id}`)
 }
