@@ -65,6 +65,23 @@ public class AiTaskService {
      * 各步骤各自事务即可保证一致。
      */
     public AiTaskStatusResponse create(CreateAiTaskRequest req, String idempotencyKey, Long userId) {
+        return create(req, idempotencyKey, userId, () -> { });
+    }
+
+    /**
+     * 同 {@link #create(CreateAiTaskRequest, String, Long)}，额外在**幂等重放判定之后、任何写入之前**
+     * 执行一次守卫。
+     *
+     * <p>领域端点用它做 R32 预览令牌校验（AC-R32-9 / AC-R32-10）：
+     * <ul>
+     *   <li>放在重放判定之后 —— 同一幂等键的客户端重试不该因为没带令牌而失败；</li>
+     *   <li>放在配额与写入之前 —— 被拒绝的请求不消耗配额、不产生 {@code ai_task} 行。</li>
+     * </ul>
+     *
+     * @param beforeCreate 守卫，通常是一次 {@code AiPreviewGuard#require} 调用；重放分支不执行
+     */
+    public AiTaskStatusResponse create(CreateAiTaskRequest req, String idempotencyKey, Long userId,
+                                       Runnable beforeCreate) {
         AiTaskCapabilityRegistry.requireRegistered(req.taskType());
         Map<String, Object> inputSnapshot = buildInputSnapshot(req);
 
@@ -93,6 +110,8 @@ public class AiTaskService {
             throw new BusinessException(ErrorCode.CONFLICT,
                     "相同幂等键的请求内容不一致");
         }
+
+        beforeCreate.run();
 
         quotaService.check(userId, req.taskType());
 

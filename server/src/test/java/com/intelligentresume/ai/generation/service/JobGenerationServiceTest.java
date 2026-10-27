@@ -61,9 +61,9 @@ class JobGenerationServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new JobGenerationService(
-                materialRepository, jdRepository, resumeRepository, taskRepository,
-                materialSelector, injectionDetector, promptBuilder, schemaValidator, providerRegistry);
+        service = new JobGenerationService(materialRepository, jdRepository, resumeRepository, taskRepository,
+                materialSelector, injectionDetector, promptBuilder,
+                new JobGenerationInputAssembler(promptBuilder, "v1.0.0"), schemaValidator, providerRegistry);
         ReflectionTestUtils.setField(service, "promptVersion", "v1.0.0");
         ReflectionTestUtils.setField(service, "schemaVersion", "v1.0.0");
     }

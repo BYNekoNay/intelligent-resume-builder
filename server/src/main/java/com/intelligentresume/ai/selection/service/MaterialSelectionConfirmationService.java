@@ -1,6 +1,8 @@
 package com.intelligentresume.ai.selection.service;
 
 import com.intelligentresume.ai.consent.service.AiConsentService;
+import com.intelligentresume.ai.generation.service.JobGenerationInputAssembler;
+import com.intelligentresume.ai.preview.AiPreviewGuard;
 import com.intelligentresume.ai.ratelimit.AiQuotaService;
 import com.intelligentresume.ai.selection.dto.ConfirmMaterialsRequest;
 import com.intelligentresume.ai.task.domain.*;
@@ -31,6 +33,8 @@ public class MaterialSelectionConfirmationService {
     private final IdempotencyService idempotencyService;
     private final AiConsentService consentService;
     private final AiQuotaService quotaService;
+    private final JobGenerationInputAssembler inputAssembler;
+    private final AiPreviewGuard previewGuard;
 
     public MaterialSelectionConfirmationService(AiTaskRepository taskRepository,
                                                 CareerMaterialRepository materialRepository,
@@ -38,7 +42,9 @@ public class MaterialSelectionConfirmationService {
                                                 PersonalProfileRepository profileRepository,
                                                 IdempotencyService idempotencyService,
                                                 AiConsentService consentService,
-                                                AiQuotaService quotaService) {
+                                                AiQuotaService quotaService,
+                                                JobGenerationInputAssembler inputAssembler,
+                                                AiPreviewGuard previewGuard) {
         this.taskRepository = taskRepository;
         this.materialRepository = materialRepository;
         this.jobRepository = jobRepository;
@@ -46,10 +52,13 @@ public class MaterialSelectionConfirmationService {
         this.idempotencyService = idempotencyService;
         this.consentService = consentService;
         this.quotaService = quotaService;
+        this.inputAssembler = inputAssembler;
+        this.previewGuard = previewGuard;
     }
 
     @Transactional
-    public AiTask confirm(Long taskId, ConfirmMaterialsRequest request, String idempotencyKey, Long userId) {
+    public AiTask confirm(Long taskId, ConfirmMaterialsRequest request, String idempotencyKey,
+                          String previewToken, Long userId) {
         AiTask selection = taskRepository.findByIdForUpdate(taskId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Selection task not found"));
         if (!selection.getUserId().equals(userId) || selection.getTaskType() != AiTaskType.JOB_MATERIAL_SELECTION) {
@@ -60,14 +69,7 @@ public class MaterialSelectionConfirmationService {
             throw new BusinessException(ErrorCode.CONSENT_REQUIRED);
         }
 
-        LinkedHashSet<Long> requestedIds = new LinkedHashSet<>(request.selectedMaterialIds());
-        LinkedHashSet<Long> forcedIds = request.forcedIncludedMaterialIds() == null
-                ? new LinkedHashSet<>() : new LinkedHashSet<>(request.forcedIncludedMaterialIds());
-        LinkedHashSet<Long> selectedIds = new LinkedHashSet<>(requestedIds);
-        selectedIds.addAll(forcedIds);
-        if (selectedIds.isEmpty() || selectedIds.size() > MAX_FINAL_MATERIALS) {
-            throw new BusinessException(ErrorCode.VALIDATION, "Select between 1 and 30 materials");
-        }
+        LinkedHashSet<Long> selectedIds = resolvedSelection(request);
         String childKey = idempotencyKey == null || idempotencyKey.isBlank()
                 ? "selection-confirm:" + selection.getId() : idempotencyKey;
         Map<String, Object> confirmationInput = new LinkedHashMap<>();
@@ -89,30 +91,13 @@ public class MaterialSelectionConfirmationService {
             throw new BusinessException(ErrorCode.CONFLICT, "Selection task changed; refresh before confirming");
         }
 
-        Long jobId = longValue(selection.getInputSnapshotJson().get("jobDescriptionId"));
-        JobDescription job = jobRepository.findByIdAndUserId(jobId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Job description not found"));
-        Map<Long, CareerMaterial> owned = materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(userId).stream()
-                .collect(Collectors.toMap(CareerMaterial::getId, material -> material));
-        if (!owned.keySet().containsAll(selectedIds)) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "Career material not found");
-        }
-        validateSelectionBoundary(selection, requestedIds, forcedIds);
+        Map<String, Object> childSnapshot = buildGenerationInput(selection, request, userId);
 
-        Map<String, Object> childSnapshot = new LinkedHashMap<>();
-        childSnapshot.put("taskType", AiTaskType.JOB_GENERATION.name());
-        childSnapshot.put("jobDescriptionId", jobId);
-        childSnapshot.put("jobSnapshot", snapshot(job));
-        childSnapshot.put("materialSnapshots", selectedIds.stream().map(id -> snapshot(owned.get(id))).toList());
-        childSnapshot.put("missingRequirements", stringList(selection.getResultJson().get("missingRequirements")));
-        childSnapshot.put("personalProfileSnapshot", profileRepository.findByUserId(userId)
-                .map(this::snapshot).orElseGet(LinkedHashMap::new));
-        String resumeTitle = request.resumeTitle();
-        if (resumeTitle == null || resumeTitle.isBlank()) {
-            Object originalTitle = selection.getInputSnapshotJson().get("resumeTitle");
-            resumeTitle = originalTitle == null ? null : originalTitle.toString();
-        }
-        if (resumeTitle != null && !resumeTitle.isBlank()) childSnapshot.put("resumeTitle", resumeTitle);
+        // R32 AC-R32-9 / AC-R32-10：必须先看过 /confirm-materials/preview 的确切内容并确认。
+        // 校验用服务端**自己组装**的 providerInput 重算令牌（客户端伪造不了"预览过"）。
+        // 位置刻意为「幂等重放之后、任何写库之前」：重试不该因缺令牌失败，被拒时 ai_task 零新增。
+        previewGuard.require(AiTaskType.JOB_GENERATION,
+                inputAssembler.fromSnapshot(childSnapshot).providerInput(), previewToken);
 
         // 配额闸门（模块核实报告 P1-2）：确认选材会隐式创建 JOB_GENERATION 子任务，
         // 必须与 AiTaskService.create 走同一配额检查，否则"确认选材"路径会绕过每日配额限制。
@@ -135,6 +120,69 @@ public class MaterialSelectionConfirmationService {
         selection.setConfirmationStatus(ConfirmationStatus.CONFIRMED);
         taskRepository.save(selection);
         return child;
+    }
+
+    /**
+     * 组装 JOB_GENERATION 子任务的不可变输入快照 —— confirm 与发送前预览**共用同一实现**
+     * （R32 AC-R32-8）。只读：不写库、不调 provider。
+     *
+     * <p>预览时 {@code confirmationStatus} 仍是 PENDING 属正常，故本方法不校验确认状态；
+     * 它校验快照能成立的前提：岗位/素材归属、素材来自本轮候选、1..30 条。
+     * **任务归属与状态由调用方先校验**（{@code confirm} 在方法开头，预览走
+     * {@code JobGenerationPreviewService}）。
+     *
+     * @throws BusinessException 归属不符 → {@code 40401}；素材越界或数量非法 → {@code 40001}
+     */
+    public Map<String, Object> buildGenerationInput(AiTask selection, ConfirmMaterialsRequest request, Long userId) {
+        LinkedHashSet<Long> selectedIds = resolvedSelection(request);
+        LinkedHashSet<Long> requestedIds = requestedIds(request);
+        LinkedHashSet<Long> forcedIds = forcedIds(request);
+        Long jobId = longValue(selection.getInputSnapshotJson().get("jobDescriptionId"));
+        JobDescription job = jobRepository.findByIdAndUserId(jobId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Job description not found"));
+        Map<Long, CareerMaterial> owned = materialRepository.findByUserIdOrderByUpdatedAtDescIdDesc(userId).stream()
+                .collect(Collectors.toMap(CareerMaterial::getId, material -> material));
+        if (!owned.keySet().containsAll(selectedIds)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "Career material not found");
+        }
+        validateSelectionBoundary(selection, requestedIds, forcedIds);
+
+        Map<String, Object> childSnapshot = new LinkedHashMap<>();
+        childSnapshot.put("taskType", AiTaskType.JOB_GENERATION.name());
+        childSnapshot.put("jobDescriptionId", jobId);
+        childSnapshot.put("jobSnapshot", MaterialSelectionSnapshotMapper.of(job));
+        childSnapshot.put("materialSnapshots", selectedIds.stream()
+                .map(id -> MaterialSelectionSnapshotMapper.of(owned.get(id))).toList());
+        Map<String, Object> selectionResult = selection.getResultJson() == null ? Map.of() : selection.getResultJson();
+        childSnapshot.put("missingRequirements", stringList(selectionResult.get("missingRequirements")));
+        childSnapshot.put("personalProfileSnapshot", profileRepository.findByUserId(userId)
+                .map(MaterialSelectionSnapshotMapper::of).orElseGet(LinkedHashMap::new));
+        String resumeTitle = request.resumeTitle();
+        if (resumeTitle == null || resumeTitle.isBlank()) {
+            Object originalTitle = selection.getInputSnapshotJson().get("resumeTitle");
+            resumeTitle = originalTitle == null ? null : originalTitle.toString();
+        }
+        if (resumeTitle != null && !resumeTitle.isBlank()) childSnapshot.put("resumeTitle", resumeTitle);
+        return childSnapshot;
+    }
+
+    private LinkedHashSet<Long> requestedIds(ConfirmMaterialsRequest request) {
+        return new LinkedHashSet<>(request.selectedMaterialIds());
+    }
+
+    private LinkedHashSet<Long> forcedIds(ConfirmMaterialsRequest request) {
+        return request.forcedIncludedMaterialIds() == null
+                ? new LinkedHashSet<>() : new LinkedHashSet<>(request.forcedIncludedMaterialIds());
+    }
+
+    /** 常规勾选 ∪ 强制加入，1..30 条。 */
+    private LinkedHashSet<Long> resolvedSelection(ConfirmMaterialsRequest request) {
+        LinkedHashSet<Long> selectedIds = new LinkedHashSet<>(requestedIds(request));
+        selectedIds.addAll(forcedIds(request));
+        if (selectedIds.isEmpty() || selectedIds.size() > MAX_FINAL_MATERIALS) {
+            throw new BusinessException(ErrorCode.VALIDATION, "Select between 1 and 30 materials");
+        }
+        return selectedIds;
     }
 
     private void validateSelectionBoundary(AiTask selection, Set<Long> requestedIds, Set<Long> forcedIds) {
@@ -203,43 +251,6 @@ public class MaterialSelectionConfirmationService {
                 .map(String::trim)
                 .filter(value -> !value.isEmpty())
                 .toList();
-    }
-
-    private Map<String, Object> snapshot(JobDescription job) {
-        Map<String, Object> value = new LinkedHashMap<>();
-        value.put("id", job.getId());
-        value.put("title", job.getTitle());
-        value.put("companyName", job.getCompanyName());
-        value.put("jdText", job.getJdText());
-        value.put("parsedKeywordsJson", job.getParsedKeywordsJson());
-        return value;
-    }
-
-    private Map<String, Object> snapshot(CareerMaterial material) {
-        Map<String, Object> value = new LinkedHashMap<>();
-        value.put("id", material.getId());
-        value.put("materialType", material.getMaterialType().name());
-        value.put("title", material.getTitle());
-        value.put("contentJson", material.getContentJson());
-        value.put("sourceText", material.getSourceText());
-        value.put("usagePreference", material.getUsagePreference().name());
-        return value;
-    }
-
-    private Map<String, Object> snapshot(com.intelligentresume.personalprofile.domain.PersonalProfile profile) {
-        Map<String, Object> value = new LinkedHashMap<>();
-        value.put("fullName", profile.getFullName());
-        value.put("email", profile.getEmail());
-        value.put("phone", profile.getPhone());
-        value.put("location", profile.getLocation());
-        value.put("website", profile.getWebsite());
-        value.put("profileSummary", profile.getProfileSummary());
-        value.put("targetRoleTitles", profile.getTargetRoleTitles());
-        value.put("targetSeniority", profile.getTargetSeniority());
-        value.put("targetIndustries", profile.getTargetIndustries());
-        value.put("targetWorkPreferences", profile.getTargetWorkPreferences());
-        value.put("careerPositioningSummary", profile.getCareerPositioningSummary());
-        return value;
     }
 
     private Long longValue(Object value) {

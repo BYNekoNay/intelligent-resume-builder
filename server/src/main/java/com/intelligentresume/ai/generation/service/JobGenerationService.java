@@ -36,6 +36,7 @@ public class JobGenerationService {
     private final MaterialSelector materialSelector;
     private final PromptInjectionDetector injectionDetector;
     private final JobGenerationPromptBuilder promptBuilder;
+    private final JobGenerationInputAssembler inputAssembler;
     private final JobGenerationSchemaValidator schemaValidator;
     private final AiProviderRegistry providerRegistry;
 
@@ -52,6 +53,7 @@ public class JobGenerationService {
                                 MaterialSelector materialSelector,
                                 PromptInjectionDetector injectionDetector,
                                 JobGenerationPromptBuilder promptBuilder,
+                                JobGenerationInputAssembler inputAssembler,
                                 JobGenerationSchemaValidator schemaValidator,
                                 AiProviderRegistry providerRegistry) {
         this.materialRepository = materialRepository;
@@ -60,6 +62,7 @@ public class JobGenerationService {
         this.materialSelector = materialSelector;
         this.injectionDetector = injectionDetector;
         this.promptBuilder = promptBuilder;
+        this.inputAssembler = inputAssembler;
         this.schemaValidator = schemaValidator;
         this.providerRegistry = providerRegistry;
     }
@@ -101,16 +104,11 @@ public class JobGenerationService {
             resumeRepository.findByIdAndUserId(resumeId, task.getUserId())
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Resume not found"));
         }
-        JobDescription job = jobFromSnapshot(snapshot.get("jobSnapshot"));
-        List<CareerMaterial> materials = materialsFromSnapshot(snapshot.get("materialSnapshots"));
-        Map<String, Object> profile = mapValue(snapshot.get("personalProfileSnapshot"));
-        Long jobId = toLong(snapshot.get("jobDescriptionId"));
-        if (job == null || !Objects.equals(job.getId(), jobId)) {
-            throw new BusinessException(ErrorCode.CONFLICT, "Generation task has no confirmed job snapshot");
-        }
-        if (materials.isEmpty()) {
-            throw new BusinessException(ErrorCode.VALIDATION, "No confirmed career materials");
-        }
+        // 组装（重建实体 + prompt）与发送前预览同源，见 JobGenerationInputAssembler（R32 AC-R32-8）
+        JobGenerationInputAssembler.GenerationInput input = inputAssembler.fromSnapshot(snapshot);
+        JobDescription job = input.job();
+        List<CareerMaterial> materials = input.materials();
+        Map<String, Object> profile = input.profile();
 
         List<String> sourceTexts = materials.stream().map(CareerMaterial::getSourceText)
                 .filter(Objects::nonNull).toList();
@@ -121,14 +119,8 @@ public class JobGenerationService {
             log.warn("Prompt injection detected for task {}: {}", task.getId(), detection.matchedPatterns());
         }
 
-        JobGenerationPromptBuilder.Prompt prompt = promptBuilder.build(job, materials, List.of(), List.of(),
-                careerProfileContext(profile), promptVersion);
-        Map<String, Object> providerInput = new LinkedHashMap<>();
-        providerInput.put("_systemPrompt", prompt.system());
-        providerInput.put("_taskPrompt", prompt.task());
-        providerInput.put("_dataPrompt", prompt.data());
         AiCallResult response = providerRegistry.route(AiTaskType.JOB_GENERATION)
-                .call(new AiCallContext(AiTaskType.JOB_GENERATION, providerInput));
+                .call(new AiCallContext(AiTaskType.JOB_GENERATION, input.providerInput()));
         if (!response.success()) {
             throw new BusinessException(ErrorCode.AI_FAILURE, "Resume generation failed: " + response.errorMessage());
         }
@@ -452,46 +444,6 @@ public class JobGenerationService {
         if (material != null) selected.add(new SelectedMaterialEntry(material.getId(), path, "AI_REFERENCED"));
     }
 
-    @SuppressWarnings("unchecked")
-    private JobDescription jobFromSnapshot(Object raw) {
-        Map<String, Object> value = mapValue(raw);
-        if (value.isEmpty()) return null;
-        JobDescription job = new JobDescription();
-        job.setId(toLong(value.get("id")));
-        job.setTitle(stringValue(value.get("title")));
-        job.setCompanyName(stringValue(value.get("companyName")));
-        job.setJdText(stringValue(value.get("jdText")));
-        return job;
-    }
-
-    private List<CareerMaterial> materialsFromSnapshot(Object raw) {
-        if (!(raw instanceof List<?> list)) return List.of();
-        List<CareerMaterial> materials = new ArrayList<>();
-        for (Object item : list) {
-            Map<String, Object> value = mapValue(item);
-            if (value.isEmpty()) continue;
-            CareerMaterial material = new CareerMaterial();
-            material.setId(toLong(value.get("id")));
-            material.setTitle(stringValue(value.get("title")));
-            material.setMaterialType(MaterialType.valueOf(stringValue(value.get("materialType"))));
-            material.setUsagePreference(UsagePreference.valueOf(stringValue(value.get("usagePreference"))));
-            material.setSourceText(stringValue(value.get("sourceText")));
-            material.setContentJson(mapValue(value.get("contentJson")));
-            materials.add(material);
-        }
-        return materials;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> mapValue(Object value) {
-        if (!(value instanceof Map<?, ?> raw)) return new LinkedHashMap<>();
-        Map<String, Object> result = new LinkedHashMap<>();
-        raw.forEach((key, child) -> result.put(String.valueOf(key), child));
-        return result;
-    }
-
-    private String stringValue(Object value) { return value == null ? null : value.toString(); }
-
     private List<String> stringList(Object value) {
         if (!(value instanceof Collection<?> values)) return List.of();
         return values.stream().filter(String.class::isInstance).map(String.class::cast)
@@ -504,16 +456,6 @@ public class JobGenerationService {
                 .anyMatch(value -> value != null && !value.toString().isBlank());
     }
 
-    private Map<String, Object> careerProfileContext(Map<String, Object> profile) {
-        Map<String, Object> context = new LinkedHashMap<>();
-        for (String key : List.of("profileSummary", "targetRoleTitles", "targetSeniority", "targetIndustries",
-                "targetWorkPreferences", "careerPositioningSummary")) {
-            Object value = profile.get(key);
-            if (value instanceof Collection<?> collection && collection.isEmpty()) continue;
-            if (value != null && !value.toString().isBlank()) context.put(key, value);
-        }
-        return context;
-    }
     private Long toLong(Object value) {
         if (value instanceof Number number) return number.longValue();
         try { return value == null ? null : Long.valueOf(value.toString()); }

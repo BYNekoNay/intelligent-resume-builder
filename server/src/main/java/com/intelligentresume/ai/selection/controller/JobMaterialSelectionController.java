@@ -1,5 +1,6 @@
 package com.intelligentresume.ai.selection.controller;
 
+import com.intelligentresume.ai.generation.service.JobGenerationPreviewService;
 import com.intelligentresume.ai.generation.service.JobGenerationService;
 import com.intelligentresume.ai.selection.dto.ConfirmMaterialsRequest;
 import com.intelligentresume.ai.selection.dto.SelectMaterialsRequest;
@@ -42,12 +43,14 @@ public class JobMaterialSelectionController {
     private final AiPreviewService previewService;
     private final AiPreviewGuard previewGuard;
     private final JobGenerationService generationService;
+    private final JobGenerationPreviewService generationPreviewService;
     private final AiTaskRepository taskRepository;
 
     public JobMaterialSelectionController(AiTaskService taskService,
                                           MaterialSelectionConfirmationService confirmationService,
                                           JobDescriptionRepository jobRepository,
                                           JobGenerationService generationService,
+                                          JobGenerationPreviewService generationPreviewService,
                                           AiTaskRepository taskRepository,
                                           MaterialSelectionContextBuilder contextBuilder,
                                           AiPreviewService previewService,
@@ -56,6 +59,7 @@ public class JobMaterialSelectionController {
         this.confirmationService = confirmationService;
         this.jobRepository = jobRepository;
         this.generationService = generationService;
+        this.generationPreviewService = generationPreviewService;
         this.taskRepository = taskRepository;
         this.contextBuilder = contextBuilder;
         this.previewService = previewService;
@@ -166,10 +170,28 @@ public class JobMaterialSelectionController {
             @PathVariable Long taskId,
             @Valid @RequestBody ConfirmMaterialsRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = AiPreviewGuard.HEADER, required = false) String previewToken,
             HttpServletRequest servletRequest) {
-        AiTask task = confirmationService.confirm(taskId, request, idempotencyKey, currentUserId(servletRequest));
+        AiTask task = confirmationService.confirm(taskId, request, idempotencyKey, previewToken,
+                currentUserId(servletRequest));
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(taskService.toResponse(task), traceId(servletRequest)));
+    }
+
+    /**
+     * 生成任务的发送前预览（R32 AC-R32-8）：返回**将要发送的确切 messages** 与 `previewToken`。
+     *
+     * <p>只读：不落库、不调 provider。请求体与 confirm 相同，因此客户端可以用同一个 body
+     * 先预览、再带着令牌提交。
+     */
+    @PostMapping("/tasks/{taskId}/confirm-materials/preview")
+    public ApiResponse<AiPreviewService.PreviewResponse> previewConfirmation(
+            @PathVariable Long taskId,
+            @Valid @RequestBody ConfirmMaterialsRequest request,
+            HttpServletRequest servletRequest) {
+        return ApiResponse.success(
+                generationPreviewService.preview(taskId, request, currentUserId(servletRequest)),
+                traceId(servletRequest));
     }
 
     private Object safe(Object value) { return value == null ? java.util.List.of() : value; }
