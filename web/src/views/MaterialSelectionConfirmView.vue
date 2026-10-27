@@ -5,11 +5,15 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   confirmMaterials,
   getTask,
+  previewConfirmMaterials,
   retryTask,
   type AiTask,
+  type ConfirmMaterialsPayload,
   type MaterialSelectionItem,
   type MaterialSelectionResult,
 } from '@/api/ai'
+import AiPreviewDialog from '@/components/ai/AiPreviewDialog.vue'
+import { useAiTaskPreview } from '@/composables/useAiTaskPreview'
 import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useAiTaskStore } from '@/stores/aiTask'
 import { useAuthStore } from '@/stores/auth'
@@ -43,6 +47,19 @@ const confirmationUpdatedAt = ref<string | null>(null)
 const confirmationIdempotencyKey = ref<string | null>(null)
 const pollingTimedOut = ref(false)
 const polling = useTaskPolling<AiTask>()
+
+/** R32：确认生成前先看清楚将要发送的内容；令牌只能从预览里拿，取消返回 null。 */
+const {
+  visible: previewVisible,
+  loading: previewLoading,
+  errorMessage: previewError,
+  preview: previewPayload,
+  redactionSummary: previewRedactions,
+  requestPreview,
+  confirm: confirmPreview,
+  cancel: cancelPreview,
+  toggleContact: togglePreviewContact,
+} = useAiTaskPreview()
 const selectionStorageKey = computed(() => `intelligent-resume.material-selection.${auth.currentUser?.id ?? 'anonymous'}.${taskId.value}`)
 
 const taskId = computed(() => Number(route.query.taskId))
@@ -228,13 +245,23 @@ async function confirmSelection() {
   confirmationUpdatedAt.value = taskUpdatedAt
   confirmationIdempotencyKey.value = idempotencyKey
   persistSelection()
+  // R32：预览与创建必须是**同一个** payload 对象 —— 后端用自己的组装结果重算令牌，字段漂移 → 40901。
+  const payload: ConfirmMaterialsPayload = {
+    taskUpdatedAt,
+    selectedMaterialIds,
+    forcedIncludedMaterialIds,
+    resumeTitle: typeof task.value.resultJson?.resumeTitle === 'string' ? task.value.resultJson.resumeTitle : undefined,
+  }
+  const currentTaskId = task.value.id
   try {
-    const response = await confirmMaterials(task.value.id, {
-      taskUpdatedAt,
-      selectedMaterialIds,
-      forcedIncludedMaterialIds,
-      resumeTitle: typeof task.value.resultJson?.resumeTitle === 'string' ? task.value.resultJson.resumeTitle : undefined,
-    }, idempotencyKey)
+    // 取消 = 明确不发：confirm-materials 一次都不会被调用
+    const previewToken = await requestPreview('JOB_GENERATION', {}, false,
+      () => previewConfirmMaterials(currentTaskId, payload))
+    if (!previewToken) {
+      confirming.value = false
+      return
+    }
+    const response = await confirmMaterials(currentTaskId, payload, idempotencyKey, previewToken)
     const generationTask = response.data.data
     taskStore.remember(generationTask.id)
     await router.push(`/generate/confirm?taskId=${generationTask.id}`)
@@ -352,6 +379,16 @@ function typeLabel(type: string) {
       </footer>
     </template>
   </main>
+  <AiPreviewDialog
+    :visible="previewVisible"
+    :loading="previewLoading"
+    :error-message="previewError"
+    :preview="previewPayload"
+    :redactions="previewRedactions"
+    @confirm="confirmPreview"
+    @cancel="cancelPreview"
+    @toggle-contact="togglePreviewContact"
+  />
 </template>
 
 <style scoped>

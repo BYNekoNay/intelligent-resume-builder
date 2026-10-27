@@ -36,7 +36,9 @@ const { t } = useLocale()
         <p class="ai-preview__hint">{{ t('aiPreview.description') }}</p>
 
         <div v-if="loading" class="ai-preview__loading">{{ t('aiPreview.loading') }}</div>
-        <div v-else-if="errorMessage" class="ai-preview__error">{{ errorMessage }}</div>
+        <!-- role=alert：预览失败（如授权被撤回 40302、配额用尽）必须被读屏播报，
+             且与其余视图的错误面板保持同一种语义，避免"错误静默"。 -->
+        <div v-else-if="errorMessage" class="ai-preview__error" role="alert">{{ errorMessage }}</div>
 
         <template v-else-if="preview">
           <section class="ai-preview__meta">

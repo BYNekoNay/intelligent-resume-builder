@@ -6,9 +6,11 @@ import { createInterviewAsset, listInterviewAssets } from '@/api/interviewAsset'
 import { getTask, type AiTask } from '@/api/ai'
 import {
   answerInterview, continueWithRules, createFollowUp, finishInterview, getInterviewReport, getInterviewState,
-  retryAi, startInterview,
+  previewFollowUp, retryAi, startInterview,
   type AiFailureInfo, type FollowUpCandidate, type FollowUpPracticeResult, type InterviewReportResponse, type InterviewStateResponse, type LastEvaluation, type RoundDetail,
 } from '@/api/interview'
+import AiPreviewDialog from '@/components/ai/AiPreviewDialog.vue'
+import { useAiTaskPreview } from '@/composables/useAiTaskPreview'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useLocale } from '@/i18n'
@@ -66,6 +68,19 @@ const practiceCandidates = ref<(FollowUpCandidate & { editing: boolean })[]>([])
 const expandedRounds = ref<Set<number>>(new Set())
 const copyStatus = ref('')
 const { start: startFollowUpPolling, stop: stopFollowUpPolling } = useTaskPolling<AiTask>()
+
+/** R32：追问练习也要先看清楚将要发送的内容；令牌只能从预览里拿，取消返回 null。 */
+const {
+  visible: previewVisible,
+  loading: previewLoading,
+  errorMessage: previewError,
+  preview: previewPayload,
+  redactionSummary: previewRedactions,
+  requestPreview,
+  confirm: confirmPreview,
+  cancel: cancelPreview,
+  toggleContact: togglePreviewContact,
+} = useAiTaskPreview()
 
 // ==================== 计算属性 ====================
 const status = computed(() => sessionState.value?.status ?? null)
@@ -304,7 +319,14 @@ async function generatePractice(weakness: string) {
   practiceLoading.value = true
   try {
     const key = newIdempotencyKey('follow-up')
-    const task = (await createFollowUp(interviewId.value, weakness, key)).data.data
+    // 取消 = 明确不发：follow-up 一次都不会被调用
+    const previewToken = await requestPreview('INTERVIEW_COACH', { weakness }, false,
+      () => previewFollowUp(interviewId.value as number, weakness))
+    if (!previewToken) {
+      practiceLoading.value = false
+      return
+    }
+    const task = (await createFollowUp(interviewId.value, weakness, key, previewToken)).data.data
     if (!acceptFollowUpTask(task)) {
       startFollowUpPolling({
         taskId: task.id,
@@ -677,6 +699,16 @@ onBeforeUnmount(() => {
       </article>
     </div>
   </section>
+  <AiPreviewDialog
+    :visible="previewVisible"
+    :loading="previewLoading"
+    :error-message="previewError"
+    :preview="previewPayload"
+    :redactions="previewRedactions"
+    @confirm="confirmPreview"
+    @cancel="cancelPreview"
+    @toggle-contact="togglePreviewContact"
+  />
 </template>
 
 <style scoped>

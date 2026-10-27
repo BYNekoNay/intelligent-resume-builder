@@ -1,5 +1,5 @@
 import { apiClient, type ApiResponse } from './client'
-import type { AiTask } from './ai'
+import type { AiTask, AiTaskPreview } from './ai'
 export type CommunicationType='COVER_LETTER'|'EMAIL'|'OPENING_MESSAGE'
 export type CommunicationOutputLanguage = 'ZH_CN' | 'EN'
 export type CommunicationGenerationSource = 'AI' | 'TEMPLATE'
@@ -65,12 +65,39 @@ export function generateCommunication(resumeVersionId: number, jobDescriptionId:
   })
 }
 
-export function generateCommunicationWithAi(resumeVersionId: number, jobDescriptionId: number,
-                                            type: CommunicationType, outputLanguage: CommunicationOutputLanguage,
-                                            idempotencyKey: string) {
-  return apiClient.post<ApiResponse<AiTask>>('/api/communications/ai-generate', {
-    resumeVersionId, jobDescriptionId, type, outputLanguage,
-  }, { headers: { 'Idempotency-Key': idempotencyKey } })
+/** AI 文案创建的请求参数（R32）。预览与创建共用同一份，见 {@link communicationAiBody}。 */
+export interface CommunicationAiPayload {
+  resumeVersionId: number
+  jobDescriptionId: number
+  type: CommunicationType
+  outputLanguage: CommunicationOutputLanguage
+}
+
+/** ai-generate 的请求体，**预览与创建共用同一份**（字段漂移 → 令牌对不上 → 40901）。 */
+function communicationAiBody(payload: CommunicationAiPayload) {
+  return {
+    resumeVersionId: payload.resumeVersionId,
+    jobDescriptionId: payload.jobDescriptionId,
+    type: payload.type,
+    outputLanguage: payload.outputLanguage,
+  }
+}
+
+/** AI 文案的发送前预览（R32）。只读：不落库、不调模型。 */
+export function previewCommunicationAi(payload: CommunicationAiPayload) {
+  return apiClient
+    .post<ApiResponse<AiTaskPreview>>('/api/communications/ai-generate/preview', communicationAiBody(payload))
+    .then(response => response.data.data)
+}
+
+export function generateCommunicationWithAi(
+  payload: CommunicationAiPayload,
+  idempotencyKey: string,
+  previewToken: string,
+) {
+  return apiClient.post<ApiResponse<AiTask>>('/api/communications/ai-generate', communicationAiBody(payload), {
+    headers: { 'Idempotency-Key': idempotencyKey, 'X-AI-Preview-Token': previewToken },
+  })
 }
 
 // ==================== 模板库 ====================

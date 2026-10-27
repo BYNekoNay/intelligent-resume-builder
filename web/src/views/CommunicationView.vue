@@ -11,9 +11,11 @@ import {
   generateCommunicationWithAi,
   getTemplate,
   listTemplates,
+  previewCommunicationAi,
   previewTemplate,
   saveCommunicationDraft,
   updateTemplate,
+  type CommunicationAiPayload,
   type CommunicationAiResult,
   type CommunicationGenerationSource,
   type CommunicationOutputLanguage,
@@ -24,6 +26,8 @@ import {
   type TemplateScene,
 } from '@/api/communication'
 import type { ApiResponse } from '@/api/client'
+import AiPreviewDialog from '@/components/ai/AiPreviewDialog.vue'
+import { useAiTaskPreview } from '@/composables/useAiTaskPreview'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useTaskPolling, TASK_POLL_DEFAULT_INTERVAL_MS, TASK_POLL_DEFAULT_MAX_ATTEMPTS } from '@/composables/useTaskPolling'
 import { useToast } from '@/composables/useToast'
@@ -50,6 +54,24 @@ const loadingMode = ref<'AI' | 'TEMPLATE' | 'RETRY' | null>(null)
 const waitingInBackground = ref(false)
 const activeTaskId = ref<number | null>(null)
 const { start: startTaskPolling, stop: stopTaskPolling } = useTaskPolling<AiTask>()
+
+/**
+ * R32 发送前预览：确认后才返回令牌，取消返回 null。
+ *
+ * <p>前缀 `aiPreview` 而非 `preview` —— 本视图的「模板预览」已经占用了
+ * `previewing` / `previewLoading` 这些名字。
+ */
+const {
+  visible: aiPreviewVisible,
+  loading: aiPreviewLoading,
+  errorMessage: aiPreviewError,
+  preview: aiPreviewPayload,
+  redactionSummary: aiPreviewRedactions,
+  requestPreview,
+  confirm: confirmAiPreview,
+  cancel: cancelAiPreview,
+  toggleContact: toggleAiPreviewContact,
+} = useAiTaskPreview()
 
 // ==================== 模板库 ====================
 const templates = ref<CommunicationTemplateSummary[]>([])
@@ -192,10 +214,22 @@ async function generateAi() {
   resetResult()
   loadingMode.value = 'AI'
   const key = newIdempotencyKey('communication')
+  // R32：预览与创建共用**同一个** payload 对象 —— 两处各拼一遍必然漂移 → 40901。
+  const payload: CommunicationAiPayload = {
+    resumeVersionId: Number(resumeVersionId.value),
+    jobDescriptionId: Number(jobId.value),
+    type: type.value,
+    outputLanguage: outputLanguage.value,
+  }
   try {
-    const task = (await generateCommunicationWithAi(
-      Number(resumeVersionId.value), Number(jobId.value), type.value, outputLanguage.value, key,
-    )).data.data
+    // 取消 = 明确不发：既不创建任务，也不弹错误（取消不是错误）
+    const previewToken = await requestPreview('COMMUNICATION_GENERATE', { ...payload }, false,
+      () => previewCommunicationAi(payload))
+    if (!previewToken) {
+      loadingMode.value = null
+      return
+    }
+    const task = (await generateCommunicationWithAi(payload, key, previewToken)).data.data
     activeTaskId.value = task.id
     await rememberTask(task.id)
     if (!acceptTaskResult(task)) startPolling(task.id)
@@ -603,6 +637,16 @@ onBeforeUnmount(stopPolling)
       </TransitionGroup>
     </div>
   </section>
+  <AiPreviewDialog
+    :visible="aiPreviewVisible"
+    :loading="aiPreviewLoading"
+    :error-message="aiPreviewError"
+    :preview="aiPreviewPayload"
+    :redactions="aiPreviewRedactions"
+    @confirm="confirmAiPreview"
+    @cancel="cancelAiPreview"
+    @toggle-contact="toggleAiPreviewContact"
+  />
 </template>
 
 <style scoped>

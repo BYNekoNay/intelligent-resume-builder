@@ -185,20 +185,10 @@ export function selectMaterialsForJob(payload: MaterialSelectionRequest, idempot
   })
 }
 
-export function confirmMaterials(
-  id: number,
-  payload: {
-    taskUpdatedAt: string
-    selectedMaterialIds: number[]
-    forcedIncludedMaterialIds?: number[]
-    resumeTitle?: string
-  },
-  idempotencyKey: string,
-) {
-  return apiClient.post<ApiResponse<AiTask>>(`/api/ai/tasks/${id}/confirm-materials`, payload, {
-    headers: { 'Idempotency-Key': idempotencyKey },
-  })
-}
+// confirm-materials 的共用请求体与预览/创建端点在 `jobGeneration.ts`：
+// 预览与创建必须共用同一份请求体（否则令牌漂移 → 40901），而本文件已到 300 行上限。
+// 这里原样转出，调用方仍从 '@/api/ai' 导入。
+export { previewConfirmMaterials, confirmMaterials, type ConfirmMaterialsPayload } from './jobGeneration'
 
 /** 预览里被替换掉的一类联系方式（R32）。 */
 export interface AiPreviewRedaction {

@@ -1,4 +1,5 @@
 import { apiClient, type ApiResponse } from './client'
+import type { AiTask, AiTaskPreview } from './ai'
 
 // ==================== 请求类型 ====================
 
@@ -166,8 +167,20 @@ export function listInterviewHistory(params?: { jobDescriptionId?: number }) {
   return apiClient.get<ApiResponse<InterviewSessionSummary[]>>('/api/interviews', { params })
 }
 
-export function createFollowUp(id: number, weakness: string, idempotencyKey: string) {
-  return apiClient.post<ApiResponse<import('./ai').AiTask>>(`/api/interviews/${id}/follow-up`, { weakness }, {
-    headers: { 'Idempotency-Key': idempotencyKey },
+/**
+ * 追问练习的发送前预览（R32）。只读：不落库、不调模型。
+ *
+ * <p>该领域端点的 `includeContact` 由服务端固定为 false，所以 fetcher 拿到的入参
+ * **刻意忽略**、也不往 body 里塞字段 —— 多带一个字段就会与服务端自算的载荷漂移（→ 40901）。
+ */
+export function previewFollowUp(id: number, weakness: string) {
+  return apiClient
+    .post<ApiResponse<AiTaskPreview>>(`/api/interviews/${id}/follow-up/preview`, { weakness })
+    .then(response => response.data.data)
+}
+
+export function createFollowUp(id: number, weakness: string, idempotencyKey: string, previewToken: string) {
+  return apiClient.post<ApiResponse<AiTask>>(`/api/interviews/${id}/follow-up`, { weakness }, {
+    headers: { 'Idempotency-Key': idempotencyKey, 'X-AI-Preview-Token': previewToken },
   })
 }
