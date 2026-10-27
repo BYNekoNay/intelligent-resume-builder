@@ -98,14 +98,19 @@ try {
     Invoke-Api PUT '/api/personal-profile' @{ fullName = 'Synthetic Candidate'; email = "local-$runId@example.invalid"; phone = '13800000000'; location = 'Shanghai'; website = 'https://example.invalid'; profileSummary = 'Java backend engineer with Spring Boot project experience.'; targetRoleTitles = @('Java Backend Engineer'); targetSeniority = 'Senior'; targetIndustries = @('SaaS'); targetWorkPreferences = @('Shanghai', 'Hybrid'); careerPositioningSummary = 'Backend engineer focused on reliable services and cross-team delivery.' } $token $null | Out-Null
     Invoke-Api POST '/api/ai/consent' @{ policyVersion = 'v1.2.0'; providerCode = 'bailian'; taskScopes = @('JOB_MATERIAL_SELECTION', 'JOB_GENERATION'); dataCategories = @('CAREER_MATERIAL', 'JOB_DESCRIPTION', 'PERSONAL_PROFILE'); noticeHash = 'local-validation' } $token $null | Out-Null
     Add-Check 'ai-consent' { Invoke-Api GET '/api/ai/consent' $null $token $null | Out-Null }
-    $selectionTask = Invoke-Api POST '/api/ai/select-materials-for-job' @{ jobDescriptionId = $job.id; includedMaterialIds = @($material.id, $achievement.id, $leadership.id, $skillEvidence.id); preferredMaterialIds = @(); excludedMaterialIds = @(); resumeTitle = 'Local validation resume' } $token @{ 'Idempotency-Key' = "selection-$runId" }
+    # R32：选材与确认选材都必须先预览（AC-R32-9）。令牌取真实 /preview 端点，与客户端同一协议。
+    $selectionBody = @{ jobDescriptionId = $job.id; includedMaterialIds = @($material.id, $achievement.id, $leadership.id, $skillEvidence.id); preferredMaterialIds = @(); excludedMaterialIds = @(); resumeTitle = 'Local validation resume' }
+    $selectionPreview = Invoke-Api POST '/api/ai/select-materials-for-job/preview' $selectionBody $token $null
+    $selectionTask = Invoke-Api POST '/api/ai/select-materials-for-job' $selectionBody $token @{ 'Idempotency-Key' = "selection-$runId"; 'X-AI-Preview-Token' = $selectionPreview.previewToken }
     $selectionTask = Wait-Task "/api/ai/tasks/$($selectionTask.id)" $token
     $summary.taskStates += @{ type = 'JOB_MATERIAL_SELECTION'; status = $selectionTask.status; retryCount = $selectionTask.retryCount }
     Add-Check 'material-selection' { if ($selectionTask.status -ne 'SUCCESS') { throw "Material selection ended as $($selectionTask.status)." } }
     $recommended = @($selectionTask.resultJson.recommended | ForEach-Object { $_.materialId })
     if ($recommended.Count -eq 0) { $recommended = @($selectionTask.resultJson.unselected | Select-Object -First 1 | ForEach-Object { $_.materialId }) }
     Add-Check 'material-selection-result' { if ($recommended.Count -eq 0 -or -not ($recommended -contains $achievement.id) -or -not ($recommended -contains $leadership.id) -or -not ($recommended -contains $skillEvidence.id)) { throw 'Material selection did not retain all required evidence materials.' } }
-    $task = Invoke-Api POST "/api/ai/tasks/$($selectionTask.id)/confirm-materials" @{ taskUpdatedAt = $selectionTask.updatedAt; selectedMaterialIds = $recommended; forcedIncludedMaterialIds = @(); resumeTitle = 'Local validation resume' } $token @{ 'Idempotency-Key' = "confirm-materials-$runId" }
+    $confirmBody = @{ taskUpdatedAt = $selectionTask.updatedAt; selectedMaterialIds = $recommended; forcedIncludedMaterialIds = @(); resumeTitle = 'Local validation resume' }
+    $confirmPreview = Invoke-Api POST "/api/ai/tasks/$($selectionTask.id)/confirm-materials/preview" $confirmBody $token $null
+    $task = Invoke-Api POST "/api/ai/tasks/$($selectionTask.id)/confirm-materials" $confirmBody $token @{ 'Idempotency-Key' = "confirm-materials-$runId"; 'X-AI-Preview-Token' = $confirmPreview.previewToken }
     $task = Wait-Task "/api/ai/tasks/$($task.id)" $token
     $summary.taskStates += @{ type = 'JOB_GENERATION'; status = $task.status; retryCount = $task.retryCount }
     Add-Check 'job-generation' { if ($task.status -ne 'SUCCESS') { throw "Job generation ended as $($task.status)." } }

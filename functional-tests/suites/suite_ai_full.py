@@ -207,11 +207,18 @@ def main():
     check("ai-consent-grant", is_2xx(code), f"HTTP {code}")
 
     section("3. JOB_MATERIAL_SELECTION（AI 选材）")
-    code, payload = call("POST", "/api/ai/select-materials-for-job", {
+    # R32：先预览再创建（AC-R32-9）。令牌取自真实 /preview 端点，与客户端同一协议。
+    selection_body = {
         "jobDescriptionId": job["id"], "includedMaterialIds": material_ids,
         "preferredMaterialIds": [], "excludedMaterialIds": [],
-        "resumeTitle": f"AI 冒烟测试简历-{RUN}"}, token=token,
-        extra_headers={"Idempotency-Key": f"sel-{RUN}"})
+        "resumeTitle": f"AI 冒烟测试简历-{RUN}"}
+    _, preview_payload = call("POST", "/api/ai/select-materials-for-job/preview",
+                              selection_body, token=token)
+    selection_preview_token = (data_of(preview_payload) or {}).get("previewToken")
+    check("selection-preview-issued-token", bool(selection_preview_token), "选材预览令牌")
+    code, payload = call("POST", "/api/ai/select-materials-for-job", selection_body, token=token,
+                         extra_headers={"Idempotency-Key": f"sel-{RUN}",
+                                        "X-AI-Preview-Token": selection_preview_token})
     selection = data_of(payload)
     ok = check("selection-task-created", is_2xx(code) and isinstance(selection, dict) and selection.get("id"),
                f"HTTP {code} taskId={selection.get('id') if isinstance(selection, dict) else None}")
@@ -233,12 +240,21 @@ def main():
         recommended_ids = [item.get("materialId") for item in (result.get("recommended") or [])]
         if not recommended_ids:
             recommended_ids = material_ids[:2]
-        code, payload = call("POST", f"/api/ai/tasks/{selection_task['id']}/confirm-materials", {
+        # R32 AC-R32-9/10：确认选材必须先预览并回传 X-AI-Preview-Token（缺令牌 40001、令牌不符 40901）
+        confirm_body = {
             "taskUpdatedAt": selection_task.get("updatedAt"),
             "selectedMaterialIds": recommended_ids,
             "forcedIncludedMaterialIds": [],
-            "resumeTitle": f"AI 冒烟测试简历-{RUN}"}, token=token,
-            extra_headers={"Idempotency-Key": f"cfm-{RUN}"})
+            "resumeTitle": f"AI 冒烟测试简历-{RUN}"}
+        _, confirm_preview = call("POST",
+                                  f"/api/ai/tasks/{selection_task['id']}/confirm-materials/preview",
+                                  confirm_body, token=token)
+        confirm_preview_token = (data_of(confirm_preview) or {}).get("previewToken")
+        check("generation-preview-issued-token", bool(confirm_preview_token), "生成预览令牌")
+        code, payload = call("POST", f"/api/ai/tasks/{selection_task['id']}/confirm-materials",
+                             confirm_body, token=token,
+                             extra_headers={"Idempotency-Key": f"cfm-{RUN}",
+                                            "X-AI-Preview-Token": confirm_preview_token})
         generation = data_of(payload)
         ok = check("generation-task-created", is_2xx(code) and isinstance(generation, dict) and generation.get("id"),
                    f"HTTP {code}")
