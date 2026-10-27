@@ -26,8 +26,6 @@ src/main/java/com/intelligentresume/auth/service/AuthService.java=380
 src/main/java/com/intelligentresume/ai/confirmation/service/DraftCommitService.java=378
 src/main/java/com/intelligentresume/resume/service/ResumeVersionService.java=364
 src/main/java/com/intelligentresume/ai/worker/TaskExecutionService.java=326
-src/main/java/com/intelligentresume/ats/service/AtsService.java=314
-src/main/java/com/intelligentresume/interview/service/InterviewFollowUpAiService.java=307
 src/main/java/com/intelligentresume/interview/service/InterviewAnswerService.java=301
 
 # ---- 测试代码（上限 400 行；2026-10-24 批次 3 纳入）----
