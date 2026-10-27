@@ -185,3 +185,137 @@
 
 第 3-5 片同理：沟通（`CommunicationAiPromptBuilder` 已是独立 builder，最省力）、
 ATS（按 `checkId` 预览）、面试（接 `InterviewContextSanitizer`）。
+
+### 7.7 第 3-5 片勘察结论（2026-10-26 追加，实施前实测）
+
+先厘清一个决定性事实：**这 5 类任务的消息组装分两条路**，预览的可行性完全不同。
+
+| 任务类型 | 消息来源 | 任务 input 里有没有 prompt | 预览要实现什么 |
+| --- | --- | --- | --- |
+| `JOB_MATERIAL_SELECTION` | `MaterialSelectionPromptBuilder` → 三键 | 有（第 1 片已抽 `MaterialSelectionContextBuilder`） | 已完成 |
+| `JOB_GENERATION` | `JobGenerationPromptBuilder` → 三键 | 快照里没有，worker 现场 build | 抽 `providerInputFromSnapshot`（第 2 片） |
+| `COMMUNICATION_GENERATE` | `PromptTemplates.systemFor/userPromptFor`（input 无三键 → 回落） | **没有** | 只需复现同一份 input |
+| `ATS_ANALYSIS` | 同上（回落） | **没有** | 抽 `buildTaskInput(result, version, job)` |
+| `INTERVIEW_COACH`（FOLLOW_UP） | `InterviewFollowUpAiService.callProvider` 里**现场拼** `_systemPrompt/_taskPrompt` | **没有** | 必须抽 dry-run 组装（见下） |
+
+勘察明细：
+
+1. **沟通（最省力）**：`CommunicationService:54` 一行即完成 input 组装
+   `promptBuilder.buildTaskInput(request, version.getResumeJson(), job)`，随后 `:56` 交 `AiTaskService.create`。
+   预览端点按 `GenerateCommunicationRequest` 重放同一调用即可，天然同源。
+2. **ATS**：`AtsService.createTask:197-212` 组装 input（含 `promptBuilder.sanitizeResume` +
+   `sanitizeInput`），入口有**两处**（`startAiOrFallback:188` 与 `retryAi:174`）。
+   → 抽 `buildTaskInput(result, version, job)` 后两处与预览共用；预览按 `checkId` 取 result → version → job。
+   注意 `createTask` 末尾会 `stateService.markAnalyzing(...)` 写库，**预览绝不能走它**，只能走抽出的纯组装。
+3. **面试追问（最需要小心）**：`InterviewFollowUpAiService.createFollowUpTask:139-145` 只写
+   `operation/sessionId/weakness/promptVersion`，**prompt 在 `executeTask:162-164` 才现场生成**
+   （`promptContextAssembler.buildFirstQuestionContext(session, userId)` + `FOLLOW_UP_TEMPLATE` + 语言指令），
+   经 `callProvider:195-197` 装成 `Map.of("_systemPrompt", SYSTEM_PROMPT, "_taskPrompt", userPrompt)`。
+   → 必须把 `:162-164` 抽成 dry-run 方法（如 `buildProviderInput(session, weakness)`），预览与 `executeTask` 共用。
+   已验证 `InterviewPromptContextAssembler` **只读**（无 `save`、无 `@Transactional`），可安全用于预览。
+
+### 7.8 ATS 片的死锁与解决（D-AI-11，2026-10-26 定）
+
+**发现的结构性障碍**（不是实现细节，是设计冲突）：
+
+1. `AtsService.createTask:199` 把 `atsCheckResultId` 放进任务 input —— worker 必须用它才能写回结果
+   （`TaskExecutionService:296` 读取）。
+2. `AtsAiPromptBuilder.build:41-77` 把**整个 input** 序列化进 `_dataPrompt`，于是数据库行 id 进入 prompt 正文。
+3. 结果：预览若拿不到真实 checkId，组装出的 messages 与发送时不同 → 令牌必然对不上。
+4. 而首次检查（`POST /api/ats/check`）时 check 尚不存在（`saveAndFlush` 之后才启动 AI），
+   **客户端没有任何办法在发请求前预览** —— 死锁。
+
+两条出路，选后者：
+
+| 方案 | 内容 | 取舍 |
+| --- | --- | --- |
+| 改 prompt，剔除 id 类元数据 | `_dataPrompt` 只留 `resumeJson`/`jdText`/`localResult` | 技术上更干净，但**改动 AI 实际输入内容**，会动到既有 ATS 评估基线与历史可比性，代价与收益不成比例 |
+| **不改 prompt；收敛 AI 启动入口** | 见下 | **采纳** |
+
+**D-AI-11 决策**：
+
+- **唯一预览端点** `POST /api/ats/checks/{id}/preview`（按 checkId，只读）：此时 check 已落库，
+  `localResult`/`resumeJson` 均为确定值，预览与发送天然同源。
+- **`POST /api/ats/check` 的 AI 自动启动降级**：无 `X-AI-Preview-Token` 时**不创建 ai_task**，
+  返回 `analysisStatus=RULES_FALLBACK` + `fallback.code=PREVIEW_REQUIRED`（新增 code，`retryable=true`）。
+  **check 记录本身照常落库** —— 规则分免费且即时，不该被 AI 预览拖住；
+  故 AC-R32-9 的「不落库」在 ATS 上的落地口径是「**不创建 ai_task**」，须在 docs/05 写明。
+- **`POST /api/ats/checks/{id}/ai-retry` 强制令牌**（缺 → 40001，不符 → 40901）。
+  该端点本就是 ensure-or-upgrade 语义（见 OPEN-DECISIONS 2026-09-25 条目），是 ATS 真正启动 AI 的入口。
+- **顺序不可颠倒**：可用性检查（`isAvailable`）→ 令牌校验 → `createTask`（内部 consent/quota/落库）。
+  可用性在最前，才能保住无密钥环境下 `AtsControllerIT` 既有的 `AI_DISABLED` 断言。
+
+这样 ATS 的所有路径都满足「不预览就不发 AI 请求」：`/check` 无令牌不发，`/ai-retry` 强制令牌。
+
+**已知代价**（须写进发布说明）：`/check` 缺令牌时不再自动启动 AI，客户端多一步「预览 → 启动」。
+这是 R32 的必然代价，不是退化；规则分与既有返回结构均未改变。
+
+**连带要改的既有断言**：`AtsControllerIT` 里 `useAi` 默认 true 的用例（`fallback.code=AI_DISABLED`）
+在无密钥环境仍然成立，**不需要改**；`AtsConsentFallbackIT` 的 `CONSENT_REQUIRED` 用例需补
+「先建 check → 预览拿令牌」，否则会先被令牌校验拦成 `PREVIEW_REQUIRED`。
+
+### 7.9 第 2-5 片完成情况（2026-10-27）
+
+五个领域的预览协议**全部落地并通过承重验证**。逐片记录与计划的偏差：
+
+#### 第 2 片 生成（JOB_GENERATION）
+
+按 §7.6 执行要点实施，无偏差。新增 `JobGenerationInputAssembler`（从子任务快照重建 +
+三段式 prompt）与 `JobGenerationPreviewService`，worker 与预览共用同一组装实现。
+
+#### 第 3 片 沟通文案（COMMUNICATION_GENERATE）
+
+**纠正 §7.7 的勘察结论**：沟通生成**不走** `PromptTemplates` 回落。
+`CommunicationAiService:37` 是拿任务 input 现场调 `promptBuilder.build(input)`。
+故 dry-run 组装必须复用 `CommunicationAiPromptBuilder`，而不是照抄模板常量。
+
+由于没有"选材快照"可重建，本片的 `prepareInput` 直接用请求字段组装，
+与 worker 路径同源（worker 读的是同一个 taskInput）。
+
+#### 第 4 片 ATS（ATS_ANALYSIS）
+
+按 §7.8 的 D-AI-11 实施。实测中又发现一处**连带影响比预估的大**：
+`AtsQuotaFallbackIT` 与 `AtsConsentFallbackIT` **两个** IT 都受影响（原估只有 consent 一个），
+因为 `useAi` 默认为 `true`，任何不带令牌的检查都会先被令牌校验拦下。
+两个 IT 都已改为两段式，原断言语义保留。
+
+#### 第 5 片 面试追问（INTERVIEW_COACH）
+
+按 §7.7 的"最需小心"判断处理：`InterviewFollowUpPromptAssembler` 抽出 dry-run 组装，
+`SYSTEM_PROMPT` / `FOLLOW_UP_TEMPLATE` / `languageInstruction` 全部搬迁，
+worker 侧 `callProvider` 签名改为接收 `Map<String,Object>`。
+
+**主动撤回了两条基于 mock 的令牌单测**：`InterviewFollowUpAiServiceTest` 把
+`AiTaskService` mock 掉，`beforeCreate` 守卫根本不会执行，
+在那儿断言"缺令牌会抛错"永远拿不到真值（假绿）。该覆盖移交 IT。
+
+#### 承重验证记录（五个领域各一次）
+
+方法：注释掉该领域的 `previewGuard.require(...)`，跑对应 IT，确认拒绝用例变红；
+还原后比对 md5 一致。
+
+| 领域 | 注入点 | IT | 结果 |
+| --- | --- | --- | --- |
+| JOB_MATERIAL_SELECTION | `JobMaterialSelectionController:114` | `JobGenerationControllerIT` | 红：400→202、409→202 |
+| JOB_GENERATION | `MaterialSelectionConfirmationService:99-100` | `JobGenerationPreviewProtocolIT` | 红（同上套件覆盖） |
+| COMMUNICATION_GENERATE | `CommunicationService:88` | `CommunicationControllerIT` | 红：400→202、409→202 |
+| ATS_ANALYSIS | `AtsAiStarter:105`（retryAi 路径） | `AtsPreviewProtocolIT` | 红：400→200、409→200 |
+| INTERVIEW_COACH | `InterviewFollowUpAiService:115` | `InterviewFollowUpPreviewProtocolIT` | 红：400→202、409→202 |
+
+全部还原后 md5 一致，全仓无 `MUTATION-GATE` 残留。
+
+#### 行数棘轮：一次红与正确修法
+
+我给 `AtsService` 塞预览编排 → **314 → 337 行** → 棘轮立红。
+
+正确修法**不是**调大基线值，而是把新增的 AI 侧逻辑整体抽成 `AtsAiStarter`
+（与 `AtsAiInputAssembler` 同批），`AtsService` 降到 **233 行**；
+因跌破 300，按规则 3 **删除**了该基线条目。
+
+> 教训：往已登记的欠债文件里塞新逻辑 = 一边还债一边欠新的，正是棘轮要挡的行为。新逻辑一律进新文件。
+
+#### 当前状态
+
+- 后端全量 **1106 绿 / 0 失败 / 7 跳过**（跳过的是需真实密钥的 live-AI 用例，**不得视为通过**）。
+- 三项门禁（棘轮 / 版本一致性 / 文档覆盖）绿。
+- 前端接线进行中。
