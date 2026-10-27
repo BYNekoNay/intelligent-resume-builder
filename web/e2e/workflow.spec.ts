@@ -64,6 +64,22 @@ const allSectionsResume = JSON.parse(readFileSync(
   'utf8',
 )) as Record<string, unknown>
 
+/**
+ * R32 领域 `/preview` 端点的最小可用响应。
+ *
+ * <p>令牌由服务端对自己组装的载荷算出来，前端拿不到也伪造不了 —— 所以创建请求必须
+ * 带上这里返回的 `previewToken`，否则后端以 40001/40901 拒绝且不落库。
+ */
+function aiPreviewResponse(taskType: string, previewToken: string) {
+  return {
+    taskType,
+    messages: [{ role: 'system', content: 'system prompt' }, { role: 'user', content: 'preview payload' }],
+    includeContact: false,
+    redactions: [],
+    previewToken,
+  }
+}
+
 async function mockAuthenticatedApi(page: Page) {
   await page.route('**/api/auth/refresh', route => route.fulfill({ json: response({ accessToken: 'e2e-token' }) }))
   await page.route('**/api/auth/me', route => route.fulfill({ json: response({ id: 99, username: 'e2e-user', email: 'e2e@example.com' }) }))
@@ -1934,14 +1950,19 @@ test('resumes the pending job generation after granting AI consent', async ({ pa
 test('reviews AI material selection before starting resume generation', async ({ page }) => {
   await mockAuthenticatedApi(page)
   let confirmationPayload: unknown
+  let previewTokenHeader: string | undefined
   await page.route('**/api/ai/tasks/99/confirm-materials', route => {
     confirmationPayload = route.request().postDataJSON()
+    previewTokenHeader = route.request().headers()['x-ai-preview-token']
     return route.fulfill({ json: response({
       id: 100, taskType: 'JOB_GENERATION', parentTaskId: 99, jobDescriptionId: job.id,
       status: 'PENDING', confirmationStatus: 'PENDING', resultJson: null, errorMessage: null,
       retryCount: 0, resultResumeVersionId: null, createdAt: now, updatedAt: now,
     }) })
   })
+  await page.route('**/api/ai/tasks/99/confirm-materials/preview', route => route.fulfill({
+    json: response(aiPreviewResponse('JOB_GENERATION', 'e2e-confirm-materials-token')),
+  }))
   await page.route('**/api/ai/tasks/99', route => route.fulfill({ json: response({
     id: 99, taskType: 'JOB_MATERIAL_SELECTION', jobDescriptionId: job.id,
     status: 'SUCCESS', confirmationStatus: 'PENDING', errorMessage: null, updatedAt: now,
@@ -1967,11 +1988,53 @@ test('reviews AI material selection before starting resume generation', async ({
   await page.getByRole('button', { name: '加入', exact: true }).click()
   await page.getByRole('button', { name: '本次强制加入' }).click()
   await page.getByRole('button', { name: '确认选材并生成简历' }).click()
+  // R32：先确认发送前预览，才轮到 confirm-materials
+  await expect(page.getByTestId('ai-preview-overlay')).toBeVisible()
+  await page.getByTestId('ai-preview-confirm').click()
   await expect.poll(() => confirmationPayload).toMatchObject({
     selectedMaterialIds: [55, 56, 57],
     forcedIncludedMaterialIds: [57],
   })
+  expect(previewTokenHeader, '创建请求必须携带预览令牌').toBe('e2e-confirm-materials-token')
   await expect(page).toHaveURL(/\/generate\/confirm\?taskId=100$/)
+})
+
+/**
+ * R32 协议底线：取消预览 = 明确不发。这里不测弹窗长相，只测
+ * 「confirm-materials 一次都没被调用」 —— 这是 40001/40901 之外唯一能证明
+ * 前端没有绕路的信号。
+ */
+test('cancelling the material confirmation preview creates no generation task', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let confirmCalls = 0
+  await page.route('**/api/ai/tasks/99/confirm-materials', route => {
+    confirmCalls += 1
+    return route.fulfill({ json: response({ id: 100, taskType: 'JOB_GENERATION', status: 'PENDING', resultJson: null, errorMessage: null, updatedAt: now }) })
+  })
+  await page.route('**/api/ai/tasks/99/confirm-materials/preview', route => route.fulfill({
+    json: response(aiPreviewResponse('JOB_GENERATION', 'e2e-confirm-materials-token')),
+  }))
+  await page.route('**/api/ai/tasks/99', route => route.fulfill({ json: response({
+    id: 99, taskType: 'JOB_MATERIAL_SELECTION', jobDescriptionId: job.id,
+    status: 'SUCCESS', confirmationStatus: 'PENDING', errorMessage: null, updatedAt: now,
+    resultJson: {
+      recommended: [{ materialId: 55, title: '订单平台重构', materialType: 'PROJECT_EXPERIENCE', reason: '直接匹配高并发系统经验' }],
+      unselected: [],
+      excluded: [],
+      missingRequirements: [],
+    },
+  }) }))
+
+  await page.goto('/generate/materials?taskId=99')
+  await expect(page.getByRole('button', { name: '确认选材并生成简历' })).toBeEnabled()
+  await page.getByRole('button', { name: '确认选材并生成简历' }).click()
+
+  await expect(page.getByTestId('ai-preview-overlay')).toBeVisible()
+  await page.getByTestId('ai-preview-cancel').click()
+  await expect(page.getByTestId('ai-preview-overlay')).toBeHidden()
+
+  expect(confirmCalls, '取消后不得创建生成任务').toBe(0)
+  await expect(page).toHaveURL(/\/generate\/materials\?taskId=99$/)
 })
 
 test('retries material confirmation after refresh with the same selection and idempotency key', async ({ page }) => {
@@ -1994,6 +2057,9 @@ test('retries material confirmation after refresh with the same selection and id
       retryCount: 0, resultResumeVersionId: null, createdAt: now, updatedAt: now,
     }) })
   })
+  await page.route('**/api/ai/tasks/99/confirm-materials/preview', route => route.fulfill({
+    json: response(aiPreviewResponse('JOB_GENERATION', 'e2e-confirm-materials-token')),
+  }))
   await page.route('**/api/ai/tasks/99', route => route.fulfill({ json: response({
     id: 99, taskType: 'JOB_MATERIAL_SELECTION', jobDescriptionId: job.id,
     status: 'SUCCESS', confirmationStatus: 'CONFIRMED', errorMessage: null, updatedAt: taskUpdatedAt,
@@ -2014,11 +2080,13 @@ test('retries material confirmation after refresh with the same selection and id
   await page.getByRole('button', { name: '加入', exact: true }).click()
   await page.getByRole('button', { name: '本次强制加入' }).click()
   await page.getByRole('button', { name: '确认选材并生成简历' }).click()
+  await page.getByTestId('ai-preview-confirm').click()
   await expect(page.getByRole('alert')).toBeVisible()
   await page.reload()
   await expect(page.locator('.selected-section')).toContainText('AWS 证书')
   await expect(page.locator('.selected-section')).toContainText('内部创新奖')
   await page.getByRole('button', { name: '确认选材并生成简历' }).click()
+  await page.getByTestId('ai-preview-confirm').click()
 
   await expect(page).toHaveURL(/\/generate\/confirm\?taskId=100$/)
   expect(requests).toHaveLength(2)
@@ -2239,14 +2307,19 @@ test('generates a communication draft through the AI task lifecycle', async ({ p
   await page.setViewportSize({ width: 390, height: 844 })
   await mockAuthenticatedApi(page)
   let aiPayload: unknown
+  let aiPreviewTokenHeader: string | undefined
   await page.route('**/api/communications/ai-generate', async route => {
     aiPayload = route.request().postDataJSON()
+    aiPreviewTokenHeader = route.request().headers()['x-ai-preview-token']
     expect(route.request().headers()['idempotency-key']).toMatch(/^communication:[0-9a-f-]{36}$/)
     await route.fulfill({ json: response({
       id: 81, taskType: 'COMMUNICATION_GENERATE', jobDescriptionId: 20, status: 'PENDING',
       resultJson: null, errorMessage: null, retryCount: 0, createdAt: now, updatedAt: now,
     }) })
   })
+  await page.route('**/api/communications/ai-generate/preview', route => route.fulfill({
+    json: response(aiPreviewResponse('COMMUNICATION_GENERATE', 'e2e-communication-token')),
+  }))
   await page.route('**/api/ai/tasks/81', route => route.fulfill({ json: response({
     id: 81, taskType: 'COMMUNICATION_GENERATE', jobDescriptionId: 20, status: 'SUCCESS',
     resultJson: {
@@ -2262,14 +2335,45 @@ test('generates a communication draft through the AI task lifecycle', async ({ p
   await page.locator('select').nth(2).selectOption('20')
   await page.locator('select').nth(3).selectOption('EMAIL')
   await page.locator('form.compact-form .generation-actions button').first().click()
+  // R32：先确认发送前预览，才轮到 ai-generate
+  await expect(page.getByTestId('ai-preview-overlay')).toBeVisible()
+  await page.getByTestId('ai-preview-confirm').click()
 
   await expect.poll(() => aiPayload).toEqual({
     resumeVersionId: 11, jobDescriptionId: 20, type: 'EMAIL', outputLanguage: 'ZH_CN',
   })
+  expect(aiPreviewTokenHeader, '创建请求必须携带预览令牌').toBe('e2e-communication-token')
   await expect(page).toHaveURL(/taskId=81/)
   await expect(page.getByText('AI 生成', { exact: true })).toBeVisible({ timeout: 5_000 })
   await expect(page.locator('article.workspace-card textarea')).toHaveValue(/Java 服务开发经验/)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+})
+
+/** R32 协议底线（沟通文案入口）：取消预览 = 明确不发，且取消不算错误。 */
+test('cancelling the communication preview creates no AI task and shows no error', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let aiGenerateCalls = 0
+  await page.route('**/api/communications/ai-generate', route => {
+    aiGenerateCalls += 1
+    return route.fulfill({ json: response({ id: 81, taskType: 'COMMUNICATION_GENERATE', status: 'PENDING', resultJson: null, errorMessage: null, updatedAt: now }) })
+  })
+  await page.route('**/api/communications/ai-generate/preview', route => route.fulfill({
+    json: response(aiPreviewResponse('COMMUNICATION_GENERATE', 'e2e-communication-token')),
+  }))
+  await page.route('**/api/communications/templates**', route => route.fulfill({ json: response([]) }))
+
+  await page.goto('/communications')
+  await page.locator('select').nth(1).selectOption('11')
+  await page.locator('select').nth(2).selectOption('20')
+  await page.locator('select').nth(3).selectOption('EMAIL')
+  await page.locator('form.compact-form .generation-actions button').first().click()
+
+  await expect(page.getByTestId('ai-preview-overlay')).toBeVisible()
+  await page.getByTestId('ai-preview-cancel').click()
+  await expect(page.getByTestId('ai-preview-overlay')).toBeHidden()
+
+  expect(aiGenerateCalls, '取消后不得创建 AI 任务').toBe(0)
+  await expect(page.getByRole('alert')).toHaveCount(0)
 })
 
 test('retries a failed PDF export through polling and downloads the completed document', async ({ page }) => {

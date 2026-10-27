@@ -124,3 +124,64 @@ test('expands report rounds and saves an answer asset with an idempotent saved s
   await expect(roundCard.getByText('Saved', { exact: true })).toBeVisible()
   expect(assetCreates).toBe(1)
 })
+
+/**
+ * R32：薄弱项练习（INTERVIEW_COACH）也要先预览再创建。
+ *
+ * <p>守的是协议而不是弹窗：取消 → `follow-up` 一次都不调用；确认 → 请求必须带上
+ * 预览端点返回的令牌（前端算不出来，只能从预览拿）。
+ */
+test('confirms the follow-up practice preview before creating the task', async ({ page }) => {
+  await mockInterviewReportPage(page)
+  let followUpCreates = 0
+  let followUpPreviewToken: string | undefined
+
+  await page.route('**/api/interviews/5/follow-up/preview', route => route.fulfill({
+    json: response({
+      taskType: 'INTERVIEW_COACH',
+      messages: [
+        { role: 'system', content: 'You are an interview coach.' },
+        { role: 'user', content: 'weakness: Evidence specificity' },
+      ],
+      includeContact: false,
+      redactions: [],
+      previewToken: 'e2e-follow-up-token',
+    }),
+  }))
+  await page.route('**/api/interviews/5/follow-up', async route => {
+    followUpCreates += 1
+    followUpPreviewToken = route.request().headers()['x-ai-preview-token']
+    await route.fulfill({
+      json: response({
+        id: 77, taskType: 'INTERVIEW_COACH', parentTaskId: null, jobDescriptionId: 20,
+        status: 'SUCCESS', confirmationStatus: 'NOT_REQUIRED', errorMessage: null, retryCount: 0,
+        resultResumeVersionId: null, createdAt: now, updatedAt: now,
+        resultJson: {
+          operation: 'FOLLOW_UP_PRACTICE',
+          promptVersion: 'interview-follow-up-v1',
+          weakness: 'Evidence specificity',
+          candidates: [{ question: 'Give a metric-backed example.', focus: 'Evidence specificity', expectedSignals: ['metrics'], coverageTags: ['evidence'] }],
+        },
+      }),
+    })
+  })
+
+  await page.goto('/interviews')
+  await expect(page.getByRole('heading', { name: 'Interview report' })).toBeVisible({ timeout: 10_000 })
+
+  // 取消 = 明确不发
+  await page.getByRole('button', { name: 'Generate practice' }).click()
+  await expect(page.getByTestId('ai-preview-overlay')).toBeVisible()
+  await page.getByTestId('ai-preview-cancel').click()
+  await expect(page.getByTestId('ai-preview-overlay')).toBeHidden()
+  expect(followUpCreates, '取消后不得创建追问任务').toBe(0)
+
+  // 确认后才发，且必须带预览令牌
+  await page.getByRole('button', { name: 'Generate practice' }).click()
+  await expect(page.getByTestId('ai-preview-overlay')).toBeVisible()
+  await page.getByTestId('ai-preview-confirm').click()
+  await expect.poll(() => followUpCreates).toBe(1)
+  expect(followUpPreviewToken, '创建请求必须携带预览令牌').toBe('e2e-follow-up-token')
+  // 候选题渲染在可编辑 textarea 里（值而非文本节点）
+  await expect(page.locator('.practice-candidate textarea')).toHaveValue('Give a metric-backed example.')
+})
