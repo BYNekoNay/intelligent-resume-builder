@@ -1,5 +1,7 @@
 package com.intelligentresume.communication.service;
 
+import com.intelligentresume.ai.preview.AiPreviewGuard;
+import com.intelligentresume.ai.preview.AiPreviewService;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
@@ -33,29 +35,64 @@ public class CommunicationService {
     private final CommunicationAiPromptBuilder promptBuilder;
     private final AiTaskService aiTaskService;
     private final CommunicationTemplateRepository templateRepository;
+    private final AiPreviewService previewService;
+    private final AiPreviewGuard previewGuard;
 
     public CommunicationService(ResumeVersionRepository versionRepository, JobDescriptionRepository jobRepository,
                                 CommunicationDraftRepository draftRepository,
                                 CommunicationAiPromptBuilder promptBuilder,
                                 AiTaskService aiTaskService,
-                                CommunicationTemplateRepository templateRepository) {
+                                CommunicationTemplateRepository templateRepository,
+                                AiPreviewService previewService,
+                                AiPreviewGuard previewGuard) {
         this.versionRepository = versionRepository;
         this.jobRepository = jobRepository;
         this.draftRepository = draftRepository;
         this.promptBuilder = promptBuilder;
         this.aiTaskService = aiTaskService;
         this.templateRepository = templateRepository;
+        this.previewService = previewService;
+        this.previewGuard = previewGuard;
+    }
+
+    /**
+     * 组装「要落库的任务 input」与「worker 实际交给模型的三段式 prompt」—— 创建与预览**共用同一实现**
+     * （R32 AC-R32-8）。
+     *
+     * <p>为什么必须连 prompt 一起算：{@code CommunicationAiService.executeTask} 是拿任务 input 现场调
+     * {@link CommunicationAiPromptBuilder#build(Map)} 得到消息的，**不走** {@code PromptTemplates} 回落。
+     * 预览若只重放 input 就交出去，看到的正文会是另一套模板，与实际发送的不一致。
+     */
+    public record PreparedInput(Map<String, Object> taskInput, Map<String, Object> providerInput) {
+    }
+
+    /**
+     * @throws BusinessException 版本/岗位不属于当前用户 → {@code 40401}；版本已归档 → {@code 40902}
+     */
+    public PreparedInput prepareInput(GenerateCommunicationRequest request, Long userId) {
+        ResumeVersion version = ownedResumeVersion(request.resumeVersionId(), userId);
+        JobDescription job = ownedJob(request.jobDescriptionId(), userId);
+        Map<String, Object> taskInput = promptBuilder.buildTaskInput(request, version.getResumeJson(), job);
+        return new PreparedInput(taskInput, promptBuilder.build(taskInput));
     }
 
     public AiTaskStatusResponse generateWithAi(GenerateCommunicationRequest request, String idempotencyKey,
-                                               Long userId) {
-        ResumeVersion version = ownedResumeVersion(request.resumeVersionId(), userId);
-        JobDescription job = ownedJob(request.jobDescriptionId(), userId);
-        Map<String, Object> input = promptBuilder.buildTaskInput(request, version.getResumeJson(), job);
+                                               String previewToken, Long userId) {
+        PreparedInput prepared = prepareInput(request, userId);
         CreateAiTaskRequest taskRequest = new CreateAiTaskRequest(
-                AiTaskType.COMMUNICATION_GENERATE, input, null, request.jobDescriptionId(),
+                AiTaskType.COMMUNICATION_GENERATE, prepared.taskInput(), null, request.jobDescriptionId(),
                 null, null, null, null);
-        return aiTaskService.create(taskRequest, idempotencyKey, userId);
+        // R32 AC-R32-9 / AC-R32-10：令牌用服务端自己组装出的 providerInput 重算并比对。
+        // 位置由 AiTaskService 保证：幂等重放之后（重试不因缺令牌失败）、配额与写入之前（被拒不落库）。
+        return aiTaskService.create(taskRequest, idempotencyKey, userId,
+                () -> previewGuard.require(AiTaskType.COMMUNICATION_GENERATE, prepared.providerInput(), previewToken));
+    }
+
+    /** 发送前预览（AC-R32-8 / AC-R32-12）：只读，不落库、不调 provider、不扣配额、不校验幂等键。 */
+    public AiPreviewService.PreviewResponse preview(GenerateCommunicationRequest request, Long userId) {
+        PreparedInput prepared = prepareInput(request, userId);
+        return previewService.preview(new AiPreviewService.PreviewRequest(
+                AiTaskType.COMMUNICATION_GENERATE, prepared.providerInput(), false));
     }
 
     private ResumeVersion ownedResumeVersion(Long id, Long userId) {

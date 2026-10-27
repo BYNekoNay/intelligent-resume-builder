@@ -1,5 +1,7 @@
 package com.intelligentresume.communication.controller;
 
+import com.intelligentresume.ai.preview.AiPreviewGuard;
+import com.intelligentresume.ai.preview.AiPreviewService;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.communication.domain.CommunicationOutputLanguage;
@@ -45,13 +47,29 @@ public class CommunicationController {
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> generateWithAi(
             @Valid @RequestBody GenerateCommunicationRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = AiPreviewGuard.HEADER, required = false) String previewToken,
             HttpServletRequest httpRequest) {
         if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.trim().length() > 128) {
             throw new BusinessException(ErrorCode.VALIDATION, "Idempotency-Key 必填且最长 128 字符");
         }
-        AiTaskStatusResponse task = service.generateWithAi(request, idempotencyKey.trim(), currentUserId(httpRequest));
+        AiTaskStatusResponse task = service.generateWithAi(request, idempotencyKey.trim(), previewToken,
+                currentUserId(httpRequest));
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(task, traceId(httpRequest)));
+    }
+
+    /**
+     * 沟通生成的发送前预览（R32 AC-R32-8）：返回**将要发送的确切 messages** 与 `previewToken`。
+     *
+     * <p>只读：不落库、不调 provider、不扣配额，也不要求 `Idempotency-Key`（那是创建期的东西）。
+     * 请求体与 `POST /api/communications/ai-generate` 相同。
+     */
+    @PostMapping("/ai-generate/preview")
+    public ApiResponse<AiPreviewService.PreviewResponse> previewWithAi(
+            @Valid @RequestBody GenerateCommunicationRequest request,
+            HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.preview(request, currentUserId(httpRequest)),
+                traceId(httpRequest));
     }
 
     // ==================== 模板库 ====================

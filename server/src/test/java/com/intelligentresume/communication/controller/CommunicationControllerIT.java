@@ -1,8 +1,14 @@
 package com.intelligentresume.communication.controller;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.ai.provider.AiMessageAssembler;
+import com.intelligentresume.ai.task.domain.AiTask;
+import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.ai.task.repository.AiTaskRepository;
 import com.intelligentresume.communication.domain.CommunicationTemplate;
 import com.intelligentresume.communication.repository.CommunicationTemplateRepository;
+import com.intelligentresume.communication.service.CommunicationAiPromptBuilder;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -13,6 +19,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+
+import java.util.List;
+import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -29,6 +38,8 @@ class CommunicationControllerIT {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private CommunicationTemplateRepository templateRepository;
+    @Autowired private AiTaskRepository taskRepository;
+    @Autowired private CommunicationAiPromptBuilder promptBuilder;
     private static String tokenA;
     private static String tokenB;
     private static long versionId;
@@ -99,6 +110,7 @@ class CommunicationControllerIT {
         MvcResult first = mockMvc.perform(post("/api/communications/ai-generate")
                         .header("Authorization", "Bearer " + tokenA)
                         .header("Idempotency-Key", "communication-ai-key")
+                        .header("X-AI-Preview-Token", previewToken(body))
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.data.taskType").value("COMMUNICATION_GENERATE"))
@@ -106,6 +118,7 @@ class CommunicationControllerIT {
                 .andReturn();
         aiTaskId = objectMapper.readTree(first.getResponse().getContentAsString()).path("data").path("id").asLong();
 
+        // 幂等重放**不需要**再带令牌：令牌校验排在重放判定之后，否则客户端重试会被 40001 打死
         mockMvc.perform(post("/api/communications/ai-generate")
                         .header("Authorization", "Bearer " + tokenA)
                         .header("Idempotency-Key", "communication-ai-key")
@@ -214,6 +227,80 @@ class CommunicationControllerIT {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(40902))
                 .andExpect(jsonPath("$.message").value("该简历版本已归档，请先恢复后再发起沟通"));
+    }
+
+    @Test @Order(9)
+    @DisplayName("R32：不带预览令牌发起 AI 沟通 → 40001，且 ai_task 零新增")
+    void rejectsAiGenerationWithoutPreviewToken() throws Exception {
+        String body = aiBody("EMAIL");
+        long before = taskRepository.count();
+        mockMvc.perform(post("/api/communications/ai-generate")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "communication-no-preview")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001));
+        Assertions.assertEquals(before, taskRepository.count(), "缺令牌不得产生 ai_task 行");
+    }
+
+    @Test @Order(10)
+    @DisplayName("R32：预览后改了文案类型 → 40901，且 ai_task 零新增")
+    void rejectsAiGenerationWithStalePreviewToken() throws Exception {
+        String staleToken = previewToken(aiBody("EMAIL"));
+        long before = taskRepository.count();
+        mockMvc.perform(post("/api/communications/ai-generate")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", "communication-stale-preview")
+                        .header("X-AI-Preview-Token", staleToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(aiBody("COVER_LETTER")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(40901));
+        Assertions.assertEquals(before, taskRepository.count(), "令牌失效不得产生 ai_task 行");
+    }
+
+    @Test @Order(11)
+    @DisplayName("R32：预览只读，且与 worker 从落库快照组装出的消息逐字节相等")
+    void previewIsReadOnlyAndMatchesWorkerMessages() throws Exception {
+        String body = aiBody("COVER_LETTER");
+        long before = taskRepository.count();
+        MvcResult previewed = mockMvc.perform(post("/api/communications/ai-generate/preview")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.messages").isArray())
+                .andReturn();
+        Assertions.assertEquals(before, taskRepository.count(), "预览不得写库（AC-R32-12）");
+
+        // AC-R32-8：worker 是拿任务 input 现场 promptBuilder.build(...) 的（CommunicationAiService:37），
+        // 所以这里必须按**落库快照**重算，而不是按预览自己的那一份。
+        AiTask task = taskRepository.findById(aiTaskId).orElseThrow();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> input = (Map<String, Object>) task.getInputSnapshotJson().get("input");
+        List<Map<String, String>> actual = AiMessageAssembler.assemble(
+                AiTaskType.COMMUNICATION_GENERATE, promptBuilder.build(input));
+        List<Map<String, String>> expected = objectMapper.convertValue(
+                objectMapper.readTree(previewed.getResponse().getContentAsByteArray()).path("data").path("messages"),
+                new TypeReference<>() { });
+        Assertions.assertEquals(expected, actual, "预览内容必须与 worker 实际发送的内容完全一致");
+    }
+
+    private String aiBody(String type) {
+        return "{\"resumeVersionId\":%d,\"jobDescriptionId\":%d,\"type\":\"%s\",\"outputLanguage\":\"EN\"}"
+                .formatted(versionId, jobId, type);
+    }
+
+    /**
+     * 走**真实预览端点**取令牌（R32）：不在测试里自己算哈希，否则测的就不是客户端协议。
+     */
+    private String previewToken(String body) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/communications/ai-generate/preview")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.previewToken").isNotEmpty())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+                .path("data").path("previewToken").asText();
     }
 
     private String register(String username, String email) throws Exception {
