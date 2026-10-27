@@ -1,12 +1,7 @@
 package com.intelligentresume.ats.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.intelligentresume.ai.provider.AiProviderRegistry;
-import com.intelligentresume.ai.task.domain.AiTaskStatus;
-import com.intelligentresume.ai.task.domain.AiTaskType;
-import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
-import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
-import com.intelligentresume.ai.task.service.AiTaskService;
+import com.intelligentresume.ai.preview.AiPreviewService;
 import com.intelligentresume.ai.task.service.IdempotencyService;
 import com.intelligentresume.ats.domain.AtsCheckResult;
 import com.intelligentresume.ats.dto.*;
@@ -40,32 +35,29 @@ public class AtsService {
     private final ResumeRepository resumeRepository;
     private final JobDescriptionRepository jobRepository;
     private final AtsCheckResultRepository repository;
-    private final AiTaskService taskService;
     private final IdempotencyService idempotencyService;
-    private final AiProviderRegistry providerRegistry;
-    private final AtsResultStateService stateService;
     private final AtsAiPromptBuilder promptBuilder;
+    private final AtsAiStarter aiStarter;
     private final ObjectMapper objectMapper;
 
     public AtsService(ScoringService scoringService, ResumeVersionRepository versionRepository,
                       ResumeRepository resumeRepository, JobDescriptionRepository jobRepository,
-                      AtsCheckResultRepository repository, AiTaskService taskService, IdempotencyService idempotencyService,
-                      AiProviderRegistry providerRegistry, AtsResultStateService stateService,
-                      AtsAiPromptBuilder promptBuilder, ObjectMapper objectMapper) {
+                      AtsCheckResultRepository repository, IdempotencyService idempotencyService,
+                      AtsAiPromptBuilder promptBuilder, AtsAiStarter aiStarter,
+                      ObjectMapper objectMapper) {
         this.scoringService = scoringService;
         this.versionRepository = versionRepository;
         this.resumeRepository = resumeRepository;
         this.jobRepository = jobRepository;
         this.repository = repository;
-        this.taskService = taskService;
         this.idempotencyService = idempotencyService;
-        this.providerRegistry = providerRegistry;
-        this.stateService = stateService;
         this.promptBuilder = promptBuilder;
+        this.aiStarter = aiStarter;
         this.objectMapper = objectMapper;
     }
 
-    public AtsCheckResponse check(AtsCheckRequest request, String idempotencyKey, Long userId) {
+    public AtsCheckResponse check(AtsCheckRequest request, String idempotencyKey, Long userId,
+                            String previewToken) {
         String fingerprint = idempotencyService.fingerprint(Map.of(
                 "resumeVersionId", request.resumeVersionId(), "jobDescriptionId", request.jobDescriptionId(),
                 "useAi", request.shouldUseAi()));
@@ -133,7 +125,7 @@ public class AtsService {
         }
 
         if (request.shouldUseAi()) {
-            startAiOrFallback(entity, version, job, userId);
+            aiStarter.startOrFallback(entity, version, job, userId, previewToken);
         }
         return get(entity.getId(), userId);
     }
@@ -145,89 +137,24 @@ public class AtsService {
         return toResponse(result);
     }
 
-    public AtsCheckResponse retryAi(Long id, Long userId) {
+    public AtsCheckResponse retryAi(Long id, Long userId, String previewToken) {
         AtsCheckResult result = repository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "ATS 检查记录不存在"));
         ResumeVersion version = ownedVersion(result.getResumeVersionId(), userId);
         JobDescription job = jobRepository.findByIdAndUserId(result.getJobDescriptionId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位描述不存在"));
-
-        Long taskId = longValue(result.getResultJson().get("aiTaskId"));
-        try {
-            if (!providerRegistry.route(AiTaskType.ATS_ANALYSIS).isAvailable()) {
-                return fallback(result, userId, taskId, AtsFallbackCode.AI_DISABLED,
-                        "AI 服务尚未配置，已使用本地规则结果。", false, false);
-            }
-            if (taskId != null) {
-                AiTaskStatusResponse task = taskService.get(taskId, userId);
-                if (task.status() == AiTaskStatus.FAILED) {
-                    AiTaskStatusResponse retried = taskService.retry(taskId, userId);
-                    stateService.markAnalyzing(id, userId, retried.id());
-                    return get(id, userId);
-                }
-                if (task.status() == AiTaskStatus.PENDING || task.status() == AiTaskStatus.RUNNING) {
-                    stateService.markAnalyzing(id, userId, task.id());
-                    return get(id, userId);
-                }
-                if (task.status() == AiTaskStatus.SUCCESS) return get(id, userId);
-            }
-            createTask(result, version, job, userId);
-        } catch (BusinessException e) {
-            applyExpectedFallback(result, userId, taskId, e);
-        }
+        aiStarter.retryOrThrow(result, version, job, userId, previewToken);
         return get(id, userId);
     }
 
-    private void startAiOrFallback(AtsCheckResult result, ResumeVersion version, JobDescription job, Long userId) {
-        try {
-            if (!providerRegistry.route(AiTaskType.ATS_ANALYSIS).isAvailable()) {
-                stateService.markFallback(result.getId(), userId, null, AtsFallbackCode.AI_DISABLED,
-                        "AI 服务尚未配置，已使用本地规则结果。", false, false);
-                return;
-            }
-            createTask(result, version, job, userId);
-        } catch (BusinessException e) {
-            applyExpectedFallback(result, userId, null, e);
-        } catch (RuntimeException e) {
-            stateService.markFallback(result.getId(), userId, null, AtsFallbackCode.UNKNOWN,
-                    "AI 分析未能启动，已使用本地规则结果。", true, false);
-        }
-    }
-
-    private void createTask(AtsCheckResult result, ResumeVersion version, JobDescription job, Long userId) {
-        Map<String, Object> input = new LinkedHashMap<>();
-        input.put("atsCheckResultId", result.getId());
-        input.put("resumeVersionId", result.getResumeVersionId());
-        input.put("jobDescriptionId", result.getJobDescriptionId());
-        input.put("resumeJson", promptBuilder.sanitizeResume(version.getResumeJson()));
-        input.put("jdText", job.getJdText());
-        input.put("localResult", localSnapshot(result.getResultJson()));
-        input.put("promptVersion", promptBuilder.promptVersion());
-        input.put("schemaVersion", promptBuilder.schemaVersion());
-        CreateAiTaskRequest request = new CreateAiTaskRequest(
-                AiTaskType.ATS_ANALYSIS, promptBuilder.sanitizeInput(input), null, result.getJobDescriptionId(),
-                null, null, null, null);
-        AiTaskStatusResponse task = taskService.create(request, "ats:" + result.getId() + ":v1", userId);
-        stateService.markAnalyzing(result.getId(), userId, task.id());
-    }
-
-    private void applyExpectedFallback(AtsCheckResult result, Long userId, Long taskId, BusinessException e) {
-        if (e.getErrorCode() == ErrorCode.CONSENT_REQUIRED) {
-            stateService.markFallback(result.getId(), userId, taskId, AtsFallbackCode.CONSENT_REQUIRED,
-                    "需要授权 AI 处理简历和岗位信息，当前已使用本地规则结果。", false, true);
-        } else if (e.getErrorCode() == ErrorCode.RATE_LIMITED) {
-            stateService.markFallback(result.getId(), userId, taskId, AtsFallbackCode.QUOTA_EXCEEDED,
-                    "今日 AI ATS 分析配额已用完，当前已使用本地规则结果。", false, false);
-        } else {
-            stateService.markFallback(result.getId(), userId, taskId, AtsFallbackCode.UNKNOWN,
-                    "AI 分析未能启动，已使用本地规则结果。", true, false);
-        }
-    }
-
-    private AtsCheckResponse fallback(AtsCheckResult result, Long userId, Long taskId, AtsFallbackCode code,
-                                      String message, boolean retryable, boolean consentRequired) {
-        stateService.markFallback(result.getId(), userId, taskId, code, message, retryable, consentRequired);
-        return get(result.getId(), userId);
+    /** 发送前预览（R32）：按 checkId 组装，只读 —— 不落库、不调 provider、不改检查状态。 */
+    public AiPreviewService.PreviewResponse preview(Long id, Long userId) {
+        AtsCheckResult result = repository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "ATS 检查记录不存在"));
+        ResumeVersion version = ownedVersion(result.getResumeVersionId(), userId);
+        JobDescription job = jobRepository.findByIdAndUserId(result.getJobDescriptionId(), userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位描述不存在"));
+        return aiStarter.preview(result, version, job);
     }
 
     private ResumeVersion ownedVersion(Long versionId, Long userId) {
@@ -241,14 +168,6 @@ public class AtsService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在");
         }
         return version;
-    }
-
-    private Map<String, Object> localSnapshot(Map<String, Object> source) {
-        Map<String, Object> local = new LinkedHashMap<>();
-        for (String key : List.of("checks", "passedChecks", "risks", "priorities", "disclaimer")) {
-            local.put(key, source.get(key));
-        }
-        return local;
     }
 
     private AtsCheckResponse toResponse(AtsCheckResult entity) {
@@ -289,7 +208,7 @@ public class AtsService {
     }
 
     private Long longValue(Object value) {
-        return value instanceof Number number ? number.longValue() : null;
+        return AtsResultStateService.longValueOf(value);
     }
 
     private boolean atLeast(BigDecimal score, int threshold) {

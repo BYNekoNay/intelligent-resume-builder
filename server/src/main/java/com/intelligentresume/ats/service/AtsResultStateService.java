@@ -72,6 +72,16 @@ public class AtsResultStateService {
         return true;
     }
 
+    /**
+     * 包内共享：把 resultJson 里可能来自 JSON 反序列化的数值统一取成 {@code Long}。
+     *
+     * <p>为什么要共用：{@code AtsService} 与 {@link AtsAiStarter} 都要读 {@code aiTaskId}，
+     * 各写一份 instanceof 判断就会出现两份口径（本仓已多次因此吃亏）。
+     */
+    static Long longValueOf(Object value) {
+        return value instanceof Number number ? number.longValue() : null;
+    }
+
     private AtsCheckResult ownedForUpdate(Long resultId, Long userId) {
         return repository.findOwnedForUpdate(resultId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "ATS 检查记录不存在"));

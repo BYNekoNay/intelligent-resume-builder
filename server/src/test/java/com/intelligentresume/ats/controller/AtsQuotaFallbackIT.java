@@ -1,6 +1,7 @@
 package com.intelligentresume.ats.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.ai.preview.AiPreviewGuard;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -36,7 +37,8 @@ class AtsQuotaFallbackIT {
                 {"title":"Backend Engineer","jdText":"Java Spring Boot backend engineering role"}
                 """));
 
-        mockMvc.perform(post("/api/ats/check")
+        // R32 / D-AI-11：第一段只落规则结果并标记 PREVIEW_REQUIRED（尚未到配额校验）
+        long checkId = id(mockMvc.perform(post("/api/ats/check")
                         .header("Authorization", "Bearer " + token)
                         .header("Idempotency-Key", "ats-quota")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -44,8 +46,32 @@ class AtsQuotaFallbackIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalScore").isNumber())
                 .andExpect(jsonPath("$.data.analysisStatus").value("RULES_FALLBACK"))
+                .andExpect(jsonPath("$.data.fallback.code").value("PREVIEW_REQUIRED"))
+                .andExpect(jsonPath("$.data.fallback.retryable").value(true))
+                .andReturn());
+
+        // 第二段带预览令牌重试 —— 令牌通过后才是配额校验，落成 QUOTA_EXCEEDED
+        mockMvc.perform(post("/api/ats/checks/" + checkId + "/ai-retry")
+                        .header("Authorization", "Bearer " + token)
+                        .header(AiPreviewGuard.HEADER, previewToken(checkId, token))
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.analysisStatus").value("RULES_FALLBACK"))
                 .andExpect(jsonPath("$.data.fallback.code").value("QUOTA_EXCEEDED"))
-                .andExpect(jsonPath("$.data.fallback.retryable").value(false));
+                .andExpect(jsonPath("$.data.fallback.retryable").value(false))
+                .andExpect(jsonPath("$.data.aiTaskId").doesNotExist());
+    }
+
+    /** 走真实预览端点取令牌 —— 不允许手工拼令牌，否则测的就不是协议本身。 */
+    private String previewToken(long checkId, String token) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/ats/checks/" + checkId + "/preview")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.previewToken").isNotEmpty())
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsByteArray())
+                .path("data").path("previewToken").asText();
     }
 
     private void grantAtsConsent(String token) throws Exception {
