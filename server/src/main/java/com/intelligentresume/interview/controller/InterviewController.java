@@ -4,6 +4,8 @@ import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
+import com.intelligentresume.ai.preview.AiPreviewGuard;
+import com.intelligentresume.ai.preview.AiPreviewService;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.interview.dto.*;
 import com.intelligentresume.interview.service.InterviewService;
@@ -44,11 +46,25 @@ public class InterviewController {
             @PathVariable Long id,
             @Valid @RequestBody FollowUpPracticeRequest request,
             @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 64) String idempotencyKey,
+            @RequestHeader(value = AiPreviewGuard.HEADER, required = false) String previewToken,
             HttpServletRequest httpRequest) {
         AiTaskStatusResponse task = service.createFollowUp(id, request.weakness(),
-                currentUserId(httpRequest), idempotencyKey.trim());
+                currentUserId(httpRequest), idempotencyKey.trim(), previewToken);
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(task, traceId(httpRequest)));
+    }
+
+    /**
+     * 追问练习的发送前预览（R32）：返回**将要发送的确切 messages** 与 `previewToken`。
+     * 只读：不落库、不调 provider、不消耗配额，不要求 `Idempotency-Key`。
+     */
+    @PostMapping("/{id}/follow-up/preview")
+    public ApiResponse<AiPreviewService.PreviewResponse> previewFollowUp(
+            @PathVariable Long id,
+            @Valid @RequestBody FollowUpPracticeRequest request,
+            HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.previewFollowUp(id, request.weakness(), currentUserId(httpRequest)),
+                traceId(httpRequest));
     }
 
     @GetMapping("/{id}")

@@ -102,8 +102,15 @@ public class InterviewService {
         return historyService.list(userId, jobDescriptionId);
     }
 
-    public AiTaskStatusResponse createFollowUp(Long id, String weakness, Long userId, String idempotencyKey) {
-        return followUpService.createFollowUpTask(id, weakness, userId, idempotencyKey);
+    public AiTaskStatusResponse createFollowUp(Long id, String weakness, Long userId, String idempotencyKey,
+                                               String previewToken) {
+        return followUpService.createFollowUpTask(id, weakness, userId, idempotencyKey, previewToken);
+    }
+
+    /** 追问练习的发送前预览（R32）：只读，不落库、不调 provider。 */
+    public com.intelligentresume.ai.preview.AiPreviewService.PreviewResponse previewFollowUp(
+            Long id, String weakness, Long userId) {
+        return followUpService.preview(id, weakness, userId);
     }
 
     // ==================== 会话状态（留在门面，Controller answer() 依赖其路由） ====================
