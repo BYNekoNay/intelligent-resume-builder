@@ -58,6 +58,26 @@ class RetentionPolicyContractTest {
     /** 硬删承诺完全未实现的生命周期行（行首标记）。第 74 批后账户侧已实现，仅剩投递与面试数据。 */
     private static final List<String> PENDING_ROWS = List.of("投递与面试数据");
 
+    /** 表示「还没做完」的措辞。账户行与手册里的账户句都不得在窗口内出现。 */
+    private static final List<String> UNFINISHED = List.of("尚未实现", "仍无实现", "仍待实现", "计划中");
+
+    /**
+     * 「账户」之后多少字符内视为同一句。
+     *
+     * <p>必须在**窗口内**判定，不能整行判定：`docs/08` §9.6 有一句同时讲了两个事实 ——
+     * 「投递/面试数据的硬删仍**计划中**……账户删除的 7 天撤销窗口……**已实施**」。
+     * 整行判「不得含计划中」会把它误判成红（假红），整行判「必须含已实施」又会放过
+     * 「账户仍是计划中、投递已实施」的错位（假绿）。
+     */
+    private static final int ACCOUNT_WINDOW = 80;
+
+    /** 手册中承载「账户删除」状态句的章节（起止标题各一）。 */
+    private static final List<DocSection> ACCOUNT_SECTIONS = List.of(
+            new DocSection("docs/07-测试计划与验收说明书.md", "### 5.10", "### 5.11"),
+            new DocSection("docs/08-部署与运维说明书.md", "### 9.6", "## 10."));
+
+    private record DocSection(String relativePath, String start, String end) {}
+
     private record DocClaim(String relativePath, Pattern pattern) {}
 
     @Test
@@ -104,7 +124,7 @@ class RetentionPolicyContractTest {
     }
 
     @Test
-    @DisplayName("未覆盖资源（账户侧）的硬删承诺仍显式标注「计划中/尚未实现」，不得留作已兑现")
+    @DisplayName("未实现的资源（投递与面试数据）仍显式标注「计划中/尚未实现」，不得留作已兑现")
     void pendingRowsStayExplicit() throws Exception {
         String lifecycle = read("docs/04-数据库设计说明书.md");
         assertTrue(!PENDING_ROWS.isEmpty(), "未实现行清单不得为空（否则本门禁空转）");
@@ -112,9 +132,51 @@ class RetentionPolicyContractTest {
         for (String marker : PENDING_ROWS) {
             String row = lifecycleRow(lifecycle, marker);
             assertTrue(row.contains("计划中") || row.contains("尚未实现"),
-                    "该资源的硬删/匿名化承诺尚无实现（决策 D2 阶段 3 未落地），必须显式标注「计划中」或"
-                            + "「尚未实现」，否则读者会当作已兑现：\n" + row);
+                    "该资源的硬删承诺尚无实现（`RetentionPurgeService` 未覆盖投递/面试相关表），"
+                            + "必须显式标注「计划中」或「尚未实现」，否则读者会当作已兑现：\n" + row);
         }
+    }
+
+    @Test
+    @DisplayName("账户行必须标「已实施」（阶段 3 已于第 74 批落地）")
+    void accountRowIsMarkedImplemented() throws Exception {
+        String row = lifecycleRow(read("docs/04-数据库设计说明书.md"), "账户");
+
+        assertTrue(row.contains("已实施"),
+                "账户侧（7 天撤销窗口 + `AccountPurgeService` 级联清扫）已于第 74 批落地，"
+                        + "生命周期表必须标「已实施」，否则读者会当作未兑现：\n" + row);
+        for (String unfinished : List.of("尚未实现", "仍无实现", "仍待实现")) {
+            assertFalse(row.contains(unfinished),
+                    "账户行同时出现「已实施」与「" + unfinished + "」—— 同一行自我矛盾：\n" + row);
+        }
+    }
+
+    @Test
+    @DisplayName("docs/07 与 docs/08 的账户删除措辞与 docs/04 同极性")
+    void accountDeletionWordingAgreesAcrossManuals() throws Exception {
+        List<String> problems = new ArrayList<>();
+
+        for (DocSection section : ACCOUNT_SECTIONS) {
+            String body = sectionOf(read(section.relativePath()), section.start(), section.end());
+            List<Integer> anchors = indexesOf(body, "账户");
+            assertTrue(!anchors.isEmpty(),
+                    section.relativePath() + " 的「" + section.start() + "」节里找不到「账户」二字 —— "
+                            + "锚点失效。解析不到时必须失败，不得当成「没有违规」");
+
+            for (int at : anchors) {
+                String window = body.substring(at, Math.min(body.length(), at + ACCOUNT_WINDOW));
+                for (String unfinished : UNFINISHED) {
+                    if (window.contains(unfinished)) {
+                        problems.add("  " + section.relativePath() + " 的「账户」句仍写「" + unfinished
+                                + "」，与 docs/04 §7.1「已实施」冲突：" + window.replace('\n', ' '));
+                    }
+                }
+            }
+        }
+
+        assertTrue(problems.isEmpty(),
+                "同一事实在手册间口径不一致（账户侧已实施，只有投递/面试硬删未实现）：\n"
+                        + String.join("\n", problems));
     }
 
     /** 取 docs/04 §7.1 生命周期表中以 {@code marker} 开头的整行。 */
@@ -122,6 +184,24 @@ class RetentionPolicyContractTest {
         Matcher row = Pattern.compile("(?m)^\\|\\s*" + Pattern.quote(marker) + "[^\\n]*").matcher(lifecycle);
         assertTrue(row.find(), "docs/04 §7.1 生命周期表应保留以「" + marker + "」开头的行");
         return row.group();
+    }
+
+    /** 取以 {@code start} 起、{@code end} 止的章节正文（不含 end 标题）。 */
+    private String sectionOf(String text, String start, String end) {
+        int from = text.indexOf(start);
+        assertTrue(from >= 0, "找不到章节标题「" + start + "」—— 判据锚点失效（不得当成通过）");
+        int to = text.indexOf(end, from + start.length());
+        assertTrue(to > from, "找不到章节结束标记「" + end + "」—— 判据锚点失效（不得当成通过）");
+        return text.substring(from, to);
+    }
+
+    /** 返回 {@code needle} 在文本中的全部起始下标。 */
+    private List<Integer> indexesOf(String text, String needle) {
+        List<Integer> found = new ArrayList<>();
+        for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
+            found.add(i);
+        }
+        return found;
     }
 
     /** 从 application.yml 取 {@code app.ai.task.retention-days} 的默认值（支持 {@code ${ENV:default}}）。 */
