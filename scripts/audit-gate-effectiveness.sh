@@ -32,7 +32,12 @@ set -u
 # 注入文本被改写，PREPEND 到 Java 源码顶部就是裸表达式 → javac [1,1]「需要 class」
 # （好样本方向曾因此产出「首跑红、复跑绿」的不一致结论）。此变量禁用该转换；
 # Linux CI 无此机制，设置无副作用。
-export MSYS2_ARG_CONV_EXCL='*'
+#
+# **只能作用在 inject 这一条 python 调用上，不能全局 export**（2026-10-28 实测）：
+# mvn 的启动脚本依赖 msys2 把 `/d/...` 形式的 MAVEN_HOME 转成 Windows 路径；全局禁用后
+# Maven 会直接 `ClassNotFoundException: org.codehaus.plexus.classworlds.launcher.Launcher`，
+# 于是**每一行都记 RUN-FAILED** —— 既跑不出结论，也看不出是本工具坏了。
+
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -71,6 +76,7 @@ PdfDeadlineContractTest	server/src/main/resources/application.yml	render-timeout
 ResponseCompressionContractTest	server/src/main/resources/application.yml	min-response-size: 2048	min-response-size: 1
 SchemaDocContractTest	docs/04-数据库设计说明书.md	### 3.4 resume_version	### 3.4 resume_version_x
 MySql57BaselineContractTest	server/src/test/resources/mysql57/v19-schema.sql	<<PREPEND>>	CREATE TABLE ghost_audit_gate_probe (id BIGINT);
+OpenDecisionRegisterContractTest	docs/decisions/OPEN-DECISIONS.md	(2026-10-28)<br>Decision: **采显式 409	(2026-10-28)<br>**采显式 409
 TABLE_EOF
 )
 
@@ -106,6 +112,7 @@ ComposeResourceBoundsContractTest	deploy/docker-compose.prod.yml	<<PREPEND>>	# �
 AlertRuleContractTest	monitoring/prometheus/rules/intelligent-resume-alerts.yml	<<PREPEND>>	# 反例：sum(rate(resume_ai_ghost_metric_total[10m])) 只是注释
 ExportStreamingContractTest	server/src/main/java/com/intelligentresume/auth/service/AccountExportService.java	<<PREPEND>>	// 反例：this.mapper.writeValueAsString(payload) 只是注释，不是整份缓冲
 MySql57BaselineContractTest	server/src/test/resources/mysql57/v19-schema.sql	<<PREPEND>>	-- 反例：CREATE TABLE ghost_audit_gate_probe (id BIGINT); 只是注释
+OpenDecisionRegisterContractTest	docs/decisions/OPEN-DECISIONS.md	<<PREPEND>>	<!-- 反例：| 2026-01-01 | ghost | 干扰行 | — | — | — | — | OPEN | 只是注释 -->
 GOOD_EOF
 )
 
@@ -117,7 +124,7 @@ declare -a REPORT=()
 md5_of() { md5sum "$1" | cut -d' ' -f1; }
 
 inject() { # file old new -> 0 ok / 1 anchor missing / 2 not unique
-  python3 - "$1" "$2" "$3" <<'PY'
+  MSYS2_ARG_CONV_EXCL='*' python3 - "$1" "$2" "$3" <<'PY'
 import io, sys
 path, old, new = sys.argv[1], sys.argv[2], sys.argv[3]
 s = io.open(path, encoding='utf-8').read()
