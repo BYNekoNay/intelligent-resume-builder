@@ -46,6 +46,10 @@
 | [2026-09-23-002-bailian-model-chain](./plans/2026-09-23-002-bailian-model-chain.md) | 百炼模型链方案：8 模型实测、链式调度设计、已确认决策与上线后发现的缺陷 |
 | [2026-09-23-003-known-issues-remediation](./plans/2026-09-23-003-known-issues-remediation.md) | 已知问题系统梳理：复现证据、根因与影响范围、修改方案、S1~S6 实施计划 |
 | [2026-09-24-001-browser-e2e-test-plan](./plans/2026-09-24-001-browser-e2e-test-plan.md) | **浏览器端端到端测试计划**（供具备视觉与操作能力的 AI 执行）：种子数据包、8 组用例、已知缺陷清单、严格回报格式 |
+| [2026-09-30-001-career-material-schema-soft-validation](./plans/2026-09-30-001-career-material-schema-soft-validation.md) | 职业资料 contentJson 最小 schema 与软校验方案（三步走第一步） |
+| [2026-10-01-001-data-retention-tiered-purge](./plans/2026-10-01-001-data-retention-tiered-purge.md) | 数据生命周期 · 分档清扫方案（决策 D2 的实现设计与证据） |
+| [2026-10-20-001-feat-windows-offline-career-workspace-plan](./plans/2026-10-20-001-feat-windows-offline-career-workspace-plan.md) | Windows 离线职业工作区计划（ADR-012 的需求侧，requirements-only） |
+| [2026-10-26-001-feat-ai-preview-and-degrade-plan](./plans/2026-10-26-001-feat-ai-preview-and-degrade-plan.md) | AI 发送前预览（R32）与失败保留/降级（R33）的实施计划 |
 
 ### 2.2 reviews/ —— 审计、评审与实施报告
 
@@ -75,6 +79,12 @@
 | ├ [E2-judgment-table-v2](./reviews/2026-09-24-ats-reasoning-eval/E2-judgment-table-v2.md) | 判定表定稿 |
 | ├ [E2-judgment-table](./reviews/2026-09-24-ats-reasoning-eval/E2-judgment-table.md) | 判定表 v1.2 预演痕迹（保留） |
 | └ [E5-final-report](./reviews/2026-09-24-ats-reasoning-eval/E5-final-report.md) | 最终报告：结局 ③ 证据不足、4 项副产品、第二轮三件必要条件 |
+| [2026-09-26-optimization-opportunities](./reviews/2026-09-26-optimization-opportunities.md) | 优化机会盘点报告（含 I2 领取策略等已完成项的原始记录） |
+| [2026-09-30-ideation-closure-audit](./reviews/2026-09-30-ideation-closure-audit.md) | ideation 101 条 finding 闭环核对；含「第一~十七批全部执行、当前无待实现项」的收口声明与 5 类留观 |
+| [2026-10-01-cloud-e2e-verification](./reviews/2026-10-01-cloud-e2e-verification.md) | 云端端到端验证报告 |
+| [2026-10-23-baseline-0.4.1](./reviews/2026-10-23-baseline-0.4.1.md) | 测试环境基线核对（v0.4.1 生效状态） |
+| [2026-10-23-export-import-roundtrip](./reviews/2026-10-23-export-import-roundtrip.md) | Web→桌面迁移：真实导出包往返核查与修复 |
+| [2026-10-23-nested-import](./reviews/2026-10-23-nested-import.md) | 批次 1.4：嵌套集合纳入预览 + 子记录不丢 |
 | [2026-09-23-remote-ai-smoke-report](./reviews/2026-09-23-remote-ai-smoke-report.md) | 远程 AI 全链路冒烟：7 类 AI 任务实测结果、模型链线上降级证据、发现的缺陷与待决策项 |
 | [agent-frontend-regression-review](./reviews/agent-frontend-regression-review.md) | 前端回归审查 |
 | [agent-testing-evidence-review](./reviews/agent-testing-evidence-review.md) | 测试与证据回归审查 |
@@ -93,6 +103,10 @@
 | [ADR-006](./decisions/ADR-006-keep-reasoning-for-ats-analysis.md) | 保留 ATS_ANALYSIS 推理（本轮实验未能回答该问题） |
 | [ADR-007](./decisions/ADR-007-shared-host-independent-port-and-database.md) | 测试环境迁入与另一项目共用的主机（独立端口 8088 + 独立 MySQL） |
 | [ADR-008](./decisions/ADR-008-configuration-binding-via-configuration-properties.md) | 配置绑定一律用 `@ConfigurationProperties`，禁止 `@Value` + SpEL map 字面量 |
+| [ADR-009](./decisions/ADR-009-ai-task-idempotency-state-machine.md) | `ai_task` 幂等状态机（幂等键 + 内容指纹 + 租约） |
+| [ADR-010](./decisions/ADR-010-interview-attempt-lifecycle.md) | `interview_ai_attempt` 生命周期（双层唯一约束 + 短事务 + 陈旧丢弃） |
+| [ADR-011](./decisions/ADR-011-draft-commit-reference-provenance.md) | 草稿确认落库的材料引用只记录「真实被使用」的关系 |
+| [ADR-012](./decisions/ADR-012-windows-desktop-local-workspace.md) | Windows 桌面本地工作区的技术架构 |
 
 ### 2.4 research/ —— 调研与对标
 

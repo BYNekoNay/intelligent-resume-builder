@@ -99,6 +99,8 @@ web/src/
 | `communication` | 基于简历/JD 事实生成并持久化人工确认草稿，绝不自动发送 |
 | `interview` | 有限轮次面试、确定性反馈与报告、答案资产 CRUD 和筛选 |
 | `imports` | TXT/PDF/DOCX 文本抽取与基础字段规范化，原文件不落盘 |
+| `desktop` | 桌面工作区的导入/导出预览与执行、本地 AI 设置；DPAPI 凭据仅 Windows 可用 |
+| `retention` | 分档留存清扫：A 档无引用者物理删除、B 档被引用者转最小快照；账户侧 7 天撤销窗口与级联硬删 |
 | `common` | API 响应、异常、Trace ID、可观测性与跨模块基础能力 |
 
 ### 前端重点
@@ -119,6 +121,25 @@ web/src/
 - 资料选材默认最多向模型发送 60 条候选，模型最多推荐 12 条；用户确认后的总资料数最多 30 条。
 - Prompt、模型原文、用户资料、联系方式、Token、密钥和用户 ID 不得写入日志、指标标签、测试报告或 Git。
 - 修改登录邮箱和密码时，服务端必须校验当前密码、校验邮箱唯一性并撤销该用户的刷新会话；前端不得缓存或记录密码字段。
+
+### AI 发送前预览（R32）与失败保留（R33）
+
+- 五个领域的 AI 创建端点要求请求头 `X-AI-Preview-Token`，**缺失返回 40001**。令牌由
+  `POST /api/ai/tasks/preview` 签发，该端点**只读**：不写库、不调 provider，返回「将要发送的确切 messages +
+  本轮脱敏摘要 + 令牌」。
+- ATS 的 `/check` 不带令牌时**不再自动启动 AI**，落 `RULES_FALLBACK` + `PREVIEW_REQUIRED`。
+- 失败后输入快照留在 `ai_task.input_snapshot_json`（R33），无需重建输入即可重试。
+- **重试系列端点不要求令牌**（`/optimize/tasks/{id}/retry`、面试 `ai-retry`）：它们重跑的是已落库的
+  输入快照 / 同一场会话，内容与上次逐字相同（决策 D8）。若将来某入口改为**重新组装 prompt**，必须纳入令牌。
+
+### 桌面工作区（Windows，ADR-012）
+
+- 与 Web 共用同一份前后端代码，桌面 profile 用 H2 文件库 + 免登录恒定本地用户；PDF 走纯 Java（PDFBox），不依赖 Node 与 Chromium。
+- 与 Web 的数据交换走导出包 / 导入包：`desktop_import_map`（V37）记 stableId 映射；导入前必须预览分类
+  （新增 / 冲突 / 跳过），**嵌套集合与顶层同规则**（批次 1.4）。
+- **非核心集合**（面试会话、答案资产、沟通模板、草稿、同意记录）当前**整份拒绝**导入 —— 明确拒绝，不静默丢弃。
+- 本地 AI 设置存 V38 `local_ai_setting`（不含密钥明文）；密钥经 **DPAPI** 加密落 `<dataDir>/ai-credentials/`，
+  **仅 Windows 可用**。保存后经 `AiRuntimeOverlay` 立即生效，重启由 `LocalAiRuntimeBootstrap` 装回。
 
 ## 4. 数据与任务的关键关系
 

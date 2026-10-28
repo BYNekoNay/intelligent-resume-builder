@@ -3,7 +3,7 @@
 面向求职者的**岗位定制简历平台**。你维护一份可复用的个人档案与职业资料库，选定目标 JD 后，系统先用真实大模型做资料选材、由你确认，再生成可编辑、可追溯的结构化简历——AI 负责选材与表达，**最终决定权始终在你手上**。
 
 ![version](https://img.shields.io/badge/version-0.4.4-2f6f4f?style=flat-square)
-![tests](https://img.shields.io/badge/backend%20tests-1019%20passing-2f6f4f?style=flat-square)
+![tests](https://img.shields.io/badge/backend%20tests-1100%2B%20passing-2f6f4f?style=flat-square)
 ![stack](https://img.shields.io/badge/Java%2017%20%C2%B7%20Spring%20Boot%203.3%20%C2%B7%20Vue%203-2f6f4f?style=flat-square)
 ![deploy](https://img.shields.io/badge/deploy-systemd%20%2B%20nginx%2C%20no%20Docker-2f6f4f?style=flat-square)
 
@@ -78,7 +78,7 @@
 flowchart LR
   B["浏览器 / 桌面壳"] --> W["Vue 3 + TypeScript<br/>Vite 构建"]
   W -->|"/api"| A["Spring Boot 3.3 API<br/>Java 17 · 分层架构"]
-  A --> DB[("MySQL 8.4<br/>Flyway V1–V37")]
+  A --> DB[("MySQL 8.4<br/>Flyway V1–V38")]
   A --> WK["AI 任务工作器<br/>HEAVY / LIGHT 双队列"]
   WK --> LLM["百炼模型链<br/>7 个模型顺序降级"]
   A --> PDF["PDF 渲染"]
@@ -145,13 +145,13 @@ java -jar intelligent-resume-server-0.4.4.jar \
 bash scripts/deploy-direct.sh
 ```
 
-本机打包源码 → 上传 → 服务器端构建 → 同步产物 → 重启服务 → 自动执行 17 项部署后探针（安全头、配置一致性、监听范围、模型链一致性等）。**探针失败脚本以非零码退出**，不会给出"部署成功"的假结论。详见 [直连部署手册](docs/DEPLOYMENT_DIRECT.md)。
+本机打包源码 → 上传 → 服务器端构建 → 同步产物 → 重启服务 → 自动执行 24 项部署后探针（安全头、配置一致性、监听范围、模型链一致性、备份与监控等）。**探针失败脚本以非零码退出**，不会给出"部署成功"的假结论。详见 [直连部署手册](docs/DEPLOYMENT_DIRECT.md)。
 
 ## 工程结构
 
 ```text
 server/            Spring Boot API（分层：controller / service / repository / domain）
-  └─ db/migration/ Flyway 迁移 V1–V37
+  └─ db/migration/ Flyway 迁移 V1–V38
 web/               Vue 3 + TypeScript 前端（views / components / api / stores）
 pdf-service/       Node.js + Puppeteer 私有 PDF 渲染服务
 scripts/           部署、探针、持久化门禁、全流程验证
@@ -162,7 +162,7 @@ deploy/            nginx 站点配置与 systemd 单元（随部署幂等同步�
 
 ## 质量与验证
 
-当前基线：**后端 1019 个测试全绿**（含集成测试真跑全部 Flyway 迁移）、前端构建与浏览器 E2E、PDF 服务用例，以及部署后 17 项探针与 18 项状态机探针。
+当前基线：**后端 1100+ 个测试全绿**（含集成测试真跑全部 Flyway 迁移；精确条数以最近一份 `docs/RELEASES/` 发布说明为准）、前端构建与浏览器 E2E、PDF 服务用例，以及部署后 24 项探针与 18 项状态机探针。
 
 比"测试数量"更值得说的是——这个仓库对**门禁本身**下了功夫，因为"永远返回通过"的检查比没有检查更危险：
 
@@ -191,6 +191,6 @@ deploy/            nginx 站点配置与 systemd 单元（随部署幂等同步�
 - [系统架构设计](docs/03-系统架构设计说明书.md) · [数据库设计](docs/04-数据库设计说明书.md) · [接口设计](docs/05-接口设计说明书.md)
 - [测试计划与验收](docs/07-测试计划与验收说明书.md) · [部署与运维](docs/08-部署与运维说明书.md)
 - [架构决策记录](docs/decisions/) · [悬而未决登记册](docs/decisions/OPEN-DECISIONS.md)
-- [发布说明 v0.4.1](docs/RELEASES/v0.4.1.md)
+- [发布说明 v0.4.4](docs/RELEASES/v0.4.4.md)
 
 English: [README.en.md](README.en.md)

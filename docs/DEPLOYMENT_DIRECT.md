@@ -370,7 +370,7 @@ draft-fields 两道静态门禁）→ **PDF 依赖 `PUPPETEER_SKIP_DOWNLOAD=true
 真实启动一次 Chromium 自检** → 原子替换产物 → **同步 nginx 站点配置**（`deploy/nginx/host.conf` +
 `security-headers.conf` 片段；先落位片段再覆盖站点文件，`nginx -t` 校验通过才 reload）→
 **同步 systemd 单元**（`deploy/systemd/*.service`；仅在内容变化时安装 + `daemon-reload`）→
-重启服务 → 等待 readiness → **部署后探针**（17 项：行为断言 + 生效配置与仓库的一致性 + 应用加载配置与磁盘 `.env` 的一致性）→
+重启服务 → 等待 readiness → **部署后探针**（24 项：行为断言 + 生效配置与仓库的一致性 + 应用加载配置与磁盘 `.env` 的一致性 + 备份与监控）→
 输出健康检查。
 
 > **nginx 配置已纳入脚本（2026-10-01 第六十一批）**。此前它**只存在于 §4.5 的手工流程**里，
@@ -457,6 +457,11 @@ SSH_HOST= bash scripts/probe-deployment.sh             # 跳过配置一致性�
 ---
 
 ## 6. 验收结果（2026-09-25 · 新环境 `101.35.239.218` · 入口 `:8088`）
+
+> **本节是 2026-09-25 的快照，不代表当前状态。** AC-01~AC-14 的实测值（尤其 AC-06 的
+> applied=25 / 最高 V25 / 24 张表）只反映当时的库与代码。**当前线上版本、迁移版本、表数、
+> 探针项数一律看 [§13](#13-当前线上状态滚动表每次部署后更新)。**
+> 按仓库惯例（`docs/README.md` §4 第 2 条）保留本节原文，不改写结论。
 
 > 旧环境 `8.160.165.227` 的验收结论（原 AC-01~AC-13 表）已随该机下线失效，不再维护；
 > 如需追溯见 git 历史。**下表每一条都附实测证据，未验证的项明确标出，不用"通过"含糊带过。**
@@ -684,3 +689,29 @@ curl -s http://127.0.0.1:8080/actuator/prometheus | grep resume_ai_model_chain_a
 3. **无告警通道** —— alertmanager 未部署，备份失败只能靠 `systemctl --failed`、`journalctl` 或部署探针发现；
    没有人会在凌晨 03:30 收到通知。
 4. **恢复演练没有自动化** —— 2026-10-24 手工做过一次并记录；季度节奏目前靠人记。
+
+---
+
+## 13. 当前线上状态（滚动表，每次部署后更新）
+
+> **全仓唯一允许写「线上精确数字」的位置。** 其他文档一律引用本节，不各写一份 ——
+> 此前 README 写「1019 测试 / 17 项探针」、`docs/08` 写「15 条告警在评估」、§6 写「V25 / 24 张表」，
+> 三处都与实际不符，且都没人负责更新。
+>
+> 与仓库版本的一致性由 `ManualFactConsistencyContractTest` 守护（迁移版本、最新发布说明）。
+> **表里的「线上」列只能靠部署后的实测填写，不能从仓库推导。**
+
+| 项 | 值 | 核对方式 | 最后核对 |
+| --- | --- | --- | --- |
+| 线上版本 | 0.4.4 | `systemctl cat intelligent-resume-api \| grep ExecStart`；`curl -s 127.0.0.1:3001/health` | 2026-10-27 |
+| Flyway 最高版本 | V38（38 个迁移，无缺口） | `SELECT MAX(version) FROM flyway_schema_history` | 2026-10-27 |
+| 业务表数 | 28 | `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='intelligent_resume'` | 2026-10-27（承备份自检记录，下次部署复核） |
+| 部署探针 | 24 项 / 0 失败（10 节：0~9） | `bash scripts/probe-deployment.sh` 的汇总行 | 2026-10-27 |
+| 备份 | 每日 03:30，保留 14 天，timer 已 enabled | `systemctl list-timers intelligent-resume-backup.timer` | 2026-10-27 |
+| 告警评估 | **未生效** —— 直连的 `deploy/prometheus/prometheus.yml` 尚无 `rule_files`，15 条规则空转 | `curl -s 127.0.0.1:9090/api/v1/rules \| head` | 2026-10-28（待补齐） |
+
+**维护规则**
+
+1. 每次 `bash scripts/deploy-direct.sh` 成功后更新本表；探针红时**不得**把该次写为成功。
+2. 「线上」列的值必须来自部署后的实测命令，**不得从仓库文件推导** —— 仓库是意图，线上才是事实。
+3. 新增一个会漂移的指标时，先想清楚由谁在什么时候更新；没有人更新的指标不要写进任何文档。

@@ -23,7 +23,7 @@ The design principle is the opposite of a one-click resume beautifier: **verifia
 flowchart LR
   B["Browser / Desktop shell"] --> W["Vue 3 + TypeScript"]
   W -->|"/api"| A["Spring Boot 3.3 API (Java 17)"]
-  A --> DB[("MySQL 8.4 · Flyway V1–V37")]
+  A --> DB[("MySQL 8.4 · Flyway V1–V38")]
   A --> WK["AI task workers (HEAVY / LIGHT)"]
   WK --> LLM["Bailian model chain (7 models)"]
   A --> PDF["PDF rendering"]
@@ -60,12 +60,12 @@ java -jar intelligent-resume-server-0.4.4.jar \
 
 ## Quality
 
-Backend: **1019 tests passing**, including integration tests that run every Flyway migration. Every quality gate is validated against a known-bad sample first — a check that can never fail is treated as worse than no check (version-copy consistency, a per-file line-count ratchet, API-doc coverage, schema-doc contract, dual-dialect migration gates).
+Backend: **1100+ tests passing** (exact count is in the latest `docs/RELEASES/` note), including integration tests that run every Flyway migration. Every quality gate is validated against a known-bad sample first — a check that can never fail is treated as worse than no check (version-copy consistency, a per-file line-count ratchet, API-doc coverage, schema-doc contract, dual-dialect migration gates).
 
 ## Docs
 
 - [Project context](PROJECT_CONTEXT.md) · [Docs index](docs/README.md)
 - [Architecture](docs/03-系统架构设计说明书.md) · [API](docs/05-接口设计说明书.md) · [Deployment](docs/08-部署与运维说明书.md)
-- [Decisions](docs/decisions/) · [Release notes v0.4.1](docs/RELEASES/v0.4.1.md)
+- [Decisions](docs/decisions/) · [Release notes v0.4.4](docs/RELEASES/v0.4.4.md)
 
 中文版：[README.md](README.md)
