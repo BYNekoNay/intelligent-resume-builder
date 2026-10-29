@@ -9,11 +9,11 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -42,8 +42,11 @@ class AppObservabilityTest {
     void registersQuotaGaugesWithAttemptSemantics() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         AiTaskRepository repository = mock(AiTaskRepository.class);
-        when(repository.countAttemptsByTaskTypeAndCreatedAtAfter(eq(AiTaskType.JOB_GENERATION), any(LocalDateTime.class)))
-                .thenReturn(3L);
+        // 取值来源已从「每类型各发一条 count(*)」改为「一次分组查询 + 30s 快照」，
+        // 因此桩要打在 sumAttemptsGroupedByTaskType 上。此前这里仍桩旧方法
+        // countAttemptsByTaskTypeAndCreatedAtAfter，导致 gauge 恒为 0 而测试长期红着无人发现。
+        when(repository.sumAttemptsGroupedByTaskType(any(LocalDateTime.class)))
+                .thenReturn(List.<Object[]>of(new Object[]{AiTaskType.JOB_GENERATION, 3L}));
         AppObservability observability = new AppObservability(registry, repository, mock(ExportTaskRepository.class));
 
         observability.registerQuotaLimit(AiTaskType.JOB_GENERATION, 20);

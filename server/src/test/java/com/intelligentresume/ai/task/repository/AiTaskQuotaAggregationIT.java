@@ -51,6 +51,13 @@ class AiTaskQuotaAggregationIT {
         userId = userRepository.findByUsername("agg_it_user")
                 .orElseGet(() -> userRepository.save(user)).getId();
 
+        // 先取基线：本类是 @SpringBootTest，且 test profile 的 H2 在同一 JVM 内被多个上下文共享，
+        // 跑全量时别的用例已经把 JOB_GENERATION 行写进来了（实测断言 4 却得到 12）。
+        // 所以断言必须看**增量**，不能看绝对值——否则用例只在「单独跑」时绿，全量必红。
+        Map<AiTaskType, Long> baseline = grouped();
+        long baselineJob = baseline.getOrDefault(AiTaskType.JOB_GENERATION, 0L);
+        long baselineAts = baseline.getOrDefault(AiTaskType.ATS_ANALYSIS, 0L);
+
         // 三种类型、覆盖 retryCount = 0 / 1 / 2 / 3 与「昨天创建」的边界样本
         save(AiTaskType.JOB_GENERATION, 0, TODAY_START.plusHours(1));
         save(AiTaskType.JOB_GENERATION, 1, TODAY_START.plusHours(2));
@@ -60,10 +67,7 @@ class AiTaskQuotaAggregationIT {
         // 昨天的任务不得计入今日
         save(AiTaskType.JOB_GENERATION, 0, TODAY_START.minusMinutes(1));
 
-        Map<AiTaskType, Long> grouped = new HashMap<>();
-        for (Object[] row : taskRepository.sumAttemptsGroupedByTaskType(TODAY_START)) {
-            grouped.put((AiTaskType) row[0], ((Number) row[1]).longValue());
-        }
+        Map<AiTaskType, Long> grouped = grouped();
 
         assertTrue(!grouped.isEmpty(), "分组查询返回空结果 —— 解析失效（不得当成通过）");
         for (AiTaskType type : List.of(AiTaskType.JOB_GENERATION, AiTaskType.ATS_ANALYSIS)) {
@@ -71,10 +75,19 @@ class AiTaskQuotaAggregationIT {
             assertEquals(perType, grouped.getOrDefault(type, 0L),
                     type + " 的分组结果与单类型 count 不一致 —— 两条路径的口径已经漂移");
         }
-        // 期望值（重试计次：retryCount<1 记 1，否则记 retryCount）
-        assertEquals(1L + 1L + 2L, grouped.get(AiTaskType.JOB_GENERATION),
-                "JOB_GENERATION 应为 1(retry0)+1(retry1)+2(retry2)，昨天那条不计入");
-        assertEquals(1L + 3L, grouped.get(AiTaskType.ATS_ANALYSIS), "ATS_ANALYSIS 应为 1+3");
+        // 期望增量（重试计次：retryCount<1 记 1，否则记 retryCount）；昨天那条不计入
+        assertEquals(1L + 1L + 2L, grouped.getOrDefault(AiTaskType.JOB_GENERATION, 0L) - baselineJob,
+                "JOB_GENERATION 增量应为 1(retry0)+1(retry1)+2(retry2)，昨天那条不计入");
+        assertEquals(1L + 3L, grouped.getOrDefault(AiTaskType.ATS_ANALYSIS, 0L) - baselineAts,
+                "ATS_ANALYSIS 增量应为 1+3");
+    }
+
+    private Map<AiTaskType, Long> grouped() {
+        Map<AiTaskType, Long> result = new HashMap<>();
+        for (Object[] row : taskRepository.sumAttemptsGroupedByTaskType(TODAY_START)) {
+            result.put((AiTaskType) row[0], ((Number) row[1]).longValue());
+        }
+        return result;
     }
 
     private void save(AiTaskType type, int retryCount, LocalDateTime createdAt) {
