@@ -5,12 +5,20 @@
 # 于是监控"纸面就绪、实际从未接入"。这里改成回环地址，与 systemd 单元同源。
 #
 # 只抓一个目标、只留 7 天：宿主机 3.6G 且与其他项目共用，不做长期存储。
+#
+# rule_files 用**绝对路径**：prometheus 以 User=prometheus 运行，工作目录不确定，
+# 相对路径会解析到别处（表现为规则"看起来配了、实际从未加载"——本仓的旧病）。
+# 路径刻意与仓库布局同构（monitoring/prometheus/rules/），使
+# AlertRuleContractTest 能把服务器路径机械映射回仓库路径做深度比对。
 global:
   scrape_interval: 30s
   scrape_timeout: 10s
   external_labels:
     env: test-direct
     app: intelligent-resume
+
+rule_files:
+  - /opt/intelligent-resume/monitoring/prometheus/rules/*.yml
 
 scrape_configs:
   - job_name: intelligent-resume-api

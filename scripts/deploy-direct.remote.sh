@@ -88,6 +88,12 @@ console.log("Chromium 自检通过:", version, "| PDF", pdf.length, "字节");
 log "4/8 同步产物到运行目录"
 install -d "$APP/api" "$APP/api/pdf-output"
 
+# 覆盖前保留上一版 jar 供快速回滚（与 web.bak / pdf-service.bak 同款）。
+# 此前 jar 是全链路唯一没有 .bak 的产物：cp 直接覆盖，部署后发现问题只能完整重跑。
+if [ -f "$APP/api/$JAR_NAME" ]; then
+  cp -a "$APP/api/$JAR_NAME" "$APP/api/$JAR_NAME.bak"
+  echo "已保留上一版 jar：$APP/api/$JAR_NAME.bak"
+fi
 cp "$SRC/server/target/$JAR_NAME" "$APP/api/$JAR_NAME"
 
 # 前端产物原子替换，保留上一版便于回滚
@@ -196,6 +202,9 @@ if [ -f "$SRC/deploy/backup-database.sh" ]; then
   if cmp -s "$backup_tmp" "$ROOT/bin/backup-database.sh" 2>/dev/null; then
     rm -f "$backup_tmp"
   else
+    if [ -f "$ROOT/bin/backup-database.sh" ]; then
+      $SUDO cp -a "$ROOT/bin/backup-database.sh" "$ROOT/bin/backup-database.sh.bak"
+    fi
     $SUDO install -m 700 "$backup_tmp" "$ROOT/bin/backup-database.sh"
     rm -f "$backup_tmp"
     echo "备份脚本已更新：$ROOT/bin/backup-database.sh"
@@ -204,18 +213,76 @@ else
   echo "警告：源码包缺少 deploy/backup-database.sh，跳过备份脚本安装" >&2
 fi
 
+# 告警轮询检查脚本（alertcheck.timer 的执行体；不上 alertmanager 的替代出口）
+if [ -f "$SRC/deploy/check-alerts.sh" ]; then
+  $SUDO install -d -m 755 "$ROOT/bin"
+  alerts_tmp="/tmp/check-alerts.sh.$$"
+  sed 's/\r$//' "$SRC/deploy/check-alerts.sh" > "$alerts_tmp"
+  if cmp -s "$alerts_tmp" "$ROOT/bin/check-alerts.sh" 2>/dev/null; then
+    rm -f "$alerts_tmp"
+  else
+    $SUDO install -m 755 "$alerts_tmp" "$ROOT/bin/check-alerts.sh"
+    rm -f "$alerts_tmp"
+    echo "告警检查脚本已更新：$ROOT/bin/check-alerts.sh"
+  fi
+else
+  echo "警告：源码包缺少 deploy/check-alerts.sh，跳过告警检查脚本安装" >&2
+fi
+
 if [ -f "$SRC/deploy/prometheus/prometheus.yml" ]; then
   prom_tmp="/tmp/prometheus.yml.$$"
   sed 's/\r$//' "$SRC/deploy/prometheus/prometheus.yml" > "$prom_tmp"
   if cmp -s "$prom_tmp" "$ROOT/monitoring/prometheus.yml" 2>/dev/null; then
     rm -f "$prom_tmp"
   else
+    if [ -f "$ROOT/monitoring/prometheus.yml" ]; then
+      $SUDO cp -a "$ROOT/monitoring/prometheus.yml" "$ROOT/monitoring/prometheus.yml.bak"
+    fi
     $SUDO install -m 644 "$prom_tmp" "$ROOT/monitoring/prometheus.yml"
     rm -f "$prom_tmp"
     echo "prometheus 配置已更新：$ROOT/monitoring/prometheus.yml"
   fi
 else
   echo "警告：源码包缺少 deploy/prometheus/prometheus.yml，跳过" >&2
+fi
+
+# 告警规则目录同步（幂等）。
+# 为什么必须随部署同步：规则写在仓库 monitoring/prometheus/rules/（唯一源，
+# AlertRuleContractTest 钉住），此前 deploy/prometheus/prometheus.yml 没有 rule_files，
+# 这 15 条规则在直连路线**从未被评估**。目标路径与仓库布局同构
+# （$ROOT/monitoring/prometheus/rules/），探针与门禁可机械映射。
+# 有变更才重启 prometheus；无变更时不抖动。
+if [ -d "$SRC/monitoring/prometheus/rules" ]; then
+  # prometheus 用户可能尚未创建（apt 安装在第 5/8 步）：属主只能条件性设置，
+  # 否则首次部署在这里直接失败。文件 644 + 目录 755 已足够 prometheus 读取。
+  $SUDO install -d -m 755 "$ROOT/monitoring/prometheus/rules"
+  if $SUDO id prometheus >/dev/null 2>&1; then
+    $SUDO chown prometheus:prometheus "$ROOT/monitoring/prometheus/rules"
+  fi
+  RULES_CHANGED=0
+  for rule_src in "$SRC"/monitoring/prometheus/rules/*.yml; do
+    [ -f "$rule_src" ] || continue
+    rule_name="$(basename "$rule_src")"
+    rule_tmp="/tmp/$rule_name.$$"
+    sed 's/\r$//' "$rule_src" > "$rule_tmp"
+    if [ -f "$ROOT/monitoring/prometheus/rules/$rule_name" ] && cmp -s "$rule_tmp" "$ROOT/monitoring/prometheus/rules/$rule_name"; then
+      rm -f "$rule_tmp"
+      continue
+    fi
+    $SUDO install -m 644 "$rule_tmp" "$ROOT/monitoring/prometheus/rules/$rule_name"
+    rm -f "$rule_tmp"
+    if $SUDO id prometheus >/dev/null 2>&1; then
+      $SUDO chown prometheus:prometheus "$ROOT/monitoring/prometheus/rules/$rule_name"
+    fi
+    RULES_CHANGED=1
+    echo "告警规则已更新：$rule_name"
+  done
+  # 配置或规则有任一变化时，prometheus 必须重启才能加载（第 5/8 步会统一重启，这里只留痕）
+  if [ "$RULES_CHANGED" -eq 1 ]; then
+    echo "告警规则目录有变更，待第 5/8 步重启 prometheus 后生效"
+  fi
+else
+  echo "警告：源码包缺少 monitoring/prometheus/rules/，跳过告警规则同步（旧规则继续生效）" >&2
 fi
 
 

@@ -3,6 +3,8 @@ Description=Intelligent Resume MySQL backup (single transaction dump + verify + 
 Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
 After=network-online.target mysql.service
 Requires=mysql.service
+# 备份失败时立即触发告警轮询：备份是"最不显眼却最不能停"的作业（见 backup-database.sh 头注）
+OnFailure=intelligent-resume-alertcheck.service
 
 [Service]
 Type=oneshot

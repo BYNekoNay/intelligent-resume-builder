@@ -3,6 +3,8 @@ Description=Intelligent Resume PDF Renderer (Node.js + Puppeteer)
 Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
 After=network-online.target
 Wants=network-online.target
+# 服务失败时立即触发告警轮询（不等下一个 5 分钟周期）
+OnFailure=intelligent-resume-alertcheck.service
 
 [Service]
 Type=simple
@@ -39,6 +41,12 @@ ExecStart=/usr/bin/node --env-file=.env src/server.js
 Restart=on-failure
 RestartSec=10
 SuccessExitStatus=143
+
+# 内存封顶：Node + Chromium 的组合峰值波动大（一次导出加载整页 DOM + 生成 PDF），
+# 512M 是实测常驻（~150-250M）与峰值之间的折中。OOM 时单元会被杀并自动重启，
+# 且 OnFailure 会立即触发告警轮询。
+MemoryMax=512M
+TasksMax=512
 
 # 日志走 journald（自带轮转）：journalctl -u intelligent-resume-pdf -f
 StandardOutput=journal

@@ -4,6 +4,8 @@ Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
 After=network-online.target mysql.service intelligent-resume-pdf.service
 Wants=network-online.target
 Requires=mysql.service
+# 服务失败时立即触发告警轮询（不等下一个 5 分钟周期）
+OnFailure=intelligent-resume-alertcheck.service
 
 [Service]
 Type=simple
@@ -47,6 +49,12 @@ Restart=on-failure
 RestartSec=10
 SuccessExitStatus=143
 LimitNOFILE=65535
+
+# 内存封顶（与 -Xmx768m + MaxMetaspaceSize=224m + 堆外直接内存相称，留出 GC 与线程栈余量）。
+# 上一道防线是 ExitOnOutOfMemoryError；这一道防的是堆外增长拖垮同机另一个项目。
+# 宿主机 3.6G 总量的容量红线，见 pdf/api 单元内的内存说明。
+MemoryMax=1200M
+TasksMax=512
 
 # 日志走 journald（自带轮转）：journalctl -u intelligent-resume-api -f
 StandardOutput=journal

@@ -1,0 +1,24 @@
+[Unit]
+Description=Intelligent Resume alert check (poll Prometheus, fail on critical firing)
+Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
+# 被 api / pdf / backup 单元以 OnFailure= 引用：任一服务失败时立即跑一次，
+# 不用等下一个 5 分钟周期才发现问题。
+After=network-online.target intelligent-resume-prometheus.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=prometheus
+Group=prometheus
+ExecStart=/opt/intelligent-resume/bin/check-alerts.sh
+# critical firing → 退出码 2 → 本单元记 failed → systemctl --failed / 探针可见。
+# 这是刻意设计：failure 状态就是"出口"，不要加 SuccessExitStatus 把它洗白。
+TimeoutStartSec=1min
+# 轮询脚本只发一次 HTTP + 一次 python3 解析，64M 封顶绰绰有余（同 prometheus 的容量纪律）
+MemoryMax=64M
+TasksMax=32
+
+# 日志走 journald：journalctl -u intelligent-resume-alertcheck -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=intelligent-resume-alertcheck

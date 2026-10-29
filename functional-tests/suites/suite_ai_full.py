@@ -7,7 +7,7 @@
 
 用法：
     python test_remote_ai.py [base_url]
-    python test_remote_ai.py http://8.160.165.227
+    python test_remote_ai.py http://127.0.0.1:8088   # 或线上入口 http://101.35.239.218:8088
 
 设计取舍：
 - **不清理测试账号**：测试结束时打印账号口令，便于在浏览器里登录查看真实生成结果。
@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://8.160.165.227").rstrip("/")
+BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8088").rstrip("/")
 RUN = uuid.uuid4().hex[:8]
 USERNAME = f"aitest{RUN}"
 EMAIL = f"aitest-{RUN}@example.invalid"

@@ -1,0 +1,15 @@
+[Unit]
+Description=Poll intelligent-resume alerts every 5 minutes
+Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
+
+[Timer]
+# 每 5 分钟一次；OnUnitActiveSec 以"上次跑完"为基准，服务卡住也不会堆积触发
+OnUnitActiveSec=5min
+# 开机 3 分钟后先跑一次：避免"停机期间一直没人看告警"
+OnBootSec=3min
+# 停机期间错过的窗口在启动后补跑一次（与 backup.timer 同口径）
+Persistent=true
+Unit=intelligent-resume-alertcheck.service
+
+[Install]
+WantedBy=timers.target
