@@ -2,7 +2,7 @@
 
 面向求职者的**岗位定制简历平台**。你维护一份可复用的个人档案与职业资料库，选定目标 JD 后，系统先用真实大模型做资料选材、由你确认，再生成可编辑、可追溯的结构化简历——AI 负责选材与表达，**最终决定权始终在你手上**。
 
-![version](https://img.shields.io/badge/version-0.4.4-2f6f4f?style=flat-square)
+![version](https://img.shields.io/badge/version-0.5.0-2f6f4f?style=flat-square)
 ![tests](https://img.shields.io/badge/backend%20tests-1100%2B%20passing-2f6f4f?style=flat-square)
 ![stack](https://img.shields.io/badge/Java%2017%20%C2%B7%20Spring%20Boot%203.3%20%C2%B7%20Vue%203-2f6f4f?style=flat-square)
 ![deploy](https://img.shields.io/badge/deploy-systemd%20%2B%20nginx%2C%20no%20Docker-2f6f4f?style=flat-square)
@@ -24,7 +24,7 @@
 
 ## 产品一览
 
-以下截图取自 [在线测试环境](http://101.35.239.218:8088/) 的真实运行状态（v0.4.4）。
+以下截图取自 [在线测试环境](http://101.35.239.218:8088/) 的真实运行状态（v0.5.0）。
 
 ### 求职工作台
 
@@ -132,7 +132,7 @@ cd pdf-service && npm install && npm start
 ### 桌面模式（单进程、免登录）
 
 ```bash
-java -jar intelligent-resume-server-0.4.4.jar \
+java -jar intelligent-resume-server-0.5.0.jar \
   --spring.profiles.active=desktop \
   --server.port=8082 --server.address=127.0.0.1
 ```
@@ -191,6 +191,6 @@ deploy/            nginx 站点配置与 systemd 单元（随部署幂等同步�
 - [系统架构设计](docs/03-系统架构设计说明书.md) · [数据库设计](docs/04-数据库设计说明书.md) · [接口设计](docs/05-接口设计说明书.md)
 - [测试计划与验收](docs/07-测试计划与验收说明书.md) · [部署与运维](docs/08-部署与运维说明书.md)
 - [架构决策记录](docs/decisions/) · [悬而未决登记册](docs/decisions/OPEN-DECISIONS.md)
-- [发布说明 v0.4.4](docs/RELEASES/v0.4.4.md)
+- [发布说明 v0.5.0](docs/RELEASES/v0.5.0.md)
 
 English: [README.en.md](README.en.md)

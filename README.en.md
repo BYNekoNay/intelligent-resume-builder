@@ -54,7 +54,7 @@ cd pdf-service && npm install && npm start                                # :300
 Desktop mode (single process, no login, local H2 file database):
 
 ```bash
-java -jar intelligent-resume-server-0.4.4.jar \
+java -jar intelligent-resume-server-0.5.0.jar \
   --spring.profiles.active=desktop --server.port=8082 --server.address=127.0.0.1
 ```
 
@@ -66,6 +66,6 @@ Backend: **1100+ tests passing** (exact count is in the latest `docs/RELEASES/` 
 
 - [Project context](PROJECT_CONTEXT.md) · [Docs index](docs/README.md)
 - [Architecture](docs/03-系统架构设计说明书.md) · [API](docs/05-接口设计说明书.md) · [Deployment](docs/08-部署与运维说明书.md)
-- [Decisions](docs/decisions/) · [Release notes v0.4.4](docs/RELEASES/v0.4.4.md)
+- [Decisions](docs/decisions/) · [Release notes v0.5.0](docs/RELEASES/v0.5.0.md)
 
 中文版：[README.md](README.md)
