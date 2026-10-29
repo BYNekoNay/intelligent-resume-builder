@@ -23,6 +23,10 @@ import { dirname, join } from 'node:path'
 const here = dirname(fileURLToPath(import.meta.url))
 const COMPONENT = join(here, '..', 'src', 'components', 'DraftContentFields.vue')
 const I18N = join(here, '..', 'src', 'i18n', 'index.ts')
+// 2026-10-29：en-US 目录拆到独立文件（按语言懒加载），中英两块不再同文件。
+// 这里按「中文在前、英文在后」拼接后仍按出现顺序取第 0/1 个 draftFields 块，
+// audit() 的签名与判据不变 —— 拆文件不该豁免任何校验。
+const I18N_EN = join(here, '..', 'src', 'i18n', 'locales', 'en-US.ts')
 
 /**
  * 草稿 schema 中会出现在确认页的字段全集。
@@ -135,7 +139,7 @@ export function audit({ component, i18n }) {
 function main() {
   const result = audit({
     component: readFileSync(COMPONENT, 'utf8'),
-    i18n: readFileSync(I18N, 'utf8'),
+    i18n: `${readFileSync(I18N, 'utf8')}\n${readFileSync(I18N_EN, 'utf8')}`,
   })
   if (result.problems.length) {
     console.error('✗ 草稿字段映射门禁未通过：')

@@ -11,7 +11,12 @@ import { audit, parseStringMap } from './check-draft-fields.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const realComponent = readFileSync(join(here, '..', 'src', 'components', 'DraftContentFields.vue'), 'utf8')
-const realI18n = readFileSync(join(here, '..', 'src', 'i18n', 'index.ts'), 'utf8')
+// en-US 已拆到独立文件（按语言懒加载）：按「中文在前、英文在后」拼接，
+// 与 check-draft-fields.mjs 的 main() 保持同一口径，否则测试与门禁各判一套。
+const realI18n = [
+  readFileSync(join(here, '..', 'src', 'i18n', 'index.ts'), 'utf8'),
+  readFileSync(join(here, '..', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8'),
+].join('\n')
 
 test('真实文件通过门禁', () => {
   const result = audit({ component: realComponent, i18n: realI18n })

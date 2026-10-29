@@ -87,10 +87,12 @@ describe('errorCodes', () => {
    * 只断言「key 形如 errors.*」是不够的——写成 errors.ghost 一样通过，而界面上会显示原始 key。
    */
   it('每个错误码的文案键在中英文案里都存在', () => {
-    const i18nSource = readFileSync(
-      fileURLToPath(new URL('../../src/i18n/index.ts', import.meta.url)),
-      'utf8',
-    )
+    // en-US 已拆到独立文件（2026-10-29 按语言懒加载）：两份拼起来才是完整目录，
+    // 只读 index.ts 会让"英文缺文案"这类缺陷假装通过。
+    const i18nSource = [
+      readFileSync(fileURLToPath(new URL('../../src/i18n/index.ts', import.meta.url)), 'utf8'),
+      readFileSync(fileURLToPath(new URL('../../src/i18n/locales/en-US.ts', import.meta.url)), 'utf8'),
+    ].join('\n')
     const missing: string[] = []
     for (const [code, key] of Object.entries(ERROR_CODE_KEYS)) {
       const leaf = key.split('.').pop() as string

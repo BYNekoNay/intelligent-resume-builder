@@ -24,12 +24,12 @@ const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const distDir = join(projectRoot, 'dist')
 const indexPath = join(distDir, 'index.html')
 
-/** 首屏 JS 总量上限（KB，gzip -9）。2026-10-29 实测 123.66 KB（不含 CSS）。 */
-const EXPECTED_INITIAL_JS_KB = 128
-/** 首屏 JS + CSS 总量上限（KB，gzip -9）。2026-10-29 实测 137.55 KB。 */
-const EXPECTED_INITIAL_TOTAL_KB = 142
-/** 入口 chunk（index-*.js）上限（KB，gzip -9）。2026-10-29 实测 57.41 KB。 */
-const EXPECTED_ENTRY_CHUNK_KB = 60
+/** 首屏 JS 总量上限（KB，gzip -9）。2026-10-29（i18n 拆分后）实测 101.65 KB（不含 CSS）。 */
+const EXPECTED_INITIAL_JS_KB = 105
+/** 首屏 JS + CSS 总量上限（KB，gzip -9）。2026-10-29（i18n 拆分后）实测 115.54 KB。 */
+const EXPECTED_INITIAL_TOTAL_KB = 120
+/** 入口 chunk（index-*.js）上限（KB，gzip -9）。2026-10-29（i18n 拆分后）实测 35.27 KB。 */
+const EXPECTED_ENTRY_CHUNK_KB = 38
 
 if (!existsSync(indexPath)) {
   console.error('[bundle-budget] 找不到 dist/index.html —— 必须先 `npm run build`（不得当作通过）')

@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { resolve, dirname, extname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
@@ -176,7 +176,39 @@ function collectCatalog(object, prefix, keys, duplicates) {
   }
 }
 
-export function inspectCatalog(source) {
+function findDefaultExportObject(source, fileName) {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  let identifier
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+      const expression = statement.expression
+      if (ts.isObjectLiteralExpression(expression)) return expression
+      if (ts.isIdentifier(expression)) identifier = expression.text
+    }
+  }
+  if (!identifier) throw new Error(`Unable to locate the default-exported catalog object in ${fileName}`)
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.name.text === identifier
+        && declaration.initializer && ts.isObjectLiteralExpression(declaration.initializer)) {
+        return declaration.initializer
+      }
+    }
+  }
+  throw new Error(`Unable to resolve '${identifier}' to an object literal in ${fileName}`)
+}
+
+/**
+ * 解析文案目录。
+ *
+ * `extraCatalogs` 是 2026-10-29 拆包后新增的输入：`src/i18n/locales/<locale>.ts` 每个语言一个文件，
+ * 内容是**对象字面量的 default export**（结构契约写在该文件头注释里）。
+ * 为什么要拆：两个 locale 内联会让主包背上全部英文文案（约 9-10 KB gzip），而多数用户从不切英文。
+ *
+ * 注意：拆出去≠豁免校验 —— 这里的 key 集合仍然参与后续所有对账（缺 key / 多 key 都红）。
+ */
+export function inspectCatalog(source, extraCatalogs = []) {
   const root = findMessagesObject(source)
   const locales = new Map()
   const duplicates = []
@@ -191,6 +223,15 @@ export function inspectCatalog(source) {
     collectCatalog(property.initializer, '', keys, duplicates)
     locales.set(locale, keys)
   }
+
+  for (const { locale, source: localeSource, fileName } of extraCatalogs) {
+    if (seenLocales.has(locale)) duplicates.push(locale)
+    seenLocales.add(locale)
+    const keys = new Set()
+    collectCatalog(findDefaultExportObject(localeSource, fileName), '', keys, duplicates)
+    locales.set(locale, keys)
+  }
+
   return { locales, duplicates }
 }
 
@@ -272,7 +313,18 @@ function run() {
     .flatMap(dir => collectFilesWithExtensions(join(projectRoot, 'src', dir), ['.ts']))
   const catalogSource = readFileSync(join(projectRoot, 'src', 'i18n', 'index.ts'), 'utf8')
   const navigationSource = readFileSync(join(projectRoot, 'src', 'navigation', 'registry.ts'), 'utf8')
-  const { locales, duplicates } = inspectCatalog(catalogSource)
+  // 拆出去的语言文件（每个 locale 一个，default export 对象字面量）
+  const localeDir = join(projectRoot, 'src', 'i18n', 'locales')
+  const extraCatalogs = existsSync(localeDir)
+    ? readdirSync(localeDir)
+      .filter(name => name.endsWith('.ts'))
+      .map(name => ({
+        locale: name.replace(/\.ts$/, ''),
+        source: readFileSync(join(localeDir, name), 'utf8'),
+        fileName: `src/i18n/locales/${name}`,
+      }))
+    : []
+  const { locales, duplicates } = inspectCatalog(catalogSource, extraCatalogs)
   const requiredLocales = ['zh-CN', 'en-US']
   const failures = duplicates.map(key => `src/i18n/index.ts: duplicate catalog key ${key}`)
 
