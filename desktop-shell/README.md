@@ -1,7 +1,8 @@
 # 智历 · Windows 桌面壳（ADR-012 阶段六）
 
-把「本地工作区」包成双击可用的桌面应用。**这一批只做了可验证的骨架**，没有安装包——
-完整清单与"哪些已验证 / 哪些没验证"见下面。
+把「本地工作区」包成双击可用的桌面应用。当前状态：**安装包已产出并验证过打包后编排**
+（`release-0.5.0/Zhili Setup 0.5.0.exe`，内嵌 0.5.0 jar，打包后冒烟 6 项全绿）；
+**窗口与安装流程仍未有图形会话的实测记录**——完整清单与"哪些已验证 / 哪些没验证"见下面。
 
 ## 结构
 
@@ -44,6 +45,35 @@ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-
 而那个包里含有 macOS 的符号链接，Windows 非开发者模式**无权创建**，解压直接失败。
 本仓在 `build.win.signAndEditExecutable=false` 下打包，代价是 exe 保持 Electron 默认图标与版本信息。
 要恢复的话，需要开发者模式或管理员权限。
+
+## 版本同轨（2026-10-29 起）
+
+壳版本**必须**与产品版本一致（`desktop-shell/package.json` 是 `VersionConsistencyContractTest`
+的第 12/13 处副本）。安装包内嵌后端 jar，壳版本脱钩时产物无法从版本号判断内嵌的是哪一代 ——
+`release-v042/` 里那套「0.1.0 壳 + 0.4.2 jar」就是这么来的。
+
+`scripts/stage-jar.mjs` 在打包入口再拦一次：壳版本 ≠ `server/pom.xml` 版本时**直接拒绝打包**。
+
+## 已产出的安装包
+
+| 目录 | 内容 | 状态 |
+| --- | --- | --- |
+| `release-0.5.0/` | `Zhili Setup 0.5.0.exe`（内嵌 `intelligent-resume-server-0.5.0.jar`） | **当前可用** |
+| `release-v042/` | `Zhili Setup 0.1.0.exe`（内嵌 0.4.2 jar） | **已废弃**，内含 `DEPRECATED.md`；不得分发 |
+| `release/` | 0.1.0 时代的半成品（打包中断留下） | 可删，见下 |
+
+**若 `release/` 被占用导致打包失败**（`cannot access ... app.asar` / `Permission denied`）：
+本机安全删除策略对递归删除 fail-closed，删不掉也改不了名。直接换输出目录即可：
+
+```bash
+cd desktop-shell && npx electron-builder --win nsis --config.directories.output=release-0.5.0
+```
+
+**打包后验证编排**（不需要图形会话）：
+
+```bash
+node desktop-shell/scripts/smoke.mjs --packaged desktop-shell/release-0.5.0/win-unpacked
+```
 
 **为什么需要 `scripts/stage-jar.mjs`**：2026-10-26 实测踩到 —— `server/target` 里躺着 0.4.0/0.4.1 两代旧 jar，
 `extraResources` 通配符把它们**一起打进安装包**，而取 jar 的逻辑取第一个匹配项，装出来跑的是旧版本。

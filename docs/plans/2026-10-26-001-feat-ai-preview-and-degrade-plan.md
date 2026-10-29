@@ -97,6 +97,17 @@
 | AC-SHELL-2 | ✅ 产出 + ⚠️ 安装流程未点 | NSIS 安装包已产出（162MB）；打包后的编排用 `smoke --packaged` 验证（16s 就绪、SPA 200、`/api/desktop/ai-settings` 200）；**安装器点完能启动未验证** |
 | AC-SHELL-3 | ✅ | 包内只有 0.4.2 一个 jar；扫描无 `.env`/`secrets.env`/`resume.mv.db`；asar 内无 `ai-credentials` 字样 |
 
+> **状态更正确认（2026-10-29，P5 批次；原文不改写）**
+>
+> - **AC-SHELL-2 更新**：安装包已用当前版本重建 —— `desktop-shell/release-0.5.0/Zhili Setup 0.5.0.exe`，
+>   内嵌 `intelligent-resume-server-0.5.0.jar`；打包后编排冒烟 6 项全绿（12s 就绪、SPA 200、
+>   `/api/desktop/ai-settings` 200、`SERVER__PORT` 未被劫持、退出无孤儿进程）。
+>   **安装器点完能启动仍未验证**（需图形会话）。
+> - **AC-SHELL-3 的历史口径已失效**：它当时断言「包内只有 0.4.2 一个 jar」（那是当时唯一产物）；
+>   现在的正确判据是「包内 jar 版本 == `server/pom.xml` 版本」，由 `VersionConsistencyContractTest`
+>   （13 处副本）+ `stage-jar.mjs` 的打包入口断言共同守护。
+> - **AC-SHELL-1 仍 ⚠️ 未验证**：窗口未在图形会话起过，无变化；`release-v042/` 已标废弃（`DEPRECATED.md`），不得分发。
+
 **本轮范围说明**：R32 的强制校验落在**通用任务端点**（`POST /api/ai/tasks`）。
 `JOB_GENERATION` / `JOB_MATERIAL_SELECTION` / `COMMUNICATION_GENERATE` / `ATS_ANALYSIS` / `INTERVIEW_COACH`
 走各自的领域端点，且本来就已排除联系方式、本身带确认步骤 —— 把它们接进预览协议是下一批的事（不在本轮声称完成）。
