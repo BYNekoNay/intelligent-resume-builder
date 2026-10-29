@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 import { newIdempotencyKey } from '@/utils/idempotency'
 
 export interface AtsCheckResponse {
@@ -36,15 +36,15 @@ export interface AtsFallbackInfo {
 }
 
 export function runAtsCheck(resumeVersionId: number, jobDescriptionId: number, useAi = true, idempotencyKey = newIdempotencyKey()) {
-  return apiClient.post<ApiResponse<AtsCheckResponse>>('/api/ats/check', { resumeVersionId, jobDescriptionId, useAi }, {
+  return http.post<AtsCheckResponse>('/api/ats/check', { resumeVersionId, jobDescriptionId, useAi }, {
     headers: { 'Idempotency-Key': idempotencyKey },
   })
 }
 
 export function getAtsCheck(id: number) {
-  return apiClient.get<ApiResponse<AtsCheckResponse>>(`/api/ats/checks/${id}`)
+  return http.get<AtsCheckResponse>(`/api/ats/checks/${id}`)
 }
 
 export function retryAtsAi(id: number) {
-  return apiClient.post<ApiResponse<AtsCheckResponse>>(`/api/ats/checks/${id}/ai-retry`)
+  return http.post<AtsCheckResponse>(`/api/ats/checks/${id}/ai-retry`)
 }

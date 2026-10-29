@@ -8,6 +8,7 @@ import { getMaterial, listMaterials, type CareerMaterial, type CareerMaterialSum
 import { AiTaskTimeoutError, inlineOptimize, waitForAiTaskResult, type InlineOptimizeResponse } from '@/api/ai'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
+import { extractErrorCode } from '@/utils/errorCodes'
 import { useAuthStore } from '@/stores/auth'
 import sampleResume from '@/data/sampleResume'
 import ResumeEditorNavigation, { type ResumeEditorSection } from '@/components/resume/ResumeEditorNavigation.vue'
@@ -82,7 +83,7 @@ async function loadRelatedSectionAssets() {
   if (!sectionKey) return
   relatedAssetsLoading.value = true
   try {
-    const response = (await listInterviewAssets({ sectionKey })).data.data
+    const response = (await listInterviewAssets({ sectionKey }))
     if (epoch !== relatedAssetsEpoch) return
     relatedSectionAssets.value = response
   } catch {
@@ -335,7 +336,7 @@ async function resolveAtsHandoff(requestedResumeId: number) {
   const sourceVersionId = positiveQueryInteger(route.query.sourceVersionId)
   if (!section || !resultId || !sourceVersionId) return null
   try {
-    const result = (await getAtsCheck(resultId)).data.data
+    const result = (await getAtsCheck(resultId))
     if (result.resumeId !== requestedResumeId || result.resumeVersionId !== sourceVersionId) return null
     const context = handoffItem(result, route.query.atsItem, section)
     return context ? { context, sourceVersionId } : null
@@ -378,7 +379,7 @@ async function loadMaterialLibrary() {
   materialLibraryLoading.value = true
   error.value = ''
   try {
-    const materials = (await listMaterials()).data.data
+    const materials = (await listMaterials())
     if (props.id === targetResumeId && epoch === editorContextEpoch) materialLibrary.value = materials
   } catch {
     if (props.id === targetResumeId && epoch === editorContextEpoch) error.value = t('resumeEditor.materialLibraryLoadFailed')
@@ -416,9 +417,8 @@ async function insertMaterial() {
   materialInsertLoading.value = true
   error.value = ''
   try {
-    const { data } = await getMaterial(id)
+    const material = await getMaterial(id)
     if (props.id !== targetResumeId || epoch !== editorContextEpoch) return
-    const material = data.data
     const outcome = textFromMaterial(material, ['outcome', 'result', 'outcomeEvidence'])
     const description = textFromMaterial(material, ['description', 'summary', 'applicationDescription', 'responsibilityScope'])
     if (targetSection === 'work') updateResume((d) => { d.work = [...(Array.isArray(d.work) ? d.work : []), { company: textFromMaterial(material, ['company', 'organization']) || material.title, position: textFromMaterial(material, ['position', 'role']), ...timeFieldsFromMaterial(material), description, highlights: outcome ? [outcome] : [] }] })
@@ -473,12 +473,12 @@ async function openAiAssistant(scope: 'field' | 'section', label: string, sectio
   const epoch = editorContextEpoch
   aiAssistant.value.loading = true
   try {
-    const createdTask = (await inlineOptimize({ resumeVersionId: currentVersionId.value, section, content: contentValue }, assistant.idempotencyKey)).data.data
+    const createdTask = (await inlineOptimize({ resumeVersionId: currentVersionId.value, section, content: contentValue }, assistant.idempotencyKey))
     const result = await waitForAiTaskResult<InlineOptimizeResponse>(createdTask.id)
     if (epoch === editorContextEpoch && aiAssistant.value?.idempotencyKey === assistant.idempotencyKey) aiAssistant.value.result = result
   } catch (requestError: any) {
     if (epoch === editorContextEpoch && aiAssistant.value?.idempotencyKey === assistant.idempotencyKey) {
-      aiAssistant.value.needsConsent = requestError?.response?.data?.code === 40302
+      aiAssistant.value.needsConsent = extractErrorCode(requestError) === 40302
       aiAssistant.value.error = aiAssistant.value.needsConsent
         ? t('resumeEditor.consentRequired')
         : requestError instanceof AiTaskTimeoutError
@@ -712,7 +712,7 @@ async function loadEditor() {
       getResume(requestedResumeId),
       resolveAtsHandoff(requestedResumeId),
     ])
-    const currentResumeVersionId = resumeResponse.data.data.currentVersionId
+    const currentResumeVersionId = resumeResponse.currentVersionId
     let loadedVersionId = currentResumeVersionId
     let requestedEditableSuccessor = false
     if (handoff) {
@@ -725,15 +725,15 @@ async function loadEditor() {
     }
     if (loadedVersionId == null) {
       const versionsResponse = await listVersions(requestedResumeId)
-      loadedVersionId = versionsResponse.data.data[0]?.id ?? null
+      loadedVersionId = versionsResponse[0]?.id ?? null
     }
     let currentVersion = loadedVersionId
-      ? (await getResumeVersion(loadedVersionId)).data.data
+      ? (await getResumeVersion(loadedVersionId))
       : null
     if (handoff && requestedEditableSuccessor
       && !isAtsEditableSuccessor(currentVersion, handoff.context, handoff.sourceVersionId)) {
       loadedVersionId = handoff.sourceVersionId
-      currentVersion = (await getResumeVersion(loadedVersionId)).data.data
+      currentVersion = (await getResumeVersion(loadedVersionId))
     }
     if (loadSequence !== editorLoadSequence) return
     historicalSourceReadOnly.value = Boolean(handoff && loadedVersionId !== currentResumeVersionId)
@@ -778,7 +778,7 @@ async function createEditableSuccessor() {
       ?? (await restoreResumeVersion(Number(props.id), sourceVersionId, {
         atsResultId: context.resultId,
         atsItem: context.item,
-      })).data.data.id
+      })).id
     pendingEditableSuccessorId.value = successorId
     resetDraft()
     await router.replace({

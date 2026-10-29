@@ -32,8 +32,8 @@ export function useResumeJobOptions() {
     try {
       const [resumeResponse, jobResponse] = await Promise.all([listResumes(), listJobs()])
       if (epoch !== loadEpoch) return
-      resumes.value = resumeResponse.data.data
-      jobs.value = jobResponse.data.data
+      resumes.value = resumeResponse
+      jobs.value = jobResponse
       const assignedInitialSelection = selectedResumeId.value == null && resumes.value.length > 0
       if (assignedInitialSelection) selectedResumeId.value = resumes.value[0].id
       // 仅在「本次加载确立了选择」或「选择自加载开始未变」时加载版本列表：
@@ -57,7 +57,7 @@ export function useResumeJobOptions() {
     try {
       const response = await listVersions(resumeId)
       if (epoch !== versionEpoch) return
-      versions.value = response.data.data
+      versions.value = response
     } catch {
       if (epoch !== versionEpoch) return
       error.value = t('jobOptions.versionsLoadError')

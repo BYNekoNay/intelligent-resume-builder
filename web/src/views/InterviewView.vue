@@ -15,6 +15,7 @@ import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useTaskPolling } from '@/composables/useTaskPolling'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
+import { extractErrorCode } from '@/utils/errorCodes'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 import { newIdempotencyKey } from '@/utils/idempotency'
 
@@ -148,7 +149,7 @@ async function pollInterviewState() {
     return
   }
   try {
-    const result = (await getInterviewState(id)).data.data
+    const result = (await getInterviewState(id))
     if (interviewId.value !== id) return
     statePollAttempt += 1
     applySessionState(result)
@@ -180,7 +181,7 @@ async function start() {
     : { payload, idempotencyKey: newIdempotencyKey() }
   pendingStart.value = pending
   try {
-    const result = (await startInterview(payload, pending.idempotencyKey)).data.data
+    const result = (await startInterview(payload, pending.idempotencyKey))
     pendingStart.value = null
     applySessionState(result)
   } catch (e: any) {
@@ -205,7 +206,7 @@ async function submit() {
   error.value = ''
   submitting.value = true
   try {
-    const result = (await answerInterview(payload.interviewId, payload.answer, pending.idempotencyKey)).data.data
+    const result = (await answerInterview(payload.interviewId, payload.answer, pending.idempotencyKey))
     applySessionState(result)
     if (result.status !== 'AI_ACTION_REQUIRED') {
       pendingAnswer.value = null
@@ -225,7 +226,7 @@ async function retry() {
   error.value = ''
   retrying.value = true
   try {
-    const result = (await retryAi(interviewId.value)).data.data
+    const result = (await retryAi(interviewId.value))
     applySessionState(result)
     if (result.status !== 'AI_ACTION_REQUIRED') {
       pendingAnswer.value = null
@@ -243,7 +244,7 @@ async function fallbackToRules() {
   error.value = ''
   fallingBack.value = true
   try {
-    const result = (await continueWithRules(interviewId.value)).data.data
+    const result = (await continueWithRules(interviewId.value))
     applySessionState(result)
   } catch { error.value = t('interview.fallbackError') }
   finally { fallingBack.value = false }
@@ -256,7 +257,7 @@ async function finish() {
   error.value = ''
   finishing.value = true
   try {
-    const result = (await finishInterview(interviewId.value)).data.data
+    const result = (await finishInterview(interviewId.value))
     applySessionState(result)
   } catch { error.value = t('interview.finishError') }
   finally { finishing.value = false }
@@ -326,11 +327,11 @@ async function generatePractice(weakness: string) {
       practiceLoading.value = false
       return
     }
-    const task = (await createFollowUp(interviewId.value, weakness, key, previewToken)).data.data
+    const task = (await createFollowUp(interviewId.value, weakness, key, previewToken))
     if (!acceptFollowUpTask(task)) {
       startFollowUpPolling({
         taskId: task.id,
-        fetchTask: async (id) => (await getTask(id)).data.data,
+        fetchTask: async (id) => (await getTask(id)),
         onTask: acceptFollowUpTask,
         shouldStop: (current) => current.status === 'SUCCESS' || current.status === 'FAILED' || current.status === 'CANCELLED',
         onTimeout: () => {
@@ -345,7 +346,7 @@ async function generatePractice(weakness: string) {
     }
   } catch (cause: any) {
     practiceLoading.value = false
-    const code = cause?.response?.data?.code
+    const code = extractErrorCode(cause)
     practiceError.value = code === 40302
       ? t('interview.consentRequired')
       : code === 42901 ? t('interview.quotaExceeded') : t('interview.practiceError')
@@ -400,13 +401,13 @@ async function startPractice(candidateIndex: number) {
       outputLanguage: session?.outputLanguage ?? (locale.value === 'zh-CN' ? 'ZH_CN' : 'EN'),
       initialQuestion: question,
     }
-    const result = (await startInterview(payload, newIdempotencyKey('practice'))).data.data
+    const result = (await startInterview(payload, newIdempotencyKey('practice')))
     practiceCandidates.value = []
     practiceWeakness.value = ''
     stopFollowUpPolling()
     applySessionState(result)
   } catch (cause: any) {
-    const code = cause?.response?.data?.code
+    const code = extractErrorCode(cause)
     if (code === 40302) {
       await router.push(consentRedirectUrl)
       return
@@ -421,10 +422,10 @@ async function startPractice(candidateIndex: number) {
 async function loadReport() {
   if (interviewId.value === null) return
   try {
-    report.value = (await getInterviewReport(interviewId.value)).data.data
+    report.value = (await getInterviewReport(interviewId.value))
     // 预标记已保存态：报告逐轮「存入资产」幂等展示
     try {
-      const assets = (await listInterviewAssets()).data.data
+      const assets = (await listInterviewAssets())
       for (const asset of assets) {
         if (asset.interviewRecordId !== null && !savedRecordIds.value.includes(asset.interviewRecordId)) {
           savedRecordIds.value.push(asset.interviewRecordId)
@@ -463,7 +464,7 @@ async function recoverSession() {
   const id = Number(savedId)
   if (Number.isNaN(id)) return
   try {
-    const result = (await getInterviewState(id)).data.data
+    const result = (await getInterviewState(id))
     applySessionState(result)
     if (result.status === 'COMPLETED') {
       void loadReport()

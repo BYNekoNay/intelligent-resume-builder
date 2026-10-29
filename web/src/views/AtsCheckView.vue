@@ -69,7 +69,7 @@ async function check(useAi: boolean) {
   loading.value = true
   checkingMode.value = useAi ? 'AI' : 'RULES'
   try {
-    result.value = (await runAtsCheck(Number(resumeVersionId.value), Number(jobDescriptionId.value), useAi)).data.data
+    result.value = (await runAtsCheck(Number(resumeVersionId.value), Number(jobDescriptionId.value), useAi))
     await rememberResult(result.value.id)
     if (result.value.analysisStatus === 'ANALYZING') startPolling(result.value.id)
   } catch {
@@ -86,7 +86,7 @@ function startPolling(id: number) {
   // 对齐后端 300s 推理 readTimeout；超时后保留本地规则报告并提示后台继续。
   startTaskPolling({
     taskId: id,
-    fetchTask: async (taskId) => (await getAtsCheck(taskId)).data.data,
+    fetchTask: async (taskId) => (await getAtsCheck(taskId)),
     intervalMs: ATS_POLL_INTERVAL_MS,
     maxAttempts: ATS_POLL_MAX_ATTEMPTS,
     initialDelayMs: TASK_POLL_DEFAULT_INITIAL_DELAY_MS,
@@ -115,7 +115,7 @@ async function retryAi() {
   retrying.value = true
   pollingTimedOut.value = false
   try {
-    result.value = (await retryAtsAi(result.value.id)).data.data
+    result.value = (await retryAtsAi(result.value.id))
     if (result.value.analysisStatus === 'ANALYZING') startPolling(result.value.id)
   } catch {
     error.value = t('ats.retryError')
@@ -159,7 +159,7 @@ onMounted(async () => {
   const id = Number(route.query.result)
   if (!Number.isInteger(id) || id <= 0) return
   try {
-    result.value = (await getAtsCheck(id)).data.data
+    result.value = (await getAtsCheck(id))
     if (result.value.analysisStatus === 'ANALYZING') startPolling(id)
   } catch {
     error.value = t('ats.restoreError')

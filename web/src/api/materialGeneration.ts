@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 import { AI_TASK_POLL_ATTEMPTS, AiTaskTimeoutError } from './ai'
 import { AI_CONTEXT_SECTION_KEYS } from '@/resume/sectionRegistry'
 
@@ -31,7 +31,7 @@ export async function generateResumeFromMaterial(
   const taskId = await createMaterialTask({ rawMaterialText, ...(jobDescriptionId ? { jobDescriptionId } : {}), ...(associationReference ? { generationMode: 'ASSOCIATIVE_STRUCTURED_DRAFT', associationReference } : {}) }, idempotencyKey, previewToken)
   const task = await waitForTask(taskId)
   const r = task.resultJson as Record<string, unknown>
-  return { data: { data: { taskId, rawMaterialText, generatedResumeJson: normalizeResumeJson((r.generatedResumeJson ?? r.draftResumeJson ?? r) as Record<string, unknown>), suggestions: Array.isArray(r.suggestions) ? r.suggestions as string[] : [], requiresManualConfirmation: true } } } as { data: ApiResponse<MaterialGenerationResponse> }
+  return { taskId, rawMaterialText, generatedResumeJson: normalizeResumeJson((r.generatedResumeJson ?? r.draftResumeJson ?? r) as Record<string, unknown>), suggestions: Array.isArray(r.suggestions) ? r.suggestions as string[] : [], requiresManualConfirmation: true }
 }
 
 function normalizeResumeJson(value: Record<string, unknown>) {
@@ -51,7 +51,14 @@ export async function generateMaterialAssociation(rawMaterialText: string, idemp
   const taskId = await createMaterialTask({ rawMaterialText, generationMode: 'ASSOCIATIVE_EXPANSION' }, idempotencyKey, previewToken)
   const task = await waitForTask(taskId)
   const r = task.resultJson as Record<string, unknown>
-  return { data: { data: { taskId, expandedMaterial: typeof r.expandedMaterial === 'string' ? r.expandedMaterial : '', verificationQuestions: Array.isArray(r.verificationQuestions) ? r.verificationQuestions as string[] : [], disclaimer: typeof r.disclaimer === 'string' ? r.disclaimer : '' } } } as { data: ApiResponse<MaterialAssociationResponse> }
+  return {
+    taskId,
+    expandedMaterial: typeof r.expandedMaterial === 'string' ? r.expandedMaterial : '',
+    verificationQuestions: Array.isArray(r.verificationQuestions)
+      ? r.verificationQuestions as string[]
+      : [],
+    disclaimer: typeof r.disclaimer === 'string' ? r.disclaimer : '',
+  }
 }
 
 /**
@@ -59,22 +66,21 @@ export async function generateMaterialAssociation(rawMaterialText: string, idemp
  * 令牌只能从「预览 → 用户确认」这条路径拿到，因此这里不做兜底。
  */
 async function createMaterialTask(input: Record<string, unknown>, idempotencyKey: string, previewToken: string) {
-  const createResp = await apiClient.post<ApiResponse<{ id: number; status: string }>>(
+  const createResp = await http.post<{ id: number; status: string }>(
     '/api/ai/tasks',
     { taskType: 'MATERIAL_IMPORT', input: { ...input, _previewToken: previewToken } },
     {
     headers: { 'Idempotency-Key': idempotencyKey },
   })
-  return createResp.data.data.id
+  return createResp.id
 }
 
 async function waitForTask(taskId: number, maxAttempts: number = AI_TASK_POLL_ATTEMPTS) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await delay(attempt < 3 ? [1000, 2000, 4000][attempt] : 2000)
-    const pollResp = await apiClient.get<ApiResponse<{
+    const task = await http.get<{
       id: number; status: string; resultJson: Record<string, unknown>; errorMessage: string | null
-    }>>(`/api/ai/tasks/${taskId}`)
-    const task = pollResp.data.data
+    }>(`/api/ai/tasks/${taskId}`)
 
     if (task.status === 'SUCCESS' && task.resultJson) {
       return task

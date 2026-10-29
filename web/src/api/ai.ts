@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 export interface ConsentRequest {
   policyVersion: string
@@ -144,15 +144,15 @@ export interface AchievementGuidanceResponse {
 }
 
 export function grantConsent(payload: ConsentRequest) {
-  return apiClient.post<ApiResponse<ConsentResponse>>('/api/ai/consent', payload)
+  return http.post<ConsentResponse>('/api/ai/consent', payload)
 }
 
 export function getConsent() {
-  return apiClient.get<ApiResponse<ConsentResponse | null>>('/api/ai/consent')
+  return http.get<ConsentResponse | null>('/api/ai/consent')
 }
 
 export function withdrawConsent() {
-  return apiClient.delete<ApiResponse<ConsentResponse>>('/api/ai/consent')
+  return http.delete<ConsentResponse>('/api/ai/consent')
 }
 
 function materialSelectionBody(payload: MaterialSelectionRequest) {
@@ -174,13 +174,11 @@ function materialSelectionBody(payload: MaterialSelectionRequest) {
  * 与创建共用 `materialSelectionBody` —— 字段一旦漂移，令牌就会对不上（后端会用自己组装的结果重算）。
  */
 export function previewMaterialSelection(payload: MaterialSelectionRequest) {
-  return apiClient
-    .post<ApiResponse<AiTaskPreview>>('/api/ai/select-materials-for-job/preview', materialSelectionBody(payload))
-    .then(response => response.data.data)
+  return http.post<AiTaskPreview>('/api/ai/select-materials-for-job/preview', materialSelectionBody(payload))
 }
 
 export function selectMaterialsForJob(payload: MaterialSelectionRequest, idempotencyKey: string, previewToken: string) {
-  return apiClient.post<ApiResponse<AiTask>>('/api/ai/select-materials-for-job', materialSelectionBody(payload), {
+  return http.post<AiTask>('/api/ai/select-materials-for-job', materialSelectionBody(payload), {
     headers: { 'Idempotency-Key': idempotencyKey, 'X-AI-Preview-Token': previewToken },
   })
 }
@@ -216,30 +214,28 @@ export interface AiTaskPreview {
  * `input._previewToken`，否则后端会以 40001/40901 拒绝。
  */
 export function previewAiTask(taskType: string, input: Record<string, unknown>, includeContact = false) {
-  return apiClient
-    .post<ApiResponse<AiTaskPreview>>('/api/ai/tasks/preview', { taskType, input, includeContact })
-    .then(response => response.data.data)
+  return http.post<AiTaskPreview>('/api/ai/tasks/preview', { taskType, input, includeContact })
 }
 
 export function getTask(id: number) {
-  return apiClient.get<ApiResponse<AiTask>>(`/api/ai/tasks/${id}`)
+  return http.get<AiTask>(`/api/ai/tasks/${id}`)
 }
 
 export function listTaskContinuations() {
-  return apiClient.get<ApiResponse<AiTaskContinuation[]>>('/api/ai/tasks/continuations')
+  return http.get<AiTaskContinuation[]>('/api/ai/tasks/continuations')
 }
 
 /** #26：清空本人的 AI 任务历史（只删终态且非待确认任务）；返回实际删除条数。 */
 export function clearAiTaskHistory() {
-  return apiClient.delete<ApiResponse<number>>('/api/ai/tasks/history')
+  return http.delete<number>('/api/ai/tasks/history')
 }
 
 export function retryTask(id: number) {
-  return apiClient.post<ApiResponse<AiTask>>(`/api/ai/tasks/${id}/retry`)
+  return http.post<AiTask>(`/api/ai/tasks/${id}/retry`)
 }
 
 export function confirmTask(id: number, payload: ConfirmRequest, idempotencyKey: string) {
-  return apiClient.post<ApiResponse<{ resumeVersionId: number; versionNo: number; resultResumeVersionId: number; rejectedPaths: string[]; newMaterialIds: number[]; resumeId: number }>>(
+  return http.post<{ resumeVersionId: number; versionNo: number; resultResumeVersionId: number; rejectedPaths: string[]; newMaterialIds: number[]; resumeId: number }>(
     `/api/ai/tasks/${id}/confirm`,
     payload,
     { headers: { 'Idempotency-Key': idempotencyKey } },
@@ -247,11 +243,11 @@ export function confirmTask(id: number, payload: ConfirmRequest, idempotencyKey:
 }
 
 export function rejectTask(id: number, taskUpdatedAt: string) {
-  return apiClient.post<ApiResponse<void>>(`/api/ai/tasks/${id}/reject`, { taskUpdatedAt })
+  return http.post<void>(`/api/ai/tasks/${id}/reject`, { taskUpdatedAt })
 }
 
 export function inlineOptimize(payload: InlineOptimizeRequest, idempotencyKey: string) {
-  return apiClient.post<ApiResponse<AiTask>>('/api/ai/inline-optimize', payload, {
+  return http.post<AiTask>('/api/ai/inline-optimize', payload, {
     headers: { 'Idempotency-Key': idempotencyKey },
   })
 }
@@ -274,7 +270,7 @@ const AI_TASK_POLL_INTERVAL_MS = 2000
 export async function waitForAiTaskResult<T>(taskId: number, maxAttempts: number = AI_TASK_POLL_ATTEMPTS): Promise<T> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await new Promise((resolve) => window.setTimeout(resolve, AI_TASK_POLL_INTERVAL_MS))
-    const task = (await getTask(taskId)).data.data
+    const task = await getTask(taskId)
     if (task.status === 'SUCCESS' && task.resultJson) return task.resultJson as unknown as T
     if (task.status === 'FAILED' || task.status === 'CANCELLED') {
       throw new Error(task.errorMessage || 'AI 任务执行失败')
@@ -284,7 +280,7 @@ export async function waitForAiTaskResult<T>(taskId: number, maxAttempts: number
 }
 
 export function guideAchievement(payload: { resumeVersionId: number; section: string; content: string }, idempotencyKey: string) {
-  return apiClient.post<ApiResponse<AiTask>>('/api/ai/achievement-guidance', payload, {
+  return http.post<AiTask>('/api/ai/achievement-guidance', payload, {
     headers: { 'Idempotency-Key': idempotencyKey },
   })
 }

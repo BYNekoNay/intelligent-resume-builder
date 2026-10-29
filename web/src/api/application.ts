@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 export type ApplicationStatus = 'DRAFT' | 'APPLIED' | 'SCREENING' | 'INTERVIEWING' | 'OFFERED' | 'HIRED' | 'REJECTED' | 'WITHDRAWN' | 'NO_RESPONSE'
 
@@ -56,22 +56,22 @@ export interface ApplicationStats {
 }
 
 export function listApplications(followUp?: FollowUpFilter) {
-  return apiClient.get<ApiResponse<ApplicationSummary[]>>('/api/applications', { params: { followUp } })
+  return http.get<ApplicationSummary[]>('/api/applications', { params: { followUp } })
 }
 export function getApplication(id: number) {
-  return apiClient.get<ApiResponse<ApplicationRecord>>(`/api/applications/${id}`)
+  return http.get<ApplicationRecord>(`/api/applications/${id}`)
 }
 export interface ApplicationPayload { jobDescriptionId: number; resumeVersionId: number; status: ApplicationStatus; coverLetterText?: string; emailBodyText?: string; openingMessageText?: string; version?: number; nextFollowUpAt?: string | null }
 export function createApplication(payload: ApplicationPayload) {
-  return apiClient.post<ApiResponse<ApplicationRecord>>('/api/applications', payload)
+  return http.post<ApplicationRecord>('/api/applications', payload)
 }
 export function updateApplication(id: number, payload: ApplicationPayload) {
-  return apiClient.put<ApiResponse<ApplicationRecord>>(`/api/applications/${id}`, payload)
+  return http.put<ApplicationRecord>(`/api/applications/${id}`, payload)
 }
 export function updateApplicationStatus(id: number, status: ApplicationStatus, version: number, feedbackText?: string, note?: string) {
-  return apiClient.patch<ApiResponse<ApplicationRecord>>(`/api/applications/${id}/status`, { status, version, ...(feedbackText !== undefined ? { feedbackText } : {}), ...(note !== undefined ? { note } : {}) })
+  return http.patch<ApplicationRecord>(`/api/applications/${id}/status`, { status, version, ...(feedbackText !== undefined ? { feedbackText } : {}), ...(note !== undefined ? { note } : {}) })
 }
-export function deleteApplication(id: number) { return apiClient.delete<ApiResponse<void>>(`/api/applications/${id}`) }
+export function deleteApplication(id: number) { return http.delete<void>(`/api/applications/${id}`) }
 export function getApplicationStats() {
-  return apiClient.get<ApiResponse<ApplicationStats>>('/api/applications/stats')
+  return http.get<ApplicationStats>('/api/applications/stats')
 }

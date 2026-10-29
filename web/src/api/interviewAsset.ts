@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 export interface InterviewAsset {
   id: number
@@ -24,14 +24,14 @@ export interface InterviewAssetPayload {
 }
 
 export function listInterviewAssets(params?: { jobDescriptionId?: number; keyword?: string; sectionKey?: string; interviewRecordId?: number }) {
-  return apiClient.get<ApiResponse<InterviewAsset[]>>('/api/interview-answer-assets', { params })
+  return http.get<InterviewAsset[]>('/api/interview-answer-assets', { params })
 }
 export function createInterviewAsset(payload: InterviewAssetPayload) {
-  return apiClient.post<ApiResponse<InterviewAsset>>('/api/interview-answer-assets', payload)
+  return http.post<InterviewAsset>('/api/interview-answer-assets', payload)
 }
 export function updateInterviewAsset(id: number, payload: InterviewAssetPayload) {
-  return apiClient.put<ApiResponse<InterviewAsset>>(`/api/interview-answer-assets/${id}`, payload)
+  return http.put<InterviewAsset>(`/api/interview-answer-assets/${id}`, payload)
 }
 export function deleteInterviewAsset(id: number) {
-  return apiClient.delete<ApiResponse<void>>(`/api/interview-answer-assets/${id}`)
+  return http.delete<void>(`/api/interview-answer-assets/${id}`)
 }

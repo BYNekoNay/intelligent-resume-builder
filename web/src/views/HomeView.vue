@@ -144,11 +144,11 @@ async function loadWorkspace() {
     listTaskContinuations(),
   ])
 
-  if (resumeResult.status === 'fulfilled') resumes.value = resumeResult.value.data.data
+  if (resumeResult.status === 'fulfilled') resumes.value = resumeResult.value
   else workspaceError.value = true
-  if (applicationResult.status === 'fulfilled') applications.value = applicationResult.value.data.data
+  if (applicationResult.status === 'fulfilled') applications.value = applicationResult.value
   else workspaceError.value = true
-  if (continuationResult.status === 'fulfilled') continuations.value = continuationResult.value.data.data
+  if (continuationResult.status === 'fulfilled') continuations.value = continuationResult.value
   else workspaceError.value = true
   workspaceLoaded.value = true
   workspaceLoading.value = false
@@ -156,7 +156,7 @@ async function loadWorkspace() {
 
 onMounted(async () => {
   const healthPromise = getSystemHealth()
-    .then(response => { health.value = response.data })
+    .then(response => { health.value = response })
     .catch(() => { health.value = null })
     .finally(() => { healthLoading.value = false })
 

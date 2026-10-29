@@ -10,7 +10,7 @@ export const useJobDescriptionStore = defineStore('job-description', () => {
     loading.value = true
     try {
       const res = await listJobs()
-      items.value = res.data.data
+      items.value = res
     } finally {
       loading.value = false
     }

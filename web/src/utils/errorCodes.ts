@@ -31,6 +31,7 @@ interface ApiResponseShape {
   code?: unknown
   message?: unknown
   data?: unknown
+  traceId?: unknown
 }
 
 interface ApiErrorLike {
@@ -39,13 +40,32 @@ interface ApiErrorLike {
 }
 
 /**
- * 从 axios 错误中提取后端业务错误码。
- * ApiResponse 包装层把 code 放在响应体顶层，因此 axios 的 error.response.data.code
- * 即业务码；提取不到（网络错误 / 非 ApiResponse / 码非法）返回 null。
+ * 从异常中提取后端业务错误码。**唯一入口**——视图不要再去掏 `error.response.data.code`。
+ *
+ * 两种形态都要认（2026-10-29 改造后同时存在，缺一种就会静默失效）：
+ * 1. **`ApiError`（HTTP 2xx + `code !== 0`）**：`client.ts` 的 `request()` 解信封时抛出，
+ *    业务码在 `error.code`，traceId 也在对象上；
+ * 2. **`AxiosError`（HTTP 4xx/5xx）**：后端把业务码放在响应体顶层（`response.data.code`），
+ *    axios 因此走 reject 分支。
+ *
+ * 提取不到（网络错误 / 非 ApiResponse / 码非法）返回 null，由调用方 fallback 文案兜底。
  */
 export function extractErrorCode(cause: unknown): number | null {
   if (cause == null || typeof cause !== 'object') return null
   const candidate = cause as ApiErrorLike
+  const direct = candidate.code
+  if (typeof direct === 'number' && Number.isFinite(direct) && direct !== 0) {
+    return direct
+  }
   const raw = candidate.response?.data?.code
   return typeof raw === 'number' && Number.isFinite(raw) ? raw : null
+}
+
+/** 从异常中取 traceId（`ApiError` 自带；`AxiosError` 从信封里取）。取不到返回 null。 */
+export function extractTraceId(cause: unknown): string | null {
+  if (cause == null || typeof cause !== 'object') return null
+  const candidate = cause as ApiErrorLike & { traceId?: unknown }
+  if (typeof candidate.traceId === 'string' && candidate.traceId) return candidate.traceId
+  const raw = candidate.response?.data?.traceId
+  return typeof raw === 'string' && raw ? raw : null
 }

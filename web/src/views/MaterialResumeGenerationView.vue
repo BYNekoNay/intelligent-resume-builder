@@ -10,6 +10,7 @@ import { AiTaskTimeoutError } from '@/api/ai'
 import { createResume } from '@/api/resume'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
+import { extractErrorCode } from '@/utils/errorCodes'
 import { newIdempotencyKey } from '@/utils/idempotency'
 
 const { t } = useLocale()
@@ -73,7 +74,7 @@ async function generateWithAi() {
   if (!token) return
   loading.value = true
   const idempotencyKey = idempotencyKeyFor('generate', { text: raw.value })
-  try { result.value = (await generateResumeFromMaterial(raw.value, undefined, undefined, idempotencyKey, token)).data.data; clearIdempotencyKey('generate') }
+  try { result.value = (await generateResumeFromMaterial(raw.value, undefined, undefined, idempotencyKey, token)); clearIdempotencyKey('generate') }
   catch (cause) { showGenerationError(cause, 'errorGenerate') }
   finally { loading.value = false }
 }
@@ -85,7 +86,7 @@ async function associate() {
   if (!token) return
   associating.value = true
   const idempotencyKey = idempotencyKeyFor('associate', { text: raw.value })
-  try { association.value = (await generateMaterialAssociation(raw.value, idempotencyKey, token)).data.data; clearIdempotencyKey('associate') }
+  try { association.value = (await generateMaterialAssociation(raw.value, idempotencyKey, token)); clearIdempotencyKey('associate') }
   catch (cause) { showGenerationError(cause, 'errorAssociation') }
   finally { associating.value = false }
 }
@@ -101,7 +102,7 @@ async function generateFromAssociation() {
   if (!token) return
   loading.value = true
   const idempotencyKey = idempotencyKeyFor('generate-from-association', { text: raw.value, association: association.value.expandedMaterial })
-  try { result.value = (await generateResumeFromAssociation(raw.value, association.value.expandedMaterial, idempotencyKey, token)).data.data; clearIdempotencyKey('generate-from-association') }
+  try { result.value = (await generateResumeFromAssociation(raw.value, association.value.expandedMaterial, idempotencyKey, token)); clearIdempotencyKey('generate-from-association') }
   catch (cause) { showGenerationError(cause, 'errorGenerate') }
   finally { loading.value = false }
 }
@@ -110,7 +111,7 @@ async function createDraft() {
   if (!result.value || !title.value.trim()) return
   saving.value = true; error.value = ''
   try {
-    const resume = (await createResume(title.value.trim(), result.value.generatedResumeJson)).data.data
+    const resume = (await createResume(title.value.trim(), result.value.generatedResumeJson))
     await router.push({ name: 'resume-detail', params: { id: resume.id } })
   } catch { error.value = t('materialGeneration.errorCreate') }
   finally { saving.value = false }
@@ -122,7 +123,7 @@ function generationError(cause: unknown, fallbackKey: 'errorGenerate' | 'errorAs
 }
 
 function showGenerationError(cause: unknown, fallbackKey: 'errorGenerate' | 'errorAssociation') {
-  consentRequired.value = isAxiosError(cause) && cause.response?.data?.code === 40302
+  consentRequired.value = extractErrorCode(cause) === 40302
   if (cause instanceof AiTaskTimeoutError) {
     error.value = t('common.taskStillProcessing', { taskId: cause.taskId })
     return

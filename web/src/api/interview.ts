@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 import type { AiTask, AiTaskPreview } from './ai'
 
 // ==================== 请求类型 ====================
@@ -128,43 +128,43 @@ export interface FollowUpPracticeResult {
 // ==================== API 函数 ====================
 
 export function startInterview(payload: StartInterviewRequest, idempotencyKey: string) {
-  return apiClient.post<ApiResponse<InterviewStateResponse>>('/api/interviews/start', payload, {
+  return http.post<InterviewStateResponse>('/api/interviews/start', payload, {
     headers: { 'Idempotency-Key': idempotencyKey },
     timeout: 60_000,
   })
 }
 
 export function getInterviewState(id: number) {
-  return apiClient.get<ApiResponse<InterviewStateResponse>>(`/api/interviews/${id}`)
+  return http.get<InterviewStateResponse>(`/api/interviews/${id}`)
 }
 
 export function answerInterview(id: number, answer: string, idempotencyKey: string) {
-  return apiClient.post<ApiResponse<InterviewStateResponse>>(`/api/interviews/${id}/answer`, { answer }, {
+  return http.post<InterviewStateResponse>(`/api/interviews/${id}/answer`, { answer }, {
     headers: { 'Idempotency-Key': idempotencyKey },
     timeout: 60_000,
   })
 }
 
 export function retryAi(id: number) {
-  return apiClient.post<ApiResponse<InterviewStateResponse>>(`/api/interviews/${id}/ai/retry`, null, {
+  return http.post<InterviewStateResponse>(`/api/interviews/${id}/ai/retry`, null, {
     timeout: 60_000,
   })
 }
 
 export function continueWithRules(id: number) {
-  return apiClient.post<ApiResponse<InterviewStateResponse>>(`/api/interviews/${id}/continue-with-rules`)
+  return http.post<InterviewStateResponse>(`/api/interviews/${id}/continue-with-rules`)
 }
 
 export function finishInterview(id: number) {
-  return apiClient.post<ApiResponse<InterviewStateResponse>>(`/api/interviews/${id}/finish`)
+  return http.post<InterviewStateResponse>(`/api/interviews/${id}/finish`)
 }
 
 export function getInterviewReport(id: number) {
-  return apiClient.get<ApiResponse<InterviewReportResponse>>(`/api/interviews/${id}/report`)
+  return http.get<InterviewReportResponse>(`/api/interviews/${id}/report`)
 }
 
 export function listInterviewHistory(params?: { jobDescriptionId?: number }) {
-  return apiClient.get<ApiResponse<InterviewSessionSummary[]>>('/api/interviews', { params })
+  return http.get<InterviewSessionSummary[]>('/api/interviews', { params })
 }
 
 /**
@@ -174,13 +174,11 @@ export function listInterviewHistory(params?: { jobDescriptionId?: number }) {
  * **刻意忽略**、也不往 body 里塞字段 —— 多带一个字段就会与服务端自算的载荷漂移（→ 40901）。
  */
 export function previewFollowUp(id: number, weakness: string) {
-  return apiClient
-    .post<ApiResponse<AiTaskPreview>>(`/api/interviews/${id}/follow-up/preview`, { weakness })
-    .then(response => response.data.data)
+  return http.post<AiTaskPreview>(`/api/interviews/${id}/follow-up/preview`, { weakness })
 }
 
 export function createFollowUp(id: number, weakness: string, idempotencyKey: string, previewToken: string) {
-  return apiClient.post<ApiResponse<AiTask>>(`/api/interviews/${id}/follow-up`, { weakness }, {
+  return http.post<AiTask>(`/api/interviews/${id}/follow-up`, { weakness }, {
     headers: { 'Idempotency-Key': idempotencyKey, 'X-AI-Preview-Token': previewToken },
   })
 }

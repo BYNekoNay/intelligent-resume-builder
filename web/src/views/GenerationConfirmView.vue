@@ -51,7 +51,7 @@ async function loadTask(id: number) {
   error.value = ''
   try {
     const res = await getTask(id)
-    task.value = res.data.data
+    task.value = res
     if (task.value.status === 'SUCCESS' && task.value.confirmationStatus === 'PENDING') {
       resultJson.value = task.value.resultJson
       parseDraft(resultJson.value)
@@ -61,7 +61,7 @@ async function loadTask(id: number) {
     if (task.value.status === 'SUCCESS' && task.value.confirmationStatus === 'CONFIRMED' && task.value.resultResumeVersionId) {
       try {
         const version = await getResumeVersion(task.value.resultResumeVersionId)
-        confirmedResumeId.value = version.data.data.resumeId
+        confirmedResumeId.value = version.resumeId
       } catch { /* Keep the generation workspace fallback if the result cannot be resolved. */ }
     }
     if (task.value.status === 'PENDING' || task.value.status === 'RUNNING') {
@@ -86,7 +86,7 @@ function startPolling(id: number) {
   pollingTimedOut.value = false
   polling.start({
     taskId: id,
-    fetchTask: async (taskId) => (await getTask(taskId)).data.data,
+    fetchTask: async (taskId) => (await getTask(taskId)),
     onTask: (next) => {
       task.value = next
       if (next.status === 'SUCCESS') {
@@ -125,8 +125,8 @@ async function handleConfirm() {
   if (jdId) {
     try {
       const res = await listResumesByJd(jdId)
-      if (res.data.data && res.data.data.length > 0) {
-        openJdDialog(res.data.data)
+      if (res && res.length > 0) {
+        openJdDialog(res)
         return
       }
     } catch { /* ignore, proceed with new */ }
@@ -160,7 +160,7 @@ async function doConfirm(targetResumeId: number | null) {
       targetResumeId,
     }, idempotencyKey)
 
-    const data = res.data.data
+    const data = res
     taskStore.clear()
     // Navigate to resume detail
     router.push(`/resumes/${data.resumeId}`)

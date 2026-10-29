@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 /** 一条本地工作区快照（ADR-012 阶段三）。 */
 export interface DesktopBackupInfo {
@@ -63,22 +63,22 @@ const LONG_OPERATION_TIMEOUT = 60_000
 const PROBE_TIMEOUT = 5_000
 
 export function listDesktopBackups() {
-  return apiClient.get<ApiResponse<DesktopBackupInfo[]>>('/api/desktop/backups', { timeout: PROBE_TIMEOUT })
+  return http.get<DesktopBackupInfo[]>('/api/desktop/backups', { timeout: PROBE_TIMEOUT })
 }
 
 export function createDesktopBackup(label?: string) {
-  return apiClient.post<ApiResponse<DesktopBackupInfo>>('/api/desktop/backups', { label },
+  return http.post<DesktopBackupInfo>('/api/desktop/backups', { label },
     { timeout: LONG_OPERATION_TIMEOUT })
 }
 
 export function restoreDesktopBackup(backupId: string) {
-  return apiClient.post<ApiResponse<DesktopRestoreResult>>(`/api/desktop/backups/${backupId}/restore`, undefined,
+  return http.post<DesktopRestoreResult>(`/api/desktop/backups/${backupId}/restore`, undefined,
     { timeout: LONG_OPERATION_TIMEOUT })
 }
 
 /** 请求体是**包本身**（不是 `{ package }` 套壳）。 */
 export function previewDesktopImport(workspacePackage: unknown) {
-  return apiClient.post<ApiResponse<DesktopImportPreview>>('/api/desktop/import/preview', workspacePackage,
+  return http.post<DesktopImportPreview>('/api/desktop/import/preview', workspacePackage,
     { timeout: LONG_OPERATION_TIMEOUT })
 }
 
@@ -88,7 +88,7 @@ export function previewDesktopImport(workspacePackage: unknown) {
  * 返回字段与预览不同名：`inserted / updated / skipped / keptLocal`（没有 added / conflicts）。
  */
 export function applyDesktopImport(workspacePackage: unknown, resolutions: Record<string, string>) {
-  return apiClient.post<ApiResponse<DesktopImportResult>>('/api/desktop/import/apply',
+  return http.post<DesktopImportResult>('/api/desktop/import/apply',
     { package: workspacePackage, resolutions },
     { timeout: LONG_OPERATION_TIMEOUT })
 }

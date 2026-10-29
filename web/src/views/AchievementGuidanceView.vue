@@ -33,7 +33,7 @@ async function guide() {
     lastGuideIdempotencyKey = newIdempotencyKey()
   }
   try {
-    const task = (await guideAchievement(payload, lastGuideIdempotencyKey)).data.data
+    const task = (await guideAchievement(payload, lastGuideIdempotencyKey))
     const result = task.status === 'SUCCESS' && task.resultJson
       ? task.resultJson as unknown as AchievementGuidanceResponse
       : await waitForAiTaskResult<AchievementGuidanceResponse>(task.id)

@@ -81,7 +81,7 @@ function isExpanded(key: string) {
 
 async function loadJson(versionId: number): Promise<Record<string, unknown>> {
   const response = await getResumeVersion(versionId)
-  return (response.data.data.resumeJson ?? {}) as Record<string, unknown>
+  return (response.resumeJson ?? {}) as Record<string, unknown>
 }
 
 // #63：选版本会触发多次加载，旧响应可能晚于新响应返回并覆盖最新 diff。
@@ -126,7 +126,7 @@ async function restoreVersion(versionId: number) {
   error.value = ''
   try {
     await restoreResumeVersion(resumeId, versionId)
-    const fresh = (await listVersions(resumeId, false)).data.data
+    const fresh = (await listVersions(resumeId, false))
     versions.value = fresh
     await loadDiffs()
   } catch {
@@ -183,8 +183,8 @@ onMounted(async () => {
       getResume(resumeId),
       listVersions(resumeId, false),
     ])
-    resume.value = resumeResponse.data.data
-    versions.value = versionResponse.data.data
+    resume.value = resumeResponse
+    versions.value = versionResponse
     const requestedBase = Number(route.query.base)
     const requestedCompare = Number(route.query.compare)
     baseVersionId.value = Number.isInteger(requestedBase) && versions.value.some((v) => v.id === requestedBase)

@@ -99,7 +99,7 @@ async function load() {
       jobDescriptionId: jobDescriptionId.value ?? undefined,
       keyword: keyword.value.trim() || undefined,
       sectionKey: sectionKeyFilter.value || undefined,
-    })).data.data
+    }))
   } catch {
     error.value = t('assets.loadError')
   } finally {
@@ -119,10 +119,10 @@ async function save() {
   }
   try {
     if (editingId.value === null) {
-      const item = (await createInterviewAsset(payload)).data.data
+      const item = (await createInterviewAsset(payload))
       assets.value.unshift(item)
     } else {
-      const item = (await updateInterviewAsset(editingId.value, payload)).data.data
+      const item = (await updateInterviewAsset(editingId.value, payload))
       assets.value = assets.value.map((asset) => asset.id === item.id ? item : asset)
     }
     resetForm()
@@ -148,8 +148,8 @@ async function remove(id: number) {
 onMounted(async () => {
   await Promise.all([
     load(),
-    listJobs().then((response) => { jobs.value = response.data.data }),
-    listMaterials().then((response) => { materials.value = response.data.data }).catch(() => { materials.value = [] }),
+    listJobs().then((response) => { jobs.value = response }),
+    listMaterials().then((response) => { materials.value = response }).catch(() => { materials.value = [] }),
   ])
 })
 </script>

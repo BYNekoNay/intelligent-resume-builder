@@ -35,7 +35,7 @@ async function parse() {
   loading.value = true
   error.value = ''
   try {
-    result.value = (await parseResumeFile(selected.value)).data.data
+    result.value = (await parseResumeFile(selected.value))
     extractedText.value = result.value.extractedText
   } catch {
     error.value = t('import.parseError')

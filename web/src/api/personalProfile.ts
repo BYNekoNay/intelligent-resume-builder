@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 export interface PersonalProfile {
   fullName: string
@@ -45,15 +45,15 @@ export function normalizePersonalProfile(value: Partial<PersonalProfile> | null 
 }
 
 export function getPersonalProfile() {
-  return apiClient.get<ApiResponse<PersonalProfile | null>>('/api/personal-profile')
+  return http.get<PersonalProfile | null>('/api/personal-profile')
 }
 
 export function updatePersonalProfile(payload: PersonalProfile) {
-  return apiClient.put<ApiResponse<PersonalProfile>>('/api/personal-profile', payload)
+  return http.put<PersonalProfile>('/api/personal-profile', payload)
 }
 
 export function getPersonalProfileImportSuggestion(resumeId: number) {
-  return apiClient.get<ApiResponse<PersonalProfile>>('/api/personal-profile/import-suggestion', {
+  return http.get<PersonalProfile>('/api/personal-profile/import-suggestion', {
     params: { resumeId },
   })
 }

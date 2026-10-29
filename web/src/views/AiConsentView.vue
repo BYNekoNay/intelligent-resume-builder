@@ -22,7 +22,7 @@ const redirectAfterConsent = computed(() => {
 
 onMounted(async () => {
   try {
-    consent.value = (await getConsent()).data.data
+    consent.value = (await getConsent())
     if (granted.value) message.value = t('aiConsent.granted')
     else if (consent.value?.status === 'WITHDRAWN') message.value = t('aiConsent.withdrawn')
     else message.value = t('aiConsent.defaultMessage')
@@ -39,7 +39,7 @@ async function grant() {
       dataCategories: [...AI_CONSENT_DATA_CATEGORIES],
       noticeHash: 'ai-data-processing-v1.2.0',
     })
-    consent.value = (await getConsent()).data.data
+    consent.value = (await getConsent())
     message.value = t('aiConsent.grantSuccess')
     if (redirectAfterConsent.value) await router.replace(redirectAfterConsent.value)
   } catch (cause: unknown) {
@@ -53,7 +53,7 @@ async function withdraw() {
   loading.value = true
   try {
     await withdrawConsent()
-    consent.value = (await getConsent()).data.data
+    consent.value = (await getConsent())
     message.value = t('aiConsent.withdrawSuccess')
   } catch { message.value = t('aiConsent.withdrawError') }
   finally { loading.value = false }

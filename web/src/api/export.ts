@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 export type ExportTaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'EXPIRED' | 'UNKNOWN'
 
@@ -16,15 +16,15 @@ export interface ExportTask {
 export type ResumeTemplateCode = 'classic' | 'modern' | 'minimal' | 'ats' | 'executive' | 'compact' | 'academic'
 
 export function createExport(resumeVersionId: number, templateCode: ResumeTemplateCode = 'classic') {
-  return apiClient.post<ApiResponse<ExportTask>>('/api/exports/pdf', { resumeVersionId, templateCode })
+  return http.post<ExportTask>('/api/exports/pdf', { resumeVersionId, templateCode })
 }
 
 export function getExportTask(id: number) {
-  return apiClient.get<ApiResponse<ExportTask>>(`/api/exports/tasks/${id}`)
+  return http.get<ExportTask>(`/api/exports/tasks/${id}`)
 }
 
 export function retryExport(id: number) {
-  return apiClient.post<ApiResponse<ExportTask>>(`/api/exports/tasks/${id}/retry`)
+  return http.post<ExportTask>(`/api/exports/tasks/${id}/retry`)
 }
 
 /**
@@ -32,5 +32,5 @@ export function retryExport(id: number) {
  * 慢网络下中断合法下载（大文件在移动网络需数十秒），故显式放宽。契约由 UploadPathContractTest 守护。
  */
 export function downloadExport(id: number) {
-  return apiClient.get<Blob>(`/api/exports/files/${id}`, { responseType: 'blob', timeout: 60_000 })
+  return http.get<Blob>(`/api/exports/files/${id}`, { responseType: 'blob', timeout: 60_000 })
 }

@@ -98,7 +98,7 @@ async function loadTask(initialize = false) {
   error.value = ''
   pollingTimedOut.value = false
   try {
-    task.value = (await getTask(taskId.value)).data.data
+    task.value = (await getTask(taskId.value))
     if (task.value.taskType !== 'JOB_MATERIAL_SELECTION') {
       error.value = t('materialSelection.errorWrongTaskType')
       loading.value = false
@@ -126,7 +126,7 @@ function startPolling(initialize: boolean) {
   pollingTimedOut.value = false
   polling.start({
     taskId: taskId.value,
-    fetchTask: async (id) => (await getTask(id)).data.data,
+    fetchTask: async (id) => (await getTask(id)),
     onTask: (next) => {
       task.value = next
       if (next.status === 'SUCCESS') {
@@ -262,7 +262,7 @@ async function confirmSelection() {
       return
     }
     const response = await confirmMaterials(currentTaskId, payload, idempotencyKey, previewToken)
-    const generationTask = response.data.data
+    const generationTask = response
     taskStore.remember(generationTask.id)
     await router.push(`/generate/confirm?taskId=${generationTask.id}`)
   } catch (e: any) {

@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 export type MaterialType =
   | 'WORK_EXPERIENCE'
@@ -65,25 +65,25 @@ export interface CareerMaterialPayload {
 }
 
 export function listMaterials(type?: MaterialType) {
-  return apiClient.get<ApiResponse<CareerMaterialSummary[]>>('/api/career-materials', { params: { type } })
+  return http.get<CareerMaterialSummary[]>('/api/career-materials', { params: { type } })
 }
 
 export function searchMaterials(params: CareerMaterialSearchParams = {}) {
-  return apiClient.get<ApiResponse<CareerMaterialSearchPage>>('/api/career-materials/search', { params })
+  return http.get<CareerMaterialSearchPage>('/api/career-materials/search', { params })
 }
 
 export function getMaterial(id: number) {
-  return apiClient.get<ApiResponse<CareerMaterial>>(`/api/career-materials/${id}`)
+  return http.get<CareerMaterial>(`/api/career-materials/${id}`)
 }
 
 export function createMaterial(payload: CareerMaterialPayload) {
-  return apiClient.post<ApiResponse<CareerMaterial>>('/api/career-materials', payload)
+  return http.post<CareerMaterial>('/api/career-materials', payload)
 }
 
 export function updateMaterial(id: number, payload: CareerMaterialPayload) {
-  return apiClient.patch<ApiResponse<CareerMaterial>>(`/api/career-materials/${id}`, payload)
+  return http.patch<CareerMaterial>(`/api/career-materials/${id}`, payload)
 }
 
 export function deleteMaterial(id: number) {
-  return apiClient.delete<ApiResponse<void>>(`/api/career-materials/${id}`)
+  return http.delete<void>(`/api/career-materials/${id}`)
 }

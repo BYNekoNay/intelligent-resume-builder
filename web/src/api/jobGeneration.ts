@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 // 仅类型引用：编译期擦除，不会与 ai.ts 形成运行时循环依赖。
 import type { AiTask, AiTaskPreview } from './ai'
 
@@ -31,9 +31,7 @@ function confirmMaterialsBody(payload: ConfirmMaterialsPayload) {
 
 /** 生成确认页的发送前预览（R32）。只读：不落库、不调模型。 */
 export function previewConfirmMaterials(id: number, payload: ConfirmMaterialsPayload) {
-  return apiClient
-    .post<ApiResponse<AiTaskPreview>>(`/api/ai/tasks/${id}/confirm-materials/preview`, confirmMaterialsBody(payload))
-    .then(response => response.data.data)
+  return http.post<AiTaskPreview>(`/api/ai/tasks/${id}/confirm-materials/preview`, confirmMaterialsBody(payload))
 }
 
 export function confirmMaterials(
@@ -42,7 +40,7 @@ export function confirmMaterials(
   idempotencyKey: string,
   previewToken: string,
 ) {
-  return apiClient.post<ApiResponse<AiTask>>(`/api/ai/tasks/${id}/confirm-materials`, confirmMaterialsBody(payload), {
+  return http.post<AiTask>(`/api/ai/tasks/${id}/confirm-materials`, confirmMaterialsBody(payload), {
     headers: { 'Idempotency-Key': idempotencyKey, 'X-AI-Preview-Token': previewToken },
   })
 }

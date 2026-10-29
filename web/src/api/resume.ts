@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 import type { ResumeTemplateCode } from './export'
 
 export interface ResumeSummary {
@@ -34,31 +34,31 @@ export interface ResumeVersionSummary {
 }
 
 export function createResume(title: string, resumeJson: Record<string, unknown>) {
-  return apiClient.post<ApiResponse<ResumeSummary>>('/api/resumes', { title, resumeJson })
+  return http.post<ResumeSummary>('/api/resumes', { title, resumeJson })
 }
 
 export function listResumes() {
-  return apiClient.get<ApiResponse<ResumeSummary[]>>('/api/resumes')
+  return http.get<ResumeSummary[]>('/api/resumes')
 }
 
 export function getResume(id: number) {
-  return apiClient.get<ApiResponse<ResumeSummary>>(`/api/resumes/${id}`)
+  return http.get<ResumeSummary>(`/api/resumes/${id}`)
 }
 
 export function updateResumeTitle(id: number, title: string) {
-  return apiClient.put<ApiResponse<ResumeSummary>>(`/api/resumes/${id}`, { title })
+  return http.put<ResumeSummary>(`/api/resumes/${id}`, { title })
 }
 
 export function listVersions(resumeId: number, archived = false) {
-  return apiClient.get<ApiResponse<ResumeVersionSummary[]>>(`/api/resumes/${resumeId}/versions`, { params: { archived } })
+  return http.get<ResumeVersionSummary[]>(`/api/resumes/${resumeId}/versions`, { params: { archived } })
 }
 
 export function getResumeVersion(versionId: number) {
-  return apiClient.get<ApiResponse<ResumeVersion>>(`/api/resume-versions/${versionId}`)
+  return http.get<ResumeVersion>(`/api/resume-versions/${versionId}`)
 }
 
 export function createManualVersion(resumeId: number, resumeJson: Record<string, unknown>, summary?: string) {
-  return apiClient.post<ApiResponse<ResumeVersion>>(`/api/resumes/${resumeId}/versions`, {
+  return http.post<ResumeVersion>(`/api/resumes/${resumeId}/versions`, {
     resumeJson,
     sourceType: 'MANUAL',
     optimizationSummary: summary ?? null,
@@ -66,7 +66,7 @@ export function createManualVersion(resumeId: number, resumeJson: Record<string,
 }
 
 export function setCurrentVersion(resumeId: number, versionId: number) {
-  return apiClient.patch<ApiResponse<void>>(`/api/resumes/${resumeId}/current-version`, { versionId })
+  return http.patch<void>(`/api/resumes/${resumeId}/current-version`, { versionId })
 }
 
 export type AtsRestoreProvenance = {
@@ -75,21 +75,21 @@ export type AtsRestoreProvenance = {
 }
 
 export function restoreResumeVersion(resumeId: number, versionId: number, provenance?: AtsRestoreProvenance) {
-  return apiClient.post<ApiResponse<ResumeVersion>>(`/api/resumes/${resumeId}/versions/${versionId}/restore`, provenance)
+  return http.post<ResumeVersion>(`/api/resumes/${resumeId}/versions/${versionId}/restore`, provenance)
 }
 
 export function archiveResumeVersion(resumeId: number, versionId: number) {
-  return apiClient.post<ApiResponse<void>>(`/api/resumes/${resumeId}/versions/${versionId}/archive`)
+  return http.post<void>(`/api/resumes/${resumeId}/versions/${versionId}/archive`)
 }
 
 export function unarchiveResumeVersion(resumeId: number, versionId: number) {
-  return apiClient.post<ApiResponse<void>>(`/api/resumes/${resumeId}/versions/${versionId}/unarchive`)
+  return http.post<void>(`/api/resumes/${resumeId}/versions/${versionId}/unarchive`)
 }
 
 export function deleteResume(id: number) {
-  return apiClient.delete<ApiResponse<void>>(`/api/resumes/${id}`)
+  return http.delete<void>(`/api/resumes/${id}`)
 }
 
 export function listResumesByJd(jdId: number) {
-  return apiClient.get<ApiResponse<ResumeSummary[]>>(`/api/resumes/by-jd/${jdId}`)
+  return http.get<ResumeSummary[]>(`/api/resumes/by-jd/${jdId}`)
 }

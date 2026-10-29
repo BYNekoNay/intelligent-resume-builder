@@ -58,7 +58,7 @@ function formatFileSize(bytes: number | null) {
 async function load() {
   try {
     const res = await getExportTask(Number(props.exportTaskId))
-    task.value = { ...res.data.data, status: normalizeStatus(res.data.data.status) }
+    task.value = { ...res, status: normalizeStatus(res.status) }
     if (isProcessingStatus(task.value.status)) {
       const delay = [1000, 2000, 4000, 5000][Math.min(attempt, 3)]
       attempt += 1
@@ -88,7 +88,7 @@ onBeforeUnmount(() => { if (timer !== null) window.clearTimeout(timer) })
 
 async function download() {
   try {
-    const blob = (await downloadExport(Number(props.exportTaskId))).data
+    const blob = (await downloadExport(Number(props.exportTaskId)))
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -105,7 +105,7 @@ async function download() {
 async function retry() {
   try {
     error.value = ''
-    const retried = (await retryExport(Number(props.exportTaskId))).data.data
+    const retried = (await retryExport(Number(props.exportTaskId)))
     task.value = { ...retried, status: normalizeStatus(retried.status) }
     attempt = 0; await load()
   } catch { error.value = t('export.retryError') }

@@ -49,7 +49,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    sessions.value = (await listInterviewHistory({ jobDescriptionId: jobDescriptionId.value ?? undefined })).data.data
+    sessions.value = (await listInterviewHistory({ jobDescriptionId: jobDescriptionId.value ?? undefined }))
   } catch {
     error.value = t('history.loadError')
   } finally {
@@ -63,7 +63,7 @@ async function openReport(session: InterviewSessionSummary) {
   selectedSession.value = session
   selectedReport.value = null
   try {
-    selectedReport.value = (await getInterviewReport(session.id)).data.data
+    selectedReport.value = (await getInterviewReport(session.id))
   } catch {
     error.value = t('history.reportError')
   } finally {
@@ -79,7 +79,7 @@ function backToList() {
 onMounted(async () => {
   void load()
   try {
-    jobs.value = (await listJobs()).data.data
+    jobs.value = (await listJobs())
   } catch {
     // JD 列表加载失败不阻塞历史列表
   }

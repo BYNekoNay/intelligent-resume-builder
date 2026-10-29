@@ -16,7 +16,7 @@ export const useCareerMaterialStore = defineStore('career-material', () => {
     error.value = null
     try {
       const res = await listMaterials(type)
-      items.value = res.data.data
+      items.value = res
     } catch (e) {
       error.value = e instanceof Error ? e.message : '加载失败'
     } finally {

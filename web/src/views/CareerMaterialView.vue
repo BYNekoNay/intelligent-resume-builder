@@ -136,7 +136,7 @@ async function loadWorkspace() {
       sort: routeSort.value,
     })
     if (request !== searchRequest) return
-    result.value = response.data.data
+    result.value = response
     if (result.value.totalPages > 0 && routePage.value >= result.value.totalPages) {
       if (request !== searchRequest) return
       await updateQuery({ page: result.value.totalPages })
@@ -156,7 +156,7 @@ async function loadDetail(id: number): Promise<CareerMaterial | null> {
   detailError.value = ''
   const promise = (async () => {
     try {
-      const material = (await getMaterial(id)).data.data
+      const material = (await getMaterial(id))
       if (request !== detailRequest) return null
       detail.value = material
       return material
@@ -180,7 +180,7 @@ async function loadDetail(id: number): Promise<CareerMaterial | null> {
 async function loadProfile() {
   profileLoading.value = true
   try {
-    profile.value = normalizePersonalProfile((await getPersonalProfile()).data.data)
+    profile.value = normalizePersonalProfile((await getPersonalProfile()))
     profileBaseline.value = JSON.stringify(profile.value)
   } catch {
     profileMessage.value = t('careerMaterial.profileLoadError')
@@ -192,7 +192,7 @@ async function loadProfile() {
 async function loadResumes() {
   if (resumesLoaded) return
   try {
-    resumes.value = (await listResumes()).data.data
+    resumes.value = (await listResumes())
     resumesLoaded = true
   } catch { resumes.value = [] }
 }
@@ -201,7 +201,7 @@ async function loadRelationMaterials() {
   if (relationMaterialsLoaded) return
   try {
     const [work, projects] = await Promise.all([listMaterials('WORK_EXPERIENCE'), listMaterials('PROJECT_EXPERIENCE')])
-    relationMaterials.value = [...work.data.data, ...projects.data.data]
+    relationMaterials.value = [...work, ...projects]
     relationMaterialsLoaded = true
   } catch { relationMaterials.value = [] }
 }
@@ -296,7 +296,7 @@ async function saveMaterial(payload: CareerMaterialPayload) {
     const response = editingId
       ? await updateMaterial(editingId, payload)
       : await createMaterial(payload)
-    const savedMaterial = response.data.data
+    const savedMaterial = response
     if (relationMaterialsLoaded && ['WORK_EXPERIENCE', 'PROJECT_EXPERIENCE'].includes(payload.materialType)) {
       relationMaterialsLoaded = false
       if (mounted) void loadRelationMaterials()
@@ -356,7 +356,7 @@ async function saveProfile() {
   profileSaving.value = true
   profileMessage.value = ''
   try {
-    profile.value = normalizePersonalProfile((await updatePersonalProfile(profile.value)).data.data)
+    profile.value = normalizePersonalProfile((await updatePersonalProfile(profile.value)))
     profileBaseline.value = JSON.stringify(profile.value)
     profileMessage.value = t('careerMaterial.profileSaved')
   } catch {
@@ -372,7 +372,7 @@ async function importProfileSuggestion() {
   profileLoading.value = true
   profileMessage.value = ''
   try {
-    const suggestion = normalizePersonalProfile((await getPersonalProfileImportSuggestion(importResumeId.value)).data.data)
+    const suggestion = normalizePersonalProfile((await getPersonalProfileImportSuggestion(importResumeId.value)))
     if (request === profileRequest && activeProfile.value) {
       profile.value = suggestion
       profileMessage.value = t('careerMaterial.profileImportedHint')

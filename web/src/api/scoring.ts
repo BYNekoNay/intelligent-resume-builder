@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 export interface MatchExplanation {
   matched: string[]
@@ -19,12 +19,12 @@ export interface MatchResponse {
 }
 
 export function scoreMatch(resumeVersionId: number, jobDescriptionId: number) {
-  return apiClient.post<ApiResponse<MatchResponse>>('/api/scoring/match', {
+  return http.post<MatchResponse>('/api/scoring/match', {
     resumeVersionId,
     jobDescriptionId,
   })
 }
 
 export function getMatchResult(id: number) {
-  return apiClient.get<ApiResponse<MatchResponse>>(`/api/scoring/results/${id}`)
+  return http.get<MatchResponse>(`/api/scoring/results/${id}`)
 }

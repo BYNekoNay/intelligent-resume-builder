@@ -67,7 +67,7 @@ async function runPreview() {
   result.value = null
   try {
     const response = await previewDesktopImport(workspacePackage.value)
-    preview.value = response.data.data
+    preview.value = response
     // 冲突默认「保留本地」：这是后端未指定时的语义，也让用户必须显式改成覆盖才会丢数据
     resolutions.value = Object.fromEntries(
       conflicts.value.map(item => [item.stableId, 'KEEP_LOCAL']),
@@ -86,7 +86,7 @@ async function runApply() {
   error.value = ''
   try {
     const response = await applyDesktopImport(workspacePackage.value, resolutions.value)
-    result.value = response.data.data
+    result.value = response
     preview.value = null
   } catch (cause) {
     error.value = resolveApiError(cause, 'desktop.import.applyFailed')

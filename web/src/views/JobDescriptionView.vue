@@ -49,7 +49,7 @@ async function edit(job: JobDescriptionSummary) {
   applyJobToForm({ title: job.title, companyName: job.companyName, jdText: '' })
   error.value = ''
   try {
-    const fullJob = (await getJob(job.id)).data.data
+    const fullJob = (await getJob(job.id))
     if (requestId !== editRequestId || editingId.value !== job.id) return
     applyJobToForm(fullJob)
     editDetailLoaded.value = true
@@ -80,7 +80,7 @@ async function save() {
 async function parse(id: number) {
   error.value = ''
   try {
-    parsedResult.value = (await parseJob(id)).data.data
+    parsedResult.value = (await parseJob(id))
     await store.load()
   } catch {
     error.value = t('jobs.parseError')

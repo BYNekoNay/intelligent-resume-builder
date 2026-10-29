@@ -31,9 +31,9 @@ export const useAuthStore = defineStore('auth', () => {
       initialized.value = true
       try {
         if (!accessToken.value) {
-          accessToken.value = (await refresh()).data.accessToken
+          accessToken.value = (await refresh()).accessToken
         }
-        currentUser.value = (await fetchCurrentUser()).data
+        currentUser.value = (await fetchCurrentUser())
         initializationError.value = null
       } catch (error: any) {
         if (!error?.response) {
@@ -52,23 +52,23 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function signIn(payload: LoginPayload) {
     const response = await login(payload)
-    setAccessToken(response.data.accessToken)
+    setAccessToken(response.accessToken)
     initializationError.value = null
-    currentUser.value = (await fetchCurrentUser()).data
+    currentUser.value = (await fetchCurrentUser())
   }
 
   async function restoreAfterDeletion(payload: LoginPayload) {
     const response = await restoreAccountDeletion(payload)
-    setAccessToken(response.data.accessToken)
+    setAccessToken(response.accessToken)
     initializationError.value = null
-    currentUser.value = (await fetchCurrentUser()).data
+    currentUser.value = (await fetchCurrentUser())
   }
 
   async function signUp(payload: RegisterPayload) {
     const response = await register(payload)
-    setAccessToken(response.data.accessToken)
+    setAccessToken(response.accessToken)
     initializationError.value = null
-    currentUser.value = (await fetchCurrentUser()).data
+    currentUser.value = (await fetchCurrentUser())
   }
 
   async function signOut() {
@@ -83,7 +83,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function updateCurrentUser(displayName: string) {
-    currentUser.value = (await updateProfile({ displayName })).data
+    currentUser.value = (await updateProfile({ displayName }))
   }
 
   return { accessToken, currentUser, initialized, initializationError, setAccessToken, initialize, signIn, signUp, signOut, restoreAfterDeletion, updateCurrentUser }

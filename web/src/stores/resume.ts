@@ -10,7 +10,7 @@ export const useResumeStore = defineStore('resume', () => {
     loading.value = true
     try {
       const res = await listResumes()
-      items.value = res.data.data
+      items.value = res
     } finally {
       loading.value = false
     }

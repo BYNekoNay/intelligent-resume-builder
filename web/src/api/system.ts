@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 export interface SystemHealth {
   service: string
@@ -8,7 +8,6 @@ export interface SystemHealth {
   checks?: Array<{ capability: string; status: 'UP' | 'DOWN' | 'DEGRADED' | string }>
 }
 
-export async function getSystemHealth(): Promise<ApiResponse<SystemHealth>> {
-  const response = await apiClient.get<ApiResponse<SystemHealth>>('/api/system/health')
-  return response.data
+export async function getSystemHealth(): Promise<SystemHealth> {
+  return http.get<SystemHealth>('/api/system/health')
 }

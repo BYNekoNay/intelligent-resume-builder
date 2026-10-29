@@ -28,7 +28,7 @@ async function load() {
   error.value = ''
   try {
     const response = await listDesktopBackups()
-    backups.value = response.data.data ?? []
+    backups.value = response ?? []
   } catch (cause) {
     error.value = resolveApiError(cause, 'desktop.backup.failed')
   } finally {
@@ -67,7 +67,7 @@ async function confirmRestore() {
   error.value = ''
   try {
     const response = await restoreDesktopBackup(target.id)
-    const result = response.data.data
+    const result = response
     if (result && !result.ok) {
       error.value = restoreFailureText(result)
       return

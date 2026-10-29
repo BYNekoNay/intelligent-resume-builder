@@ -33,6 +33,7 @@ import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
+import { extractErrorCode } from '@/utils/errorCodes'
 import { getResumeVersion } from '@/api/resume'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
@@ -109,8 +110,8 @@ async function load() {
       listApplications(followUpFilter.value),
       getApplicationStats(),
     ])
-    records.value = listResponse.data.data
-    stats.value = statsResponse.data.data
+    records.value = listResponse
+    stats.value = statsResponse
     // 备注草稿不预填：未编辑过的记录在改状态时省略 feedbackText，由服务端保留现值
     // （避免把别处更新的备注用陈旧副本覆盖）。展开面板的初值直接读列表里的 feedbackText。
   } catch {
@@ -157,7 +158,7 @@ async function selectResumeVersion(versionId: number) {
  */
 async function locateResumeIdByVersion(versionId: number): Promise<number | null> {
   try {
-    return (await getResumeVersion(versionId)).data.data.resumeId ?? null
+    return (await getResumeVersion(versionId)).resumeId ?? null
   } catch {
     return null
   }
@@ -197,7 +198,7 @@ async function toggleDetails(record: ApplicationSummary) {
   expandedRecordId.value = record.id
   if (draftTexts.value[record.id]) return
   try {
-    cacheDrafts((await getApplication(record.id)).data.data)
+    cacheDrafts((await getApplication(record.id)))
   } catch {
     draftTexts.value[record.id] = { coverLetterText: null, emailBodyText: null, openingMessageText: null }
     statusHistory.value[record.id] = []
@@ -214,7 +215,7 @@ async function edit(record: ApplicationSummary) {
   nextFollowUpAt.value = record.nextFollowUpAt ? record.nextFollowUpAt.slice(0, 16) : ''
   try {
     // #50：草稿长文本不在列表里，编辑时按需拉一次详情
-    const detail = (await getApplication(record.id)).data.data
+    const detail = (await getApplication(record.id))
     cacheDrafts(detail)
     coverLetterText.value = detail.coverLetterText ?? ''
     emailBodyText.value = detail.emailBodyText ?? ''
@@ -243,7 +244,7 @@ async function save() {
   }
   try {
     if (editingId.value === null) {
-      const created = (await createApplication(payload)).data.data
+      const created = (await createApplication(payload))
       records.value.unshift(toSummary(created))
     } else {
       const existing = records.value.find(record => record.id === editingId.value)
@@ -251,7 +252,7 @@ async function save() {
         ...payload,
         status: existing?.status ?? 'DRAFT',
         version: existing?.version,
-      })).data.data
+      }))
       records.value = records.value.map(record => record.id === updated.id ? toSummary(updated) : record)
     }
     // 草稿可能已改动：清空按需缓存，避免展开卡片显示旧文本
@@ -344,12 +345,12 @@ async function changeStatus(record: ApplicationSummary, status: ApplicationStatu
       status,
       record.version,
       feedbackDraft.value[record.id],
-    )).data.data
+    ))
     Object.assign(record, toSummary(updated))
     cacheDrafts(updated)
     feedbackDraft.value[record.id] = record.feedbackText ?? ''
   } catch (cause: any) {
-    if (cause?.response?.data?.code === 40901) {
+    if (extractErrorCode(cause) === 40901) {
       toastError(t('toast.applicationConflict'))
       await load()
     } else {
@@ -401,14 +402,14 @@ async function onLaneDrop(status: ApplicationStatus, event: DragEvent) {
       status,
       record.version,
       feedbackDraft.value[record.id],
-    )).data.data
+    ))
     records.value = records.value.map(item => item.id === updated.id ? toSummary(updated) : item)
     cacheDrafts(updated)
     feedbackDraft.value[updated.id] = updated.feedbackText ?? ''
     toastSuccess(t('toast.applicationMoved'))
   } catch (cause: any) {
     // 乐观锁冲突：toast + 重新拉列表
-    if (cause?.response?.data?.code === 40901) {
+    if (extractErrorCode(cause) === 40901) {
       toastError(t('toast.applicationConflict'))
       await load()
     } else {

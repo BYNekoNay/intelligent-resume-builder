@@ -191,7 +191,7 @@ async function submitGeneration(payload: MaterialSelectionRequest, idempotencyKe
   if (!token) return
 
   const res = await selectMaterialsForJob(payload, idempotencyKey, token)
-  const task = res.data.data
+  const task = res
   taskStore.remember(task.id)
   sessionStorage.removeItem(PENDING_GENERATION_KEY)
   await router.push(`/generate/materials?taskId=${task.id}`)
@@ -205,7 +205,7 @@ async function resumePendingGeneration() {
   generating.value = true
   error.value = ''
   try {
-    const consent = (await getConsent()).data.data
+    const consent = (await getConsent())
     if (!hasJobGenerationConsent(consent)) {
       error.value = t('generationWorkbench.consentNotActive')
       return
@@ -225,7 +225,7 @@ async function startGeneration() {
   try {
     const payload = buildGenerationPayload()
     const idempotencyKey = `gen-workbench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const consent = (await getConsent()).data.data
+    const consent = (await getConsent())
     if (!hasJobGenerationConsent(consent)) {
       storePendingGeneration({ payload, idempotencyKey })
       await router.push({

@@ -44,7 +44,7 @@ export const useAiTaskStore = defineStore('ai-task', () => {
   async function load(id: number, key = storageKey()) {
     const res = await getTask(id)
     if (!isCurrentStorageKey(key)) return null
-    const task = res.data.data
+    const task = res
     current.value = task
     if (needsRecovery(task)) {
       remember(id, key)

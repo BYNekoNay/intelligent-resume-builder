@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 export interface ResumeImportResponse { fileName:string;mediaType:string;extractedText:string;normalizedResumeInput:Record<string,unknown>;originalFileStored:boolean }
 /**
  * 简历文件解析（同步长耗时端点）。
@@ -8,4 +8,4 @@ export interface ResumeImportResponse { fileName:string;mediaType:string;extract
  * 与 exportAccountData(30s) / 面试步进(60s) 同一惯例：客户端死线必须晚于服务端预算。
  * 契约由 UploadPathContractTest 守护。
  */
-export function parseResumeFile(file:File){const form=new FormData();form.append('file',file);return apiClient.post<ApiResponse<ResumeImportResponse>>('/api/resume-imports/parse',form,{headers:{'Content-Type':'multipart/form-data'},timeout:30_000})}
+export function parseResumeFile(file:File){const form=new FormData();form.append('file',file);return http.post<ResumeImportResponse>('/api/resume-imports/parse',form,{headers:{'Content-Type':'multipart/form-data'},timeout:30_000})}

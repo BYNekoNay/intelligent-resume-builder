@@ -12,7 +12,7 @@ export const useMatchResultStore = defineStore('match-result', () => {
     error.value = null
     try {
       const res = await scoreMatch(resumeVersionId, jobDescriptionId)
-      current.value = res.data.data
+      current.value = res
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : '评分结果无法获取'
     } finally {
@@ -25,7 +25,7 @@ export const useMatchResultStore = defineStore('match-result', () => {
     error.value = null
     try {
       const res = await getMatchResult(id)
-      current.value = res.data.data
+      current.value = res
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : '评分结果无法获取'
     } finally {

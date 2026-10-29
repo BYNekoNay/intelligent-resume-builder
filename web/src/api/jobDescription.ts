@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 
 interface JobDescriptionBase {
   id: number
@@ -33,29 +33,29 @@ export interface JobDescriptionPayload {
 }
 
 export function listJobs() {
-  return apiClient.get<ApiResponse<JobDescriptionSummary[]>>('/api/jobs')
+  return http.get<JobDescriptionSummary[]>('/api/jobs')
 }
 
 export function getJob(id: number) {
-  return apiClient.get<ApiResponse<JobDescriptionDetail>>(`/api/jobs/${id}`)
+  return http.get<JobDescriptionDetail>(`/api/jobs/${id}`)
 }
 
 export function getJobReference(id: number) {
-  return apiClient.get<ApiResponse<JobDescriptionReference>>(`/api/jobs/${id}/reference`)
+  return http.get<JobDescriptionReference>(`/api/jobs/${id}/reference`)
 }
 
 export function createJob(payload: JobDescriptionPayload) {
-  return apiClient.post<ApiResponse<JobDescriptionDetail>>('/api/jobs', payload)
+  return http.post<JobDescriptionDetail>('/api/jobs', payload)
 }
 
 export function updateJob(id: number, payload: JobDescriptionPayload) {
-  return apiClient.patch<ApiResponse<JobDescriptionDetail>>(`/api/jobs/${id}`, payload)
+  return http.patch<JobDescriptionDetail>(`/api/jobs/${id}`, payload)
 }
 
 export function parseJob(id: number) {
-  return apiClient.post<ApiResponse<JobDescriptionDetail>>(`/api/jobs/${id}/parse`)
+  return http.post<JobDescriptionDetail>(`/api/jobs/${id}/parse`)
 }
 
 export function deleteJob(id: number) {
-  return apiClient.delete<ApiResponse<void>>(`/api/jobs/${id}`)
+  return http.delete<void>(`/api/jobs/${id}`)
 }

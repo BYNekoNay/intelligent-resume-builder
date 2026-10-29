@@ -80,13 +80,13 @@ async function load() {
     getResume(Number(props.id)),
     listVersions(Number(props.id), false),
   ])
-  resume.value = resumeResponse.data.data
+  resume.value = resumeResponse
   titleDraft.value = resume.value.title
-  versions.value = versionResponse.data.data
+  versions.value = versionResponse
   associatedJob.value = null
   if (resume.value.jobDescriptionId !== null) {
     try {
-      associatedJob.value = (await getJobReference(resume.value.jobDescriptionId)).data.data
+      associatedJob.value = (await getJobReference(resume.value.jobDescriptionId))
     } catch {
       // 关联岗位可能已软删除；不应阻断简历历史页的其余内容加载。
       associatedJob.value = null
@@ -96,7 +96,7 @@ async function load() {
 
 async function loadVersions() {
   const response = await listVersions(Number(props.id), historyView.value === 'archived')
-  versions.value = response.data.data
+  versions.value = response
 }
 
 async function switchHistoryView(view: 'active' | 'archived') {
@@ -128,8 +128,8 @@ async function loadRelatedAssets() {
       listMaterials(),
     ])
     if (epoch !== relatedAssetsEpoch) return
-    relatedAssets.value = assetResponse.data.data
-    materialTitles.value = Object.fromEntries(materialResponse.data.data.map((material) => [material.id, material.title]))
+    relatedAssets.value = assetResponse
+    materialTitles.value = Object.fromEntries(materialResponse.map((material) => [material.id, material.title]))
   } catch {
     if (epoch !== relatedAssetsEpoch) return
     relatedAssets.value = []
@@ -170,7 +170,7 @@ async function saveTitle() {
   savingTitle.value = true; error.value = ''
   try {
     const response = await updateResumeTitle(Number(props.id), titleDraft.value.trim())
-    resume.value = response.data.data
+    resume.value = response
     titleDraft.value = resume.value.title
     editingTitle.value = false
   } catch { error.value = t('resumeDetail.titleSaveError') }
@@ -219,7 +219,7 @@ async function score(version: ResumeVersionSummary) {
   runningAction.value = version.id; error.value = ''
   try {
     const response = await scoreMatch(version.id, jobId)
-    await router.push({ name: 'match-result', params: { matchResultId: response.data.data.matchResultId } })
+    await router.push({ name: 'match-result', params: { matchResultId: response.matchResultId } })
   } catch { error.value = t('resumeDetail.scoreError') }
   finally { runningAction.value = null }
 }
@@ -230,7 +230,7 @@ async function exportPdf(version: ResumeVersionSummary) {
   runningAction.value = version.id; error.value = ''
   try {
     const response = await createExport(version.id, versionTemplate(version))
-    await router.push({ name: 'export', params: { exportTaskId: response.data.data.taskId } })
+    await router.push({ name: 'export', params: { exportTaskId: response.taskId } })
   } catch (cause) { error.value = resolveApiError(cause, 'resumeDetail.exportError') }
   finally { runningAction.value = null }
 }

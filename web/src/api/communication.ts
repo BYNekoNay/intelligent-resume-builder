@@ -1,4 +1,4 @@
-import { apiClient, type ApiResponse } from './client'
+import { http } from './client'
 import type { AiTask, AiTaskPreview } from './ai'
 export type CommunicationType='COVER_LETTER'|'EMAIL'|'OPENING_MESSAGE'
 export type CommunicationOutputLanguage = 'ZH_CN' | 'EN'
@@ -60,7 +60,7 @@ export interface TemplatePayload {
 
 export function generateCommunication(resumeVersionId: number, jobDescriptionId: number,
                                       type: CommunicationType, outputLanguage: CommunicationOutputLanguage) {
-  return apiClient.post<ApiResponse<CommunicationResult>>('/api/communications/generate', {
+  return http.post<CommunicationResult>('/api/communications/generate', {
     resumeVersionId, jobDescriptionId, type, outputLanguage,
   })
 }
@@ -85,9 +85,7 @@ function communicationAiBody(payload: CommunicationAiPayload) {
 
 /** AI 文案的发送前预览（R32）。只读：不落库、不调模型。 */
 export function previewCommunicationAi(payload: CommunicationAiPayload) {
-  return apiClient
-    .post<ApiResponse<AiTaskPreview>>('/api/communications/ai-generate/preview', communicationAiBody(payload))
-    .then(response => response.data.data)
+  return http.post<AiTaskPreview>('/api/communications/ai-generate/preview', communicationAiBody(payload))
 }
 
 export function generateCommunicationWithAi(
@@ -95,7 +93,7 @@ export function generateCommunicationWithAi(
   idempotencyKey: string,
   previewToken: string,
 ) {
-  return apiClient.post<ApiResponse<AiTask>>('/api/communications/ai-generate', communicationAiBody(payload), {
+  return http.post<AiTask>('/api/communications/ai-generate', communicationAiBody(payload), {
     headers: { 'Idempotency-Key': idempotencyKey, 'X-AI-Preview-Token': previewToken },
   })
 }
@@ -103,29 +101,29 @@ export function generateCommunicationWithAi(
 // ==================== 模板库 ====================
 
 export function listTemplates(params?: { scene?: TemplateScene; type?: CommunicationType; outputLanguage?: CommunicationOutputLanguage }) {
-  return apiClient.get<ApiResponse<CommunicationTemplateSummary[]>>('/api/communications/templates', { params })
+  return http.get<CommunicationTemplateSummary[]>('/api/communications/templates', { params })
 }
 
 export function getTemplate(id: number) {
-  return apiClient.get<ApiResponse<CommunicationTemplateDetail>>(`/api/communications/templates/${id}`)
+  return http.get<CommunicationTemplateDetail>(`/api/communications/templates/${id}`)
 }
 
 export function previewTemplate(id: number, resumeVersionId: number, jobDescriptionId: number) {
-  return apiClient.get<ApiResponse<TemplatePreview>>(`/api/communications/templates/${id}/preview`, {
+  return http.get<TemplatePreview>(`/api/communications/templates/${id}/preview`, {
     params: { resumeVersionId, jobDescriptionId },
   })
 }
 
 export function createTemplate(payload: TemplatePayload) {
-  return apiClient.post<ApiResponse<CommunicationTemplateSummary>>('/api/communications/templates', payload)
+  return http.post<CommunicationTemplateSummary>('/api/communications/templates', payload)
 }
 
 export function updateTemplate(id: number, payload: TemplatePayload) {
-  return apiClient.put<ApiResponse<CommunicationTemplateSummary>>(`/api/communications/templates/${id}`, payload)
+  return http.put<CommunicationTemplateSummary>(`/api/communications/templates/${id}`, payload)
 }
 
 export function deleteTemplate(id: number) {
-  return apiClient.delete<ApiResponse<void>>(`/api/communications/templates/${id}`)
+  return http.delete<void>(`/api/communications/templates/${id}`)
 }
 
 // ==================== 草稿（确认保存，绝不发送） ====================
@@ -137,5 +135,5 @@ export function saveCommunicationDraft(payload: {
   draftText: string
   templateId?: number
 }) {
-  return apiClient.post<ApiResponse<CommunicationResult>>('/api/communications/drafts', payload)
+  return http.post<CommunicationResult>('/api/communications/drafts', payload)
 }

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import axios from 'axios'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AlertTriangle, Bookmark, Clipboard, FileText, FolderOpen, Mail, Pencil, Plus, RefreshCw, Save, Send, ShieldCheck, Sparkles, Trash2, X } from 'lucide-vue-next'
@@ -25,7 +24,6 @@ import {
   type TemplatePreview,
   type TemplateScene,
 } from '@/api/communication'
-import type { ApiResponse } from '@/api/client'
 import AiPreviewDialog from '@/components/ai/AiPreviewDialog.vue'
 import { useAiTaskPreview } from '@/composables/useAiTaskPreview'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
@@ -33,6 +31,7 @@ import { useTaskPolling, TASK_POLL_DEFAULT_INTERVAL_MS, TASK_POLL_DEFAULT_MAX_AT
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
+import { extractErrorCode } from '@/utils/errorCodes'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 import { newIdempotencyKey } from '@/utils/idempotency'
 
@@ -139,8 +138,8 @@ function setDraft(text: string, generationSource: CommunicationGenerationSource)
 }
 
 function errorCode(cause: unknown) {
-  if (!axios.isAxiosError<ApiResponse<unknown>>(cause)) return null
-  return cause.response?.data?.code ?? null
+  // 统一入口：ApiError（2xx + code≠0）与 AxiosError（4xx/5xx）两种形态都要认
+  return extractErrorCode(cause)
 }
 
 function handleCreateError(cause: unknown) {
@@ -188,7 +187,7 @@ function startPolling(taskId: number) {
   // 对齐后端 300s 推理 readTimeout，避免任务仍在执行时前端先显示超时。
   startTaskPolling({
     taskId,
-    fetchTask: async (id) => (await getTask(id)).data.data,
+    fetchTask: async (id) => (await getTask(id)),
     intervalMs: TASK_POLL_DEFAULT_INTERVAL_MS,
     maxAttempts: TASK_POLL_DEFAULT_MAX_ATTEMPTS,
     onTask: (task) => {
@@ -229,7 +228,7 @@ async function generateAi() {
       loadingMode.value = null
       return
     }
-    const task = (await generateCommunicationWithAi(payload, key, previewToken)).data.data
+    const task = (await generateCommunicationWithAi(payload, key, previewToken))
     activeTaskId.value = task.id
     await rememberTask(task.id)
     if (!acceptTaskResult(task)) startPolling(task.id)
@@ -250,7 +249,7 @@ async function generateTemplate() {
   try {
     const result = (await generateCommunication(
       Number(resumeVersionId.value), Number(jobId.value), type.value, outputLanguage.value,
-    )).data.data
+    ))
     setDraft(result.draft, 'TEMPLATE')
   } catch (cause) {
     error.value = resolveApiError(cause, 'communication.templateGenerateError')
@@ -267,7 +266,7 @@ async function retryAi() {
   waitingInBackground.value = false
   loadingMode.value = 'RETRY'
   try {
-    const task = (await retryTask(activeTaskId.value)).data.data
+    const task = (await retryTask(activeTaskId.value))
     if (!acceptTaskResult(task)) startPolling(task.id)
     else loadingMode.value = null
   } catch (cause) {
@@ -314,7 +313,7 @@ async function loadTemplates() {
       outputLanguage: outputLanguage.value,
     })
     if (epoch !== templateRequestEpoch) return
-    templates.value = response.data.data
+    templates.value = response
   } catch {
     if (epoch !== templateRequestEpoch) return
     error.value = t('communication.templateLoadError')
@@ -339,7 +338,7 @@ async function openPreview(template: CommunicationTemplateSummary) {
   previewLoading.value = true
   error.value = ''
   try {
-    const result = (await previewTemplate(template.id, Number(resumeVersionId.value), Number(jobId.value))).data.data
+    const result = (await previewTemplate(template.id, Number(resumeVersionId.value), Number(jobId.value)))
     if (epoch !== previewRequestEpoch) return
     previewResult.value = result
     previewDraft.value = result.filledBody
@@ -369,7 +368,7 @@ async function confirmSaveDraft() {
       type: previewResult.value.type,
       draftText: previewDraft.value,
       templateId: previewResult.value.id,
-    })).data.data
+    }))
     setDraft(result.draft, 'TEMPLATE')
     activeTab.value = 'ai'
     closePreview()
@@ -400,7 +399,7 @@ async function openEditTemplate(template: CommunicationTemplateSummary) {
   showTemplateDialog.value = true
   templateDialogLoading.value = true
   try {
-    const detail = (await getTemplate(template.id)).data.data
+    const detail = (await getTemplate(template.id))
     if (editingTemplateId.value === template.id) templateDialogBody.value = detail.bodyText
   } catch {
     error.value = t('communication.templateLoadError')
@@ -479,7 +478,7 @@ onMounted(async () => {
   if (!Number.isInteger(taskId) || taskId <= 0) return
   loadingMode.value = 'AI'
   try {
-    const task = (await getTask(taskId)).data.data
+    const task = (await getTask(taskId))
     if (task.taskType !== 'COMMUNICATION_GENERATE') throw new Error('wrong task type')
     activeTaskId.value = task.id
     if (!acceptTaskResult(task)) startPolling(task.id)

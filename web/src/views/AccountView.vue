@@ -129,7 +129,7 @@ async function clearAiHistory() {
   historyMessage.value = ''
   try {
     const response = await clearAiTaskHistory()
-    historyMessage.value = t('account.clearAiHistoryDone').replace('{count}', String(response.data.data ?? 0))
+    historyMessage.value = t('account.clearAiHistoryDone').replace('{count}', String(response ?? 0))
   } catch (error) {
     historyMessage.value = resolveApiError(error, 'account.clearAiHistoryError')
   } finally {
