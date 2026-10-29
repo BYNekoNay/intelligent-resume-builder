@@ -18,7 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 版本号一致性门禁：同一版本号在仓库里有 **11 处独立副本**，且过去**没有任何机器判据**。
+ * 版本号一致性门禁：同一版本号在仓库里有 **13 处独立副本**，且过去**没有任何机器判据**。
+ *
+ * <p>2026-10-29 起把**桌面壳**（`desktop-shell/package.json` 与 lock）纳入清单：安装包内嵌后端 jar，
+ * 壳版本与产品版本脱钩时，装出来的产物无法从版本号判断内嵌的是哪一代 jar —— 这正是
+ * `release-v042` 里嵌 0.4.2 jar 的同类错误。
  *
  * <p>为什么必须有：只改一处会得到「看起来是新的、实际不是」的静默不一致 —— 例如
  * {@code pom.xml} 升到 0.4.0 但 {@code deploy-direct.remote.sh} 的 {@code JAR_NAME} 还是 0.3.0，
@@ -69,6 +73,10 @@ class VersionConsistencyContractTest {
         copies.put("pdf-service/src/server.js", firstGroup(
                 read("pdf-service/src/server.js"), "version:\\s*'([^']+)'"));
 
+        // ⑫⑬ 桌面壳（安装包内嵌 jar，壳版本必须与产品同轨）
+        copies.put("desktop-shell/package.json", jsonVersion(read("desktop-shell/package.json")));
+        copies.put("desktop-shell/package-lock.json", lockVersion(read("desktop-shell/package-lock.json")));
+
         // ⑨⑩⑪ jar 名三处：systemd 单元、部署脚本、部署手册
         copies.put("deploy/systemd/intelligent-resume-api.service", jarName(
                 read("deploy/systemd/intelligent-resume-api.service")));
@@ -77,7 +85,7 @@ class VersionConsistencyContractTest {
         copies.put("docs/DEPLOYMENT_DIRECT.md", jarName(read("docs/DEPLOYMENT_DIRECT.md")));
 
         // 副本清单条数本身也要被守住：悄悄删掉某一处检查会让门禁"看起来还在、其实少看了一个地方"
-        assertEquals(11, copies.size(),
+        assertEquals(13, copies.size(),
                 "版本副本清单条数变了（新增或删除了一处副本）—— 必须同步更新本门禁的清单与预期条数："
                         + copies.keySet());
 

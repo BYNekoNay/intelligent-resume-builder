@@ -25,6 +25,19 @@ if (!version) {
 
 const targetDir = join(repoRoot, 'server', 'target')
 const jarName = `intelligent-resume-server-${version}.jar`
+
+// 壳版本必须与产品版本同轨（2026-10-29 起 VersionConsistencyContractTest 也守着这两处，
+// 但那里跑在 CI/单测里；打包入口再拦一次，因为打出来的安装包无法事后改）：
+// release-v042 曾把 0.4.2 的 jar 打进「0.1.0 壳」，装完从版本号根本看不出内嵌的是哪一代后端。
+const shellPkg = join(repoRoot, 'desktop-shell', 'package.json')
+const shellVersion = JSON.parse(readFileSync(shellPkg, 'utf8')).version
+if (shellVersion !== version) {
+  throw new Error(
+    `桌面壳版本(${shellVersion}) 与产品版本(${version}) 不一致：请先同步 desktop-shell/package.json\n` +
+      `（安装包内嵌后端 jar，壳版本脱钩会让产物失去可追溯性）`,
+  )
+}
+
 const source = join(targetDir, jarName)
 if (!existsSync(source)) {
   throw new Error(

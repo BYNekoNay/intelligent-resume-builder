@@ -1,7 +1,7 @@
 {
   "name": "intelligent-resume-desktop-shell",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "智历 · Windows 桌面壳（ADR-012 阶段六）",
   "type": "module",
   "main": "src/main.js",
