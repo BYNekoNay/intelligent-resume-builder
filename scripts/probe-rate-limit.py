@@ -25,6 +25,7 @@ import urllib.request
 
 BASE = os.environ.get('BASE', 'http://101.35.239.218:8088')
 LOGIN_LIMIT = int(os.environ.get('LOGIN_LIMIT', '10'))
+REGISTER_LIMIT = int(os.environ.get('REGISTER_LIMIT', '5'))
 failures = []
 unverified = []
 
@@ -90,10 +91,10 @@ def main():
             check('放行数恰好等于阈值', True)
         else:
             # 线上 nginx 用 $remote_addr 覆写 X-Forwarded-For（部署探针专门守着这一点），
-            # 所以探针无法靠伪造 IP 拿到「全新客户端」；窗口内已有占用时精确计数不可复现。
-            # 精确计数由 RateLimitFilterTest 用可控时钟覆盖，这里如实标为未验证。
-            unverified.append('精确计数（本窗口已有 %d 次占用，nginx 覆写 XFF 无法隔离客户端）'
-                              % (LOGIN_LIMIT - allowed))
+            # 所以探针无法靠伪造 IP 拿到「全新客户端」：login 桶里本来就有别的占用。
+            # 精确计数改由下方 register 档（测试环境无人触碰）实测，这里只作说明。
+            print('  注：login 桶本窗口已有 %d 次占用，精确计数改由 register 档验证'
+                  % (LOGIN_LIMIT - allowed))
 
     retry_after = header(headers, 'Retry-After')
     check('429 带 Retry-After（1~60 秒）',
@@ -112,7 +113,33 @@ def main():
                         {'username': 'probe-rate-limit', 'password': 'wrong-password'}, client_ip)
     check('等价转义路径仍命中同一桶（fail-closed）', status == 429, status)
 
+    measure_register_exact_count(client_ip)
     return report()
+
+
+def measure_register_exact_count(client_ip):
+    """在 register 档（默认 5/min）上量「精确计数」。
+
+    为什么不用 login 量：探针自己的连续调用会把 login 窗口一直占满，
+    精确计数在共享出口 IP 上根本复现不出来。register 档在测试环境几乎无人触碰，
+    且**请求体故意非法**（缺 email/password）——限流在参数校验之前计数，
+    所以每次请求都会计入配额但不会落任何账号数据。
+    """
+    print('== 注册档（默认 %d/min）：精确计数 ==' % REGISTER_LIMIT)
+    allowed = 0
+    for _ in range(REGISTER_LIMIT + 2):
+        status, headers, _ = call('POST', '/api/auth/register', {'username': 'probe-rate-limit'}, client_ip)
+        if status == 429:
+            check('429 回显命中的规则 id', header(headers, 'X-RateLimit-Rule') == 'register',
+                  header(headers, 'X-RateLimit-Rule'))
+            break
+        allowed += 1
+    if allowed == REGISTER_LIMIT:
+        check('放行数恰好等于阈值（第 %d 次起 429）' % (REGISTER_LIMIT + 1), True)
+    elif allowed < REGISTER_LIMIT:
+        unverified.append('register 档精确计数（本窗口已有 %d 次占用）' % (REGISTER_LIMIT - allowed))
+    else:
+        check('放行数恰好等于阈值', False, '放行 %d，阈值 %d' % (allowed, REGISTER_LIMIT))
 
 
 def report():
