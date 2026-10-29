@@ -329,9 +329,16 @@ T+  78.0s  【短任务】INLINE_OPTIMIZE id=16 已启动
 | S1 | ✅ 已上线 | `useTaskPolling` 窗口对齐、生成页/选材页超时分支分离、`loadTask` 白屏修复、耗时文案修正、`web/e2e/generation-timeout.spec.ts` | i18n 门禁（48 文件 × 2 语言）通过、vue-tsc 通过、构建通过、e2e **137 passed / 0 failed**（基线 134）；已部署并抽查公网产物：新文案在、旧文案归零 |
 | S2 | ✅ 已落地 | `AiModelChainExhausted`（critical，`available <= 0`，for 2m）+ `AiModelChainDegraded`（warning，`available <= 2`，for 15m） | YAML 解析通过、规则数 9 → 11、字段完整性/severity/summary/重名全部通过结构断言 |
 | S3 | ✅ 已落地 | `docs/decisions/`：README + OPEN-DECISIONS + ADR-001~004 | 79 条相对链接全部可达；decisions 下 6 个文件全部入总索引 |
-| S4 | ⏳ 待办 | — | 需先做容量评估；高风险（`FOR UPDATE` + 租约） |
-| S5 | ⏳ 待办 | — | 需先诊断链首超时性质 |
+| S4 | ⏳ 待办<br>*2026-10-28：已闭环，见下注* | — | 需先做容量评估；高风险（`FOR UPDATE` + 租约） |
+| S5 | ⏳ 待办<br>*2026-10-28：已闭环，见下注* | — | 需先诊断链首超时性质 |
 | S6 | ✅ 已落地 | 部署手册环境属性声明（可随时重置、测试账号前缀 `aitest*/e2e*/local*/isolation*`）；**并修正 §7 原「账号额度已耗尽需充值」的事实错误**，改为「额度按模型计量」并保留原始证据与错因 | 文档校对 |
+
+> **S4 / S5 均已闭环**（2026-10-28 追记，不改上表与下文原文）：
+> S4 未走「容量评估」那条路，实际采的是**按任务类型分组领取** —— `AiTaskCapabilityRegistry` 把每个
+> 任务类型登记为 HEAVY / LIGHT，`DatabaseTaskWorker` 分组各领各执行、两组独立线程池与独立并发额度，
+> 领取过滤下推到 SQL。S5 的诊断结论即本文 §7：根因是**推理开销**（88% 输出 token 为不可见 reasoning），
+> 非 provider 阻塞，采「对生成类任务关闭推理」，线上实测 477s → **7s**。两项在
+> `docs/decisions/OPEN-DECISIONS.md` 中均为 RESOLVED。
 
 > S6 附带修正值得单独说明：部署手册 §7 原结论要求「充值或关闭仅用免费额度模式」，
 > 是基于"用单个模型的外推"得出的**错误结论**（详见 ADR-001）。留着会让后来者误以为需要付费。

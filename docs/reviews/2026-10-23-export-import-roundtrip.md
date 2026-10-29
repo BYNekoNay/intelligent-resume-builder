@@ -92,6 +92,9 @@ ADR-012 阶段四（Web→桌面迁移包）在 2026-10-21 标为 ✅，证据�
 1. **嵌套集合不参与预览**：`preview()` 只产出顶层记录，而 `insertChildren()` 会写入
    `resumes.versions` / `applications.statusHistory`；并且 `apply()` 只在 ADD 分支调 `insertChildren`，
    **父记录 SKIP/CONFLICT 时子记录根本不写**（比「未预览」更严重）。登记于 `OPEN-DECISIONS.md:28`，本次未改。
+   *（2026-10-28 追记，不改上文：**已解决** —— 批次 1.4 让嵌套集合与顶层同规则参与分类，
+   且父记录 SKIP/KEEP_LOCAL 时也播种 idMap、子记录照自己的决策写入。守护用例见
+   `docs/reviews/2026-10-23-nested-import.md` 与 `docs/05` §18.1。）*
 2. **非核心集合显式拒绝**：`interviewSessions` / `interviewAnswerAssets` / `communicationTemplates` /
    `communicationDrafts` / `aiConsents` 有数据时整份导入会被拒绝（这是刻意的「不静默丢」策略，
    但用户侧体验是「有这个包却导不进去」，需产品口径决定后续是否支持）。
