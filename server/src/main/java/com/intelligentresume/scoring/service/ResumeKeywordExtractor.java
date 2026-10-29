@@ -170,9 +170,8 @@ public class ResumeKeywordExtractor {
             // 若只收录单词，"spring boot" 永远不可能等于任何 token →
             // 多词关键词即使与简历逐字相同也必然判缺失（详见 Normalizer#tokenizeWithPhrases）。
             for (String token : normalizer.tokenizeWithPhrases(s, Normalizer.MAX_PHRASE_WORDS)) {
-                String cleaned = token.toLowerCase()
-                        .replaceAll("[^\\p{L}\\p{N}\\s\\-]", "")
-                        .replaceAll("\\s+", " ").trim();
+                // 清洗规则由 Normalizer.clean 单点维护（历史上此处在三个地方各抄了一份字面量）
+                String cleaned = Normalizer.clean(token);
                 if (!cleaned.isEmpty()) {
                     raw.add(cleaned);
                 }

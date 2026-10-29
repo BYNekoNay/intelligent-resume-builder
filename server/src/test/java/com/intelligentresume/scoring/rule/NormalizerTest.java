@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -91,5 +92,65 @@ class NormalizerTest {
         assertTrue(tokens.contains("高并发"));
         assertTrue(tokens.contains("场景"));
         assertFalse(tokens.contains("熟悉 高并发"), "中文不应被空格拼接成词组");
+    }
+
+    // ---------- clean() 契约 ----------
+    // 清洗规则原本在三个地方各写一份字面量，现收敛到 Normalizer.clean。
+    // 以下用例钉住「收敛后行为不变」，并补齐原实现从未测过的边界（emoji / 全角标点 / 制表换行）。
+    // 若有人把 clean 改回 replaceAll 手抄版，或用错字符集，这些断言会直接指出差在哪个字符类。
+
+    @Test
+    @DisplayName("clean: null / 空白 / 纯标点一律得到空串")
+    void clean_degenerateInputs_empty() {
+        assertEquals("", Normalizer.clean(null));
+        assertEquals("", Normalizer.clean(""));
+        assertEquals("", Normalizer.clean("   "));
+        assertEquals("", Normalizer.clean("，。！？"));
+        assertEquals("", Normalizer.clean("!!!"));
+    }
+
+    @Test
+    @DisplayName("clean: 保留字母数字连字符与中文，去掉其余符号")
+    void clean_keepsAlnumHyphenAndChinese() {
+        assertEquals("e-commerce", Normalizer.clean("e-commerce"));
+        assertEquals("nodejs", Normalizer.clean("Node.js"), "点号不在保留集，应被去掉");
+        assertEquals("c", Normalizer.clean("C++"), "加号应被去掉，且大小写已折叠");
+        assertEquals("微服务", Normalizer.clean("微服务。"));
+        assertEquals("gcg1zgc", Normalizer.clean("GC（G1/ZGC）"), "全角括号与斜杠应被去掉");
+    }
+
+    @Test
+    @DisplayName("clean: 制表 / 换行折叠为单个空格，首尾去空白")
+    void clean_collapsesTabsAndNewlines() {
+        assertEquals("分布式 事务", Normalizer.clean("分布式\t事务"));
+        assertEquals("消息 队列 削峰", Normalizer.clean("  消息 \n 队列\t\t削峰 "));
+    }
+
+    @Test
+    @DisplayName("clean: emoji 与符号被去掉（不属于字母/数字/空白/连字符）")
+    void clean_dropsEmoji() {
+        assertEquals("java", Normalizer.clean("Java🔥"));
+        assertEquals("spring boot", Normalizer.clean("Spring 🚀 Boot"));
+    }
+
+    @Test
+    @DisplayName("clean: 大小写折叠保持一致")
+    void clean_lowercases() {
+        assertEquals("spring boot", Normalizer.clean("SPRING BOOT"));
+        assertEquals(Normalizer.clean("Spring Boot"), Normalizer.clean("spring boot"));
+    }
+
+    @Test
+    @DisplayName("三处消费点共用同一清洗口径（normalize / isDirectMatch / clean）")
+    void allConsumersShareSameCleaning() {
+        // normalize 在空词典下退化为 clean（既是空词典契约，也是「同一口径」的直接体现）
+        Normalizer emptyDict = new Normalizer(Map.of());
+        String raw = "  Spring   Boot🚀 ";
+        assertEquals(Normalizer.clean(raw), emptyDict.normalize(raw));
+
+        // isDirectMatch 用 clean 后的形式去比对 token 集合
+        Set<String> tokens = Set.of(Normalizer.clean(raw));
+        assertTrue(normalizer.isDirectMatch("  SPRING\tBOOT ", tokens),
+                "两侧各自 clean 后应能命中同一 key");
     }
 }

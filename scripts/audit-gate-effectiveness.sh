@@ -86,6 +86,7 @@ SelectionReasonContractTest	server/src/main/java/com/intelligentresume/ai/confir
 SelectionReasonContractTest	server/src/main/java/com/intelligentresume/resume/domain/SelectionReason.java	    USER_EDITED;	    USER_EDITED, GHOST_VALUE;
 RetryReuseContractTest	server/src/main/java/com/intelligentresume/ai/task/service/AiTaskService.java	        task.setStatus(com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING);	        task.setInputSnapshotJson(task.getInputSnapshotJson());
         task.setStatus(com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING);
+NormalizerSingleSourceContractTest	server/src/main/java/com/intelligentresume/scoring/service/ResumeKeywordExtractor.java	String cleaned = Normalizer.clean(token);	String cleaned = Normalizer.clean(token); cleaned = cleaned.replaceAll("[^\\p{L}\\p{N}\\s\\-]", "");
 TABLE_EOF
 )
 
@@ -129,6 +130,7 @@ AlertRuleContractTest	deploy/prometheus/prometheus.yml	<<PREPEND>>	# 反例：ru
 BackupRetentionContractTest	deploy/backup-database.sh	<<PREPEND>>	# 反例：find . -mtime +14 -delete 只是注释
 SelectionReasonContractTest	server/src/main/java/com/intelligentresume/ai/confirmation/service/DraftCommitService.java	<<PREPEND>>	// 反例：saveReference(version, id, path, snap, sel.get("selectedReason").toString()) 只是注释
 RetryReuseContractTest	server/src/main/java/com/intelligentresume/ai/task/service/AiTaskService.java	<<PREPEND>>	// 反例：task.setInputSnapshotJson(task.getInputSnapshotJson()) 只是注释
+NormalizerSingleSourceContractTest	server/src/main/java/com/intelligentresume/scoring/service/ResumeKeywordExtractor.java	<<PREPEND>>	// 反例：注释里的 cleaned.replaceAll("[^\\p{L}\\p{N}\\s\\-]", "") 不得被当作第二处定义
 GOOD_EOF
 )
 

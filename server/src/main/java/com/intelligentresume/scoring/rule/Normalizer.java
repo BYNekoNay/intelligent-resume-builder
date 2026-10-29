@@ -21,6 +21,20 @@ public class Normalizer {
     private static final Pattern ENGLISH_WORD = Pattern.compile("[a-zA-Z0-9]+(?:[\\-][a-zA-Z0-9]+)*");
 
     /**
+     * 去标点：保留字母、数字、空白、连字符。
+     *
+     * <p><b>为什么提成常量</b>：同一条清洗规则原本在三个地方各写了一遍字面量
+     * （{@code normalize}、{@code isDirectMatch}、{@code ResumeKeywordExtractor#addText}），
+     * 任一处改字符集就会与另外两处漂移——这是「同一事实多份副本」的典型形态。
+     * 同时 {@code String#replaceAll} 每次都重新 {@code Pattern.compile}，
+     * 在每 token 两次替换的热路径上是纯粹的重复编译。
+     */
+    private static final Pattern NON_WORD_CHARS = Pattern.compile("[^\\p{L}\\p{N}\\s\\-]");
+
+    /** 折叠连续空白（含制表、换行）为单个空格。 */
+    private static final Pattern WHITESPACE_RUN = Pattern.compile("\\s+");
+
+    /**
      * 一趟扫描的有序分词模式。
      *
      * <p>两个分支的字符集不相交（拉丁数字词 vs 中文序列），因此与分两趟扫描
@@ -85,15 +99,29 @@ public class Normalizer {
         if (token == null || token.isBlank()) {
             return "";
         }
-        // 小写
-        String lower = token.toLowerCase();
-        // 去标点（保留字母数字中文空格连字符）
-        lower = lower.replaceAll("[^\\p{L}\\p{N}\\s\\-]", "");
-        // 折叠空格
-        lower = lower.replaceAll("\\s+", " ").trim();
+        String cleaned = clean(token);
         // 同义词归一
-        String canonical = reverseIndex.get(lower);
-        return canonical != null ? canonical : lower;
+        String canonical = reverseIndex.get(cleaned);
+        return canonical != null ? canonical : cleaned;
+    }
+
+    /**
+     * 文本清洗：小写 → 去标点 → 折叠空白 → 去首尾空白。
+     *
+     * <p>这是<b>唯一</b>的清洗实现，{@code normalize}、{@code isDirectMatch} 与
+     * 简历侧 token 抽取都走这里。历史上这段逻辑被复制了三份，其中两份在
+     * {@code Normalizer} 内、一份在 {@link com.intelligentresume.scoring.service.ResumeKeywordExtractor}，
+     * 靠肉眼保持一致；提取成单一入口后，改字符集只需动一处。
+     *
+     * <p>契约：{@code null} 返回空串；纯标点输入也返回空串（调用方据此判空，不必另行判断）。
+     */
+    public static String clean(String text) {
+        if (text == null) {
+            return "";
+        }
+        String lowered = text.toLowerCase();
+        String stripped = NON_WORD_CHARS.matcher(lowered).replaceAll("");
+        return WHITESPACE_RUN.matcher(stripped).replaceAll(" ").trim();
     }
 
     /**
@@ -196,7 +224,6 @@ public class Normalizer {
      * 判断原始 token 是否为直接匹配（非通过同义词）。
      */
     public boolean isDirectMatch(String jdKeyword, Set<String> resumeRawTokens) {
-        String cleaned = jdKeyword.toLowerCase().replaceAll("[^\\p{L}\\p{N}\\s\\-]", "").replaceAll("\\s+", " ").trim();
-        return resumeRawTokens.contains(cleaned);
+        return resumeRawTokens.contains(clean(jdKeyword));
     }
 }
