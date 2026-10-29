@@ -91,6 +91,15 @@ public class NumericConfigurationValidator {
         // PDF 导出过期清理：与 AI 留存同形（PageRequest 批量 + fixedDelay 间隔）
         minimums.put("app.pdf.cleanup-batch-size", 1);
         minimums.put("app.pdf.cleanup-interval-ms", 1000);
+        // 导出重试（B5-2）：自动重排 0/负值 → 第一次容量拒绝即判失败（与「可重试」语义相反）；
+        // 手动重试上限 0 → 任何失败任务都不可手动重试（用户只能重新发起，旧行永远卡在 FAILED）
+        minimums.put("app.pdf.worker.max-attempts", 1);
+        minimums.put("app.pdf.worker.max-manual-retries", 0);
+        // AI 任务租约上限（B5-2）：0 会让「崩溃循环收口」失效或把每个任务都判死，
+        // 负值同理。max-retries 是用户可见的手动重试上限，max-attempts 是领取次数上的
+        // 崩溃循环阈值，两者都必须为正。
+        minimums.put("app.ai.worker.max-retries", 1);
+        minimums.put("app.ai.worker.max-attempts", 1);
         // 数据生命周期分档清扫（决策 D2，第 64 批）：批量 0 → 一个候选都取不回来（守卫生效但清扫静默停摆）；
         // 周期 0 → 连轴转的热循环。恢复期/宽限期下限为 0（合法但激进）：取负值会让 cutoff 落到未来、
         // 把**尚未超过保留期**的软删行提前纳入删除候选 —— 保留期语义反转。

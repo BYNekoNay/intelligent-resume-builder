@@ -250,6 +250,10 @@ app:
       # 代价：进程崩溃后的任务恢复需等租约到期（可接受——崩溃场景旧进程已死，无重复调用）。
       lease-seconds: ${AI_WORKER_LEASE_S:660}
       max-retries: ${AI_WORKER_MAX_RETRIES:3}
+      # 崩溃循环收口：一个任务最多被领取几次就该有结论。刻意与 max-retries 分开 ——
+      # 后者是「用户能手动点几次重试」（测试/桌面/CI 常调成 1），若收口共用同一个值，
+      # 那些环境里「租约过期被正常接管」会被误判成不可恢复的中断。
+      max-attempts: ${AI_WORKER_MAX_ATTEMPTS:3}
       batch-size: ${AI_WORKER_BATCH:5}
       # 分组并发额度:重任务(分钟级)与轻任务(秒级)各自独立,防止长任务饿死短任务
       heavy-concurrency: ${AI_WORKER_HEAVY_CONCURRENCY:2}
@@ -362,6 +366,13 @@ app:
       # 租约：单次投递（读超时 50s + 存储收尾）必须远小于它，否则租约在渲染中途被第二 worker
       # 接管 → 重复渲染（releaseSuccess 会丢弃 stale 结果，但外部渲染工作已浪费）
       lease-seconds: ${PDF_WORKER_LEASE_S:90}
+      # pdf-service 容量拒绝（503 + Retry-After）时的**自动重排上限**（含首次）。
+      # 此前第一次 503 就直接 FAILED：对端明说了「等 2 秒再来」，执行侧却把任务判死，
+      # 用户必须回页面手动点重试。达到上限才落 FAILED，文案带已试次数。
+      max-attempts: ${PDF_WORKER_MAX_ATTEMPTS:3}
+      # 用户手动重试同一行的次数上限（与 AI 任务的 app.ai.worker.max-retries 对齐）。
+      # 超限后要求重新发起导出：新行能区分「这一行坏了」与「下游临时故障」。
+      max-manual-retries: ${PDF_WORKER_MAX_MANUAL_RETRIES:5}
     service-base-url: ${PDF_SERVICE_BASE_URL:http://127.0.0.1:3001}
     service-token: ${PDF_SERVICE_TOKEN:dev-pdf-token-change-me}
     # 读超时必须晚于 pdf-service 的服务端上界（排队上限 15s + setContent 15s + pdf 15s = 45s）：

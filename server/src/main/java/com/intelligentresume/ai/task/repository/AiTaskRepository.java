@@ -172,6 +172,25 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
     int renewLease(@Param("id") Long id, @Param("owner") String owner,
                    @Param("leaseUntil") LocalDateTime leaseUntil);
 
+    /**
+     * 崩溃循环收口：把「反复被领取却始终没进入终态」的任务判为 FAILED。
+     *
+     * <p>触发场景是进程被硬杀（OOM / kill -9 / 部署重启）：任务停在 RUNNING，
+     * 租约到期后被重新领取，{@code retry_count} 每次 +1 而状态永远不落地 ——
+     * 一次坏输入就能让 worker 无限重跑。<b>注意这与 R33「不自动重试」不冲突</b>：
+     * 这里判定的不是「业务失败后重试」，而是「连续 N 次被领取、一次都没能收尾」，
+     * 属于不可恢复的中断，必须终结掉否则永远占着队列。
+     *
+     * @return 1 = 已置 FAILED；0 = 条件不再成立（已被其它实例推进）
+     */
+    @Modifying
+    @Query(value = "UPDATE ai_task SET status = 'FAILED', error_message = :message, lease_owner = NULL, "
+            + "lease_expires_at = NULL, updated_at = NOW() "
+            + "WHERE id = :id AND retry_count >= :maxAttempts AND (status = 'PENDING' OR status = 'RUNNING')",
+            nativeQuery = true)
+    int abandonExhausted(@Param("id") Long id, @Param("maxAttempts") int maxAttempts,
+                         @Param("message") String message);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT t FROM AiTask t WHERE t.id = :id " +
             "AND t.status = com.intelligentresume.ai.task.domain.AiTaskStatus.RUNNING AND t.leaseOwner = :owner")

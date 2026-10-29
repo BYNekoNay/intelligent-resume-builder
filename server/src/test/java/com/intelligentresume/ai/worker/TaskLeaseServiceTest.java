@@ -73,6 +73,44 @@ class TaskLeaseServiceTest {
         verifyNoInteractions(taskRepository);
     }
 
+    /**
+     * 崩溃循环收口：进程被硬杀后任务停在 RUNNING，租约过期被反复领取，retry_count 一直涨
+     * 而状态永不落地 —— 一次坏输入就能让 worker 无限重跑。
+     *
+     * <p>这与 R33「不自动重试」不冲突：判的不是「业务失败后重试」，而是
+     * 「连续 N 次被领取、一次都没能收尾」。
+     */
+    @Test
+    @DisplayName("已领取达上限仍未终态 → 判 FAILED 并跳过领取（不再无限重跑）")
+    void claimBatch_abandonsTaskThatNeverReachesTerminalState() {
+        when(properties.getLeaseSeconds()).thenReturn(60);
+        when(properties.getMaxAttempts()).thenReturn(3);
+        AiTask poisoned = task(1L, AiTaskStatus.RUNNING, 3);
+        when(taskRepository.claimableTasksByTypes(anyList(), eq(5))).thenReturn(List.of(poisoned));
+        when(taskRepository.abandonExhausted(eq(1L), eq(3), anyString())).thenReturn(1);
+
+        List<AiTask> claimed = service.claimBatch("worker-1", 5, List.of(AiTaskType.JOB_GENERATION));
+
+        assertTrue(claimed.isEmpty(), "不可恢复的任务不得再被领取");
+        verify(taskRepository).abandonExhausted(eq(1L), eq(3), contains("连续 3 次"));
+        verify(taskRepository, never()).acquireLease(any(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("未达上限的任务照常领取（收口不得误伤正常重试）")
+    void claimBatch_stillClaimsTaskBelowAbandonThreshold() {
+        when(properties.getLeaseSeconds()).thenReturn(60);
+        when(properties.getMaxAttempts()).thenReturn(3);
+        AiTask task = task(1L, AiTaskStatus.PENDING, 2);
+        when(taskRepository.claimableTasksByTypes(anyList(), eq(5))).thenReturn(List.of(task));
+        when(taskRepository.acquireLease(eq(1L), anyString(), any())).thenReturn(1);
+
+        List<AiTask> claimed = service.claimBatch("worker-1", 5, List.of(AiTaskType.JOB_GENERATION));
+
+        assertEquals(1, claimed.size());
+        verify(taskRepository, never()).abandonExhausted(any(), anyInt(), anyString());
+    }
+
     @Test
     @DisplayName("可重试失败也不再自动重试：一律 FAILED（R33）")
     void releaseFailed_retryable_stillMarksFailed() {

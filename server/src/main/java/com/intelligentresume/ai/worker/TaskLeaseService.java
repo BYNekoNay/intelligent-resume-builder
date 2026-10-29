@@ -47,8 +47,22 @@ public class TaskLeaseService {
         List<AiTask> claimable = taskRepository.claimableTasksByTypes(typeNames, batchSize);
         List<AiTask> acquired = new ArrayList<>();
         LocalDateTime leaseUntil = LocalDateTime.now().plusSeconds(properties.getLeaseSeconds());
+        // 读一次：上限 <= 0 属非法配置（NumericConfigurationValidator 会拒绝启动），
+        // 这里兜底为「关闭收口」，避免 0 值把每一个任务都判死。
+        int maxAttempts = properties.getMaxAttempts();
 
         for (AiTask task : claimable) {
+            // 崩溃循环收口：进程被硬杀时任务停在 RUNNING，租约到期后被反复领取，
+            // retry_count 一直涨而状态永不落地。达到上限即判 FAILED 并跳过领取 ——
+            // 否则一次坏输入会让 worker 无限重跑（此前 claim/acquireLease 都没有这个上界）。
+            if (maxAttempts > 0 && task.getRetryCount() >= maxAttempts) {
+                int abandoned = taskRepository.abandonExhausted(task.getId(), maxAttempts,
+                        AsyncFailureMessages.persisted(
+                                "任务连续 " + task.getRetryCount() + " 次被领取但未完成，已终止；请重新发起"));
+                log.warn("Abandoning AI task {}: claimed {} times without reaching a terminal state (updated={})",
+                        task.getId(), task.getRetryCount(), abandoned);
+                continue;
+            }
             int updated = taskRepository.acquireLease(task.getId(), owner, leaseUntil);
             if (updated > 0) {
                 // 刷新实体状态以反映原生 SQL 的更新

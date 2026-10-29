@@ -22,6 +22,15 @@ public class AiTaskWorkerProperties {
      */
     private int leaseSeconds = 660;
     private int maxRetries = 3;
+    /**
+     * 崩溃循环收口阈值：一个任务**最多被领取几次**就该有结论。
+     *
+     * <p>刻意与 {@link #maxRetries} 分开：那个是「用户可见的手动重试上限」，
+     * 各环境会把它调成 1（测试/桌面/CI 不重试）；如果收口也用同一个值，
+     * 那「租约过期被正常接管」在那些环境里会被误判成不可恢复的中断。
+     * 两者是不同的问题：一个关于用户能点几次，一个关于进程被杀了几次。
+     */
+    private int maxAttempts = 3;
     private int batchSize = 5;
     /** 重任务分组（分钟级）的并发执行额度。 */
     private int heavyConcurrency = 2;
@@ -34,6 +43,8 @@ public class AiTaskWorkerProperties {
     public void setLeaseSeconds(int leaseSeconds) { this.leaseSeconds = leaseSeconds; }
     public int getMaxRetries() { return maxRetries; }
     public void setMaxRetries(int maxRetries) { this.maxRetries = maxRetries; }
+    public int getMaxAttempts() { return maxAttempts; }
+    public void setMaxAttempts(int maxAttempts) { this.maxAttempts = maxAttempts; }
     public int getBatchSize() { return batchSize; }
     public void setBatchSize(int batchSize) { this.batchSize = batchSize; }
     public int getHeavyConcurrency() { return heavyConcurrency; }
