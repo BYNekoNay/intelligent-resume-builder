@@ -197,7 +197,7 @@ mysql -uroot --protocol=socket -e \
 > Spring Boot 3.3 管理的 `mysql-connector-j` 8.3 原生支持它，配合连接串里的
 > `allowPublicKeyRetrieval=true&useSSL=false` 可正常握手（已实测 TCP 登录成功）。
 
-**不要手工建表**：表结构由应用启动时的 Flyway 前向迁移创建（当前 `V1` → `V25`，共 **25 个迁移 / 24 张业务表**）。
+**不要手工建表**：表结构由应用启动时的 Flyway 前向迁移创建。**迁移条数与库表数以 [§13](#13-当前线上状态滚动表每次部署后更新) 为准**（该节是全仓唯一允许写线上精确数字的位置，本文不复述，避免两处数字各自腐烂）。
 > 别被 `ls db/migration` 误导：它按字典序排序，`V10`~`V25` 会排在 `V2` 前面，
 > 直接 `tail` 会看到 `V9` 而误以为只到 V9。用 `ls | sort -V` 或看 `flyway_schema_history` 的 count。
 
