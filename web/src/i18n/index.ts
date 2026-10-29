@@ -624,7 +624,36 @@ function resolve(message: MessageTree, key: string): string | undefined {
   ), message) as string | undefined
 }
 
-let englishLoading: Promise<void> | null = null
+/**
+ * 懒加载目录的最小实现。抽成工厂是为了让两条不变量可被单测钉住：
+ *
+ * 1. **并发只加载一次**（启动期 `bootstrap()` 与用户点语言开关可能同时触发）；
+ * 2. **失败必须可重试**——早期实现把 rejected promise 留在缓存里，
+ *    一次网络抖动就让英文在本会话内永久不可用（后续调用直接拿到同一个失败 promise，
+ *    连 `setLocale` 的重试都变成了瞬时失败）。
+ */
+export function createLazyCatalog(load: () => Promise<MessageTree>) {
+  let pending: Promise<void> | null = null
+  let value: MessageTree | null = null
+  return {
+    isLoaded: () => value !== null,
+    get: () => value,
+    ensure(): Promise<void> {
+      if (value) return Promise.resolve()
+      if (!pending) {
+        pending = load()
+          .then((tree) => { value = tree })
+          .catch((cause: unknown) => {
+            pending = null // 清掉才能重试；失败不留痕，语义就是「这次没成」
+            throw cause
+          })
+      }
+      return pending
+    },
+  }
+}
+
+const englishCatalog = createLazyCatalog(async () => (await import('./locales/en-US')).default)
 
 /**
  * 确保目标语言的目录已就绪。zh-CN 内联，永远即时可用；en-US 首次调用才加载。
@@ -632,15 +661,15 @@ let englishLoading: Promise<void> | null = null
  * 为什么要 `ensure` 而不是在 `setLocale` 里直接 await import：
  * 应用启动时要先知道用户存的是哪种语言（`main.ts` 会 await 本函数），
  * 否则英文用户会先看到一闪而过的中文界面。
+ *
+ * ⚠ 本函数**会 reject**（chunk 可能 404 / 断网），调用方必须处理；
+ * `main.ts` 里的 try/catch 是白屏防线，删掉会导致启动即空页面。
  */
 export async function ensureLocaleMessages(target: Locale): Promise<void> {
   if (target !== 'en-US' || messages['en-US']) return
-  if (!englishLoading) {
-    englishLoading = import('./locales/en-US').then((module) => {
-      messages['en-US'] = module.default
-    })
-  }
-  await englishLoading
+  await englishCatalog.ensure()
+  const tree = englishCatalog.get()
+  if (tree) messages['en-US'] = tree
 }
 
 export function useLocale() {
