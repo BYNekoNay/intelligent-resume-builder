@@ -79,6 +79,8 @@ MySql57BaselineContractTest	server/src/test/resources/mysql57/v19-schema.sql	<<P
 OpenDecisionRegisterContractTest	docs/decisions/OPEN-DECISIONS.md	(2026-10-28)<br>Decision: **采显式 409	(2026-10-28)<br>**采显式 409
 RetentionPolicyContractTest	docs/08-部署与运维说明书.md	账户删除的 7 天撤销窗口与窗口结束后的级联清扫**已实施**	账户删除的 7 天撤销窗口与窗口结束后的级联清扫**计划中，尚未实现**
 ManualFactConsistencyContractTest	README.md	Flyway 迁移 V1–V38	Flyway 迁移 V1–V37
+AlertRuleContractTest	deploy/prometheus/prometheus.yml	- /opt/intelligent-resume/monitoring/prometheus/rules/*.yml	- /opt/intelligent-resume/monitoring/rules-ghost/*.yml
+BackupRetentionContractTest	deploy/backup-database.sh	MIN_KEEP="${MIN_KEEP:-3}"	# MIN_KEEP removed
 TABLE_EOF
 )
 
@@ -117,6 +119,8 @@ MySql57BaselineContractTest	server/src/test/resources/mysql57/v19-schema.sql	<<P
 OpenDecisionRegisterContractTest	docs/decisions/OPEN-DECISIONS.md	<<PREPEND>>	<!-- 反例：| 2026-01-01 | ghost | 干扰行 | — | — | — | — | OPEN | 只是注释 -->
 RetentionPolicyContractTest	docs/08-部署与运维说明书.md	<<PREPEND>>	> 反例：账户删除仍是「计划中，尚未实现」只是引用块
 ManualFactConsistencyContractTest	README.md	<<PREPEND>>	<!-- 反例：V1–V37 与 docs/RELEASES/v0.4.1.md 只是注释 -->
+AlertRuleContractTest	deploy/prometheus/prometheus.yml	<<PREPEND>>	# 反例：rule_files: /opt/intelligent-resume/monitoring/rules-ghost/*.yml 只是注释
+BackupRetentionContractTest	deploy/backup-database.sh	<<PREPEND>>	# 反例：find . -mtime +14 -delete 只是注释
 GOOD_EOF
 )
 

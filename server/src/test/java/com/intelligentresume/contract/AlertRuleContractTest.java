@@ -44,6 +44,10 @@ class AlertRuleContractTest {
 
     private static final String RULES = "monitoring/prometheus/rules/intelligent-resume-alerts.yml";
     private static final String PROMETHEUS = "monitoring/prometheus/prometheus.yml";
+    private static final String DEPLOY_PROMETHEUS = "deploy/prometheus/prometheus.yml";
+    private static final String DEPLOY_REMOTE = "scripts/deploy-direct.remote.sh";
+    /** 服务器上应用根的绝对路径；rule_files 必须以它开头，且去掉它之后与仓库布局同构。 */
+    private static final String SERVER_PREFIX = "/opt/intelligent-resume/";
     private static final String ALERTMANAGER = "monitoring/alertmanager/alertmanager.yml";
     private static final String DASHBOARD = "monitoring/grafana/dashboards/intelligent-resume-operations.json";
     private static final String OBSERVABILITY =
@@ -151,6 +155,71 @@ class AlertRuleContractTest {
     void documentedThresholdGradesAreImplemented() throws Exception {
         assertGrades("http_server_requests_seconds_count{status=~\"5..\"}", "> 0.01", "> 0.05");
         assertGrades("histogram_quantile(0.95", "> 0.5", "> 2");
+    }
+
+    @Test
+    @DisplayName("deploy 份抓取配置必须加载规则源（rule_files 为空 = 15 条规则从未被评估）")
+    void deployScrapeConfigAlsoLoadsRules() throws Exception {
+        // 必须单独实现，不能复用 availabilityAlertMatchesScrapeJobAndToleratesThreeFailures 的
+        // "恰好 1 个 job" 断言：deploy 份有 2 个 job（api + self），结构不同，复用必炸。
+        Object ruleFilesObj = loadYaml(DEPLOY_PROMETHEUS).get("rule_files");
+        assertTrue(ruleFilesObj instanceof List && !((List<?>) ruleFilesObj).isEmpty(),
+                DEPLOY_PROMETHEUS + " 缺少 rule_files —— 直连路线的 15 条告警规则将**从未被评估**："
+                        + "「规则写对」「门禁绿」「真实环境在评估」是三件事（2026-10-28 取证）");
+
+        Set<String> loaded = new TreeSet<>();
+        for (Object patternObj : (List<?>) ruleFilesObj) {
+            String pattern = String.valueOf(patternObj);
+            assertTrue(pattern.startsWith(SERVER_PREFIX),
+                    "rule_files 必须用绝对路径（prometheus 以 User=prometheus 运行，工作目录不确定）：" + pattern);
+            // 服务器路径与仓库布局同构（/opt/intelligent-resume/monitoring/prometheus/rules/
+            // ↔ 仓库 monitoring/prometheus/rules/），去掉前缀即可机械映射回仓库相对路径。
+            String repoGlob = pattern.substring(SERVER_PREFIX.length());
+            assertTrue(repoGlob.endsWith("*.yml"),
+                    "门禁只展开 *.yml 结尾的 glob，其他形态需先扩展本断言：" + pattern);
+            String dir = repoGlob.substring(0, repoGlob.lastIndexOf('/'));
+            try (var stream = Files.newDirectoryStream(repoFile(dir), "*.yml")) {
+                for (Path file : stream) {
+                    String relative = dir + "/" + file.getFileName();
+                    Object groups = loadYaml(relative).get("groups");
+                    assertTrue(groups instanceof List, relative + " 缺少 groups 段");
+                    for (Object group : (List<?>) groups) {
+                        Object groupRules = asMap(group).get("rules");
+                        assertTrue(groupRules instanceof List, relative + " 的 group 缺少 rules 段");
+                        for (Object rule : (List<?>) groupRules) {
+                            loaded.add(String.valueOf(asMap(rule).get("alert")));
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(!loaded.isEmpty(), "rule_files 展开后没有加载到任何告警规则 —— 路径写错时 glob 静默为空，"
+                + "Prometheus 不报错，规则从未被评估");
+
+        Set<String> source = new TreeSet<>();
+        for (Map<String, Object> rule : rules()) {
+            source.add(String.valueOf(rule.get("alert")));
+        }
+        assertTrue(loaded.equals(source),
+                "deploy 份 rule_files 加载到的告警集与规则源深度不相等：加载 " + loaded + " vs 源 " + source
+                        + "（多 = 源里有规则没被加载；少 = 加载了别的东西。两者都意味着线上评估的不是这份源）");
+    }
+
+    @Test
+    @DisplayName("部署脚本必须同步规则目录并重启 prometheus（否则规则改动永远停在仓库）")
+    void deployScriptSyncsRuleDirectory() throws Exception {
+        // 抹白注释是必须的：remote.sh 有大段注释在讲"这些文件不随部署同步"，不过滤会假绿
+        String script = read(DEPLOY_REMOTE).replaceAll("(?m)^\\s*#.*$", "");
+        assertTrue(script.contains("monitoring/prometheus/rules"),
+                DEPLOY_REMOTE + " 没有同步规则目录 —— 15 条规则的任何改动都只停留在仓库，线上继续评估旧规则");
+        assertTrue(Pattern.compile("install -d [^\\n]*monitoring/prometheus/rules").matcher(script).find(),
+                "缺少规则目录创建（install -d）—— 目录不存在时同步会整体失败");
+        assertTrue(Pattern.compile("install -m 644 [^\\n]*rule_tmp").matcher(script).find(),
+                "缺少规则文件安装（install -m 644 ... $rule_tmp）—— 没有逐文件落位就不是同步");
+        assertTrue(script.contains("intelligent-resume-prometheus")
+                        && (script.contains("restart intelligent-resume-prometheus")
+                            || script.contains("enable --now intelligent-resume-prometheus")),
+                "缺少 prometheus 重启分支 —— 规则文件同步了但不重启也不会加载（Prometheus 只在启动时读 rule_files）");
     }
 
     private void assertGrades(String exprMarker, String warningThreshold, String criticalThreshold) throws Exception {
