@@ -74,32 +74,47 @@ def find_nulls(node, path='$'):
 
 
 def register_and_login():
+    """注册即登录：`POST /api/auth/register` 返回 201 且**直接带回 accessToken**。
+
+    不要再顺手调一次 `/api/auth/login` —— 那会掩盖「注册是否真的下发了可用令牌」，
+    也会让探针在注册成功但登录接口坏掉时误报成通过。
+    """
     user = rand('probe_json_')
     email = user + '@example.com'
     password = 'Probe#2026'
     status, body = envelope('POST', '/api/auth/register', {'username': user, 'email': email, 'password': password})
-    assert status == 200, ('register', status, body)
-    status, body = envelope('POST', '/api/auth/login', {'username': user, 'password': password})
-    assert status == 200 and body.get('code') == 0, ('login', status, body)
-    return user, body['data']['accessToken'] if 'accessToken' in body.get('data', {}) else body['data'].get('token')
+    assert status in (200, 201) and body.get('code') == 0, ('register', status, body)
+    token = (body.get('data') or {}).get('accessToken')
+    assert token, ('register-no-token', body)
+    return user, token
 
 
 def main():
     with open(FIXTURE, encoding='utf-8') as handle:
-        resume_json = json.load(handle)
+        fixture = json.load(handle)
+    # 夹具带 `unknownFutureField`：它是**历史/导入数据**才可能出现的键。写入路径的 schema
+    # 校验会直接拒绝它，所以线上永远造不出「未知顶层键」的简历——这一点本身值得断言（见下）。
+    resume_json = {k: v for k, v in fixture.items() if k != 'unknownFutureField'}
 
     print('== 造数据 ==')
     user, token = register_and_login()
-    check('注册并登录成功', bool(token), token)
+    check('注册直接下发 accessToken', bool(token), token)
+
+    status, body = envelope('POST', '/api/resumes',
+                            {'title': 'JSON Resume 探针', 'resumeJson': fixture}, token)
+    check('写入未知顶层键被拒（40001）',
+          status == 400 and (body or {}).get('code') == 40001, (status, body))
+
     status, body = envelope('POST', '/api/resumes', {'title': 'JSON Resume 探针', 'resumeJson': resume_json}, token)
-    check('创建简历 200/0', status == 200 and body.get('code') == 0, (status, body))
+    check('创建简历 2xx/0', status in (200, 201) and (body or {}).get('code') == 0, (status, body))
     resume_id = body['data']['id'] if 'id' in body.get('data', {}) else body['data'].get('resumeId')
 
     status, body = envelope('POST', '/api/resumes/%d/versions' % resume_id,
                             {'sourceType': 'MANUAL', 'resumeJson': resume_json}, token)
-    check('保存版本 200/0', status == 200 and body.get('code') == 0, (status, body))
+    check('保存版本 2xx/0', status in (200, 201) and body.get('code') == 0, (status, body))
     version_id = body['data']['id']
-    print('  resumeId=%s versionId=%s' % (resume_id, version_id))
+    version_no = body['data']['versionNo']
+    print('  resumeId=%s versionId=%s versionNo=%s' % (resume_id, version_id, version_no))
 
     print('== 导出 ==')
     status, headers, payload = call('GET', '/api/resume-versions/%d/json-resume' % version_id, token=token)
@@ -107,9 +122,10 @@ def main():
     ctype = headers.get('Content-Type', '')
     check('Content-Type 是 JSON', ctype.startswith('application/json'), ctype)
     disposition = headers.get('Content-Disposition', '')
-    check('以附件下发且文件名带版本号',
-          disposition.startswith('attachment') and ('resume-%d-v' % resume_id) in disposition and disposition.endswith('.json"'),
-          disposition)
+    expected_name = 'resume-%d-v%d-jsonresume.json' % (resume_id, version_no)
+    check('以附件下发且文件名可预测',
+          disposition.startswith('attachment') and expected_name in disposition,
+          (disposition, expected_name))
 
     try:
         document = json.loads(payload)
@@ -126,13 +142,17 @@ def main():
 
     meta = document.get('meta') or {}
     platform = meta.get('platform') or {}
+    # versionNo 以服务端返回为准：新建简历会自动产生 v1，本次保存的是 v2。
+    # 断言「导出件的 versionNo == 保存时返回的 versionNo」，而不是写死 1。
     check('meta.platform 保留 resumeId/versionNo/exporter',
-          platform.get('resumeId') == resume_id and platform.get('versionNo') == 1 and bool(platform.get('exporter')),
-          platform)
+          platform.get('resumeId') == resume_id and platform.get('versionNo') == version_no
+          and bool(platform.get('exporter')), platform)
     check('objective/courses/customSections 进 meta.platform',
           'objective' in platform and 'courses' in platform and 'customSections' in platform, sorted(platform))
     unknown = platform.get('unknownSections') or {}
-    check('未知顶层键不静默丢弃', 'unknownFutureField' in unknown, sorted(unknown))
+    # 线上不可能造出未知顶层键（写入阶段已被 schema 拒），所以这里期望「为空/缺省」；
+    # 真正的搬迁逻辑由 `JsonResumeExporterTest` 直接构造入参覆盖——那是唯一能造出该输入的层。
+    check('干净数据下 unknownSections 不出现', not unknown, sorted(unknown))
 
     basics = document.get('basics') or {}
     check('basics 映射 name/email/label', bool(basics.get('name')) and bool(basics.get('email')), basics)
