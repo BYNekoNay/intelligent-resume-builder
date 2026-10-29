@@ -187,6 +187,7 @@ const enUS: MessageTree = {
       templateClassic: 'Classic', templateModern: 'Modern', templateMinimal: 'Minimal',
       templateSuffix: 'style', currentVersion: 'Current',
       setCurrent: 'Set as current', viewScore: 'View JD coverage', exportPdf: 'Export PDF',
+      exportJson: 'Export JSON Resume', exportJsonHint: 'Export a standard JSON Resume v1.0.0 file for jsonresume.org and other third-party tools', exportJsonError: 'Unable to export the JSON Resume file. Try again later.',
       creatingTask: 'Creating task…', loadError: 'Failed to load resume details. Go back to the list and try again.',
       switchCurrentError: 'Failed to switch current version. Please try again.', scoreError: 'Failed to calculate coverage. Check the JD and resume version, then try again.',
       exportError: 'Failed to create PDF export task. Please try again.', scoreNeedJob: 'Create and select a JD first.',

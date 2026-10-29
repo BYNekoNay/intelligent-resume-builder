@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Archive, ArrowLeft, BriefcaseBusiness, CheckCircle2, Download, FileClock, GitCompareArrows, Pencil, Plus, RotateCcw } from 'lucide-vue-next'
-import { archiveResumeVersion, getResume, listVersions, restoreResumeVersion, setCurrentVersion, unarchiveResumeVersion, updateResumeTitle, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
+import { Archive, ArrowLeft, BriefcaseBusiness, CheckCircle2, Download, FileClock, FileJson, GitCompareArrows, Pencil, Plus, RotateCcw } from 'lucide-vue-next'
+import { archiveResumeVersion, downloadJsonResume, getResume, listVersions, restoreResumeVersion, setCurrentVersion, unarchiveResumeVersion, updateResumeTitle, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
 import { getJobReference, type JobDescriptionReference } from '@/api/jobDescription'
 import { listInterviewAssets, type InterviewAsset } from '@/api/interviewAsset'
 import { listMaterials } from '@/api/careerMaterial'
-import { SECTION_KEYS, type SectionKey } from '@/resume/sectionRegistry'
+import { SECTION_KEYS } from '@/resume/sectionRegistry'
 import { scoreMatch } from '@/api/scoring'
 import { createExport, type ResumeTemplateCode } from '@/api/export'
 import LoadingBlock from '@/components/ui/LoadingBlock.vue'
@@ -253,6 +253,30 @@ async function exportPdf(version: ResumeVersionSummary) {
   } catch (cause) { error.value = resolveApiError(cause, 'resumeDetail.exportError') }
   finally { runningAction.value = null }
 }
+
+/**
+ * 导出 JSON Resume v1.0.0（B4）：与 PDF 走完全不同的链路 ——
+ * 同步返回文件、不建导出任务、不进 /exports 轮询页，所以这里直接落盘。
+ */
+async function exportJsonResume(version: ResumeVersionSummary) {
+  if (runningAction.value !== null) return
+  runningAction.value = version.id; error.value = ''
+  try {
+    const blob = await downloadJsonResume(version.id)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `resume-v${version.versionNo}-jsonresume.json`
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    // 不能在 click() 后立刻 revoke：部分浏览器（Safari）会把下载一并取消。
+    // 留一个宏任务让下载先启动，再回收 blob URL。
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (cause) { error.value = resolveApiError(cause, 'resumeDetail.exportJsonError') }
+  finally { runningAction.value = null }
+}
 </script>
 
 <template>
@@ -303,6 +327,7 @@ async function exportPdf(version: ResumeVersionSummary) {
             <button class="icon-history-action" :title="t('resumeDetail.compareAction')" :aria-label="`${t('resumeDetail.compareAction')} v${v.versionNo}`" :disabled="runningAction !== null" @click="compareVersion(v)"><GitCompareArrows :size="15" /></button>
             <button v-if="resume?.currentVersionId !== v.id" class="icon-history-action" :title="t('resumeDetail.archiveAction')" :aria-label="`${t('resumeDetail.archiveAction')} v${v.versionNo}`" :disabled="runningAction !== null" @click="archive(v)"><Archive :size="15" /></button>
             <button v-if="resume?.jobDescriptionId" class="btn-neon btn-ghost" :disabled="runningAction !== null" @click="score(v)">{{ t('resumeDetail.viewScore') }}</button>
+            <button class="btn-neon btn-ghost" :title="t('resumeDetail.exportJsonHint')" :disabled="runningAction !== null" @click="exportJsonResume(v)"><FileJson :size="15" />{{ t('resumeDetail.exportJson') }}</button>
             <button class="btn-neon btn-primary" :disabled="runningAction !== null" @click="exportPdf(v)"><Download v-if="runningAction !== v.id" :size="15" />{{ runningAction === v.id ? t('resumeDetail.creatingTask') : t('resumeDetail.exportPdf') }}</button>
           </template>
           <template v-else>

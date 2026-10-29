@@ -194,6 +194,7 @@ const messages: Partial<Record<Locale, MessageTree>> = {
       templateClassic: '经典', templateModern: '现代', templateMinimal: '极简',
       templateSuffix: '样式', currentVersion: '当前',
       setCurrent: '设为当前', viewScore: '查看 JD 规则覆盖度', exportPdf: '导出 PDF',
+      exportJson: '导出 JSON Resume', exportJsonHint: '导出标准 JSON Resume v1.0.0，可导入 jsonresume.org 等第三方工具', exportJsonError: '导出 JSON Resume 失败，请稍后重试。',
       creatingTask: '正在创建任务…', loadError: '简历详情无法加载，请返回列表后重试。',
       switchCurrentError: '当前版本切换失败，请稍后重试。', scoreError: '规则覆盖度计算失败，请检查 JD 与简历版本后重试。',
       exportError: 'PDF 导出任务创建失败，请稍后重试。', scoreNeedJob: '请先创建并选择一份 JD。',

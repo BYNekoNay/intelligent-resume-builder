@@ -2485,6 +2485,32 @@ test('archives a historical version and restores it to the visible history', asy
   await expect(archivedCard).toHaveCount(0)
 })
 
+test('downloads a standards-compliant JSON Resume document from the version history', async ({ page }) => {
+  await mockAuthenticatedApi(page)
+  let exports = 0
+  await page.route('**/api/resume-versions/11/json-resume', route => {
+    exports += 1
+    return route.fulfill({
+      contentType: 'application/json',
+      // 后端以附件下发（不套 ApiResponse 信封），这里必须保持同一形态，
+      // 否则用例会掩盖「前端是按信封解包还是按文件落盘」这个真实分叉。
+      headers: { 'content-disposition': 'attachment; filename="resume-1-v1-jsonresume.json"' },
+      body: JSON.stringify({ $schema: 'https://example.test/schema.json', basics: { name: 'E2E Candidate' }, meta: { platform: { resumeId: 1 } } }),
+    })
+  })
+
+  await page.goto('/resumes/1')
+  const card = page.locator('.version-card').first()
+  await expect(card).toBeVisible()
+
+  const download = page.waitForEvent('download')
+  await card.getByRole('button', { name: '导出 JSON Resume' }).click()
+  // 文件名由前端决定（带版本号），下载内容由后端决定——两者都要对得上
+  expect((await download).suggestedFilename()).toBe('resume-v1-jsonresume.json')
+  await expect.poll(() => exports).toBe(1)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
 test('opens the resume preview as a standalone mobile workspace', async ({ page }) => {
   await mockAuthenticatedApi(page)
   const editorVersion = {
