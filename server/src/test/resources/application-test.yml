@@ -74,6 +74,15 @@ app:
       # 集成测试会连续调用 parse 端点（ResumeImportControllerIT 单类 9 次），同样放宽避免误触发限流
       resume-import-parse-per-minute: 1000
       jd-parse-per-minute: 1000
+      # 限流注册表新增档位：测试会反复打同一端点（AI/ATS/PDF/面试/桌面），一律放宽，
+      # 限流本身由 RateLimitFilterTest / RateLimitRegistryTest 用显式小阈值单独验证
+      pdf-render-per-minute: 1000
+      ai-generate-per-minute: 1000
+      ats-check-per-minute: 1000
+      interview-turn-per-minute: 1000
+      desktop-mutation-per-minute: 1000
+      health-detail-per-minute: 1000
+      write-default-per-minute: 1000
       trust-forwarded-headers: false
       max-buckets: 100
   ai:

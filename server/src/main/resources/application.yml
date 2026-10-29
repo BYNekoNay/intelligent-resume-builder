@@ -177,6 +177,23 @@ app:
       # 账号导出（POST /api/auth/export）：单次请求整体重读并序列化本人全账号数据
       # （实测 200 条 62KB 资料的账号单次响应 11.9MB / ~230ms），属低频操作，阈值给最严一档
       account-export-per-minute: ${RATE_LIMIT_ACCOUNT_EXPORT:3}
+      # —— 以下为「限流注册表」补齐的档位（此前这些端点在代码里根本没有频率闸）——
+      # PDF 渲染与渲染任务重试：每次占一个 Chromium 上下文（pdf-service 4 并发 / 16 队列）
+      pdf-render-per-minute: ${RATE_LIMIT_PDF_RENDER:10}
+      # AI 创建/预览类端点共享突发闸：真正的成本上限是每人每日配额（AiQuotaService），
+      # 这里只防「一个人的日配额在一分钟内打满」以及打爆上游模型限流
+      ai-generate-per-minute: ${RATE_LIMIT_AI_GENERATE:20}
+      # ATS 体检：规则打分 + 文本重排 + 可能启动 AI 任务
+      ats-check-per-minute: ${RATE_LIMIT_ATS_CHECK:10}
+      # 面试回合（开始/作答/AI 重评）：每回合一次模型评估（实测均 108s）
+      interview-turn-per-minute: ${RATE_LIMIT_INTERVIEW_TURN:20}
+      # 桌面端破坏性写操作（导入落库、备份恢复）
+      desktop-mutation-per-minute: ${RATE_LIMIT_DESKTOP_MUTATION:5}
+      # 系统健康详情：会触发出站探测（PDF 服务 / 模型 PROVIDER）
+      health-detail-per-minute: ${RATE_LIMIT_HEALTH_DETAIL:10}
+      # 兜底：所有未被上面命中的写操作（POST/PUT/PATCH/DELETE /api/**）。
+      # 存在的意义是「结构上不存在无上限的写端点」，阈值刻意宽松（默认 240/min ≈ 4/s）
+      write-default-per-minute: ${RATE_LIMIT_WRITE_DEFAULT:240}
       # 客户端 IP 解析（限流分桶 + 会话审计）：仅在可信反代之后开启。
       # 开启时取 X-Forwarded-For 最左值，要求最外层代理**覆写**该头
       # （deploy/nginx/edge.conf、host.conf 均用 $remote_addr 覆写，内层 web 继续追加）。

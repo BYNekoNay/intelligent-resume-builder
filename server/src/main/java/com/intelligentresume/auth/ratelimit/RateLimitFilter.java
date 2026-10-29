@@ -9,7 +9,6 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
@@ -22,29 +21,31 @@ import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 认证与重解析端点的内存滑动窗口限流(MVP)。
+ * 内存滑动窗口限流：**只负责桶机制**，不决定「谁受限」。
  *
- * <p>按客户端 IP + path 组合分桶,达到阈值时返回 429。覆盖范围：
- * <ul>
- *   <li>认证端点：/api/auth/login、/api/auth/register、/api/auth/refresh</li>
- *   <li>凭证变更端点：/api/auth/me/password、/api/auth/me/email——两者都校验「当前密码」，
- *       属口令验证面；不限流时可用被盗 access token 无限试密码（绕过登录的 10/min），
- *       且两端点共享同一分桶，避免在改密/改邮箱之间交替获得双倍预算</li>
- *   <li>CPU 放大器端点：/api/resume-imports/parse（PDFBox/POI 全内存解析,阈值严格）、
- *       /api/jobs/{id}/parse（JD 本地文本解析,阈值宽松）</li>
- *   <li>数据放大器端点：/api/auth/export——单次请求把本人各业务域数据整体重读并序列化，
- *       成本随账号数据量线性增长（实测 200 条 62KB 资料的账号单次响应 11.9MB / ~230ms），
- *       而导出是低频操作，不设上限即可用单个会话把 API 的 DB 与出站带宽打满</li>
- * </ul>
- * 不引入 Redis(13 §2 禁用);进程重启会让计数清零,这是 MVP 的取舍。
- * 窗口语义是**滑动窗口**而非固定窗口(自然分钟):每个分桶保留「当前窗口 + 上一窗口」两个计数,
- * 估计值按上一窗口的剩余比例加权。固定窗口在自然分钟边界会把计数清零,攻击者对齐边界即可
- * 再吃满整份配额(默认 10/min 的登录限流实测可稳定跑成 20/min);滑动窗口把该突发压到最多
- * 1 次(权重近似误差),不再随阈值放大。
- * 客户端 IP 由 {@link ClientIpResolver} 统一解析（与会话审计同一语义）：默认不信任
- * X-Forwarded-For；生产开启信任时要求最外层代理覆写该头（见该类 Javadoc 的可信链前提）。
- * {@code maxBuckets} 是硬上限(#43):达到后新分桶直接 429(fail-closed),
- * 防止海量唯一 IP 把分桶 map 顶到无界增长;已有分桶不受影响。
+ * <p>哪些路径受限、分桶到哪一组、阈值多少、为什么限，全部由 {@link RateLimitRegistry} 表达；
+ * 本类只做三件事：解析客户端 IP、按「规则组 | IP」取桶、超限时写 429 + {@code Retry-After}。
+ * 这样拆分的原因写在 {@link RateLimitRegistry} 的类注释里（此前 if 链导致覆盖面长期漏端点和分桶绕过）。
+ *
+ * <p>分桶维度是**规则组 + 客户端 IP**，不是 URL：{@code /api/jobs/1/parse} 与
+ * {@code /api/jobs/2/parse} 命中同一条规则、同一组，共享一份预算——按 URL 分桶会随 URL 基数
+ * 线性放大阈值，等于没限流。
+ *
+ * <p>不引入 Redis(13 §2 禁用)；进程重启会让计数清零，这是 MVP 的取舍。
+ * 窗口语义是**滑动窗口**而非固定窗口(自然分钟)：每个分桶保留「当前窗口 + 上一窗口」两个计数，
+ * 估计值按上一窗口的剩余比例加权。固定窗口在自然分钟边界会把计数清零，攻击者对齐边界即可
+ * 再吃满整份配额（默认 10/min 的登录限流实测可稳定跑成 20/min）；滑动窗口把该突发压到最多
+ * 1 次（权重近似误差），不再随阈值放大。
+ *
+ * <p>客户端 IP 由 {@link ClientIpResolver} 统一解析（与会话审计同一语义）：默认不信任
+ * X-Forwarded-For；生产开启信任时要求最外层代理覆写该头。
+ *
+ * <p>{@code maxBuckets} 是硬上限(#43)：达到后新分桶直接 429(fail-closed)，
+ * 防止海量唯一 IP 把分桶 map 顶到无界增长；已有分桶不受影响。
+ *
+ * <p>已知边界：分桶维度只有 IP，没有用户。同一 NAT/公司出口下的多人会共享预算；
+ * 反过来，持有多个出口的攻击者可以绕过——账号级预算目前由 AI 日配额承担，
+ * 按用户的频率闸需要把限流挪到认证之后（会牺牲对 401 洪水的保护），留待后续批次决策。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
@@ -67,39 +68,24 @@ public class RateLimitFilter extends OncePerRequestFilter {
     /** 窗口长度（秒）：无分桶可推算退避时的提示值。 */
     private static final long WINDOW_SECONDS = WINDOW_MS / 1000L;
 
-    private final int loginPerMinute;
-    private final int registerPerMinute;
-    private final int refreshPerMinute;
-    private final int resumeImportParsePerMinute;
-    private final int jdParsePerMinute;
-    private final int changeCredentialPerMinute;
-    private final int accountExportPerMinute;
+    /** 429 响应回显命中的限流规则 id（排障用；不含阈值与内部路径）。 */
+    public static final String RATE_LIMIT_RULE_HEADER = "X-RateLimit-Rule";
+
+    private final RateLimitRegistry registry;
     private final ClientIpResolver clientIpResolver;
     private final int maxBuckets;
     private final ObjectMapper objectMapper;
     private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
 
     public RateLimitFilter(
-            @Value("${app.security.rate-limit.login-per-minute}") int loginPerMinute,
-            @Value("${app.security.rate-limit.register-per-minute}") int registerPerMinute,
-            @Value("${app.security.rate-limit.refresh-per-minute}") int refreshPerMinute,
-            @Value("${app.security.rate-limit.resume-import-parse-per-minute:6}") int resumeImportParsePerMinute,
-            @Value("${app.security.rate-limit.jd-parse-per-minute:15}") int jdParsePerMinute,
-            @Value("${app.security.rate-limit.change-credential-per-minute:5}") int changeCredentialPerMinute,
-            @Value("${app.security.rate-limit.account-export-per-minute:3}") int accountExportPerMinute,
+            RateLimitRegistry registry,
+            RateLimitProperties properties,
             ClientIpResolver clientIpResolver,
-            @Value("${app.security.rate-limit.max-buckets:10000}") int maxBuckets,
             ObjectMapper objectMapper
     ) {
-        this.loginPerMinute = loginPerMinute;
-        this.registerPerMinute = registerPerMinute;
-        this.refreshPerMinute = refreshPerMinute;
-        this.resumeImportParsePerMinute = resumeImportParsePerMinute;
-        this.jdParsePerMinute = jdParsePerMinute;
-        this.changeCredentialPerMinute = changeCredentialPerMinute;
-        this.accountExportPerMinute = accountExportPerMinute;
+        this.registry = registry;
         this.clientIpResolver = clientIpResolver;
-        this.maxBuckets = maxBuckets;
+        this.maxBuckets = properties.getMaxBuckets();
         this.objectMapper = objectMapper;
     }
 
@@ -107,13 +93,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String path = PATH_HELPER.getPathWithinApplication(request);
-        Integer limit = limitFor(path);
-        if (limit == null) {
+        RateLimitRule rule = registry.resolve(request.getMethod(), path);
+        if (rule == null) {
             chain.doFilter(request, response);
             return;
         }
         String ip = clientIpResolver.resolve(request);
-        String key = bucketGroup(path) + "|" + ip;
+        String key = rule.bucketGroup() + "|" + ip;
         long now = nowMs();
         evictStaleBuckets(now);
         Bucket bucket = buckets.get(key);
@@ -123,49 +109,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
             // 并发下 size 检查与写入之间有微小竞态，最多超出并发线程数，属可接受上界。
             if (buckets.size() >= maxBuckets) {
                 // 此处无分桶可推算退避，按窗口上限提示；后续请求会清理过期桶后恢复放行
-                writeTooManyRequests(response, request, WINDOW_SECONDS);
+                writeTooManyRequests(response, request, WINDOW_SECONDS, null);
                 return;
             }
             bucket = buckets.computeIfAbsent(key, k -> new Bucket());
         }
+        int limit = rule.limitPerMinute();
         if (!bucket.allow(limit, now)) {
-            writeTooManyRequests(response, request, bucket.retryAfterSeconds(limit, now));
+            writeTooManyRequests(response, request, bucket.retryAfterSeconds(limit, now), rule.id());
             return;
         }
         chain.doFilter(request, response);
-    }
-
-    private Integer limitFor(String path) {
-        if (path == null) return null;
-        if (path.equals("/api/auth/login")) return loginPerMinute;
-        // 删除撤销是同强度的凭据验证面（用户名/邮箱 + 密码），与登录共用阈值
-        if (path.equals("/api/auth/deletion/restore")) return loginPerMinute;
-        if (path.equals("/api/auth/register")) return registerPerMinute;
-        if (path.equals("/api/auth/refresh")) return refreshPerMinute;
-        // 凭证变更是「当前密码」验证面：不限流时可用被盗 access token 无限试密码
-        // （绕过登录的 10/min）。实测（第二十七批）：配置阈值 2 下连续 4 次请求全 401、无 429。
-        if (isCredentialChange(path)) return changeCredentialPerMinute;
-        // 简历解析是重 CPU 端点（PDFBox/POI 全内存解析最大 5MB 文件），阈值给最严
-        if (path.equals("/api/resume-imports/parse")) return resumeImportParsePerMinute;
-        // JD 解析是轻量本地文本解析，阈值宽松；仅匹配 /api/jobs/{id}/parse 形态，不影响 /api/jobs 其它端点
-        if (path.startsWith("/api/jobs/") && path.endsWith("/parse")) return jdParsePerMinute;
-        // 账号导出是「数据放大器」：单次请求把本人各业务域数据整体重读并序列化为一个 JSON 文档，
-        // 成本随账号数据量线性增长且无内部分页/上限。导出属低频操作（换设备/备份时偶尔下载），
-        // 故阈值给最严一档；若下次请求仍在同一窗口内，客户端应读 Retry-After 退避。
-        if (path.equals("/api/auth/export")) return accountExportPerMinute;
-        return null;
-    }
-
-    private static boolean isCredentialChange(String path) {
-        return path.equals("/api/auth/me/password") || path.equals("/api/auth/me/email");
-    }
-
-    /**
-     * 分桶分组：凭证变更两端点共享一组——若按路径各自分桶，攻击者可在改密/改邮箱之间
-     * 交替请求获得双倍预算；其它端点维持按路径独立分桶（/api/jobs/{id}/parse 等按具体路径隔离）。
-     */
-    private static String bucketGroup(String path) {
-        return isCredentialChange(path) ? "/api/auth/me:credential" : path;
     }
 
     private void evictStaleBuckets(long nowMs) {
@@ -173,7 +127,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         buckets.entrySet().removeIf(entry -> entry.getValue().isStale(nowMs));
     }
 
-    private void writeTooManyRequests(HttpServletResponse response, HttpServletRequest request, long retryAfterSeconds)
+    private void writeTooManyRequests(HttpServletResponse response, HttpServletRequest request,
+                                      long retryAfterSeconds, String ruleId)
             throws IOException {
         String traceId = (String) request.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE);
         ApiResponse<Void> body = ApiResponse.failure(ErrorCode.RATE_LIMITED.code(), "请求频率超限,请稍后再试", traceId);
@@ -183,6 +138,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // 盲目重试并继续打满窗口。注意不能沿用「距下一自然分钟」——滑动窗口在窗口滚动后上一窗口
         // 仍按接近 100% 权重计入，滚动瞬间重试仍会被拒，那样的提示是错的。
         response.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfterSeconds));
+        if (ruleId != null) {
+            // 排障锚点：线上出现 429 时，没有它只能靠阈值反推命中了哪条规则。
+            // 只回显规则 id（不是内部路径或阈值），不构成信息泄露。
+            response.setHeader(RATE_LIMIT_RULE_HEADER, ruleId);
+        }
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
         response.getWriter().write(objectMapper.writeValueAsString(body));

@@ -13,10 +13,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * RateLimitFilter 单元测试。
+ * RateLimitFilter 的**桶机制**单测：滑动窗口精度、分桶维度、转义/矩阵路径绕过、容量硬上限。
  *
- * <p>直接调用 {@code doFilterInternal}，验证内存令牌桶的限流行为。
- * 覆盖认证端点与 CPU 放大器端点（resume-imports/parse、jobs/{id}/parse）。
+ * <p>「哪些端点受限、按什么分组」由 {@link RateLimitRegistryTest} 与
+ * {@link RateLimitCoverageTest} 覆盖；本类只关心「同一个桶怎么计数」。
  */
 class RateLimitFilterTest {
 
@@ -25,9 +25,24 @@ class RateLimitFilterTest {
 
     @BeforeEach
     void setUp() {
-        // login=2/min, register=5/min, refresh=30/min, resume-import-parse=6/min, jd-parse=15/min,
-        // 凭证变更=2/min、账号导出=3/min（本测试内的取值）
-        filter = new RateLimitFilter(2, 5, 30, 6, 15, 2, 3, new ClientIpResolver(false), 10000, objectMapper);
+        // login=2 / register=5 / refresh=30 / resume-import-parse=6 / jd-parse=15 / 凭证变更=2 / 账号导出=3
+        filter = newFilter(props -> props.setLoginPerMinute(2), 10000);
+    }
+
+    /** 以默认阈值构造，可用回调覆盖个别档位（避免为了一个阈值写 12 个构造参数）。 */
+    private RateLimitFilter newFilter(java.util.function.Consumer<RateLimitProperties> customizer, int maxBuckets) {
+        RateLimitProperties properties = new RateLimitProperties();
+        properties.setLoginPerMinute(2);
+        properties.setRegisterPerMinute(5);
+        properties.setRefreshPerMinute(30);
+        properties.setResumeImportParsePerMinute(6);
+        properties.setJdParsePerMinute(15);
+        properties.setChangeCredentialPerMinute(2);
+        properties.setAccountExportPerMinute(3);
+        properties.setMaxBuckets(maxBuckets);
+        customizer.accept(properties);
+        return new RateLimitFilter(new RateLimitRegistry(properties), properties,
+                new ClientIpResolver(false), objectMapper);
     }
 
     @Test
@@ -50,11 +65,13 @@ class RateLimitFilterTest {
         assertEquals(429, resp.getStatus(), "第 3 次请求应被限流");
         assertTrue(resp.getContentAsString().contains("42901"),
                 "响应体应包含错误码 42901");
-        // RFC 6585：429 应告知可重试时机（固定窗口剩余秒数 1~60），与 pdf-service 503 的语义一致
+        // RFC 6585：429 应告知可重试时机（滑动窗口推算 1~60 秒），与 pdf-service 503 的语义一致
         String retryAfter = resp.getHeader("Retry-After");
         assertNotNull(retryAfter, "429 响应应携带 Retry-After 头");
         assertTrue(Long.parseLong(retryAfter) >= 1 && Long.parseLong(retryAfter) <= 60,
-                "Retry-After 应为距下一固定窗口的秒数（1~60），实际 " + retryAfter);
+                "Retry-After 应为距配额可用的秒数（1~60），实际 " + retryAfter);
+        // 排障锚点：响应要说明命中的是哪条规则，否则线上只能靠阈值反推
+        assertEquals("login", resp.getHeader(RateLimitFilter.RATE_LIMIT_RULE_HEADER));
 
         // chain 只被调用了 2 次（前 2 次放行）
         verify(chain, times(2)).doFilter(any(), any());
@@ -67,9 +84,8 @@ class RateLimitFilterTest {
 
         // IP-A 用完 2 次配额
         for (int i = 0; i < 2; i++) {
-            MockHttpServletRequest req = loginRequest("10.0.0.1");
             MockHttpServletResponse resp = new MockHttpServletResponse();
-            filter.doFilter(req, resp, chain);
+            filter.doFilter(loginRequest("10.0.0.1"), resp, chain);
             assertEquals(200, resp.getStatus());
         }
 
@@ -93,14 +109,15 @@ class RateLimitFilterTest {
 
         for (int i = 0; i < 6; i++) {
             MockHttpServletResponse resp = new MockHttpServletResponse();
-            filter.doFilter(parseRequest("10.0.0.1", "/api/resume-imports/parse"), resp, chain);
+            filter.doFilter(postRequest("10.0.0.1", "/api/resume-imports/parse"), resp, chain);
             assertEquals(200, resp.getStatus(), "第 " + (i + 1) + " 次解析应放行");
         }
 
         MockHttpServletResponse resp = new MockHttpServletResponse();
-        filter.doFilter(parseRequest("10.0.0.1", "/api/resume-imports/parse"), resp, chain);
+        filter.doFilter(postRequest("10.0.0.1", "/api/resume-imports/parse"), resp, chain);
         assertEquals(429, resp.getStatus(), "第 7 次解析应被限流");
         assertTrue(resp.getContentAsString().contains("42901"));
+        assertEquals("resume-import-parse", resp.getHeader(RateLimitFilter.RATE_LIMIT_RULE_HEADER));
     }
 
     @Test
@@ -110,44 +127,37 @@ class RateLimitFilterTest {
 
         for (int i = 0; i < 15; i++) {
             MockHttpServletResponse resp = new MockHttpServletResponse();
-            filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123/parse"), resp, chain);
+            filter.doFilter(postRequest("10.0.0.1", "/api/jobs/123/parse"), resp, chain);
             assertEquals(200, resp.getStatus(), "第 " + (i + 1) + " 次 JD 解析应放行");
         }
 
         MockHttpServletResponse resp = new MockHttpServletResponse();
-        filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123/parse"), resp, chain);
+        filter.doFilter(postRequest("10.0.0.1", "/api/jobs/123/parse"), resp, chain);
         assertEquals(429, resp.getStatus(), "第 16 次 JD 解析应被限流");
         assertTrue(resp.getContentAsString().contains("42901"));
     }
 
     @Test
-    @DisplayName("限流只命中 /api/jobs/{id}/parse 分桶，/api/jobs 其它端点不受影响")
+    @DisplayName("JD 解析不波及 /api/jobs 其它端点（方法+路径双重匹配）")
     void jdParse_bucketDoesNotAffectOtherJobEndpoints() throws Exception {
         FilterChain chain = mock(FilterChain.class);
 
-        // 用完 /api/jobs/123/parse 的配额（15 次）
         for (int i = 0; i < 15; i++) {
-            filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123/parse"),
+            filter.doFilter(postRequest("10.0.0.1", "/api/jobs/123/parse"),
                     new MockHttpServletResponse(), chain);
         }
-        // parse 桶已满，第 16 次 429
         MockHttpServletResponse parseResp = new MockHttpServletResponse();
-        filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123/parse"), parseResp, chain);
+        filter.doFilter(postRequest("10.0.0.1", "/api/jobs/123/parse"), parseResp, chain);
         assertEquals(429, parseResp.getStatus());
 
-        // /api/jobs/123 本体不在限流范围，不受 parse 桶影响
+        // /api/jobs/123 本体是另一条规则（write-default 兜底），不受 JD 解析桶影响
         for (int i = 0; i < 5; i++) {
             MockHttpServletResponse resp = new MockHttpServletResponse();
-            filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/123"), resp, chain);
-            assertEquals(200, resp.getStatus(), "/api/jobs/123 不应被限流");
+            filter.doFilter(postRequest("10.0.0.1", "/api/jobs/123"), resp, chain);
+            assertEquals(200, resp.getStatus(), "/api/jobs/123 不应被 JD 解析桶限流");
         }
 
-        // 另一个 JD 的 parse 使用独立分桶（key 含 path），也不受 123 的桶影响
-        MockHttpServletResponse otherJdResp = new MockHttpServletResponse();
-        filter.doFilter(parseRequest("10.0.0.1", "/api/jobs/456/parse"), otherJdResp, chain);
-        assertEquals(200, otherJdResp.getStatus(), "/api/jobs/456/parse 应有独立分桶");
-
-        verify(chain, times(15 + 5 + 1)).doFilter(any(), any());
+        verify(chain, times(15 + 5)).doFilter(any(), any());
     }
 
     @Test
@@ -155,14 +165,11 @@ class RateLimitFilterTest {
     void encodedPath_sharesBucketWithPlainPath() throws Exception {
         FilterChain chain = mock(FilterChain.class);
 
-        // 明文用掉 2 次配额
         for (int i = 0; i < 2; i++) {
             MockHttpServletResponse resp = new MockHttpServletResponse();
             filter.doFilter(loginRequest("10.0.0.1"), resp, chain);
             assertEquals(200, resp.getStatus(), "第 " + (i + 1) + " 次请求应放行");
         }
-
-        // 明文第 3 次被限流（基线）
         MockHttpServletResponse plainResp = new MockHttpServletResponse();
         filter.doFilter(loginRequest("10.0.0.1"), plainResp, chain);
         assertEquals(429, plainResp.getStatus(), "明文第 3 次应被限流");
@@ -220,15 +227,18 @@ class RateLimitFilterTest {
     }
 
     @Test
-    @DisplayName("资料更新（PATCH /api/auth/me）不在限流范围，不受凭证桶影响")
-    void profileUpdate_notLimited() throws Exception {
+    @DisplayName("登录与删除撤销共享口令验证桶：登录用满后 restore 同样 429")
+    void loginAndDeletionRestore_sharePasswordVerificationBucket() throws Exception {
         FilterChain chain = mock(FilterChain.class);
 
-        for (int i = 0; i < 3; i++) {
-            MockHttpServletResponse resp = new MockHttpServletResponse();
-            filter.doFilter(postRequest("10.0.0.1", "/api/auth/me"), resp, chain);
-            assertEquals(200, resp.getStatus(), "/api/auth/me 资料更新不应被限流");
+        for (int i = 0; i < 2; i++) {
+            filter.doFilter(loginRequest("10.0.0.1"), new MockHttpServletResponse(), chain);
         }
+        MockHttpServletResponse restoreResp = new MockHttpServletResponse();
+        filter.doFilter(postRequest("10.0.0.1", "/api/auth/deletion/restore"), restoreResp, chain);
+        assertEquals(429, restoreResp.getStatus(),
+                "删除撤销与登录同为口令验证面，必须共享预算（否则两部分交替可获得双倍）");
+        assertEquals("login", restoreResp.getHeader(RateLimitFilter.RATE_LIMIT_RULE_HEADER));
     }
 
     @Test
@@ -237,15 +247,15 @@ class RateLimitFilterTest {
         FilterChain chain = mock(FilterChain.class);
 
         for (int i = 0; i < 6; i++) {
-            filter.doFilter(parseRequest("10.0.0.1", "/api/resume-imports/parse"),
+            filter.doFilter(postRequest("10.0.0.1", "/api/resume-imports/parse"),
                     new MockHttpServletResponse(), chain);
         }
         MockHttpServletResponse respA = new MockHttpServletResponse();
-        filter.doFilter(parseRequest("10.0.0.1", "/api/resume-imports/parse"), respA, chain);
+        filter.doFilter(postRequest("10.0.0.1", "/api/resume-imports/parse"), respA, chain);
         assertEquals(429, respA.getStatus(), "IP-A 超配额应被限流");
 
         MockHttpServletResponse respB = new MockHttpServletResponse();
-        filter.doFilter(parseRequest("10.0.0.2", "/api/resume-imports/parse"), respB, chain);
+        filter.doFilter(postRequest("10.0.0.2", "/api/resume-imports/parse"), respB, chain);
         assertEquals(200, respB.getStatus(), "IP-B 不应受 IP-A 影响");
     }
 
@@ -253,7 +263,7 @@ class RateLimitFilterTest {
     @DisplayName("桶数达到 maxBuckets 后新 key 直接被拒（#43：硬上限,防无界增长）")
     void bucketCapacity_rejectsNewKeys() throws Exception {
         // maxBuckets=2：两个 IP 占满容量后，第三个新 key 无法再建桶
-        RateLimitFilter capped = new RateLimitFilter(2, 5, 30, 6, 15, 2, 3, new ClientIpResolver(false), 2, objectMapper);
+        RateLimitFilter capped = newFilter(props -> props.setLoginPerMinute(2), 2);
         FilterChain chain = mock(FilterChain.class);
 
         assertEquals(200, statusOf(capped, "10.0.0.1", chain), "第 1 个 IP 首次请求应放行");
@@ -282,7 +292,10 @@ class RateLimitFilterTest {
     @Test
     @DisplayName("信任转发头：按 XFF 最左值分桶，同一代理地址后的不同真实客户端互不影响")
     void trustedForwardedHeaders_bucketsByForwardedClient() throws Exception {
-        RateLimitFilter trusted = new RateLimitFilter(2, 5, 30, 6, 15, 2, 3, new ClientIpResolver(true), 10000, objectMapper);
+        RateLimitProperties properties = new RateLimitProperties();
+        properties.setLoginPerMinute(2);
+        RateLimitFilter trusted = new RateLimitFilter(new RateLimitRegistry(properties), properties,
+                new ClientIpResolver(true), objectMapper);
         FilterChain chain = mock(FilterChain.class);
 
         // 同一 remoteAddr（代理地址）下，客户端 A 用完 2 次配额
@@ -299,8 +312,10 @@ class RateLimitFilterTest {
     void slidingWindow_burstAcrossMinuteBoundary_isBounded() throws Exception {
         // 可控时钟：把时间钉在「距自然分钟结束还有 100ms」处，随后手动跨过边界
         long[] clock = {1_800_000_000_000L - Math.floorMod(1_800_000_000_000L, 60_000L) + 59_900L};
-        // login 限额 10/min（构造器第 1 个参数）
-        RateLimitFilter sliding = new RateLimitFilter(10, 5, 30, 6, 15, 2, 3, new ClientIpResolver(false), 10000, objectMapper) {
+        RateLimitProperties properties = new RateLimitProperties();
+        properties.setLoginPerMinute(10);
+        RateLimitFilter sliding = new RateLimitFilter(new RateLimitRegistry(properties), properties,
+                new ClientIpResolver(false), objectMapper) {
             @Override
             long nowMs() {
                 return clock[0];
@@ -308,7 +323,6 @@ class RateLimitFilterTest {
         };
         FilterChain chain = mock(FilterChain.class);
 
-        // 窗口末尾用满 10 次配额
         for (int i = 0; i < 10; i++) {
             assertEquals(200, statusOf(sliding, "10.0.0.1", chain), "第 " + (i + 1) + " 次应放行");
         }
@@ -334,12 +348,12 @@ class RateLimitFilterTest {
 
         for (int i = 0; i < 3; i++) {
             MockHttpServletResponse resp = new MockHttpServletResponse();
-            filter.doFilter(getRequest("10.0.0.1", "/api/auth/export"), resp, chain);
+            filter.doFilter(postRequest("10.0.0.1", "/api/auth/export"), resp, chain);
             assertEquals(200, resp.getStatus(), "第 " + (i + 1) + " 次导出应放行");
         }
 
         MockHttpServletResponse resp = new MockHttpServletResponse();
-        filter.doFilter(getRequest("10.0.0.1", "/api/auth/export"), resp, chain);
+        filter.doFilter(postRequest("10.0.0.1", "/api/auth/export"), resp, chain);
         assertEquals(429, resp.getStatus(), "第 4 次导出应被限流");
         assertTrue(resp.getContentAsString().contains("42901"));
 
@@ -367,22 +381,9 @@ class RateLimitFilterTest {
         return request;
     }
 
-    private MockHttpServletRequest parseRequest(String ip, String path) {
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
-        request.setRemoteAddr(ip);
-        return request;
-    }
-
-    /** 任意 POST 路径（用于凭证变更/资料更新等用例）。 */
+    /** 任意 POST 路径（解析/凭证变更/导出/兜底档等用例共用）。 */
     private MockHttpServletRequest postRequest(String ip, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
-        request.setRemoteAddr(ip);
-        return request;
-    }
-
-    /** 任意 GET 路径（用于账号导出等只读端点）。 */
-    private MockHttpServletRequest getRequest(String ip, String path) {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
         request.setRemoteAddr(ip);
         return request;
     }

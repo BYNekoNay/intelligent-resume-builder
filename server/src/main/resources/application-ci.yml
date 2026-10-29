@@ -42,6 +42,14 @@ app:
       # parse 类重 CPU 端点同样放开（套件注册流程含导入解析；显式键防未来新增用例踩 429）
       resume-import-parse-per-minute: 1000
       jd-parse-per-minute: 1000
+      # 功能套件会连续打 AI/ATS/PDF/面试端点，限流档位一律放开（限流正确性由单测覆盖）
+      pdf-render-per-minute: 1000
+      ai-generate-per-minute: 1000
+      ats-check-per-minute: 1000
+      interview-turn-per-minute: 1000
+      desktop-mutation-per-minute: 1000
+      health-detail-per-minute: 1000
+      write-default-per-minute: 1000
   ai:
     worker:
       poll-interval-ms: 200

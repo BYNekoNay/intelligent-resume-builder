@@ -22,3 +22,15 @@ app:
       register-per-minute: 100
       login-per-minute: 100
       refresh-per-minute: 100
+      # 本地联调会成批跑导出/体检/面试，避免误触 429（阈值仍低于测试profile，够验证重试语义）
+      resume-import-parse-per-minute: 100
+      jd-parse-per-minute: 100
+      change-credential-per-minute: 100
+      account-export-per-minute: 100
+      pdf-render-per-minute: 100
+      ai-generate-per-minute: 100
+      ats-check-per-minute: 100
+      interview-turn-per-minute: 100
+      desktop-mutation-per-minute: 100
+      health-detail-per-minute: 100
+      write-default-per-minute: 1000

@@ -56,6 +56,18 @@ app:
       login-per-minute: 1000
       register-per-minute: 1000
       refresh-per-minute: 1000
+      # 单用户桌面场景：连续导入/导出/体检都是正常操作，同样放宽
+      resume-import-parse-per-minute: 1000
+      jd-parse-per-minute: 1000
+      change-credential-per-minute: 1000
+      account-export-per-minute: 1000
+      pdf-render-per-minute: 1000
+      ai-generate-per-minute: 1000
+      ats-check-per-minute: 1000
+      interview-turn-per-minute: 1000
+      desktop-mutation-per-minute: 1000
+      health-detail-per-minute: 1000
+      write-default-per-minute: 1000
   ai:
     worker:
       poll-interval-ms: 200

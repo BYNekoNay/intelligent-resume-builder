@@ -74,7 +74,10 @@ public class NumericConfigurationValidator {
         Map<String, Integer> minimums = new LinkedHashMap<>();
         // 限流阈值：0/负值会让对应端点永久 429（登录/注册/刷新/解析/凭证变更/导出全部不可用）
         for (String endpoint : new String[]{"login", "register", "refresh", "resume-import-parse",
-                "jd-parse", "change-credential", "account-export"}) {
+                "jd-parse", "change-credential", "account-export",
+                // 限流注册表新增档位：漏进 MINIMUMS 时 0 值会被静默接受 → 整类端点永久 429
+                "pdf-render", "ai-generate", "ats-check", "interview-turn",
+                "desktop-mutation", "health-detail", "write-default"}) {
             minimums.put("app.security.rate-limit." + endpoint + "-per-minute", 1);
         }
         // 分桶硬上限（#43）：0 会让所有受限端点直接 fail-closed
