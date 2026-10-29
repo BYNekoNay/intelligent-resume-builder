@@ -153,6 +153,14 @@ const messages: Partial<Record<Locale, MessageTree>> = {
       fallbackQuotaExceeded: 'AI 用量已达上限，已使用本地规则完成检查。', fallbackProviderTimeout: 'AI 分析超时，已使用本地规则完成检查。',
       fallbackProviderError: 'AI 分析暂时不可用，已使用本地规则完成检查。', fallbackInvalidResponse: 'AI 返回结果无法解析，已使用本地规则完成检查。',
       fallbackUnknown: 'AI 分析未能完成，已使用本地规则完成检查。' },
+    atsParser: {
+      keywordTitle: '关键词缺口', keywordDesc: '把目标岗位的关键词逐个对照简历正文，分成三档：直接命中、仅同义词命中、完全缺失。', keywordMissing: '完全缺失', keywordPartial: '仅同义词命中', keywordMatched: '直接命中', keywordNone: '没有需要补充的关键词。', keywordLegacy: '这份检查记录产生于关键词明细上线之前，重新跑一次即可看到缺口。',
+      title: '解析器看到什么', desc: '这是招聘系统读到的简历文本与结构。章节名按 ATS 通用英文标准显示，与界面语言无关。', meta: '{chars} 字符 · {lines} 行 · {items} 个条目', copy: '复制文本', copied: '已复制',
+      contactTitle: '联系方式识别', contactName: '姓名', contactEmail: '邮箱', contactPhone: '电话', contactLocation: '城市', contactLinks: '链接', contactLinkCount: '{count} 条',
+      warningsTitle: '解析风险', noWarnings: '未发现解析风险。', textToggle: '展开解析文本', sectionsTitle: '章节读取情况', sectionItems: '{count} 条', sectionEmpty: '未读到',
+      loadError: '解析器视角加载失败，请稍后重试。', retry: '重新加载',
+      section: { basics: '页头信息', objective: '求职目标', links: '个人链接', work: '工作经历', volunteering: '志愿经历', skills: '技能', projects: '项目经历', education: '教育背景', courses: '课程培训', certificates: '证书', publications: '研究成果', awards: '奖项荣誉', languages: '语言能力', customSections: '自定义模块' },
+      warning: { missingName: '没有解析到姓名。', missingEmail: '没有解析到邮箱。', invalidEmail: '邮箱格式无法识别，招聘系统可能读不到。', missingPhone: '没有解析到手机号。', invalidPhone: '电话格式无法识别，建议只写数字与区号。', missingLocation: '没有解析到所在城市。', itemMissingDates: '该章节有 {count} 条经历缺少起止时间，招聘系统无法据此计算工作年限。', unknownSection: '「{section}」不是标准章节，这部分内容不会被招聘系统读到。', noExperience: '没有读到工作或项目经历。', noSkills: '没有读到技能章节。', noEducation: '没有读到教育背景。' } },
     import: {
       eyebrow: '简历导入', title: '导入并整理已有简历', subtitle: '上传不超过 5 MB 的 PDF、DOCX 或 TXT 文件。系统只解析文件，不会保存源文件。',
       progressLabel: '简历导入进度', step1: '选择文件', step2: '解析内容', step3: '检查文本', step4: '进入生成',

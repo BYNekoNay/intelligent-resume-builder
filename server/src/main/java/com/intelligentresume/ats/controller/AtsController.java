@@ -6,6 +6,7 @@ import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.ats.dto.AtsCheckRequest;
 import com.intelligentresume.ats.dto.AtsCheckResponse;
+import com.intelligentresume.ats.dto.ParserViewResponse;
 import com.intelligentresume.ats.service.AtsService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -53,6 +54,20 @@ public class AtsController {
     @PostMapping("/checks/{id}/preview")
     public ApiResponse<AiPreviewService.PreviewResponse> preview(@PathVariable Long id, HttpServletRequest httpRequest) {
         return ApiResponse.success(service.preview(id, currentUserId(httpRequest)), traceId(httpRequest));
+    }
+
+    /**
+     * 解析器视角诊断（B4）：机器读这份简历时实际看到的内容与结构。
+     *
+     * <p>只读：不落库、不调 AI、不消耗配额、不要求 {@code Idempotency-Key}。
+     * 归属校验复用 {@code AtsService.ownedVersion}，因此「他人版本」404、「已归档版本」409
+     * 与 check 端点行为一致。
+     */
+    @GetMapping("/parser-view")
+    public ApiResponse<ParserViewResponse> parserView(@RequestParam Long resumeVersionId,
+                                                       HttpServletRequest httpRequest) {
+        return ApiResponse.success(service.parserView(resumeVersionId, currentUserId(httpRequest)),
+                traceId(httpRequest));
     }
 
     private Long currentUserId(HttpServletRequest request) {

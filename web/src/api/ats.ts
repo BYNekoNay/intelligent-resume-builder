@@ -17,6 +17,51 @@ export interface AtsCheckResponse {
   aiTaskId: number | null
   aiInsights: AtsAiInsights | null
   fallback: AtsFallbackInfo | null
+  /**
+   * 关键词三档明细（B4）。**旧检查记录为 null**——面板据此隐藏，
+   * 不要当成「检查过且全部命中」。
+   */
+  keywordGap: KeywordGap | null
+}
+
+export interface KeywordGap {
+  matched: string[]
+  partialMatched: string[]
+  missing: string[]
+  coverage: number
+}
+
+/** 解析器视角（B4）：机器读这份简历时看到的线性文本与结构。 */
+export interface ParserViewSection {
+  code: string
+  present: boolean
+  itemCount: number
+  charCount: number
+}
+
+export interface ParserViewWarning {
+  code: string
+  section: string | null
+  count: number | null
+}
+
+export interface ParserViewContact {
+  name: boolean
+  email: boolean
+  emailValid: boolean
+  phone: boolean
+  location: boolean
+  linkCount: number
+}
+
+export interface ParserViewResponse {
+  resumeVersionId: number
+  charCount: number
+  lineCount: number
+  sections: ParserViewSection[]
+  contact: ParserViewContact
+  warnings: ParserViewWarning[]
+  plainText: string
 }
 
 export interface AtsAiInsights {
@@ -47,4 +92,12 @@ export function getAtsCheck(id: number) {
 
 export function retryAtsAi(id: number) {
   return http.post<AtsCheckResponse>(`/api/ats/checks/${id}/ai-retry`)
+}
+
+/**
+ * 解析器视角诊断（B4）：按版本渲染，与检查记录无关（不需要 checkId、不落库、不调 AI）。
+ * 之所以按版本而不是按检查取：用户换 JD 重跑检查时，同一份简历「被机器读到的样子」不会变。
+ */
+export function getAtsParserView(resumeVersionId: number) {
+  return http.get<ParserViewResponse>('/api/ats/parser-view', { params: { resumeVersionId } })
 }

@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  AlertTriangle, BrainCircuit, CheckCircle2, FileSearch, ListChecks,
-  PencilLine, Quote, RefreshCw, SearchCheck, ShieldCheck, Sparkles,
+  AlertTriangle, BrainCircuit, Check, CheckCircle2, Copy, FileSearch, ListChecks,
+  PencilLine, Quote, RefreshCw, ScanText, SearchCheck, ShieldCheck, Sparkles, Target,
 } from 'lucide-vue-next'
-import { getAtsCheck, retryAtsAi, runAtsCheck, type AtsCheckResponse } from '@/api/ats'
+import {
+  getAtsCheck, getAtsParserView, retryAtsAi, runAtsCheck,
+  type AtsCheckResponse, type ParserViewResponse, type ParserViewWarning,
+} from '@/api/ats'
+import LoadingBlock from '@/components/ui/LoadingBlock.vue'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useTaskPolling, TASK_POLL_DEFAULT_INITIAL_DELAY_MS } from '@/composables/useTaskPolling'
 import { useLocale } from '@/i18n'
 import { mapAtsSection } from '@/resume/sectionRegistry'
+import { parserSectionLabelKey, parserWarningLabelKey } from '@/utils/parserLabels'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
 
 const ATS_POLL_INTERVAL_MS = 1_500
@@ -154,6 +159,99 @@ function editorLocation(section: string, kind: 'evidence' | 'action', index: num
   }
 }
 
+// ---------------------------------------------------------------- B4：关键词缺口
+
+const gap = computed(() => result.value?.keywordGap ?? null)
+
+/** 三档顺序固定为「缺失 → 仅同义词 → 直接命中」：用户先看要补的，再看已经有的。 */
+const gapGroups = computed(() => {
+  const current = gap.value
+  if (!current) return []
+  return [
+    { key: 'missing', tone: 'missing', label: t('atsParser.keywordMissing'), items: current.missing },
+    { key: 'partial', tone: 'partial', label: t('atsParser.keywordPartial'), items: current.partialMatched },
+    { key: 'matched', tone: 'matched', label: t('atsParser.keywordMatched'), items: current.matched },
+  ]
+})
+
+// ------------------------------------------------------------ B4：解析器视角
+
+const parserView = ref<ParserViewResponse | null>(null)
+const parserLoading = ref(false)
+const parserError = ref('')
+const copied = ref(false)
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
+
+const parserItemTotal = computed(
+  () => parserView.value?.sections.reduce((sum, section) => sum + section.itemCount, 0) ?? 0,
+)
+
+/**
+ * 联系方式识别结果。邮箱要「有内容」**且**「格式可解析」才算识别成功——
+ * 这正是 ATS 的真实判据：字段存在但格式怪，机器一样读不到。
+ *
+ * 链接是**可选**项：多数正常简历没有个人链接，把它标成红色缺失属于误报，
+ * 会让用户去补一个并不影响 ATS 解析的东西。三档：ok / missing / optional。
+ */
+const contactChips = computed(() => {
+  const contact = parserView.value?.contact
+  if (!contact) return []
+  return [
+    { label: t('atsParser.contactName'), tone: contact.name ? 'ok' : 'missing', value: '' },
+    { label: t('atsParser.contactEmail'), tone: contact.email && contact.emailValid ? 'ok' : 'missing', value: '' },
+    { label: t('atsParser.contactPhone'), tone: contact.phone ? 'ok' : 'missing', value: '' },
+    { label: t('atsParser.contactLocation'), tone: contact.location ? 'ok' : 'missing', value: '' },
+    {
+      label: t('atsParser.contactLinks'),
+      tone: contact.linkCount > 0 ? 'ok' : 'optional',
+      value: t('atsParser.contactLinkCount', { count: contact.linkCount }),
+    },
+  ]
+})
+
+function sectionLabel(code: string) {
+  const key = parserSectionLabelKey(code)
+  return key ? t(key) : code
+}
+
+/** 未登记的码（后端先上线）退回显示码本身，不静默吞掉——用户至少能看到"有个新风险"。 */
+function warningText(warning: ParserViewWarning) {
+  const key = parserWarningLabelKey(warning.code)
+  if (!key) return warning.code
+  return t(key, { count: warning.count ?? 0, section: warning.section ?? '' })
+}
+
+async function loadParserView(versionId: number) {
+  parserLoading.value = true
+  parserError.value = ''
+  try {
+    parserView.value = await getAtsParserView(versionId)
+  } catch {
+    parserView.value = null
+    parserError.value = t('atsParser.loadError')
+  } finally {
+    parserLoading.value = false
+  }
+}
+
+async function copyParserText() {
+  if (!parserView.value) return
+  try {
+    await navigator.clipboard.writeText(parserView.value.plainText)
+    copied.value = true
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => { copied.value = false }, 2_000)
+  } catch {
+    // 剪贴板被拒（非安全上下文/无权限）时保持按钮原状，不提示"已复制"——宁可没反应也不说谎
+    copied.value = false
+  }
+}
+
+// 解析器视角只依赖简历版本：同一版本换 JD 重跑检查时不必重新取
+watch(() => result.value?.resumeVersionId, (versionId) => {
+  if (versionId) void loadParserView(versionId)
+})
+
 onMounted(async () => {
   await load()
   const id = Number(route.query.result)
@@ -166,7 +264,10 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  if (copiedTimer) clearTimeout(copiedTimer)
+})
 </script>
 
 <template>
@@ -217,6 +318,22 @@ onBeforeUnmount(stopPolling)
 
       <div class="score-grid"><p><strong>{{ t('ats.score') }}</strong><span>{{ result.totalScore }}</span></p><p><strong>{{ t('ats.structure') }}</strong><span>{{ result.checks.structure }}</span></p><p><strong>{{ t('ats.coverage') }}</strong><span>{{ result.checks.keywordCoverage }}</span></p></div>
 
+      <section v-if="gap" class="keyword-gap">
+        <header>
+          <span><Target :size="18" /></span>
+          <div><h3>{{ t('atsParser.keywordTitle') }}</h3><p>{{ t('atsParser.keywordDesc') }}</p></div>
+          <strong>{{ gap.coverage }}<small>%</small></strong>
+        </header>
+        <div class="gap-groups">
+          <article v-for="group in gapGroups" :key="group.key" :class="['gap-group', group.tone]">
+            <header><span>{{ group.label }}</span><small>{{ group.items.length }}</small></header>
+            <p v-if="!group.items.length" class="gap-empty">{{ t('atsParser.keywordNone') }}</p>
+            <ul v-else><li v-for="item in group.items" :key="`${group.key}-${item}`">{{ item }}</li></ul>
+          </article>
+        </div>
+      </section>
+      <p v-else-if="result.analysisStatus !== 'ANALYZING'" class="form-hint" role="status">{{ t('atsParser.keywordLegacy') }}</p>
+
       <section v-if="result.aiInsights" class="ai-insights">
         <header><span><BrainCircuit :size="18" /></span><div><h3>{{ t('ats.aiSummary') }}</h3><p>{{ result.aiInsights.summary }}</p></div><small>{{ t('ats.confidence') }} · {{ result.aiInsights.confidence }}</small></header>
 
@@ -234,6 +351,49 @@ onBeforeUnmount(stopPolling)
       </section>
 
       <div class="ats-findings"><section class="priority-findings"><h3><AlertTriangle :size="15" />{{ t('ats.priorities') }}</h3><ol><li v-for="priority in result.priorities" :key="priority">{{ priority }}</li><li v-if="!result.priorities.length">{{ t('ats.noPriorities') }}</li></ol></section><section class="passed-findings"><h3><CheckCircle2 :size="15" />{{ t('ats.passed') }}</h3><ul><li v-for="passed in result.passedChecks" :key="passed">{{ passed }}</li></ul></section><section class="risk-findings"><h3><AlertTriangle :size="15" />{{ t('ats.risks') }}</h3><ul><li v-for="risk in result.risks" :key="risk">{{ risk }}</li><li v-if="!result.risks.length">{{ t('ats.noRisks') }}</li></ul></section></div>
+      <section class="parser-view">
+        <header class="parser-heading">
+          <span><ScanText :size="18" /></span>
+          <div><h3>{{ t('atsParser.title') }}</h3><p>{{ t('atsParser.desc') }}</p></div>
+          <button v-if="parserView" type="button" class="btn-neon btn-ghost parser-copy" @click="copyParserText">
+            <component :is="copied ? Check : Copy" :size="14" />{{ copied ? t('atsParser.copied') : t('atsParser.copy') }}
+          </button>
+        </header>
+
+        <p v-if="parserError" class="form-error parser-error" role="alert">
+          {{ parserError }}
+          <button type="button" class="parser-retry" @click="loadParserView(result.resumeVersionId)">{{ t('atsParser.retry') }}</button>
+        </p>
+        <LoadingBlock v-else-if="parserLoading" :rows="3" />
+
+        <template v-else-if="parserView">
+          <p class="parser-meta" role="status">
+            {{ t('atsParser.meta', { chars: parserView.charCount, lines: parserView.lineCount, items: parserItemTotal }) }}
+          </p>
+          <div class="parser-contact">
+            <span v-for="field in contactChips" :key="field.label" :class="field.tone">
+              <component v-if="field.tone !== 'optional'" :is="field.tone === 'missing' ? AlertTriangle : Check" :size="12" />{{ field.label }}<small v-if="field.value">{{ field.value }}</small>
+            </span>
+          </div>
+          <div class="parser-sections">
+            <span v-for="section in parserView.sections" :key="section.code" :class="{ empty: !section.present }">
+              {{ sectionLabel(section.code) }}
+              <small>{{ section.present ? t('atsParser.sectionItems', { count: section.itemCount }) : t('atsParser.sectionEmpty') }}</small>
+            </span>
+          </div>
+          <ul v-if="parserView.warnings.length" class="parser-warnings">
+            <li v-for="(warning, index) in parserView.warnings" :key="`${warning.code}-${warning.section ?? index}`">
+              <AlertTriangle :size="13" />{{ warningText(warning) }}
+            </li>
+          </ul>
+          <p v-else class="parser-clean"><CheckCircle2 :size="13" />{{ t('atsParser.noWarnings') }}</p>
+          <details class="parser-text-block">
+            <summary>{{ t('atsParser.textToggle') }}</summary>
+            <pre class="parser-text">{{ parserView.plainText }}</pre>
+          </details>
+        </template>
+      </section>
+
       <small class="result-disclaimer">{{ result.disclaimer }}</small>
     </article>
   </section>
@@ -271,8 +431,54 @@ onBeforeUnmount(stopPolling)
 .action-list > article { display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--border-soft); }.action-list > article > span { align-self: start; text-align: center; }.action-list > article strong { font-size: 10px; }
 .insight-edit-link { display: flex; align-items: center; gap: 5px; width: fit-content; margin-top: 9px; color: var(--accent); font-size: 10px; font-weight: 700; text-decoration: none; }.insight-edit-link:hover { text-decoration: underline; }.insight-edit-link:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
 .ats-findings { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.ats-findings section { padding: 15px 17px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--bg-page); }.ats-findings .risk-findings { grid-column: 1 / -1; }.ats-findings h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 9px; color: var(--text-primary); font-size: 11px; }.priority-findings h3, .risk-findings h3 { color: var(--warning); }.passed-findings h3 { color: var(--success); }.ats-findings ol, .ats-findings ul { display: grid; gap: 6px; margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }.result-disclaimer { color: var(--text-tertiary); font-size: 9px; line-height: 1.55; }
+/* B4：关键词缺口 */
+.keyword-gap { display: grid; border-top: 1px solid var(--border); }
+.keyword-gap > header { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 16px 0; }
+.keyword-gap > header > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 6px; color: var(--info); background: var(--info-light); }
+.keyword-gap h3 { margin: 0; color: var(--text-primary); font-size: 11px; }
+.keyword-gap > header p { max-width: 620px; margin: 4px 0 0; color: var(--text-secondary); font-size: 10px; line-height: 1.55; }
+.keyword-gap > header strong { color: var(--accent); font-family: var(--font-utility); font-size: 20px; font-weight: 700; }
+.keyword-gap > header strong small { font-size: 10px; }
+.gap-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-bottom: 16px; }
+.gap-group { padding: 12px 14px; border: 1px solid var(--border-soft); border-left: 3px solid var(--border); border-radius: 6px; background: var(--bg-page); }
+.gap-group.missing { border-left-color: var(--danger); }
+.gap-group.partial { border-left-color: var(--warning); }
+.gap-group.matched { border-left-color: var(--success); }
+.gap-group header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--text-secondary); font-size: 10px; font-weight: 700; }
+.gap-group header small { color: var(--text-primary); font-family: var(--font-utility); font-size: 13px; }
+.gap-group ul { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0 0; padding: 0; list-style: none; }
+.gap-group li { padding: 3px 7px; border: 1px solid var(--border-soft); border-radius: 4px; background: var(--bg-surface); color: var(--text-secondary); font-size: 9px; }
+.gap-group.missing li { border-color: color-mix(in srgb, var(--danger) 30%, var(--border-soft)); color: var(--danger); }
+.gap-group.partial li { color: var(--warning); }
+.gap-group.matched li { color: var(--success); }
+.gap-empty { margin: 9px 0 0; color: var(--text-tertiary); font-size: 9px; }
+/* B4：解析器视角 */
+.parser-view { display: grid; padding-top: 16px; border-top: 1px solid var(--border); }
+.parser-heading { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding-bottom: 14px; }
+.parser-heading > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 6px; color: var(--info); background: var(--info-light); }
+.parser-heading h3 { margin: 0; color: var(--text-primary); font-size: 11px; }
+.parser-heading p { max-width: 620px; margin: 4px 0 0; color: var(--text-secondary); font-size: 10px; line-height: 1.55; }
+.parser-copy { padding: 6px 10px; font-size: 9px; }
+.parser-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.parser-retry { border: 0; color: var(--accent); background: none; font-size: 9px; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.parser-meta { margin: 0 0 10px; color: var(--text-tertiary); font-family: var(--font-utility); font-size: 9px; }
+.parser-contact, .parser-sections { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.parser-contact span, .parser-sections span { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--border-soft); border-radius: 4px; background: var(--bg-page); color: var(--text-secondary); font-size: 9px; }
+.parser-contact span svg { color: var(--success); }
+.parser-contact span.missing { border-color: color-mix(in srgb, var(--danger) 30%, var(--border-soft)); color: var(--danger); }
+.parser-contact span.missing svg { color: var(--danger); }
+.parser-contact span.optional { color: var(--text-tertiary); }
+.parser-sections span small { color: var(--text-tertiary); font-family: var(--font-utility); }
+.parser-sections span.empty { border-style: dashed; opacity: .6; }
+.parser-warnings { display: grid; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; }
+.parser-warnings li { display: flex; align-items: flex-start; gap: 6px; color: var(--warning); font-size: 10px; line-height: 1.5; }
+.parser-clean { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; color: var(--success); font-size: 10px; }
+.parser-text-block { border: 1px solid var(--border-soft); border-radius: 6px; background: var(--bg-page); }
+.parser-text-block summary { padding: 10px 12px; color: var(--text-secondary); font-size: 10px; font-weight: 650; cursor: pointer; }
+.parser-text { max-height: 320px; margin: 0; padding: 0 12px 12px; overflow: auto; color: var(--text-primary); font-family: var(--font-utility); font-size: 10px; line-height: 1.65; white-space: pre-wrap; }
 .spinning { animation: spin .8s linear infinite; }
 @keyframes analyze { from { transform: translateX(-110%); } to { transform: translateX(270%); } } @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .progress-line::after, .spinning { animation: none; } }
 @media (max-width: 680px) { .ats-heading h1 { font-size: 29px; }.ats-config { grid-template-columns: 1fr; padding: 20px 16px; }.ats-section-heading, .ats-config .btn-neon { grid-column: auto; }.check-actions { grid-column: auto; display: grid; width: 100%; }.ats-config .btn-neon { width: 100%; justify-content: center; }.analysis-progress { grid-template-columns: 40px 1fr; padding: 18px 16px 22px; }.ats-result { padding: 20px 16px; }.result-heading { align-items: flex-start; flex-direction: column; }.fallback-banner { grid-template-columns: 22px 1fr; }.fallback-banner .btn-neon { grid-column: 1 / -1; width: 100%; justify-content: center; }.score-grid { grid-template-columns: 1fr; }.score-grid p { border-right: 0; border-bottom: 1px solid var(--border-soft); }.score-grid p:last-child { border-bottom: 0; }.ai-insights > header { grid-template-columns: 40px 1fr; }.ai-insights > header small { grid-column: 2; }.insight-columns, .ats-findings { grid-template-columns: 1fr; }.insight-columns > section, .insight-columns > section + section { padding: 16px 0; border-left: 0; }.insight-columns > section + section { border-top: 1px solid var(--border-soft); }.ats-findings .risk-findings { grid-column: auto; } }
+@media (max-width: 680px) { .gap-groups { grid-template-columns: 1fr; } .parser-heading { grid-template-columns: 40px minmax(0, 1fr); } .parser-copy { grid-column: 2; justify-self: start; } }
 </style>

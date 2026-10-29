@@ -40,7 +40,6 @@ const EXEMPT = new Map([
   ['HomeView.vue', '工作台仪表盘：各卡片自带加载与错误提示，未使用统一关键词；待 B3 收口'],
   ['AiConsentView.vue', '单条授权开关：无列表 → 无空态'],
   ['AchievementGuidanceView.vue', '引导页：静态说明 + 单表单，无空态'],
-  ['AtsCheckView.vue', '检查结果页：结果为空时展示的是"未检查"提示，待 B3 统一为空态组件'],
   ['CareerMaterialView.vue', '资料库：空态文案内联在子组件，待 B3 统一'],
   ['ExportView.vue', '导出任务页：无任务时与 loading 复用同一卡片，待 B3 区分'],
   ['MaterialResumeGenerationView.vue', '生成表单页：无列表 → 无空态'],

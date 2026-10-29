@@ -17,6 +17,26 @@ const ruleResult = {
   aiTaskId: null,
   aiInsights: null,
   fallback: null,
+  keywordGap: { matched: ['Java'], partialMatched: ['Spring Boot'], missing: ['Redis', 'Kafka'], coverage: 65 },
+}
+
+/** 解析器视角夹具：故意包含一个缺失联系方式与一条缺时间的经历，用来断言告警文案。 */
+const parserView = {
+  resumeVersionId: 11,
+  charCount: 214,
+  lineCount: 18,
+  sections: [
+    { code: 'basics', present: true, itemCount: 1, charCount: 48 },
+    { code: 'work', present: true, itemCount: 2, charCount: 120 },
+    { code: 'skills', present: false, itemCount: 0, charCount: 0 },
+    { code: 'education', present: true, itemCount: 1, charCount: 46 },
+  ],
+  contact: { name: true, email: true, emailValid: true, phone: false, location: true, linkCount: 0 },
+  warnings: [
+    { code: 'MISSING_PHONE', section: 'basics', count: null },
+    { code: 'ITEM_MISSING_DATES', section: 'work', count: 1 },
+  ],
+  plainText: 'Backend Candidate\nBackend Engineer\nShanghai\ncandidate@example.com\n\nSUMMARY\nSeven years of Java\n\nWORK EXPERIENCE\nEngineer | Example Systems\n- Built Java services',
 }
 const hybridResult = {
   ...ruleResult,
@@ -40,6 +60,7 @@ async function mockAtsPage(page: Page) {
   await page.route('**/api/resumes', route => route.fulfill({ json: response([{ id: 1, title: 'Backend resume' }]) }))
   await page.route('**/api/resumes/1/versions**', route => route.fulfill({ json: response([{ id: 11, versionNo: 1, sourceType: 'MANUAL' }]) }))
   await page.route('**/api/jobs', route => route.fulfill({ json: response([{ id: 20, title: 'Backend Engineer', companyName: 'Example Systems' }]) }))
+  await page.route('**/api/ats/parser-view**', route => route.fulfill({ json: response(parserView) }))
 }
 
 async function chooseInputs(page: Page) {
@@ -578,4 +599,53 @@ test('does not show a stale inline optimization result after a same-resume ATS q
   await page.waitForTimeout(2500)
   await expect(page.locator('.ai-assistant-panel')).toHaveCount(0)
   await expect(page.getByText('Designed and built Java services at scale.')).toHaveCount(0)
+})
+
+test('shows the keyword gap tiers and what the parser actually reads', async ({ page }) => {
+  await mockAtsPage(page)
+  await page.route('**/api/ats/check', route => route.fulfill({ json: response(ruleResult) }))
+
+  await page.goto('/ats')
+  await chooseInputs(page)
+  await page.getByRole('button', { name: 'Run rules only' }).click()
+
+  // 关键词三档：缺失的排在最前，用户先看到要补什么
+  await expect(page.getByRole('heading', { name: 'Keyword gaps' })).toBeVisible()
+  await expect(page.locator('.gap-group.missing li')).toHaveText(['Redis', 'Kafka'])
+  await expect(page.locator('.gap-group.partial li')).toHaveText(['Spring Boot'])
+  await expect(page.locator('.gap-group.matched li')).toHaveText(['Java'])
+
+  // 解析器视角：联系方式识别 + 告警 + 章节读取
+  await expect(page.getByRole('heading', { name: 'What the parser sees' })).toBeVisible()
+  await expect(page.locator('.parser-contact span.missing')).toHaveText(['Phone'])
+  // 没有个人链接是常态，不该标红
+  await expect(page.locator('.parser-contact span.optional')).toContainText('Links')
+  await expect(page.getByText('No phone number could be parsed.')).toBeVisible()
+  await expect(page.getByText('1 entries in this section have no start or end date, so a recruiting system cannot derive years of experience.')).toBeVisible()
+  const emptySections = page.locator('.parser-sections span.empty')
+  await expect(emptySections).toHaveCount(1)
+  await expect(emptySections).toContainText('Skills')
+  await expect(emptySections).toContainText('Not found')
+
+  // 解析文本默认折叠：它不是给人读的主内容，展开后才看原文
+  const parsedText = page.locator('.parser-text')
+  await expect(parsedText).toBeHidden()
+  await page.getByText('Show parsed text').click()
+  await expect(parsedText).toBeVisible()
+  await expect(parsedText).toContainText('WORK EXPERIENCE')
+  await expect(parsedText).toContainText('Built Java services')
+})
+
+test('keeps the keyword panel hidden for checks that predate the detail', async ({ page }) => {
+  await mockAtsPage(page)
+  await page.route('**/api/ats/check', route => route.fulfill({ json: response({ ...ruleResult, keywordGap: null }) }))
+
+  await page.goto('/ats')
+  await chooseInputs(page)
+  await page.getByRole('button', { name: 'Run rules only' }).click()
+
+  await expect(page.getByRole('heading', { name: 'ATS Check Report' })).toBeVisible()
+  // 旧记录没有明细：提示重跑，而不是显示一个"3 个关键词全部命中"的假面板
+  await expect(page.getByRole('heading', { name: 'Keyword gaps' })).toHaveCount(0)
+  await expect(page.getByText('This check predates keyword detail. Run it again to see the gaps.')).toBeVisible()
 })

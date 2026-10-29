@@ -38,13 +38,14 @@ public class AtsService {
     private final IdempotencyService idempotencyService;
     private final AtsAiPromptBuilder promptBuilder;
     private final AtsAiStarter aiStarter;
+    private final ResumeParserViewRenderer parserViewRenderer;
     private final ObjectMapper objectMapper;
 
     public AtsService(ScoringService scoringService, ResumeVersionRepository versionRepository,
                       ResumeRepository resumeRepository, JobDescriptionRepository jobRepository,
                       AtsCheckResultRepository repository, IdempotencyService idempotencyService,
                       AtsAiPromptBuilder promptBuilder, AtsAiStarter aiStarter,
-                      ObjectMapper objectMapper) {
+                      ResumeParserViewRenderer parserViewRenderer, ObjectMapper objectMapper) {
         this.scoringService = scoringService;
         this.versionRepository = versionRepository;
         this.resumeRepository = resumeRepository;
@@ -53,6 +54,7 @@ public class AtsService {
         this.idempotencyService = idempotencyService;
         this.promptBuilder = promptBuilder;
         this.aiStarter = aiStarter;
+        this.parserViewRenderer = parserViewRenderer;
         this.objectMapper = objectMapper;
     }
 
@@ -95,6 +97,9 @@ public class AtsService {
         persisted.put("passedChecks", passed);
         persisted.put("risks", risks);
         persisted.put("priorities", match.explanation().suggestions());
+        // B4：关键词缺口结构化落库 —— 此前命中的关键词只以「缺少 JD 关键词: a, b」一句话出现在 risks 里，
+        // 用户看不出「哪些是直接命中、哪些只是同义词命中、各自差多少」，也就无法决定先补哪个。
+        persisted.put("keywordGap", keywordGap(match));
         persisted.put("disclaimer", DISCLAIMER);
         persisted.put("analysisStatus", request.shouldUseAi()
                 ? AtsAnalysisStatus.RULES_FALLBACK.name() : AtsAnalysisStatus.RULES_ONLY.name());
@@ -157,6 +162,27 @@ public class AtsService {
         return aiStarter.preview(result, version, job);
     }
 
+    /**
+     * 解析器视角诊断（B4）：机器读这份简历时实际看到的内容与结构。
+     *
+     * <p>只读：不落库、不调 AI、不消耗配额。归属校验复用 {@link #ownedVersion}，
+     * 因此「已归档版本」与「他人版本」的行为与检查端点完全一致（409 / 404）。
+     */
+    @Transactional(readOnly = true)
+    public ParserViewResponse parserView(Long versionId, Long userId) {
+        ResumeVersion version = ownedVersion(versionId, userId);
+        return parserViewRenderer.render(version.getId(), version.getResumeJson());
+    }
+
+    private Map<String, Object> keywordGap(MatchResponse match) {
+        Map<String, Object> gap = new LinkedHashMap<>();
+        gap.put("matched", match.explanation().matched());
+        gap.put("partialMatched", match.explanation().partialMatched());
+        gap.put("missing", match.explanation().missing());
+        gap.put("coverage", match.keywordScore());
+        return gap;
+    }
+
     private ResumeVersion ownedVersion(Long versionId, Long userId) {
         ResumeVersion version = versionRepository.findById(versionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在"));
@@ -184,7 +210,8 @@ public class AtsService {
                 analysisStatus,
                 enumValue(AtsAnalysisSource.class, json.get("analysisSource"), AtsAnalysisSource.RULES),
                 longValue(json.get("aiTaskId")), convert(json.get("aiInsights"), AtsAiInsights.class),
-                convert(json.get("fallback"), AtsFallbackInfo.class));
+                convert(json.get("fallback"), AtsFallbackInfo.class),
+                convert(json.get("keywordGap"), KeywordGap.class));
     }
 
     @SuppressWarnings("unchecked")

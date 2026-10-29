@@ -19,5 +19,7 @@ public record AtsCheckResponse(
         AtsAnalysisSource analysisSource,
         Long aiTaskId,
         AtsAiInsights aiInsights,
-        AtsFallbackInfo fallback
+        AtsFallbackInfo fallback,
+        /** B4：关键词三档明细；旧记录为 null（前端隐藏面板，不等于"全部命中"）。 */
+        KeywordGap keywordGap
 ) {}

@@ -85,7 +85,9 @@ class UploadPathContractTest {
     @DisplayName("导出下载显式放宽超时：响应体上限 10MB，全局 10s 会在慢网络下中断合法下载")
     void exportDownloadSetsExplicitTimeout() throws Exception {
         String api = read("web/src/api/export.ts");
-        Matcher download = Pattern.compile("apiClient\\.get<Blob>\\(`/api/exports/files/\\$\\{id\\}`[^)]*\\)")
+        // 传输层助手名不参与判据：B 批次把 apiClient.* 收口成 http.*（解信封）属于合法重构，
+        // 本门禁的真实不变量是「下载显式设置 timeout」，不是「用哪个 helper 发请求」。
+        Matcher download = Pattern.compile("(?:apiClient|http)\\.get<Blob>\\(`/api/exports/files/\\$\\{id\\}`[^)]*\\)")
                 .matcher(api);
         assertTrue(download.find(), "web/src/api/export.ts 应存在导出文件下载调用（否则本门禁需更新）");
         assertTrue(Pattern.compile("timeout:\\s*[\\d_]+").matcher(download.group()).find(),
@@ -122,7 +124,7 @@ class UploadPathContractTest {
     @DisplayName("账号导出下载超时与兄弟下载路径对齐：体量随账号增长且无上限，30s 只够 ~3.2Mbps")
     void accountExportDownloadSetsSufficientTimeout() throws Exception {
         String api = read("web/src/api/auth.ts");
-        Matcher call = Pattern.compile("apiClient\\.post<string>\\('/api/auth/export'[^)]*\\)").matcher(api);
+        Matcher call = Pattern.compile("(?:apiClient|http)\\.post<string>\\('/api/auth/export'[^)]*\\)").matcher(api);
         assertTrue(call.find(), "web/src/api/auth.ts 应存在带密码复核的账号导出调用");
         Matcher timeout = Pattern.compile("timeout:\\s*([\\d_]+)").matcher(call.group());
         assertTrue(timeout.find(), "账号导出未显式设置 timeout：会回落到全局 10s");
