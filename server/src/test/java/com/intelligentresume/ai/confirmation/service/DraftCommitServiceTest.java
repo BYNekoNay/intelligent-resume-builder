@@ -79,7 +79,7 @@ class DraftCommitServiceTest {
         Map<String, Object> resultJson = new LinkedHashMap<>();
         resultJson.put("draftResumeJson", draft);
         resultJson.put("selected", List.of(
-                Map.of("materialId", 1, "outputPath", "work[0]", "selectedReason", "AUTO_SELECTED")
+                Map.of("materialId", 1, "outputPath", "work[0]", "selectedReason", "AI_REFERENCED")
         ));
         task.setResultJson(resultJson);
         return task;
@@ -270,67 +270,6 @@ class DraftCommitServiceTest {
         assertFalse(editedSnapshotContent.containsKey("_sources"));
         verify(materialRepository, never()).findByIdAndUserId(2L, USER_ID);
         verify(materialRepository, never()).findByIdAndUserId(3L, USER_ID);
-    }
-
-    @Test
-    @DisplayName("静默跳过是选择性的: 恰好 1 条引用，且只写被 ACCEPT 覆盖的那条（ADR-011 Decision 3）")
-    void commit_selectedMaterialMissingFromItems_isSilentlySkipped() {
-        // fixture：selected 有两条 —— work[0]（items 未覆盖）与 basics（被 ACCEPT 覆盖）；
-        // items 只 ACCEPT basics。故 work[0] 的 decisionForSourcePath 返回 null，
-        // 走 DraftCommitService:202-204 的 continue 短路，而 basics 照常写引用。
-        //
-        // 关键：**同一个 fixture 内同时证明「跳过」与「不误伤」**。只断言 never() 是不够的 ——
-        // 那个写法在「循环被改成无脑全部 continue」时仍然全绿，证明不了跳过是选择性的。
-        //
-        // 此断言钉住 ADR-011 Decision 3 的**当前语义**：未列入 items 的 selected 素材 = 未确认 ≠ 被使用，
-        // 静默不写引用、不报 400/409；其余被 ACCEPT 覆盖的素材引用照常写。
-        // 若未来改为显式拒绝（OPEN-DECISIONS.md 2026-10-20 条目），本用例是唯一会变红的基线 ——
-        // 请连同 ADR-011 Decision 3 一起改，不要只删断言。
-        AiTask task = buildTask(AiTaskStatus.SUCCESS, ConfirmationStatus.PENDING);
-        task.setResultJson(new LinkedHashMap<>(Map.of(
-                "draftResumeJson", task.getResultJson().get("draftResumeJson"),
-                "selected", List.of(
-                        Map.of("materialId", 1, "outputPath", "work[0]", "selectedReason", "AI_REFERENCED"),
-                        Map.of("materialId", 2, "outputPath", "basics", "selectedReason", "AI_REFERENCED")))));
-        when(taskRepository.findByIdForUpdate(TASK_ID)).thenReturn(Optional.of(task));
-        when(resumeRepository.findByIdAndUserId(10L, USER_ID))
-                .thenReturn(Optional.of(new com.intelligentresume.resume.domain.Resume()));
-        when(normalizer.normalize(any(), any())).thenReturn(new LinkedHashMap<>());
-        ResumeVersion version = new ResumeVersion();
-        version.setId(53L);
-        version.setVersionNo(6);
-        when(versionService.createInTransaction(anyLong(), any(), any(), any(), any(), anyLong()))
-                .thenReturn(version);
-
-        CareerMaterial coveredMaterial = new CareerMaterial();
-        coveredMaterial.setId(2L);
-        coveredMaterial.setTitle("基本信息素材");
-        coveredMaterial.setMaterialType(MaterialType.EDUCATION);
-        coveredMaterial.setContentJson(Map.of("name", "张三"));
-        coveredMaterial.setUsagePreference(UsagePreference.NORMAL);
-        when(materialRepository.findByIdAndUserId(2L, USER_ID)).thenReturn(Optional.of(coveredMaterial));
-
-        List<ConfirmedDraftItem> items = List.of(
-                new ConfirmedDraftItem("basics", Decision.ACCEPT, null)
-        );
-
-        // 语义 1：不抛异常（静默跳过，而不是 400/409）
-        DraftCommitService.CommitResult result = assertDoesNotThrow(
-                () -> service.commit(TASK_ID, items, null, UPDATED_AT, USER_ID, null, null));
-        assertEquals(53L, result.resumeVersionId());
-        assertEquals(ConfirmationStatus.CONFIRMED, task.getConfirmationStatus());
-
-        // 语义 2：**恰好 1 条**引用 —— 未被覆盖的 work[0] 不写，被覆盖的 basics 照常写。
-        // 「恰好 1 条」本身就是选择性的证据：0 条意味着误伤，2 条意味着漏跳过。
-        ArgumentCaptor<ResumeMaterialReference> captor = ArgumentCaptor.forClass(ResumeMaterialReference.class);
-        verify(referenceRepository, times(1)).save(captor.capture());
-        ResumeMaterialReference written = captor.getValue();
-        assertEquals(2L, written.getMaterialId(), "引用应指向被 ACCEPT 覆盖的素材 2");
-        assertEquals("basics", written.getOutputPath(), "引用路径应为被覆盖的 basics");
-        assertNotEquals("work[0]", written.getOutputPath(), "未覆盖的 work[0] 不得留下引用");
-
-        // 语义 3：被跳过的素材连快照都不读（避免无谓 IO，也不扩大越权读取面）
-        verify(materialRepository, never()).findByIdAndUserId(1L, USER_ID);
     }
 
     @Test

@@ -81,6 +81,10 @@ RetentionPolicyContractTest	docs/08-部署与运维说明书.md	账户删除的 
 ManualFactConsistencyContractTest	README.md	Flyway 迁移 V1–V38	Flyway 迁移 V1–V37
 AlertRuleContractTest	deploy/prometheus/prometheus.yml	- /opt/intelligent-resume/monitoring/prometheus/rules/*.yml	- /opt/intelligent-resume/monitoring/rules-ghost/*.yml
 BackupRetentionContractTest	deploy/backup-database.sh	MIN_KEEP="${MIN_KEEP:-3}"	# MIN_KEEP removed
+SelectionReasonContractTest	server/src/main/java/com/intelligentresume/ai/confirmation/service/DraftCommitService.java	Map<String, SelectionReason> reasonByPath = SelectionProvenance.validateAndNormalize(selected, items);	Map<String, SelectionReason> reasonByPath = new java.util.LinkedHashMap<>();
+SelectionReasonContractTest	server/src/main/java/com/intelligentresume/resume/domain/SelectionReason.java	    USER_EDITED;	    USER_EDITED, GHOST_VALUE;
+RetryReuseContractTest	server/src/main/java/com/intelligentresume/ai/task/service/AiTaskService.java	        task.setStatus(com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING);	        task.setInputSnapshotJson(task.getInputSnapshotJson());
+        task.setStatus(com.intelligentresume.ai.task.domain.AiTaskStatus.PENDING);
 TABLE_EOF
 )
 
@@ -121,6 +125,8 @@ RetentionPolicyContractTest	docs/08-部署与运维说明书.md	<<PREPEND>>	> �
 ManualFactConsistencyContractTest	README.md	<<PREPEND>>	<!-- 反例：V1–V37 与 docs/RELEASES/v0.4.1.md 只是注释 -->
 AlertRuleContractTest	deploy/prometheus/prometheus.yml	<<PREPEND>>	# 反例：rule_files: /opt/intelligent-resume/monitoring/rules-ghost/*.yml 只是注释
 BackupRetentionContractTest	deploy/backup-database.sh	<<PREPEND>>	# 反例：find . -mtime +14 -delete 只是注释
+SelectionReasonContractTest	server/src/main/java/com/intelligentresume/ai/confirmation/service/DraftCommitService.java	<<PREPEND>>	// 反例：saveReference(version, id, path, snap, sel.get("selectedReason").toString()) 只是注释
+RetryReuseContractTest	server/src/main/java/com/intelligentresume/ai/task/service/AiTaskService.java	<<PREPEND>>	// 反例：task.setInputSnapshotJson(task.getInputSnapshotJson()) 只是注释
 GOOD_EOF
 )
 
