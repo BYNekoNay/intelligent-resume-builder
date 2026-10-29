@@ -89,6 +89,35 @@ class ApiDocCoverageGateTest {
             cursor = placeholder.end();
         }
         pattern.append(Pattern.quote(path.substring(cursor)));
-        return Pattern.compile(pattern.toString()).matcher(doc).find();
+
+        Matcher hit = Pattern.compile(pattern.toString()).matcher(doc);
+        while (hit.find()) {
+            if (endsAtPathBoundary(doc, hit.end())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 命中之后必须落在路径边界上，否则说明文档里写的是**更长**的路径，本端点其实没被记录。
+     *
+     * <p>反例（2026-10-29 实测）：把文档里的 `/api/resume-versions/{id}/json-resume` 改成
+     * `.../json-resume-XX`，原来的纯子串 `find()` 依然命中前缀 → 门禁照绿。
+     * 同理会把 `/api/resumes/{id}/versions` 记成已覆盖，只要文档里出现了它的子路径
+     * `/api/resumes/{id}/versions/{versionId}/archive`。两者都是「端点改名/漏写也查不出来」。
+     *
+     * <p>只把 ASCII 的字母数字与 `-` `_` `/` 视作「还是路径的一部分」——中文正文紧跟路径
+     * （如 `…/parse接口`）不该被当成越界失败，否则门禁会被中文排版方式绊倒。
+     */
+    private boolean endsAtPathBoundary(String doc, int end) {
+        if (end >= doc.length()) {
+            return true;
+        }
+        char next = doc.charAt(end);
+        if (next >= 128) {
+            return true;
+        }
+        return !(Character.isLetterOrDigit(next) || next == '-' || next == '_' || next == '/');
     }
 }

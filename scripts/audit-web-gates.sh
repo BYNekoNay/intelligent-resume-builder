@@ -30,6 +30,15 @@ export MSYS2_ARG_CONV_EXCL='*'
 
 RUN_DIR="${GATE_AUDIT_RUN_DIR:-$ROOT/web}"
 
+# lint 棘轮阈值唯一来源 = web/package.json。
+# 曾经把 65 硬编码在这里，收紧到 64 后坏样本「+1 条告警」正好落在旧上限内 → 抽查会静默失效
+# （门禁看起来通过，实际没承重）。改成运行时读取，杜绝三处漂移。
+LINT_CAP="$(sed -n 's/.*--max-warnings[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$RUN_DIR/package.json" | head -1)"
+if [ -z "$LINT_CAP" ]; then
+  echo "[audit-web-gates] 无法从 $RUN_DIR/package.json 解析 --max-warnings 阈值" >&2
+  exit 2
+fi
+
 # ---------------------------------------------------------------------------
 # 坏样本表：gate <TAB> file <TAB> old <TAB> new
 #   gate = i18n | draft（决定跑哪个门禁脚本）；new 为空 ⇒ 删除该片段；
@@ -96,7 +105,7 @@ run_gate() { # gate -> 写 /tmp/web-gate-run.log，返回退出码
   local gate="$1" script
   case "$gate" in
     i18n-*)   script="node scripts/check-i18n.mjs" ;;
-    lint-*)   script="npx eslint . --max-warnings 65" ;;
+    lint-*)   script="npx eslint . --max-warnings $LINT_CAP" ;;
     unwrap-*) script="node scripts/check-api-unwrap.mjs" ;;
     states-*) script="node scripts/check-view-states.mjs" ;;
     bundle-*) script="node scripts/check-bundle-budget.mjs" ;;

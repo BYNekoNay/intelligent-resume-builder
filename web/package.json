@@ -7,7 +7,7 @@
     "dev": "vite",
     "check:i18n": "node --test scripts/check-i18n.test.mjs && node scripts/check-i18n.mjs",
     "check:draft-fields": "node --test scripts/check-draft-fields.test.mjs && node scripts/check-draft-fields.mjs",
-    "lint": "eslint . --max-warnings 65",
+    "lint": "eslint . --max-warnings 64",
     "lint:fix": "eslint . --fix",
     "build": "npm run check:i18n && npm run check:draft-fields && npm run check:api-unwrap && npm run check:view-states && vue-tsc -b && vite build && npm run check:bundle-budget",
     "preview": "vite preview",

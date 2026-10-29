@@ -141,7 +141,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
       # 静态检查放在最前：比单测与浏览器测试都快，失败最快给出反馈。
-      # `--max-warnings` 在 package.json 里做棘轮（当前 65）：新增告警即红，清理告警后需手动下调。
+      # `--max-warnings` 在 package.json 里做棘轮（当前 64）：新增告警即红，清理告警后需手动下调。
+      # scripts/audit-web-gates.sh 运行时从 package.json 读该阈值做坏样本抽查，无需另改一处。
       - name: Lint (ESLint, warning ratchet)
         run: npm run lint
       # 单测放在 Chromium 安装之前：失败时不必先等浏览器下载完
