@@ -175,6 +175,8 @@ C 则让"删除权"名存实亡。B 是**可实现 + 可解释**的中间态。
 
 **结论**：`decision == null`（selected 有、items 无）抛 `40903 SELECTION_ITEM_UNKNOWN`；`decision != ACCEPT` 仍 `continue`（合法的用户拒绝）。
 
+> **2026-10-29 落地更正**：码值取 **`40904`** —— 登记时未核对，`40903` 已被 `ACCOUNT_DELETION_WINDOW_EXPIRED` 占用（前端 `errorCodes.ts` 亦已映射该值），沿用会让两套文案撞车。实现与前置调查结论见 [ADR-013](./ADR-013-reject-selection-unknown.md)：前端 `items` 为全量映射（`draftItems.map`），**不存在**合法的部分提交路径。
+
 **证据**：`DraftCommitService.java:196-203` 的 `continue` 让「用户勾 5 条、只提交 3 条」这类客户端 bug 静默变成「版本已落地但少 2 条溯源引用」，且无回滚路径。409 与既有 `40901` 家族同语义（客户端持有的选择集已过期）；400 不表达「可重取后重试」。
 
 **代价**：后端 2 文件 + 错误码 + 前端映射/文案 + `docs/05` + 1 个 IT。无 DB 迁移。**改 API 行为**。

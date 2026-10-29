@@ -20,6 +20,7 @@ export const ERROR_CODE_KEYS: Readonly<Record<number, string>> = {
   40902: 'errors.versionArchived',
   40303: 'errors.accountDeletionPending',
   40903: 'errors.accountDeletionWindowExpired',
+  40904: 'errors.selectionItemUnknown',
   42901: 'errors.rateLimited',
   50001: 'errors.internal',
   50002: 'errors.aiFailure',

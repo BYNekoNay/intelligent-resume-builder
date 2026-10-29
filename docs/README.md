@@ -107,6 +107,7 @@
 | [ADR-010](./decisions/ADR-010-interview-attempt-lifecycle.md) | `interview_ai_attempt` 生命周期（双层唯一约束 + 短事务 + 陈旧丢弃） |
 | [ADR-011](./decisions/ADR-011-draft-commit-reference-provenance.md) | 草稿确认落库的材料引用只记录「真实被使用」的关系 |
 | [ADR-012](./decisions/ADR-012-windows-desktop-local-workspace.md) | Windows 桌面本地工作区的技术架构 |
+| [ADR-013](./decisions/ADR-013-reject-selection-unknown.md) | 未列入 `items` 的 selected 素材改为显式 40904 拒绝（取代 ADR-011 Decision 3） |
 
 ### 2.4 research/ —— 调研与对标
 

@@ -58,3 +58,16 @@
 - `server/src/main/java/com/intelligentresume/retention/RetentionPurgeRepository.java:49-54`、`:78-82`：分档判据（引用表极性反转）。
 - `server/src/main/java/com/intelligentresume/ai/confirmation/service/DraftCommitService.java:128-142`、`:202-204`、`:215-220`、`:319-345`：引用写入路径。
 - 守护测试：`DraftCommitServiceTest.commit_referencesOnlyAcceptedAndEditedFinalContent`（覆盖 ACCEPT/EDIT/REJECT 三条分支）；`DraftCommitServiceTest.commit_selectedMaterialMissingFromItems_isSilentlySkipped`（`decision == null` 的静默跳过分支，见 Decision 第 3 条 —— 该用例已落地，承重性由变异实验验证：注入 `|| true` → 3 红、还原 → 9/9 绿）。
+
+## 状态更正确认（2026-10-29）
+
+**Decision 3（未列入 `items` 的 selected 素材静默不写引用）已被 [ADR-013](./ADR-013-reject-selection-unknown.md) 取代**：
+该情形现在抛 `40904 SELECTION_ITEM_UNKNOWN`，且在**任何写库之前**失败。原文不改写，以 ADR-013 为准。
+- 相应地，本文「守护测试」条目里提到的 `commit_selectedMaterialMissingFromItems_isSilentlySkipped` 已更名为
+  `commit_selectedMaterialMissingFromItems_conflict`（断言 40904 + 零写入），并新增对照用例
+  `commit_rejectedSelectedMaterial_isStillSkipped`（`REJECT` 仍合法静默跳过）——**两条必须成对存在**，
+  否则"正常拒绝"与"客户端缺项"会在回归中互相冒充。
+- 本文 Decision 4 提到「`selection_reason` 取值域尚未定义」也已闭环：现由 `SelectionReason` 枚举
+  （两值）+ `SelectionReasonContractTest` 守护，未知值抛 `40001`。
+- 本文「硬约束」四条分支的要求不变；其中「未覆盖（`decision == null`）」分支的语义由"静默"改为"40904"，
+  分支覆盖要求照旧。
