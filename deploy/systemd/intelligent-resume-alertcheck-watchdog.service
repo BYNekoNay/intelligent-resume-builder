@@ -1,0 +1,19 @@
+[Unit]
+Description=Intelligent Resume alert-path watchdog (did the alert check actually run successfully?)
+Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
+After=network-online.target intelligent-resume-alertcheck.service
+
+[Service]
+Type=oneshot
+User=prometheus
+Group=prometheus
+# 检查「最近一次成功」距现在多久；超过阈值（默认 900s = 3 个周期）→ 退出码 2 → 单元记 failed。
+# 这一层解决的是「轮询脚本自己挂了」：没有它的活，告警通道静默失效与"没有告警"在外部看起来一样。
+ExecStart=/opt/intelligent-resume/bin/check-alerts.sh --watchdog
+TimeoutStartSec=1min
+MemoryMax=32M
+TasksMax=16
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=intelligent-resume-alertcheck-watchdog

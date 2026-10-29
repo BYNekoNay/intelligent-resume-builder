@@ -706,7 +706,7 @@ curl -s http://127.0.0.1:8080/actuator/prometheus | grep resume_ai_model_chain_a
 | 线上版本 | 0.5.0 | `systemctl cat intelligent-resume-api \| grep ExecStart`（jar 名 0.5.0）；`curl -s 127.0.0.1:3001/health` 自报 0.5.0 | 2026-10-29 |
 | Flyway 最高版本 | V38（38 个迁移，无缺口） | `SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1`（**不要用 `MAX(version)`**：该列是 varchar，字典序会返回 "9"） | 2026-10-29 |
 | 业务表数 | 28 | `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='intelligent_resume' AND table_type='BASE TABLE'` | 2026-10-29 |
-| 部署探针 | 33 项 / 0 失败（12 节：0~11，含项数强校验） | `bash scripts/probe-deployment.sh` 的汇总行 | 2026-10-29 |
+| 部署探针 | 36 项 / 0 失败（12 节：0~11，含项数强校验与告警出口自死检测） | `bash scripts/probe-deployment.sh` 的汇总行 | 2026-10-29 |
 | 备份 | 每日 03:30，保留 14 天 + 保底 3 份，timer 已 enabled | `systemctl list-timers intelligent-resume-backup.timer` | 2026-10-29 |
 | 告警评估 | **已生效** —— 15 条规则加载（health=ok），critical firing=0 | `curl -s 127.0.0.1:9090/api/v1/rules \| head`；探针第 10 节 | 2026-10-29 |
 | 告警出口 | alertcheck.timer 每 5 分钟轮询，critical → 退出码 2；fire drill 已验证（stop API → 2，恢复 → 0） | `journalctl -u intelligent-resume-alertcheck`；探针第 11 节 | 2026-10-29 |

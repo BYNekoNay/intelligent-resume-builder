@@ -1,0 +1,14 @@
+[Unit]
+Description=Check that the alert path has succeeded recently
+Documentation=file:/opt/intelligent-resume/src/docs/DEPLOYMENT_DIRECT.md
+
+[Timer]
+# 每 15 分钟一次：阈值是 900s（3 个轮询周期），检测粒度与阈值同量级即可，
+# 更密的检查不会更早发现问题，只会多一条 journald 记录。
+OnUnitActiveSec=15min
+OnBootSec=6min
+Persistent=true
+Unit=intelligent-resume-alertcheck-watchdog.service
+
+[Install]
+WantedBy=timers.target

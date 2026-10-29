@@ -44,13 +44,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # 计数构成（SSH 模式，新增/删减检查项时必须同步改这两个数）：
 #   固定节 0~4：11 项
 #   第 5 节 nginx 配置：1 项
-#   第 6 节 systemd 单元：deploy/systemd/ 下 5 个 .service + 2 个 .timer = 7 项
+#   第 6 节 systemd 单元：deploy/systemd/ 下 6 个 .service + 3 个 .timer = 9 项
 #   第 7 节 监听范围：3 项；第 8 节 模型链：1 项
 #   第 9 节 备份：6 项（9.1 脚本自检 / 9.2 timer / 9.3 抓取 up / 9.4 最近一次成功 / 9.5 份数新鲜度+权限）
 #   第 10 节 告警评估：2 项（规则加载 / critical firing=0）
-#   第 11 节 alertcheck：2 项（timer enabled / 主动重跑一次检查）
-#   合计 11+1+7+3+1+6+2+2 = 33 项
-EXPECTED_ITEMS_SSH=33
+#   第 11 节 告警出口：3 项（timer enabled / 主动重跑 / watchdog 自死检测）
+#   合计 11+1+9+3+1+6+2+3 = 36 项
+EXPECTED_ITEMS_SSH=36
 # 无 SSH 模式只有固定节 0~4
 EXPECTED_ITEMS_NOSSH=11
 
@@ -378,6 +378,17 @@ else
     fail "alertcheck 退出码 2 —— 此刻存在 critical firing（journalctl -u intelligent-resume-alertcheck 查看详情）"
   else
     fail "alertcheck 主动重跑失败（退出码 ${ac_rc}）—— 出口路径异常（prometheus 不可达或脚本错误）"
+  fi
+
+  # 11.3 监控自死检测：轮询脚本自己挂了时，「没有告警」与「没人检查」在外部完全一样。
+  # watchdog 以「最近一次成功」为基准（不是最近一次运行），阈值 900s = 3 个轮询周期。
+  wd_rc=0
+  sshq "sudo /opt/intelligent-resume/bin/check-alerts.sh --watchdog" >/dev/null 2>&1 || wd_rc=$?
+  if [ "$wd_rc" -eq 0 ]; then
+    pass "告警出口 watchdog 正常（最近一次成功在 900s 内）"
+  else
+    wd_detail="$(sshq "sudo journalctl -u intelligent-resume-alertcheck-watchdog -n 3 --no-pager" 2>/dev/null | tail -1)"
+    fail "告警出口 watchdog 报异常（退出码 ${wd_rc}）：${wd_detail:-状态文件缺失或长期未成功}"
   fi
 fi
 
