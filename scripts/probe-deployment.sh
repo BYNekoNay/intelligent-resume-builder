@@ -27,13 +27,32 @@
 set -uo pipefail
 
 BASE="${1:-http://101.35.239.218:8088}"
-SSH_HOST="${SSH_HOST:-community-server}"   # 可为 ssh config 别名，也可为 user@host
+# SSH_HOST 刻意默认为空：作者本机的 ssh 别名（community-server）不能写死进通用脚本——
+# 换机器跑探针时若别名不存在，第 5~11 节会静默 SKIP，24+ 项门禁实际只判 11 项。
+# 由 scripts/deploy-direct.sh 显式传入；手工运行想比配置时用 SSH_HOST=user@host。
+SSH_HOST="${SSH_HOST:-}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 SSH_OPTS=(-o ConnectTimeout=15 -o BatchMode=yes)
 [ -n "${SSH_KEY:-}" ] && [ -f "$SSH_KEY" ] && SSH_OPTS+=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
 REMOTE_ROOT="${REMOTE_ROOT:-/opt/intelligent-resume}"
 NGINX_SITE="${NGINX_SITE:-/etc/nginx/sites-available/intelligent-resume}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# 期望项数（汇总时强校验：PASS+FAIL 不等于期望值 → 探针自身失效 → 判红并退出）。
+# 治理"注释掉一行 pass/fail 导致总数悄悄缩水"的失效形态——一个不再完整运行的门禁
+# 比没有门禁更危险，因为它给人"查过了"的错觉。
+# 计数构成（SSH 模式，新增/删减检查项时必须同步改这两个数）：
+#   固定节 0~4：11 项
+#   第 5 节 nginx 配置：1 项
+#   第 6 节 systemd 单元：deploy/systemd/ 下 5 个 .service + 2 个 .timer = 7 项
+#   第 7 节 监听范围：3 项；第 8 节 模型链：1 项
+#   第 9 节 备份：5 项（9.1 脚本自检 / 9.2 timer / 9.3 抓取 up / 9.4 最近一次成功 / 9.5 份数+权限）
+#   第 10 节 告警评估：2 项（规则加载 / critical firing=0）
+#   第 11 节 alertcheck：2 项（timer enabled / 最近一次跑成功）
+#   合计 11+1+7+3+1+5+2+2 = 32 项
+EXPECTED_ITEMS_SSH=32
+# 无 SSH 模式只有固定节 0~4
+EXPECTED_ITEMS_NOSSH=11
 
 PASS=0
 FAIL=0
@@ -261,11 +280,111 @@ else
   else
     fail "prometheus 60s 内仍未抓到 API（目标 down 或 prometheus 未运行）：$(printf '%s' "$prom_resp" | head -c 160)"
   fi
+
+  # 9.4 最近一次备份真的成功过（现在只验"能跑"不够——定时器可能一直失败而上一项仍绿）
+  backup_state="$(sshq "sudo systemctl show intelligent-resume-backup.service -p Result -p InactiveExitTimestamp" 2>/dev/null | tr -d '\r')"
+  backup_result="$(printf '%s\n' "$backup_state" | sed -n 's/^Result=//p')"
+  backup_ts="$(printf '%s\n' "$backup_state" | sed -n 's/^InactiveExitTimestamp=//p')"
+  backup_age_hours=""
+  if [ -n "$backup_ts" ]; then
+    backup_epoch="$(sshq "date -d '$backup_ts' +%s" 2>/dev/null | tr -d '\r')"
+    if [ -n "$backup_epoch" ] && [ "$backup_epoch" -gt 0 ] 2>/dev/null; then
+      backup_age_hours=$(( ($(date +%s) - backup_epoch) / 3600 ))
+    fi
+  fi
+  if [ "$backup_result" = "success" ] && [ -n "$backup_age_hours" ] && [ "$backup_age_hours" -le 36 ]; then
+    pass "最近一次备份成功（${backup_age_hours}h 前；每日 03:30 触发 ⇒ 36h 内必有成功一次）"
+  else
+    fail "备份最近一次运行异常：Result=${backup_result:-unknown}，时间=${backup_ts:-unknown}（${backup_age_hours:-?}h 前）—— 备份静默失败正是 9.4 要抓的形态"
+  fi
+
+  # 9.5 备份目录事实：份数 ≥ 保底 3、最新一份 < 36h、目录 700 / 文件 600
+  backup_facts="$(sshq "sudo bash -c 'ls -la /var/backups/intelligent-resume/ 2>/dev/null; stat -c %a /var/backups/intelligent-resume 2>/dev/null'" 2>/dev/null)"
+  backup_count="$(printf '%s\n' "$backup_facts" | grep -c 'intelligent_resume-.*\.sql\.gz' || true)"
+  backup_newest_age="$(sshq "sudo bash -c 'newest=\$(ls -t /var/backups/intelligent-resume/intelligent_resume-*.sql.gz 2>/dev/null | head -1); [ -n \"\$newest\" ] && echo \$(( (\$(date +%s) - \$(stat -c %Y \"\$newest\")) / 3600 )) || echo -1'" 2>/dev/null | tr -d '\r')"
+  backup_dir_perm="$(printf '%s\n' "$backup_facts" | tail -1 | tr -d '\r')"
+  backup_file_perm="$(printf '%s\n' "$backup_facts" | grep 'intelligent_resume-.*\.sql\.gz' | head -1 | awk '{print $1}' | cut -c1-10)"
+  if [ "${backup_count:-0}" -ge 3 ] && [ "${backup_newest_age:--1}" -ge 0 ] && [ "$backup_newest_age" -le 36 ]; then
+    pass "备份份数与新鲜度达标（${backup_count} 份，最新 ${backup_newest_age}h 前，保底 3）"
+  else
+    fail "备份份数/新鲜度不达标：共 ${backup_count:-0} 份（需 ≥3），最新 ${backup_newest_age:-?}h 前（需 ≤36）"
+  fi
+  if [ "$backup_dir_perm" = "700" ] && printf '%s' "$backup_file_perm" | grep -q '^-rw-\{5\}\|rw-------'; then
+    pass "备份目录 700 / 文件 600（权限收紧生效）"
+  else
+    fail "备份权限异常：目录=${backup_dir_perm:-?}（需 700），文件=${backup_file_perm:-?}（需 600）—— PII 泄露面"
+  fi
+fi
+
+# ---------- 10. 告警规则真的在评估（P3 兑现：rule_files 之前从未生效）----------
+# 与 9.3 同理必须重试：部署会重启 prometheus，重启后 /api/v1/rules 短暂为空或 health=unknown。
+printf '\n=== 10. 告警规则评估 ===\n'
+if [ -z "${SSH_HOST:-}" ]; then
+  printf '  [SKIP] 未提供 SSH_HOST，跳过\n'
+else
+  rules_resp=""
+  rules_ok=0
+  for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+    rules_resp="$(sshq "curl -fsS 'http://127.0.0.1:9090/api/v1/rules'" 2>/dev/null)"
+    if printf '%s' "$rules_resp" | grep -q '"health":"ok"' \
+      && [ "$(printf '%s' "$rules_resp" | grep -o '"name":"[A-Za-z]*"' | wc -l)" -ge 15 ]; then
+      rules_ok=1
+      break
+    fi
+    sleep 6
+  done
+  rule_count="$(printf '%s' "$rules_resp" | grep -o '"name":"[A-Za-z]*"' | wc -l | tr -d ' ')"
+  if [ "$rules_ok" -eq 1 ]; then
+    pass "告警规则已加载且评估正常（${rule_count} 条，health=ok，第 ${_attempt} 次查询）"
+  else
+    fail "告警规则未生效：/api/v1/rules 返回 ${rule_count:-0} 条或 health≠ok —— rule_files 未加载或 prometheus 未重启"
+  fi
+
+  firing_resp="$(sshq "curl -fsS 'http://127.0.0.1:9090/api/v1/alerts'" 2>/dev/null)"
+  crit_firing="$(printf '%s' "$firing_resp" | python3 -c "import json,sys
+try:
+  alerts=json.load(sys.stdin).get('data',{}).get('alerts',[])
+  print(sum(1 for a in alerts if a.get('state')=='firing' and a.get('labels',{}).get('severity')=='critical'))
+except Exception:
+  print(-1)" 2>/dev/null)"
+  if [ "${crit_firing:--1}" -eq 0 ]; then
+    pass "critical firing = 0（静默环境）"
+  else
+    fail "存在 critical firing = ${crit_firing:-解析失败} —— 检查 intelligent-resume-alertcheck 日志与上游服务"
+  fi
+fi
+
+# ---------- 11. 告警出口（alertcheck.timer）真的在跑 ----------
+printf '\n=== 11. 告警出口 ===\n'
+if [ -z "${SSH_HOST:-}" ]; then
+  printf '  [SKIP] 未提供 SSH_HOST，跳过\n'
+else
+  ac_timer="$(sshq "sudo systemctl is-enabled intelligent-resume-alertcheck.timer" 2>/dev/null | tr -d '\r')"
+  if [ "$ac_timer" = "enabled" ]; then
+    ac_next="$(sshq "systemctl list-timers intelligent-resume-alertcheck.timer --no-pager" 2>/dev/null | sed -n '2p' | awk '{print $1, $2, $3}')"
+    pass "alertcheck 定时器已 enabled（下次触发：${ac_next:-未知}）"
+  else
+    fail "alertcheck 定时器未 enabled（当前：${ac_timer:-unknown}）—— 告警出口不存在，规则评估了也没人看"
+  fi
+
+  ac_state="$(sshq "sudo systemctl show intelligent-resume-alertcheck.service -p Result" 2>/dev/null | tr -d '\r' | sed 's/^Result=//')"
+  if [ "$ac_state" = "success" ]; then
+    pass "alertcheck 最近一次运行成功（无 critical firing）"
+  else
+    fail "alertcheck 最近一次运行结果=${ac_state:-unknown}（failed=出现过 critical firing 或脚本异常；journalctl -u intelligent-resume-alertcheck 查看详情）"
+  fi
 fi
 
 # ---------- 汇总 ----------
 printf '\n%s\n' "----------------------------------------------------------------------"
-printf '探针合计 %d 项：通过 %d，失败 %d\n' "$((PASS + FAIL))" "$PASS" "$FAIL"
+TOTAL=$((PASS + FAIL))
+if [ -n "${SSH_HOST:-}" ]; then EXPECTED_ITEMS=$EXPECTED_ITEMS_SSH; else EXPECTED_ITEMS=$EXPECTED_ITEMS_NOSSH; fi
+printf '探针合计 %d 项：通过 %d，失败 %d（期望 %d 项）\n' "$TOTAL" "$PASS" "$FAIL" "$EXPECTED_ITEMS"
+if [ "$TOTAL" -ne "$EXPECTED_ITEMS" ]; then
+  printf '⚠ 实际执行项数 %d ≠ 期望 %d —— 探针自身失效（检查项被注释/跳过？），本轮结果不可信。\n' "$TOTAL" "$EXPECTED_ITEMS"
+  printf '  修正方法：增删检查项后同步更新脚本头部 EXPECTED_ITEMS_SSH / EXPECTED_ITEMS_NOSSH。\n'
+  exit 1
+fi
 if [ "$FAIL" -gt 0 ]; then
   printf '⚠ 有失败项：部署虽已完成，但复核未通过 —— 不得据此判定"部署成功"。\n'
   exit 1
