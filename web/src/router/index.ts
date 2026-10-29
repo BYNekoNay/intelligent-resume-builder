@@ -1,15 +1,20 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import AppLayout from '@/layouts/AppLayout.vue'
-import HomeView from '@/views/HomeView.vue'
-import LoginView from '@/views/LoginView.vue'
 import NotFoundView from '@/views/NotFoundView.vue'
-import RegisterView from '@/views/RegisterView.vue'
 import RouteLoadErrorView from '@/views/RouteLoadErrorView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { lazyChunkRetryKey } from './lazyChunkRecovery'
 import { navigationTargets, validateNavigationTargets } from '@/navigation/registry'
 import { useDesktopMode } from '@/composables/useDesktopMode'
+
+// 首屏三个页面也懒加载（2026-10-29 拆包）：
+// 改造前 HomeView（1025 行）/Login/Register 是静态 import，全被塞进主包，
+// 于是「只打开登录页」的用户也要下载整个工作台。三者都已在路由守卫里按需触发。
+// NotFound / RouteLoadError 刻意保持静态：错误兜底页不能再依赖一次网络加载。
+const HomeView = () => import('@/views/HomeView.vue')
+const LoginView = () => import('@/views/LoginView.vue')
+const RegisterView = () => import('@/views/RegisterView.vue')
 
 const ResumeListView = () => import('@/views/ResumeListView.vue')
 const ResumeDetailView = () => import('@/views/ResumeDetailView.vue')

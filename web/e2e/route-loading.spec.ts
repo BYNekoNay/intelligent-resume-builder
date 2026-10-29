@@ -6,7 +6,15 @@ const routerSource = readFileSync(
   'utf8',
 )
 
+// 2026-10-29（前端地基批次）把 HomeView / LoginView / RegisterView 从静态 import 改为动态 import：
+// 改造前三者被塞进主包（index chunk 64.6 KB gz），"只打开登录页"的用户也要下载整个工作台；
+// 改后入口 chunk 57.7 KB。代价是首屏多一次同源 chunk 取用（HomeView 3.2 KB gz），
+// 换来的是所有业务视图统一走懒加载、主包不再随页面增长。
+// 兜底页（NotFound / RouteLoadError）**保持静态**：错误页不能再依赖一次网络加载。
 const lazyViews = [
+  'HomeView',
+  'LoginView',
+  'RegisterView',
   'ResumeListView',
   'ResumeDetailView',
   'ResumeEditorView',
@@ -91,8 +99,12 @@ test('loads feature views through route-level dynamic imports', () => {
     expect(routerSource).not.toMatch(new RegExp(`^import\\s+${view}\\s+from`, 'm'))
   }
 
-  for (const eagerView of ['AppLayout', 'HomeView', 'LoginView', 'RegisterView']) {
+  // 只有"壳"与"错误兜底页"允许静态导入：壳必须在首帧存在，兜底页不能再触发一次网络请求。
+  for (const eagerView of ['AppLayout', 'NotFoundView', 'RouteLoadErrorView']) {
     expect(routerSource).toMatch(new RegExp(`^import\\s+${eagerView}\\s+from`, 'm'))
+  }
+  for (const lazyView of ['HomeView', 'LoginView', 'RegisterView']) {
+    expect(routerSource).not.toMatch(new RegExp(`^import\\s+${lazyView}\\s+from`, 'm'))
   }
 
   expect(routerSource).toContain('router.onError')
