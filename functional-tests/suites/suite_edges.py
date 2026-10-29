@@ -177,13 +177,24 @@ def main():
                          "sourceText": "负责订单服务开发与性能优化，熟悉 Java、Spring Boot、MySQL、Redis。"},
                         tok=tok2)
     mid = (d(raw) or {}).get("id")
-    code, raw, _ = call("POST", "/api/ai/select-materials-for-job",
-                        {"jobDescriptionId": jid2, "includedMaterialIds": [mid],
-                         "preferredMaterialIds": [], "excludedMaterialIds": [],
-                         "resumeTitle": f"拒绝验证-{RUN}"}, tok=tok2,
-                        extra={"Idempotency-Key": f"b2-sel-{RUN}"})
+    # v0.4.4 破坏性变更（R32）：创建选材任务前必须先调 /preview 拿 X-AI-Preview-Token，
+    # 否则一律 40001。此处走与前端完全相同的两步握手（preview → 带令牌创建），
+    # 顺带把"预览令牌确实签发且能通过校验"也纳入断言。
+    selection_body = {"jobDescriptionId": jid2, "includedMaterialIds": [mid],
+                      "preferredMaterialIds": [], "excludedMaterialIds": [],
+                      "resumeTitle": f"拒绝验证-{RUN}"}
+    code, raw, _ = call("POST", "/api/ai/select-materials-for-job/preview",
+                        selection_body, tok=tok2)
+    sel_preview_token = (d(raw) or {}).get("previewToken")
+    check("C0 选材预览已签发令牌（R32 发送前预览握手）", bool(sel_preview_token),
+          f"HTTP {code} previewToken={'有' if sel_preview_token else '无'}")
+    sel_headers = {"Idempotency-Key": f"b2-sel-{RUN}"}
+    if sel_preview_token:
+        sel_headers["X-AI-Preview-Token"] = sel_preview_token
+    code, raw, _ = call("POST", "/api/ai/select-materials-for-job", selection_body, tok=tok2,
+                        extra=sel_headers)
     sel = d(raw) or {}
-    stid = sel.get("taskId") or sel.get("id")
+    stid = sel.get("id")
     check("C1 选材任务已创建", bool(stid), f"HTTP {code} taskId={stid}")
     if stid:
         for _ in range(40):
@@ -208,11 +219,23 @@ def main():
                   f"status={sel_status}（中间态滞留，或失败未暴露原因）err={sel_err[:100]}")
         if sel_status == "SUCCESS":
             # 确认选材 → 生成 → 拒绝（AI 成功路径，需真实模型密钥）
+            # v0.4.4 契约：body 用 taskUpdatedAt（乐观锁）+ selectedMaterialIds，
+            # 且同样必须先预览取令牌（旧字段 confirmedMaterialIds 已移除）。
+            confirm_body = {"taskUpdatedAt": (d(tr) or {}).get("updatedAt"),
+                            "selectedMaterialIds": [mid],
+                            "forcedIncludedMaterialIds": [],
+                            "resumeTitle": f"拒绝验证-{RUN}"}
+            _, cp_raw, _ = call("POST", f"/api/ai/tasks/{stid}/confirm-materials/preview",
+                                confirm_body, tok=tok2)
+            cfm_token = (d(cp_raw) or {}).get("previewToken")
+            cfm_headers = {"Idempotency-Key": f"b2-cfm-{RUN}"}
+            if cfm_token:
+                cfm_headers["X-AI-Preview-Token"] = cfm_token
             code, raw, _ = call("POST", f"/api/ai/tasks/{stid}/confirm-materials",
-                                {"confirmedMaterialIds": [mid]}, tok=tok2)
+                                confirm_body, tok=tok2, extra=cfm_headers)
             observe("C3 确认选材", code, raw)
             gt = d(raw) or {}
-            gid = gt.get("taskId") or gt.get("id")
+            gid = gt.get("id")
             if gid:
                 for _ in range(60):
                     time.sleep(3)
@@ -221,9 +244,13 @@ def main():
                         break
                 check("C4 生成任务成功", (d(tr2) or {}).get("status") == "SUCCESS",
                       f"status={(d(tr2) or {}).get('status')}")
+                # v0.4.4 契约：reject 只收 taskUpdatedAt（乐观锁），旧的 reason 字段已移除；
+                # 提交前重新取一次任务，拿最新的 updatedAt，避免与 worker 收尾写入撞车。
+                _, gtr, _ = call("GET", f"/api/ai/tasks/{gid}", tok=tok2)
                 code, raw, _ = call("POST", f"/api/ai/tasks/{gid}/reject",
-                                    {"reason": "内容不符合预期"}, tok=tok2)
-                check("C5 reject 拒绝草稿", code in (200, 204), f"HTTP {code}")
+                                    {"taskUpdatedAt": (d(gtr) or {}).get("updatedAt")}, tok=tok2)
+                check("C5 reject 拒绝草稿", code in (200, 204),
+                      f"HTTP {code} {raw.decode('utf-8', 'replace')[:120]}")
                 code, raw, _ = call("GET", f"/api/ai/tasks/{gid}", tok=tok2)
                 observe("C6 拒绝后的任务状态", code, raw)
         else:
@@ -244,7 +271,15 @@ def main():
         aid = (d(raw) or {}).get("id")
         check("D1 纯规则检查已创建", bool(aid), f"HTTP {code} id={aid}")
         if aid:
-            code, raw, _ = call("POST", f"/api/ats/checks/{aid}/ai-retry", {}, tok=tok2)
+            # v0.4.4：ai-retry 也需要发送前预览令牌 —— 缺令牌会以 40001 直接拒绝，
+            # 不再静默降级为规则结果。先取令牌，才能观察到"对 useAi=false 发起重试"的真实语义。
+            _, prev_raw, _ = call("POST", f"/api/ats/checks/{aid}/preview", {}, tok=tok2)
+            ats_token = (d(prev_raw) or {}).get("previewToken")
+            ats_headers = {}
+            if ats_token:
+                ats_headers["X-AI-Preview-Token"] = ats_token
+            code, raw, _ = call("POST", f"/api/ats/checks/{aid}/ai-retry", {}, tok=tok2,
+                                extra=ats_headers)
             body = d(raw) or {}
             observe(f"D2 对 useAi=false 的检查发起 ai-retry（analysisStatus={body.get('analysisStatus')} "
                     f"analysisSource={body.get('analysisSource')} aiTaskId={body.get('aiTaskId')}）", code, raw)
@@ -273,10 +308,19 @@ def main():
                         {"resumeJson": RESUME, "sourceType": "MANUAL"}, tok=tok2)
     rvid3 = (d(raw) or {}).get("id")
     if rvid3 and jid2:
-        code, raw, _ = call("POST", "/api/communications/ai-generate",
-                            {"resumeVersionId": rvid3, "jobDescriptionId": jid2,
-                             "type": "EMAIL", "outputLanguage": "ZH_CN"}, tok=tok2,
-                            extra={"Idempotency-Key": f"b2-ai-gen-{RUN}"})
+        gen_body = {"resumeVersionId": rvid3, "jobDescriptionId": jid2,
+                    "type": "EMAIL", "outputLanguage": "ZH_CN"}
+        # v0.4.4：ai-generate 同样要先预览再带令牌（预览只读，不要求 Idempotency-Key）。
+        _, prev_raw, _ = call("POST", "/api/communications/ai-generate/preview",
+                              gen_body, tok=tok2)
+        gen_token = (d(prev_raw) or {}).get("previewToken")
+        check("F0 沟通生成预览已签发令牌（R32 发送前预览）", bool(gen_token),
+              f"previewToken={'有' if gen_token else '无'}")
+        gen_headers = {"Idempotency-Key": f"b2-ai-gen-{RUN}"}
+        if gen_token:
+            gen_headers["X-AI-Preview-Token"] = gen_token
+        code, raw, _ = call("POST", "/api/communications/ai-generate", gen_body, tok=tok2,
+                            extra=gen_headers)
         ai = d(raw) or {}
         check("F1 ai-generate 已受理（202；注意该接口要求必填 Idempotency-Key 头）",
               code in (200, 201, 202),

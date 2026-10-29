@@ -269,7 +269,12 @@ def main():
         if aid:
             code, raw = call("GET", f"/api/ats/checks/{aid}", tok=tok_a)
             check("E4 ats 结果回读", code == 200, f"HTTP {code}")
-            code, raw = call("POST", f"/api/ats/checks/{aid}/ai-retry", {}, tok=tok_a)
+            # v0.4.4（R32）：ai-retry 需要发送前预览令牌，缺令牌会 40001 直接拒绝；
+            # 先按同一协议取令牌，观察到的才是"重试语义"而不是"缺令牌"。
+            _, prev_raw = call("POST", f"/api/ats/checks/{aid}/preview", {}, tok=tok_a)[:2]
+            ats_token = (data_of(prev_raw) or {}).get("previewToken")
+            code, raw = call("POST", f"/api/ats/checks/{aid}/ai-retry", {}, tok=tok_a,
+                             extra={"X-AI-Preview-Token": ats_token} if ats_token else None)
             observe("E5 ats ai-retry（对非失败检查的预期行为）", code, raw)
 
     # ---------------- F. 导出 ----------------

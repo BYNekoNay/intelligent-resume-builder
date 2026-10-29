@@ -307,8 +307,11 @@ def main():
               f"resumeVersionId={resume_version_id}")
 
     if resume_version_id:
+        # v0.4.4（R32）：`/check` 不带预览令牌**不再自动起 AI**，而是落
+        # RULES_FALLBACK + PREVIEW_REQUIRED。真实客户端流程是「先出规则分 →
+        # 预览将要发送的内容 → 带令牌重试」，这里走同一条路径。
         code, payload = call("POST", "/api/ats/check", {
-            "resumeVersionId": resume_version_id, "jobDescriptionId": job["id"], "useAi": True},
+            "resumeVersionId": resume_version_id, "jobDescriptionId": job["id"], "useAi": False},
             token=token, extra_headers={"Idempotency-Key": f"ats-{RUN}"}, timeout=180)
         ats = data_of(payload)
         ok = check("ats-check-created", is_2xx(code) and isinstance(ats, dict) and ats.get("id"),
@@ -316,6 +319,15 @@ def main():
         if ok:
             check("ats-rules-scored", isinstance(ats.get("totalScore"), (int, float)),
                   f"规则分={ats.get('totalScore')}")
+            _, preview_payload = call("POST", f"/api/ats/checks/{ats['id']}/preview", {},
+                                      token=token)
+            ats_preview_token = (data_of(preview_payload) or {}).get("previewToken")
+            check("ats-preview-issued-token", bool(ats_preview_token), "ATS 预览令牌")
+            code, payload = call("POST", f"/api/ats/checks/{ats['id']}/ai-retry", {}, token=token,
+                                 extra_headers={"X-AI-Preview-Token": ats_preview_token}
+                                 if ats_preview_token else None, timeout=180)
+            ats = data_of(payload) or ats
+            check("ats-ai-retry-accepted", is_2xx(code), f"HTTP {code}")
             # 与 poll_ai_task 同理：AI worker 串行执行，ATS 的 AI 分析会排在生成任务之后
             deadline = time.time() + 600
             while time.time() < deadline and ats.get("analysisStatus") == "ANALYZING":
@@ -406,10 +418,21 @@ def main():
     section("10. 授权撤回后 AI 必须被拦截")
     code, _ = call("DELETE", "/api/ai/consent", token=token)
     check("consent-withdraw", is_2xx(code), f"HTTP {code}")
-    code, _ = call("POST", "/api/ai/select-materials-for-job", {
+    # v0.4.4：创建端点会先校验预览令牌（缺令牌 40001），因此必须走完整的两步握手，
+    # 否则测到的是「缺令牌」而不是「授权已撤回」—— 断言会名不副实。
+    blocked_body = {
         "jobDescriptionId": job["id"], "includedMaterialIds": material_ids[:1],
-        "preferredMaterialIds": [], "excludedMaterialIds": [], "resumeTitle": "撤回后应被拦截"},
-        token=token, extra_headers={"Idempotency-Key": f"blocked-{RUN}"})
+        "preferredMaterialIds": [], "excludedMaterialIds": [], "resumeTitle": "撤回后应被拦截"}
+    _, blocked_preview = call("POST", "/api/ai/select-materials-for-job/preview",
+                              blocked_body, token=token)
+    blocked_token = (data_of(blocked_preview) or {}).get("previewToken")
+    check("withdrawn-consent-preview-token-issued", bool(blocked_token),
+          "预览只读、不调 provider，撤回后仍可拿到令牌（拦截点在创建侧）")
+    code, _ = call("POST", "/api/ai/select-materials-for-job", blocked_body,
+                   token=token,
+                   extra_headers={"Idempotency-Key": f"blocked-{RUN}",
+                                  "X-AI-Preview-Token": blocked_token} if blocked_token
+                   else {"Idempotency-Key": f"blocked-{RUN}"})
     check("withdrawn-consent-blocks-ai", code == 403, f"HTTP {code}（期望 403）")
 
     # 重新授权，使账号保持可用状态，便于登录查看生成结果
