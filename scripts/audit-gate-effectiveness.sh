@@ -77,6 +77,8 @@ ResponseCompressionContractTest	server/src/main/resources/application.yml	min-re
 SchemaDocContractTest	docs/04-数据库设计说明书.md	### 3.4 resume_version	### 3.4 resume_version_x
 MySql57BaselineContractTest	server/src/test/resources/mysql57/v19-schema.sql	<<PREPEND>>	CREATE TABLE ghost_audit_gate_probe (id BIGINT);
 OpenDecisionRegisterContractTest	docs/decisions/OPEN-DECISIONS.md	(2026-10-28)<br>Decision: **采显式 409	(2026-10-28)<br>**采显式 409
+RetentionPolicyContractTest	docs/08-部署与运维说明书.md	账户删除的 7 天撤销窗口与窗口结束后的级联清扫**已实施**	账户删除的 7 天撤销窗口与窗口结束后的级联清扫**计划中，尚未实现**
+ManualFactConsistencyContractTest	README.md	Flyway 迁移 V1–V38	Flyway 迁移 V1–V37
 TABLE_EOF
 )
 
@@ -113,6 +115,8 @@ AlertRuleContractTest	monitoring/prometheus/rules/intelligent-resume-alerts.yml	
 ExportStreamingContractTest	server/src/main/java/com/intelligentresume/auth/service/AccountExportService.java	<<PREPEND>>	// 反例：this.mapper.writeValueAsString(payload) 只是注释，不是整份缓冲
 MySql57BaselineContractTest	server/src/test/resources/mysql57/v19-schema.sql	<<PREPEND>>	-- 反例：CREATE TABLE ghost_audit_gate_probe (id BIGINT); 只是注释
 OpenDecisionRegisterContractTest	docs/decisions/OPEN-DECISIONS.md	<<PREPEND>>	<!-- 反例：| 2026-01-01 | ghost | 干扰行 | — | — | — | — | OPEN | 只是注释 -->
+RetentionPolicyContractTest	docs/08-部署与运维说明书.md	<<PREPEND>>	> 反例：账户删除仍是「计划中，尚未实现」只是引用块
+ManualFactConsistencyContractTest	README.md	<<PREPEND>>	<!-- 反例：V1–V37 与 docs/RELEASES/v0.4.1.md 只是注释 -->
 GOOD_EOF
 )
 
