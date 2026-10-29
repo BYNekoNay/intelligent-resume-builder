@@ -93,6 +93,20 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
                                                   @Param("after") LocalDateTime after);
 
     /**
+     * 全站当日「尝试数」按任务类型分组（一次查询取回全部类型）。
+     *
+     * <p>为什么需要它：观测 gauge 若按类型各发一条单类型聚合，8 个任务类型就是**每次抓取 8 条
+     * {@code count} 聚合**（15~30s 抓取间隔下约 2~4 万次/天）。这台宿主机只有 3.6G 且与另一个
+     * 项目共用，监控不该成为负载来源。分组查询 + 短 TTL 快照把开销压到「每个抓取周期最多 1 条」。
+     *
+     * <p>口径与 {@link #countAttemptsByTaskTypeAndCreatedAtAfter} 完全一致（重试计次），
+     * 否则「消耗量」与「限额」不可比。
+     */
+    @Query("SELECT t.taskType, COALESCE(SUM(CASE WHEN t.retryCount < 1 THEN 1 ELSE t.retryCount END), 0) FROM AiTask t " +
+            "WHERE t.createdAt > :after GROUP BY t.taskType")
+    List<Object[]> sumAttemptsGroupedByTaskType(@Param("after") LocalDateTime after);
+
+    /**
      * 保留期清理候选（ideation #26）：终态、非待确认、尚未压缩过的老任务。
      *
      * <p>待确认（SUCCESS + confirmationStatus=PENDING）任务属于「用户还没处理完」的工作，

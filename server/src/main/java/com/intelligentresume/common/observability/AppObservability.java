@@ -32,6 +32,13 @@ public class AppObservability {
     private final AiTaskRepository aiTaskRepository;
     private final ExportTaskRepository exportTaskRepository;
     private final Map<AiTaskType, Integer> quotaLimits = new EnumMap<>(AiTaskType.class);
+
+    /** 当日尝试数快照（按类型）。TTL 见 {@link #refreshQuotaAttemptsIfStale()}。 */
+    private volatile Map<AiTaskType, Long> quotaAttemptsSnapshot = Map.of();
+    private volatile long quotaAttemptsRefreshedAt = 0L;
+
+    /** 快照 TTL：≈ 抓取间隔。监控允许一个周期的陈旧，但不能成为 DB 负载来源。 */
+    private static final long QUOTA_ATTEMPTS_TTL_MS = 30_000L;
     /** Micrometer Gauge 对 state 只持弱引用，此处强引用住 supplier 防止指标读数退化为 NaN。 */
     private final List<IntSupplier> gaugeStrongReferences = new CopyOnWriteArrayList<>();
 
@@ -155,8 +162,11 @@ public class AppObservability {
         if (quotaLimits.putIfAbsent(taskType, limit) != null) {
             return;
         }
+        // 指标名与标签保持不变（历史面板与告警规则依赖它们）；只改**取值来源**：
+        // 由「每类型各发一条 count(*)」改为「所有类型共享一次分组查询 + 短 TTL 快照」。
+        // 抓取时 8 个 gauge 依次回调，但只有第一个会触发查询，其余读快照。
         Gauge.builder("resume_ai_quota_daily_attempts", aiTaskRepository,
-                        repository -> repository.countAttemptsByTaskTypeAndCreatedAtAfter(taskType, LocalDate.now().atStartOfDay()))
+                        repository -> quotaAttemptsToday(taskType))
                 .tag("task_type", taskType.name())
                 .tag("scope", "all_users")
                 .register(registry);
@@ -164,6 +174,38 @@ public class AppObservability {
                         limits -> limits.getOrDefault(taskType, 0))
                 .tag("task_type", taskType.name())
                 .register(registry);
+    }
+
+    /**
+     * 全站当日尝试数（按类型）——过期即整批刷新，避免每次抓取发 8 条聚合查询。
+     *
+     * <p>为什么用快照而不是 MultiGauge：指标形状必须与历史一致（{@code task_type} + {@code scope}
+     * 两个标签、每类型一条序列），MultiGauge 会在同名指标上重建序列集合，面板与告警规则
+     * （`AlertRuleContractTest` 守着）都要跟着改。改成「同一指标 + 共享快照」对消费者零感知。
+     *
+     * <p>TTL 取 30s ≈ 抓取间隔：监控数据允许一个周期的陈旧，但不允许成为数据库负载来源。
+     */
+    private long quotaAttemptsToday(AiTaskType taskType) {
+        refreshQuotaAttemptsIfStale();
+        return quotaAttemptsSnapshot.getOrDefault(taskType, 0L);
+    }
+
+    private void refreshQuotaAttemptsIfStale() {
+        long now = System.currentTimeMillis();
+        if (now - quotaAttemptsRefreshedAt < QUOTA_ATTEMPTS_TTL_MS) {
+            return;
+        }
+        synchronized (this) {
+            if (now - quotaAttemptsRefreshedAt < QUOTA_ATTEMPTS_TTL_MS) {
+                return;
+            }
+            Map<AiTaskType, Long> refreshed = new EnumMap<>(AiTaskType.class);
+            for (Object[] row : aiTaskRepository.sumAttemptsGroupedByTaskType(LocalDate.now().atStartOfDay())) {
+                refreshed.put((AiTaskType) row[0], ((Number) row[1]).longValue());
+            }
+            quotaAttemptsSnapshot = Map.copyOf(refreshed);
+            quotaAttemptsRefreshedAt = now;
+        }
     }
 
     public void recordQuotaRejected(AiTaskType taskType) {
