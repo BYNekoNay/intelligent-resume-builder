@@ -19,6 +19,18 @@ public enum ErrorCode {
     VERSION_ARCHIVED(40902, "简历版本已归档"),
     ACCOUNT_DELETION_PENDING(40303, "账号处于删除撤销期"),
     ACCOUNT_DELETION_WINDOW_EXPIRED(40903, "删除撤销期已结束"),
+    /**
+     * 确认草稿时，selected 里出现了 items 完全没有覆盖的素材路径。
+     *
+     * <p>与 {@link #CONFLICT} 区分：40901 的处置是「刷新重试」，而本码的处置是
+     * 「重新载入选材」——客户端持有的选择集已经过期（少提交了某些项），重试同一请求必然再失败。
+     * 历史语义是静默 continue（ADR-011 Decision 3），实测后果是「版本已落地但少了溯源引用」
+     * 且无任何信号；v0.5.0 起改为显式拒绝（ADR-013）。
+     *
+     * <p>注意码值：登记册（OPEN-DECISIONS 2026-10-28）原写 40903，但 40903 已被
+     * {@link #ACCOUNT_DELETION_WINDOW_EXPIRED} 占用；沿用会让前端文案映射撞车，故取 40904。
+     */
+    SELECTION_ITEM_UNKNOWN(40904, "选材已过期，请重新载入后确认"),
     INTERNAL(50001, "系统异常"),
     AI_FAILURE(50002, "AI 调用失败"),
     PDF_FAILURE(50003, "PDF 导出失败");

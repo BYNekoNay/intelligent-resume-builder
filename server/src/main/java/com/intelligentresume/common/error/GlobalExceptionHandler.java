@@ -198,7 +198,7 @@ public class GlobalExceptionHandler {
             case FORBIDDEN, CONSENT_REQUIRED, ACCOUNT_DELETION_PENDING -> HttpStatus.FORBIDDEN;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
-            case CONFLICT, VERSION_ARCHIVED, ACCOUNT_DELETION_WINDOW_EXPIRED -> HttpStatus.CONFLICT;
+            case CONFLICT, VERSION_ARCHIVED, ACCOUNT_DELETION_WINDOW_EXPIRED, SELECTION_ITEM_UNKNOWN -> HttpStatus.CONFLICT;
             case INTERNAL, AI_FAILURE, PDF_FAILURE -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
     }

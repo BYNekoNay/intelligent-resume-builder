@@ -18,6 +18,7 @@ import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.resume.domain.Resume;
 import com.intelligentresume.resume.domain.ResumeSourceType;
 import com.intelligentresume.resume.domain.ResumeVersion;
+import com.intelligentresume.resume.domain.SelectionReason;
 import com.intelligentresume.resume.repository.ResumeRepository;
 import com.intelligentresume.resume.service.ResumeVersionService;
 import org.springframework.stereotype.Service;
@@ -115,6 +116,13 @@ public class DraftCommitService {
             }
         }
 
+        // 6b. 选材溯源的两项准入校验（ADR-013）：①selected 的每一处溯源必须被 items 覆盖（否则 40904）；
+        // ②selection_reason 归一化、未知值拒绝（40001）。二者都在**任何写库之前**失败，
+        // 不依赖事务回滚撤掉已创建的版本。实现在 SelectionProvenance（本类已到行数棘轮上限）。
+        // decision != ACCEPT 仍是合法的静默跳过（用户明确拒绝该项）。
+        Map<String, ConfirmedDraftItem> decisionsByPath = SelectionProvenance.decisionsByPath(items);
+        Map<String, SelectionReason> reasonByPath = SelectionProvenance.validateAndNormalize(selected, items);
+
         // 7. 标准化
         Map<String, Object> normalized = normalizer.normalize(draft, items);
 
@@ -186,10 +194,7 @@ public class DraftCommitService {
 
         // 10. 写入最终内容的来源引用。REJECT 不产生引用；EDIT 使用新建的
         // 用户编辑资料，不能继续引用 AI 生成时的原始素材。
-        Map<String, ConfirmedDraftItem> decisionsByPath = new LinkedHashMap<>();
-        for (ConfirmedDraftItem item : items) {
-            decisionsByPath.put(item.outputPath(), item);
-        }
+        // （decisionsByPath / reasonByPath 已在 6b 构建并校验）
         if (selected != null) {
             for (Map<String, Object> sel : selected) {
                 Long materialId = toLong(sel.get("materialId"));
@@ -198,7 +203,7 @@ public class DraftCommitService {
                 }
                 String outputPath = sel.get("outputPath") != null
                         ? sel.get("outputPath").toString() : "";
-                ConfirmedDraftItem decision = decisionForSourcePath(outputPath, decisionsByPath);
+                ConfirmedDraftItem decision = SelectionProvenance.decisionForSourcePath(outputPath, decisionsByPath);
                 if (decision == null || decision.decision() != Decision.ACCEPT) {
                     continue;
                 }
@@ -208,8 +213,10 @@ public class DraftCommitService {
                         .map(this::buildSnapshot)
                         .orElse(Map.of("id", materialId, "note", "资料已不存在"));
 
+                // D5：原因已在 6b 统一归一化（未知值在那时就已拒绝，不依赖事务回滚）
+                SelectionReason reason = reasonByPath.get(outputPath + "#" + materialId);
                 saveReference(version.getId(), materialId, outputPath, matSnapshot,
-                        sel.get("selectedReason") != null ? sel.get("selectedReason").toString() : null);
+                        reason == null ? null : reason.dbValue());
             }
         }
         for (Map.Entry<String, Long> edited : editedMaterialIds.entrySet()) {
@@ -217,7 +224,8 @@ public class DraftCommitService {
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Edited material not found"));
             Map<String, Object> editedSnapshot = buildSnapshot(material);
             editedSnapshot.put("origin", "USER_EDITED");
-            saveReference(version.getId(), material.getId(), edited.getKey(), editedSnapshot, "USER_EDITED");
+            saveReference(version.getId(), material.getId(), edited.getKey(), editedSnapshot,
+                    SelectionReason.USER_EDITED.dbValue());
         }
 
         // 11. 更新任务状态
@@ -296,23 +304,6 @@ public class DraftCommitService {
         ref.setSourceSnapshotJson(snapshot);
         ref.setSelectionReason(reason);
         referenceRepository.save(ref);
-    }
-
-    private ConfirmedDraftItem decisionForSourcePath(
-            String sourcePath, Map<String, ConfirmedDraftItem> decisionsByPath) {
-        ConfirmedDraftItem match = null;
-        int longestMatch = -1;
-        for (ConfirmedDraftItem item : decisionsByPath.values()) {
-            String decisionPath = item.outputPath();
-            if ((sourcePath.equals(decisionPath)
-                    || sourcePath.startsWith(decisionPath + ".")
-                    || sourcePath.startsWith(decisionPath + "["))
-                    && decisionPath.length() > longestMatch) {
-                match = item;
-                longestMatch = decisionPath.length();
-            }
-        }
-        return match;
     }
 
     @SuppressWarnings("unchecked")
