@@ -23,7 +23,7 @@ The design principle is the opposite of a one-click resume beautifier: **verifia
 flowchart LR
   B["Browser / Desktop shell"] --> W["Vue 3 + TypeScript"]
   W -->|"/api"| A["Spring Boot 3.3 API (Java 17)"]
-  A --> DB[("MySQL 8.4 · Flyway V1–V38")]
+  A --> DB[("MySQL 8.4 · Flyway V1–V39")]
   A --> WK["AI task workers (HEAVY / LIGHT)"]
   WK --> LLM["Bailian model chain (7 models)"]
   A --> PDF["PDF rendering"]
