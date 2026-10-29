@@ -35,6 +35,7 @@ public class ExportTaskWorker {
     private final ExportStorageService storageService;
     private final ExportTaskLeaseService leaseService;
     private final int batchSize;
+    private final int maxAttempts;
     private final AppObservability observability;
     private final FailureCategoryClassifier failureCategoryClassifier;
 
@@ -46,6 +47,7 @@ public class ExportTaskWorker {
                             ExportStorageService storageService,
                             ExportTaskLeaseService leaseService,
                             @Value("${app.pdf.worker.batch-size:1}") int batchSize,
+                            @Value("${app.pdf.worker.max-attempts:3}") int maxAttempts,
                             AppObservability observability,
                             FailureCategoryClassifier failureCategoryClassifier) {
         this.resumeVersionRepository = resumeVersionRepository;
@@ -56,6 +58,7 @@ public class ExportTaskWorker {
         this.storageService = storageService;
         this.leaseService = leaseService;
         this.batchSize = batchSize;
+        this.maxAttempts = maxAttempts;
         this.observability = observability;
         this.failureCategoryClassifier = failureCategoryClassifier;
     }
@@ -110,6 +113,18 @@ public class ExportTaskWorker {
                     return;
                 }
                 log.info("PDF export task completed: template={}, fileSizeBytes={}", task.getTemplateCode(), stored.size());
+            } catch (PdfCapacityException capacity) {
+                // 容量拒绝不是「这次渲染坏了」，而是「现在没名额」：pdf-service 已经用
+                // 503 + Retry-After 说明等多久，这里按它给的时间延迟重排。
+                // 只有真的试到上限才判失败 —— 之前是第一次就 FAILED，用户看到
+                // 「请稍后重试」却必须自己回页面点，服务端给的等待时长完全没被使用。
+                if (task.getRetryCount() < maxAttempts) {
+                    leaseService.releaseForRetry(task, capacity.getMessage(), capacity.getRetryAfterSeconds());
+                    log.info("PDF export task requeued after capacity rejection: taskId={}, attempt={}/{}, retryAfterSeconds={}",
+                            task.getId(), task.getRetryCount(), maxAttempts, capacity.getRetryAfterSeconds());
+                } else {
+                    markFailed(task, capacity.getMessage() + "（已尝试 " + task.getRetryCount() + " 次）");
+                }
             } catch (Exception e) {
                 PdfFailureCategory category = failureCategoryClassifier.pdf(e);
                 log.warn("PDF export task failed: template={}, category={}, exception={}",

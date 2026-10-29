@@ -38,11 +38,16 @@ public interface ExportTaskRepository extends JpaRepository<ExportTask, Long> {
     List<ExportTask> findByStatus(ExportStatus status);
 
     /**
-     * 查询可领取的导出任务:PENDING 或租约过期的 RUNNING。
+     * 查询可领取的导出任务:PENDING 或租约过期的 RUNNING，且已到「下次可尝试时刻」。
      * FOR UPDATE 串行领取;多实例下会锁等待而非跳过,见 OPEN-DECISIONS ①。
      * 防止重复领取实际由 acquireLease 的条件更新保证。
+     *
+     * <p>{@code next_attempt_at} 是 V39 加的延迟重排：pdf-service 以 503 + Retry-After
+     * 表达容量拒绝时，任务回到 PENDING 但要等到该时刻才可再领 —— 否则重排等于
+     * 无视下游给的等待时长。
      */
-    @Query(value = "SELECT * FROM export_task WHERE status = 'PENDING' OR (status = 'RUNNING' AND lease_expires_at < NOW()) ORDER BY id ASC LIMIT :batchSize FOR UPDATE", nativeQuery = true)
+    @Query(value = "SELECT * FROM export_task WHERE (status = 'PENDING' OR (status = 'RUNNING' AND lease_expires_at < NOW())) "
+            + "AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()) ORDER BY id ASC LIMIT :batchSize FOR UPDATE", nativeQuery = true)
     List<ExportTask> claimableTasks(@Param("batchSize") int batchSize);
 
     @Modifying

@@ -44,19 +44,22 @@ public class ExportService {
     private final ExportExpiryService expiryService;
     private final PublicFailureCopy publicFailureCopy;
     private final long fileTtlHours;
+    private final int maxManualRetries;
 
     public ExportService(ExportTaskRepository exportTaskRepository,
                          ResumeVersionRepository resumeVersionRepository,
                          ExportStorageService storageService,
                          ExportExpiryService expiryService,
                          PublicFailureCopy publicFailureCopy,
-                         @Value("${app.pdf.file-ttl-hours:24}") long fileTtlHours) {
+                         @Value("${app.pdf.file-ttl-hours:24}") long fileTtlHours,
+                         @Value("${app.pdf.worker.max-manual-retries:5}") int maxManualRetries) {
         this.exportTaskRepository = exportTaskRepository;
         this.resumeVersionRepository = resumeVersionRepository;
         this.storageService = storageService;
         this.expiryService = expiryService;
         this.publicFailureCopy = publicFailureCopy;
         this.fileTtlHours = fileTtlHours;
+        this.maxManualRetries = maxManualRetries;
     }
 
     /**
@@ -145,9 +148,18 @@ public class ExportService {
         if (task.getStatus() != ExportStatus.FAILED) {
             throw new BusinessException(ErrorCode.CONFLICT, "只有失败的任务可以重试");
         }
+        // 手动重试此前无次数上限：同一行可以被无限次推回 PENDING，每次都真跑一遍渲染。
+        // 与 AI 任务（AiTaskService.retry 的 maxRetries）对齐，超限时让用户重新发起导出——
+        // 重新发起会生成新行，也顺带把「这一行本身有问题」和「下游临时故障」区分开。
+        if (task.getRetryCount() != null && task.getRetryCount() >= maxManualRetries) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                    "该导出任务已重试 " + task.getRetryCount() + " 次，请重新发起导出");
+        }
         task.setStatus(ExportStatus.PENDING);
         task.setErrorMessage(null);
         task.setRetryCount(task.getRetryCount() + 1);
+        // 手动重试是「用户现在就要」，不受容量拒绝留下的延迟约束。
+        task.setNextAttemptAt(null);
         task.setExpiresAt(LocalDateTime.now().plusHours(fileTtlHours));
         exportTaskRepository.save(task);
         return toResponse(task);

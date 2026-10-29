@@ -52,6 +52,15 @@ public class ExportTask {
     @Column(name = "lease_expires_at")
     private LocalDateTime leaseExpiresAt;
 
+    /**
+     * 下次可领取时刻（V39）。NULL＝立即可领取。
+     *
+     * <p>只在「容量拒绝的重排」里被写入：pdf-service 的 503 + {@code Retry-After}
+     * 表达的是「等一会儿再来」，而这期间任务既不该被领取，也不该被当成失败。
+     */
+    @Column(name = "next_attempt_at")
+    private LocalDateTime nextAttemptAt;
+
     @Column(name = "expires_at")
     private LocalDateTime expiresAt;
 
@@ -110,6 +119,9 @@ public class ExportTask {
 
     public LocalDateTime getLeaseExpiresAt() { return leaseExpiresAt; }
     public void setLeaseExpiresAt(LocalDateTime leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
+
+    public LocalDateTime getNextAttemptAt() { return nextAttemptAt; }
+    public void setNextAttemptAt(LocalDateTime nextAttemptAt) { this.nextAttemptAt = nextAttemptAt; }
 
     public LocalDateTime getExpiresAt() { return expiresAt; }
     public void setExpiresAt(LocalDateTime expiresAt) { this.expiresAt = expiresAt; }

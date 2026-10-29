@@ -63,6 +63,7 @@ public class ExportTaskLeaseService {
         storedTask.setFileSizeBytes(stored.size());
         storedTask.setSha256(stored.checksumSha256());
         storedTask.setErrorMessage(null);
+        storedTask.setNextAttemptAt(null);
         clearLease(storedTask);
         exportTaskRepository.save(storedTask);
         copyExecutionState(storedTask, task);
@@ -84,6 +85,33 @@ public class ExportTaskLeaseService {
         }
         storedTask.setStatus(ExportStatus.FAILED);
         storedTask.setErrorMessage(AsyncFailureMessages.persisted(errorMessage));
+        storedTask.setNextAttemptAt(null);
+        clearLease(storedTask);
+        exportTaskRepository.save(storedTask);
+        copyExecutionState(storedTask, task);
+        return true;
+    }
+
+    /**
+     * 释放「稍后再试」：任务回到 PENDING，并在 {@code retryAfterSeconds} 内不可被领取。
+     *
+     * <p>用于 pdf-service 的容量拒绝（503 + {@code Retry-After}）—— 与
+     * {@link #releaseFailed} 的区别是「这不是终态」：留痕的 errorMessage 会随下一次
+     * 成功或最终失败被覆盖/清空，用户看到的是「排队中」而不是「失败，请手动重试」。
+     *
+     * @return true 表示成功写入；false 表示任务已非本 worker 持有，释放被丢弃
+     */
+    @Transactional
+    public boolean releaseForRetry(ExportTask task, String errorMessage, int retryAfterSeconds) {
+        String owner = task.getLeaseOwner();
+        ExportTask storedTask = exportTaskRepository.findRunningByIdAndOwnerForUpdate(task.getId(), owner).orElse(null);
+        if (storedTask == null) {
+            log.warn("Discarding stale retry request for task {} from owner {}", task.getId(), owner);
+            return false;
+        }
+        storedTask.setStatus(ExportStatus.PENDING);
+        storedTask.setErrorMessage(AsyncFailureMessages.persisted(errorMessage));
+        storedTask.setNextAttemptAt(LocalDateTime.now().plusSeconds(Math.max(1, retryAfterSeconds)));
         clearLease(storedTask);
         exportTaskRepository.save(storedTask);
         copyExecutionState(storedTask, task);
@@ -103,5 +131,6 @@ public class ExportTaskLeaseService {
         target.setSha256(source.getSha256());
         target.setLeaseOwner(source.getLeaseOwner());
         target.setLeaseExpiresAt(source.getLeaseExpiresAt());
+        target.setNextAttemptAt(source.getNextAttemptAt());
     }
 }

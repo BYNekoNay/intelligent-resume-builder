@@ -148,9 +148,16 @@ public class PdfServiceClient {
             PdfFailureCategory category = failureCategoryClassifier.pdf(e);
             log.warn("PDF service response failure: category={}, status={}", category, e.getStatusCode().value());
             observability.recordPdfRender(templateCode, false, category, Duration.ofNanos(System.nanoTime() - startedAt));
-            // 503＝pdf-service 容量/drain 拒绝（可重试）：给用户可读、可重试的文案，而非泛化「渲染失败」
-            throw new BusinessException(ErrorCode.PDF_FAILURE,
-                    e.getStatusCode().value() == 503 ? "PDF 服务繁忙，请稍后重试" : "PDF 渲染失败");
+            // 503＝pdf-service 容量/drain 拒绝：**可重试**，且对端已经把「等多久」写在
+            // Retry-After 里了。这里必须把它作为独立类型抛出，调用方才能区分
+            // 「现在没名额（等一会儿再来）」和「这次渲染就是坏的」——
+            // 否则队列一打满，用户的导出任务就被永久判死。
+            if (e.getStatusCode().value() == 503) {
+                int retryAfterSeconds = retryAfterSeconds(e.getResponseHeaders());
+                log.info("PDF service capacity rejection: retryAfterSeconds={}", retryAfterSeconds);
+                throw new PdfCapacityException("PDF 服务繁忙，请稍后重试", retryAfterSeconds);
+            }
+            throw new BusinessException(ErrorCode.PDF_FAILURE, "PDF 渲染失败");
         } catch (Exception e) {
             PdfFailureCategory category = failureCategoryClassifier.pdf(e);
             log.warn("PDF service call failure: category={}, exception={}", category, e.getClass().getSimpleName());
@@ -202,6 +209,35 @@ public class PdfServiceClient {
         } catch (Exception e) {
             log.debug("PDF health probe failed: exception={}", e.getClass().getSimpleName());
             return false;
+        }
+    }
+
+    /** 单次退避上限：对端若给了离谱的值，不能让导出任务排到用户早已离开之后。 */
+    static final int MAX_RETRY_AFTER_SECONDS = 30;
+
+    /**
+     * 解析 pdf-service 的 {@code Retry-After}（秒）。
+     *
+     * <p>只接受纯秒数：HTTP 规范还允许 {@code <http-date>}，但本仓的对端固定写 {@code 2}
+     * （{@code pdf-service/src/server.js}）。日期形式或任何非法值一律走兜底 ——
+     * 在这里塞一套日期解析，收益远小于「解析错了让任务白等一轮」的风险。
+     */
+    static int retryAfterSeconds(HttpHeaders headers) {
+        if (headers == null) {
+            return PdfCapacityException.DEFAULT_RETRY_AFTER_SECONDS;
+        }
+        String raw = headers.getFirst(HttpHeaders.RETRY_AFTER);
+        if (raw == null || raw.isBlank()) {
+            return PdfCapacityException.DEFAULT_RETRY_AFTER_SECONDS;
+        }
+        try {
+            long parsed = Long.parseLong(raw.trim());
+            if (parsed < 1) {
+                return PdfCapacityException.DEFAULT_RETRY_AFTER_SECONDS;
+            }
+            return (int) Math.min(parsed, MAX_RETRY_AFTER_SECONDS);
+        } catch (NumberFormatException notSeconds) {
+            return PdfCapacityException.DEFAULT_RETRY_AFTER_SECONDS;
         }
     }
 
