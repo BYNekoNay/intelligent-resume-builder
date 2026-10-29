@@ -36,6 +36,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: web
         run: npm ci
+      # 与 GitHub CI 对齐：静态检查先跑（此前 Gitee 侧只跑 build + e2e，不跑 lint 与单测）
+      - name: Lint frontend (ESLint, warning ratchet)
+        working-directory: web
+        run: npm run lint
       - name: Build frontend
         working-directory: web
         run: npm run build

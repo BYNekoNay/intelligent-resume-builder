@@ -35,6 +35,9 @@ RUN_DIR="${GATE_AUDIT_RUN_DIR:-$ROOT/web}"
 #   gate = i18n | draft（决定跑哪个门禁脚本）；new 为空 ⇒ 删除该片段；
 #   new/old 中的字面 \n 会在注入时转换为真实换行。
 # ---------------------------------------------------------------------------
+# ⚠ 样本里**不要写换行与行首 `//`**：Git Bash 调 native python 时 argv 会被 msys2 改写
+#   （实测 `// 反例` → `/ 反例`、`\n` → `/n`），样本被改写后得到的"红"是语法错误而非命中规则。
+#   需要注释形态时用同一行内的 /* ... */。
 BAD_TABLE=$(cat <<'TABLE_EOF'
 i18n-keys-mismatch	web/src/i18n/index.ts	      conflict: 'The content has been updated or its state changed. Please refresh and try again.',
 i18n-duplicate-key	web/src/i18n/index.ts	      conflict: '内容已更新或状态已变化，请刷新后重试。',	      conflict: '内容已更新或状态已变化，请刷新后重试。',\n      conflict: '内容已更新或状态已变化，请刷新后重试。',
@@ -44,6 +47,7 @@ i18n-static-key-missing	web/src/views/HomeView.vue	<div class="home-workspace">	
 i18n-dynamic-key-ghost	web/src/utils/errorCodes.ts	  40001: 'errors.validation',	  40001: 'errors.validation',\n  99999: 'errors.ghostAudit',
 draft-field-label-missing	web/src/components/DraftContentFields.vue	  name: 'draftFields.name',
 draft-i18n-key-missing	web/src/i18n/index.ts	      name: '姓名', title: '职位名称', position: '职位', role: '角色',	      title: '职位名称', position: '职位', role: '角色',
+lint-explicit-any	web/src/utils/resumeSource.ts	export type KnownResumeSourceType =	const ghostAuditProbe: any = null; export type KnownResumeSourceType =
 draft-enum-english	web/src/i18n/index.ts	      valueExpert: '精通',	      valueExpert: 'Expert',
 TABLE_EOF
 )
@@ -52,6 +56,7 @@ TABLE_EOF
 GOOD_TABLE=$(cat <<'GOOD_EOF'
 i18n-comment-template	web/src/views/HomeView.vue	<div class="home-workspace">	<div class="home-workspace">\n      <!-- 注释样例：t('ghost.comment.key') 与 保存失败 文本均在注释中 -->
 i18n-comment-registry	web/src/utils/errorCodes.ts	  40001: 'errors.validation',	  40001: 'errors.validation',\n  // 99999: 'errors.ghostComment',
+lint-comment-any	web/src/utils/resumeSource.ts	export type KnownResumeSourceType =	/* 反例：ghostAuditProbe: any 只是注释，不是类型标注 */ export type KnownResumeSourceType =
 draft-comment-key	web/src/components/DraftContentFields.vue	const FIELD_LABEL_KEYS: Record<string, string> = {	const FIELD_LABEL_KEYS: Record<string, string> = {\n  // ghostAuditField: 'draftFields.ghostAudit',
 GOOD_EOF
 )
@@ -82,7 +87,11 @@ PY
 
 run_gate() { # gate -> 写 /tmp/web-gate-run.log，返回退出码
   local gate="$1" script
-  if [[ "$gate" == i18n-* ]]; then script="node scripts/check-i18n.mjs"; else script="node scripts/check-draft-fields.mjs"; fi
+  case "$gate" in
+    i18n-*) script="node scripts/check-i18n.mjs" ;;
+    lint-*) script="npx eslint . --max-warnings 65" ;;
+    *)      script="node scripts/check-draft-fields.mjs" ;;
+  esac
   ( cd "$RUN_DIR" && eval "$script" ) > /tmp/web-gate-run.log 2>&1
 }
 
@@ -120,9 +129,16 @@ while IFS=$'\t' read -r gate file old new; do
   if grep -aqE "guard FAILED|门禁未通过" /tmp/web-gate-run.log; then
     assert_failed=1
   fi
+  # ESLint 没有 FAILED/passed 文案：超过 --max-warnings 棘轮时以「✖ N problems」收尾，
+  # 解析失败（配置错/语法错）则输出 "Parsing error"，两者必须区分开，否则会把崩溃记成承重。
+  if [[ "$gate" == lint-* ]] && [ "$exit_code" -ne 0 ] && grep -aqE "✖ [0-9]+ problems?" /tmp/web-gate-run.log; then
+    assert_failed=1
+  fi
   green_ok=0
-  if [ "$exit_code" -eq 0 ] && grep -aq "guard passed" /tmp/web-gate-run.log; then
-    green_ok=1
+  if [ "$exit_code" -eq 0 ]; then
+    if [[ "$gate" == lint-* ]] || grep -aq "guard passed" /tmp/web-gate-run.log; then
+      green_ok=1
+    fi
   fi
 
   cp "$backup" "$file"; rm -f "$backup"

@@ -1,4 +1,4 @@
-import { onMounted, onBeforeUnmount, ref, type Ref } from 'vue'
+import { onMounted, onBeforeUnmount, type Ref } from 'vue'
 
 interface Star {
   x: number; y: number; r: number; baseAlpha: number
