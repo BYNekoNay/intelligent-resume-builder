@@ -117,6 +117,12 @@ class AlertDeliveryContractTest {
                 SCRIPT + " 的 watchdog 阈值不是 900s（3 个 5 分钟轮询周期）—— 过短会误报，过长会漏掉整个故障窗口");
         assertTrue(source.contains("exit 2"),
                 SCRIPT + " 的 watchdog 超阈值时必须以退出码 2 结束（systemd 才会记 failed）");
+
+        // 状态文件必须落在服务用户可写的目录：$ROOT/logs 属部署用户（ubuntu），
+        // 而脚本以 prometheus 运行 —— 首版放那里直接 Permission denied（由 watchdog 首跑抓到）。
+        assertTrue(source.contains("/var/lib/intelligent-resume/alertcheck/state"),
+                SCRIPT + " 的状态文件默认路径必须在 /var/lib/intelligent-resume/alertcheck/ 下"
+                        + "（/opt/intelligent-resume/logs 属部署用户，prometheus 不可写）");
     }
 
     private String stripComments(String text) {

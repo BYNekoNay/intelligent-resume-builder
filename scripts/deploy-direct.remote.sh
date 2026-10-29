@@ -225,6 +225,12 @@ if [ -f "$SRC/deploy/check-alerts.sh" ]; then
     rm -f "$alerts_tmp"
     echo "告警检查脚本已更新：$ROOT/bin/check-alerts.sh"
   fi
+  # 状态目录：脚本以 prometheus 用户运行，而 $ROOT/logs 属部署用户（首版即因此 Permission denied）。
+  # prometheus 用户可能尚未创建（apt 安装在第 5/8 步），属主条件性设置。
+  $SUDO install -d -m 750 /var/lib/intelligent-resume/alertcheck
+  if $SUDO id prometheus >/dev/null 2>&1; then
+    $SUDO chown -R prometheus:prometheus /var/lib/intelligent-resume/alertcheck
+  fi
 else
   echo "警告：源码包缺少 deploy/check-alerts.sh，跳过告警检查脚本安装" >&2
 fi

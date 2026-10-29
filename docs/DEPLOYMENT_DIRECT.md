@@ -709,7 +709,7 @@ curl -s http://127.0.0.1:8080/actuator/prometheus | grep resume_ai_model_chain_a
 | 部署探针 | 36 项 / 0 失败（12 节：0~11，含项数强校验与告警出口自死检测） | `bash scripts/probe-deployment.sh` 的汇总行 | 2026-10-29 |
 | 备份 | 每日 03:30，保留 14 天 + 保底 3 份，timer 已 enabled | `systemctl list-timers intelligent-resume-backup.timer` | 2026-10-29 |
 | 告警评估 | **已生效** —— 15 条规则加载（health=ok），critical firing=0 | `curl -s 127.0.0.1:9090/api/v1/rules \| head`；探针第 10 节 | 2026-10-29 |
-| 告警出口 | alertcheck.timer 每 5 分钟轮询，critical → 退出码 2；fire drill 已验证（stop API → 2，恢复 → 0） | `journalctl -u intelligent-resume-alertcheck`；探针第 11 节 | 2026-10-29 |
+| 告警出口 | alertcheck.timer 每 5 分钟轮询（critical → 退出码 2，状态留痕 `/var/lib/intelligent-resume/alertcheck/state`）+ watchdog.timer 每 15 分钟查「最近一次成功 ≤900s」；fire drill 已验证（stop API → 2 且状态记 `critical:ApiTargetDown`，恢复 → 0） | `journalctl -u intelligent-resume-alertcheck`；探针第 11 节 | 2026-10-29 |
 
 **维护规则**
 

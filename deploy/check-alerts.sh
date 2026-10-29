@@ -29,7 +29,10 @@ set -uo pipefail
 
 PROM_URL="${PROM_URL:-http://127.0.0.1:9090}"
 WEBHOOK="${ALERT_WEBHOOK_URL:-}"
-STATE_FILE="${ALERTCHECK_STATE_FILE:-/opt/intelligent-resume/logs/alertcheck.state}"
+# 状态文件放 /var/lib 而不是 /opt/intelligent-resume/logs：后者属部署用户（ubuntu），
+# 而本脚本以 prometheus 用户运行 —— 首版放 logs/ 时写入 Permission denied（2026-10-29 实测，
+# 由 watchdog 首跑抓到）。目录由部署脚本创建并 chown 给 prometheus。
+STATE_FILE="${ALERTCHECK_STATE_FILE:-/var/lib/intelligent-resume/alertcheck/state}"
 # 3 个 timer 周期（每 5 分钟一次）：允许偶发失败，不允许「连续三次都没跑成」
 WATCHDOG_MAX_AGE_SEC="${WATCHDOG_MAX_AGE_SEC:-900}"
 
