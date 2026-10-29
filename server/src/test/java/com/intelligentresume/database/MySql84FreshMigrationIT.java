@@ -40,10 +40,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @EnabledIfEnvironmentVariable(named = "MYSQL84_LIVE_TEST", matches = "true")
 class MySql84FreshMigrationIT {
 
-    /** 迁移总数（V1~V37）。新增迁移时同步改这里。 */
+    /** 迁移总数（V1~V38）。新增迁移时同步改这里。 */
     private static final int EXPECTED_MIGRATIONS = 38;
 
-    /** 最新版本号（V37）。新增迁移时同步改这里。 */
+    /** 最新版本号（V38）。新增迁移时同步改这里。 */
     private static final String EXPECTED_LATEST_VERSION = "38";
 
     @Test

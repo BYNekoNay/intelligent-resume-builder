@@ -90,7 +90,7 @@ chmod 600 "$DEFAULTS"
 TABLE_COUNT="$(mysql --defaults-extra-file="$DEFAULTS" -N -B \
   -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}' AND table_type='BASE TABLE'" 2>/dev/null)" \
   || die "连不上数据库 ${DB_HOST}:${DB_PORT}/${DB_NAME}（凭据或网络问题）"
-[ "${TABLE_COUNT:-0}" -ge 20 ] || die "库 ${DB_NAME} 只有 ${TABLE_COUNT:-0} 张表，低于预期（V1~V37 至少 20 张）—— 疑似连错库"
+[ "${TABLE_COUNT:-0}" -ge 20 ] || die "库 ${DB_NAME} 只有 ${TABLE_COUNT:-0} 张表，低于预期（V1~V38 至少 20 张）—— 疑似连错库"
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
   log "自检通过：${DB_HOST}:${DB_PORT}/${DB_NAME}，${TABLE_COUNT} 张表，保留 ${RETENTION_DAYS} 天，目录 ${BACKUP_DIR}"

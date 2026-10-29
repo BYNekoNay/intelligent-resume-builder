@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 智历 · 服务器侧部署执行器（非 Docker 直接部署）
 #
-# 由 scripts/Deploy-DirectUpload.ps1 上传到 /opt/intelligent-resume/ 后调用。
+# 由 scripts/deploy-direct.sh 打包上传到 /opt/intelligent-resume/ 后调用。
 # 职责：构建 -> 同步产物 -> 重启服务 -> 健康检查。
 # 约定：源码位于 $ROOT/src，运行产物位于 $ROOT/app，密钥位于 $ROOT/secrets.env（600）。
 #
