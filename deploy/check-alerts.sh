@@ -63,10 +63,11 @@ case "$SUMMARY" in
     ;;
 esac
 
-IFS='|' read -r NC CRIT NW WARN <<< "$SUMMARY"
+# python 输出顺序：critical数 | warning数 | critical名单 | warning名单
+IFS='|' read -r NC NCW CRIT WARN <<< "$SUMMARY"
 
 if [ "$NC" -gt 0 ]; then
-  log "CRITICAL firing x${NC}：${CRIT}（另有 warning x${NW}：${WARN}）"
+  log "CRITICAL firing x${NC}：${CRIT}（另有 warning x${NCW}：${WARN}）"
   if [ -n "$WEBHOOK" ]; then
     # 外呼失败不影响退出码：外呼只是增强通道，journald 才是本出口的事实记录
     curl -s --noproxy '*' -m 10 -H 'Content-Type: application/json' \
@@ -77,8 +78,8 @@ if [ "$NC" -gt 0 ]; then
   exit 2
 fi
 
-if [ "$NW" -gt 0 ]; then
-  log "warning firing x${NW}：${WARN}（不升级，仅留痕）"
+if [ "$NCW" -gt 0 ]; then
+  log "warning firing x${NCW}：${WARN}（不升级，仅留痕）"
 else
   log "无 firing 告警"
 fi

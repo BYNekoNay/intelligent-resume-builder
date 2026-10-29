@@ -46,11 +46,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 #   第 5 节 nginx 配置：1 项
 #   第 6 节 systemd 单元：deploy/systemd/ 下 5 个 .service + 2 个 .timer = 7 项
 #   第 7 节 监听范围：3 项；第 8 节 模型链：1 项
-#   第 9 节 备份：5 项（9.1 脚本自检 / 9.2 timer / 9.3 抓取 up / 9.4 最近一次成功 / 9.5 份数+权限）
+#   第 9 节 备份：6 项（9.1 脚本自检 / 9.2 timer / 9.3 抓取 up / 9.4 最近一次成功 / 9.5 份数新鲜度+权限）
 #   第 10 节 告警评估：2 项（规则加载 / critical firing=0）
-#   第 11 节 alertcheck：2 项（timer enabled / 最近一次跑成功）
-#   合计 11+1+7+3+1+5+2+2 = 32 项
-EXPECTED_ITEMS_SSH=32
+#   第 11 节 alertcheck：2 项（timer enabled / 主动重跑一次检查）
+#   合计 11+1+7+3+1+6+2+2 = 33 项
+EXPECTED_ITEMS_SSH=33
 # 无 SSH 模式只有固定节 0~4
 EXPECTED_ITEMS_NOSSH=11
 
@@ -367,11 +367,17 @@ else
     fail "alertcheck 定时器未 enabled（当前：${ac_timer:-unknown}）—— 告警出口不存在，规则评估了也没人看"
   fi
 
-  ac_state="$(sshq "sudo systemctl show intelligent-resume-alertcheck.service -p Result" 2>/dev/null | tr -d '\r' | sed 's/^Result=//')"
-  if [ "$ac_state" = "success" ]; then
-    pass "alertcheck 最近一次运行成功（无 critical firing）"
+  # 主动重跑一次而不是看"上次的 Result"：部署过程中 alertcheck 首跑会撞上 prometheus
+  # 重启窗口（timer enable 早于 prometheus restart），Result 会留下一次无害的 exit-code——
+  # 拿它做判据是随机红的。主动重跑既消除竞态，又真正验证出口路径此刻可用。
+  ac_rc=0
+  sshq "sudo systemctl start intelligent-resume-alertcheck.service" >/dev/null 2>&1 || ac_rc=$?
+  if [ "$ac_rc" -eq 0 ]; then
+    pass "alertcheck 主动重跑通过（退出码 0，无 critical firing）"
+  elif [ "$ac_rc" -eq 2 ]; then
+    fail "alertcheck 退出码 2 —— 此刻存在 critical firing（journalctl -u intelligent-resume-alertcheck 查看详情）"
   else
-    fail "alertcheck 最近一次运行结果=${ac_state:-unknown}（failed=出现过 critical firing 或脚本异常；journalctl -u intelligent-resume-alertcheck 查看详情）"
+    fail "alertcheck 主动重跑失败（退出码 ${ac_rc}）—— 出口路径异常（prometheus 不可达或脚本错误）"
   fi
 fi
 

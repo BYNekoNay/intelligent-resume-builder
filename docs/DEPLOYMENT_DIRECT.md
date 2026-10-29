@@ -370,7 +370,7 @@ draft-fields 两道静态门禁）→ **PDF 依赖 `PUPPETEER_SKIP_DOWNLOAD=true
 真实启动一次 Chromium 自检** → 原子替换产物 → **同步 nginx 站点配置**（`deploy/nginx/host.conf` +
 `security-headers.conf` 片段；先落位片段再覆盖站点文件，`nginx -t` 校验通过才 reload）→
 **同步 systemd 单元**（`deploy/systemd/*.service`；仅在内容变化时安装 + `daemon-reload`）→
-重启服务 → 等待 readiness → **部署后探针**（24 项：行为断言 + 生效配置与仓库的一致性 + 应用加载配置与磁盘 `.env` 的一致性 + 备份与监控）→
+重启服务 → 等待 readiness → **部署后探针**（33 项：行为断言 + 生效配置与仓库的一致性 + 应用加载配置与磁盘 `.env` 的一致性 + 备份与告警链路；项数由脚本内 EXPECTED_ITEMS 常量强校验）→
 输出健康检查。
 
 > **nginx 配置已纳入脚本（2026-10-01 第六十一批）**。此前它**只存在于 §4.5 的手工流程**里，
@@ -706,9 +706,10 @@ curl -s http://127.0.0.1:8080/actuator/prometheus | grep resume_ai_model_chain_a
 | 线上版本 | 0.4.4 | `systemctl cat intelligent-resume-api \| grep ExecStart`；`curl -s 127.0.0.1:3001/health` | 2026-10-27 |
 | Flyway 最高版本 | V38（38 个迁移，无缺口） | `SELECT MAX(version) FROM flyway_schema_history` | 2026-10-27 |
 | 业务表数 | 28 | `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='intelligent_resume'` | 2026-10-27（承备份自检记录，下次部署复核） |
-| 部署探针 | 24 项 / 0 失败（10 节：0~9） | `bash scripts/probe-deployment.sh` 的汇总行 | 2026-10-27 |
-| 备份 | 每日 03:30，保留 14 天，timer 已 enabled | `systemctl list-timers intelligent-resume-backup.timer` | 2026-10-27 |
-| 告警评估 | **未生效** —— 直连的 `deploy/prometheus/prometheus.yml` 尚无 `rule_files`，15 条规则空转 | `curl -s 127.0.0.1:9090/api/v1/rules \| head` | 2026-10-28（待补齐） |
+| 部署探针 | 33 项 / 0 失败（12 节：0~11，含项数强校验） | `bash scripts/probe-deployment.sh` 的汇总行 | 2026-10-29 |
+| 备份 | 每日 03:30，保留 14 天 + 保底 3 份，timer 已 enabled | `systemctl list-timers intelligent-resume-backup.timer` | 2026-10-29 |
+| 告警评估 | **已生效** —— 15 条规则加载（health=ok），critical firing=0 | `curl -s 127.0.0.1:9090/api/v1/rules \| head`；探针第 10 节 | 2026-10-29 |
+| 告警出口 | alertcheck.timer 每 5 分钟轮询，critical → 退出码 2；fire drill 已验证（stop API → 2，恢复 → 0） | `journalctl -u intelligent-resume-alertcheck`；探针第 11 节 | 2026-10-29 |
 
 **维护规则**
 
