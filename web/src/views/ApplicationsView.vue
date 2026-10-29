@@ -31,6 +31,8 @@ import {
 } from '@/api/application'
 import { useResumeJobOptions } from '@/composables/useResumeJobOptions'
 import { useToast } from '@/composables/useToast'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import LoadingBlock from '@/components/ui/LoadingBlock.vue'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
 import { extractErrorCode } from '@/utils/errorCodes'
@@ -519,7 +521,7 @@ onMounted(async () => {
       <label class="follow-up-filter">{{ t('applications.followUpFilter') }}<select v-model="followUpFilter" @change="changeFollowUpFilter"><option value="ALL">{{ t('applications.followUpAll') }}</option><option value="TODAY">{{ t('applications.followUpToday') }}</option><option value="OVERDUE">{{ t('applications.followUpOverdue') }}</option></select></label>
     </div>
 
-    <p v-if="loading" class="pipeline-loading">{{ t('applications.loading') }}</p>
+    <LoadingBlock v-if="loading" :rows="5" :label="t('applications.loading')" />
     <div v-else-if="records.length" class="application-board">
       <section v-for="lane in lanes" :key="lane.status" class="pipeline-lane" :class="[`lane-${lane.status.toLowerCase()}`, { 'is-drag-over': dragOverLane === lane.status }]" @dragover="onLaneDragOver(lane.status, $event)" @dragleave="onLaneDragLeave" @drop="onLaneDrop(lane.status, $event)">
         <header><span class="lane-marker" /><h2>{{ statusLabel(lane.status) }}</h2><strong>{{ lane.records.length }}</strong></header>
@@ -556,7 +558,12 @@ onMounted(async () => {
         </div>
       </section>
     </div>
-    <div v-else class="empty-state application-empty"><BriefcaseBusiness :size="24" /><strong>{{ t('applications.empty') }}</strong><button class="btn-neon btn-secondary" type="button" @click="openComposer"><Plus :size="15" />{{ t('applications.create') }}</button></div>
+    <EmptyState v-else :title="t('applications.empty')" :description="t('applications.emptyHint')">
+      <template #icon><BriefcaseBusiness :size="24" /></template>
+      <template #action>
+        <button class="btn-neon btn-secondary" type="button" @click="openComposer"><Plus :size="15" />{{ t('applications.create') }}</button>
+      </template>
+    </EmptyState>
 
     <div class="toast-region" aria-live="polite">
       <TransitionGroup name="toast">

@@ -47,6 +47,7 @@ i18n-static-key-missing	web/src/views/HomeView.vue	<div class="home-workspace">	
 i18n-dynamic-key-ghost	web/src/utils/errorCodes.ts	  40001: 'errors.validation',	  40001: 'errors.validation',\n  99999: 'errors.ghostAudit',
 draft-field-label-missing	web/src/components/DraftContentFields.vue	  name: 'draftFields.name',
 draft-i18n-key-missing	web/src/i18n/index.ts	      name: '姓名', title: '职位名称', position: '职位', role: '角色',	      title: '职位名称', position: '职位', role: '角色',
+states-exempt-entry-removed	web/scripts/check-view-states.mjs	  ['AiConsentView.vue', '单条授权开关：无列表 → 无空态'],
 unwrap-envelope-in-view	web/src/utils/resumeDiff.ts	export function stableEntryKey(entry: JsonObject, index: number): string {	const __probe = (await http.get<{ data: { data?: unknown } }>('/api/probe')).data.data; export function stableEntryKey(entry: JsonObject, index: number): string {
 unwrap-bare-code	web/src/utils/resumeDiff.ts	export function stableEntryKey(entry: JsonObject, index: number): string {	const __probe = (cause as { response?: { data?: { code?: number } } })?.response?.data?.code; export function stableEntryKey(entry: JsonObject, index: number): string {
 bundle-budget-too-tight	web/scripts/check-bundle-budget.mjs	const EXPECTED_ENTRY_CHUNK_KB = 60	const EXPECTED_ENTRY_CHUNK_KB = 1
@@ -59,6 +60,8 @@ TABLE_EOF
 GOOD_TABLE=$(cat <<'GOOD_EOF'
 i18n-comment-template	web/src/views/HomeView.vue	<div class="home-workspace">	<div class="home-workspace">\n      <!-- 注释样例：t('ghost.comment.key') 与 保存失败 文本均在注释中 -->
 i18n-comment-registry	web/src/utils/errorCodes.ts	  40001: 'errors.validation',	  40001: 'errors.validation',\n  // 99999: 'errors.ghostComment',
+states-comment-only	web/src/views/AccountView.vue	<script setup lang="ts">	<script setup lang="ts">
+<!-- 注释里的 loading / empty / error 不该算作已覆盖 -->
 unwrap-comment	web/src/utils/resumeDiff.ts	export function stableEntryKey(entry: JsonObject, index: number): string {	/* 反例：response?.data?.code 与 .data.data 只出现在注释里 */ export function stableEntryKey(entry: JsonObject, index: number): string {
 lint-comment-any	web/src/utils/resumeSource.ts	export type KnownResumeSourceType =	/* 反例：ghostAuditProbe: any 只是注释，不是类型标注 */ export type KnownResumeSourceType =
 draft-comment-key	web/src/components/DraftContentFields.vue	const FIELD_LABEL_KEYS: Record<string, string> = {	const FIELD_LABEL_KEYS: Record<string, string> = {\n  // ghostAuditField: 'draftFields.ghostAudit',
@@ -95,6 +98,7 @@ run_gate() { # gate -> 写 /tmp/web-gate-run.log，返回退出码
     i18n-*)   script="node scripts/check-i18n.mjs" ;;
     lint-*)   script="npx eslint . --max-warnings 65" ;;
     unwrap-*) script="node scripts/check-api-unwrap.mjs" ;;
+    states-*) script="node scripts/check-view-states.mjs" ;;
     bundle-*) script="node scripts/check-bundle-budget.mjs" ;;
     *)        script="node scripts/check-draft-fields.mjs" ;;
   esac

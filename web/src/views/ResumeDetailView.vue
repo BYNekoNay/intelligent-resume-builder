@@ -9,6 +9,7 @@ import { listMaterials } from '@/api/careerMaterial'
 import { SECTION_KEYS, type SectionKey } from '@/resume/sectionRegistry'
 import { scoreMatch } from '@/api/scoring'
 import { createExport, type ResumeTemplateCode } from '@/api/export'
+import LoadingBlock from '@/components/ui/LoadingBlock.vue'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
 import { resumeSourceLabelKey } from '@/utils/resumeSource'
@@ -94,9 +95,20 @@ async function load() {
   }
 }
 
+/**
+ * 版本列表加载态（2026-10-29）：此前只有 error 分支，加载期间是"空列表 + 空态文案"，
+ * 用户会误以为"没有历史版本"，然后数据突然出现。用骨架屏区分"还没来"与"真的没有"。
+ */
+const versionsLoading = ref(true)
+
 async function loadVersions() {
-  const response = await listVersions(Number(props.id), historyView.value === 'archived')
-  versions.value = response
+  versionsLoading.value = true
+  try {
+    const response = await listVersions(Number(props.id), historyView.value === 'archived')
+    versions.value = response
+  } finally {
+    versionsLoading.value = false
+  }
 }
 
 async function switchHistoryView(view: 'active' | 'archived') {
@@ -108,10 +120,17 @@ async function switchHistoryView(view: 'active' | 'archived') {
 }
 
 onMounted(async () => {
+  // 初始加载走 load()（内部直接赋值 versions），**也必须关掉骨架屏**——
+  // 否则 versionsLoading 会永远停在 true，版本列表再也不会出现
+  // （2026-10-29 引入骨架屏时正是漏了这一步，被两个 e2e 用例抓到）。
   try {
     await load()
     await loadRelatedAssets()
-  } catch { error.value = t('resumeDetail.loadError') }
+  } catch {
+    error.value = t('resumeDetail.loadError')
+  } finally {
+    versionsLoading.value = false
+  }
 })
 
 // #65：章节筛选请求世代。快速切换筛选时旧章节的响应可能晚到，
@@ -267,7 +286,8 @@ async function exportPdf(version: ResumeVersionSummary) {
           <button type="button" :class="{ active: historyView === 'archived' }" :aria-selected="historyView === 'archived'" @click="switchHistoryView('archived')">{{ t('resumeDetail.archivedHistory') }}</button>
         </div>
       </header>
-      <p v-if="!versions.length" class="history-empty">{{ t('resumeDetail.noVersions') }}</p>
+      <LoadingBlock v-if="versionsLoading" :rows="4" />
+      <p v-else-if="!versions.length" class="history-empty">{{ t('resumeDetail.noVersions') }}</p>
       <div v-else class="version-list">
         <article v-for="v in versions" :key="v.id" class="version-row version-card">
           <div class="version-number"><span>v{{ v.versionNo }}</span><CheckCircle2 v-if="resume?.currentVersionId === v.id" :size="15" /></div>

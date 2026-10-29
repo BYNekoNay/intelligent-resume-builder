@@ -748,6 +748,19 @@ h3 { font-size: 15px; font-weight: 600; color: var(--text-primary); }
   text-align: center;
 }
 
+/* 表单区的「可执行提示」（不是错误，是"为什么下一步做不了/该做什么"） */
+.form-hint {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius-sm);
+  background: var(--info-light);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .form-error {
   display: flex;
   align-items: flex-start;
