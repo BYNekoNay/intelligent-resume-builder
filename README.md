@@ -78,7 +78,7 @@
 flowchart LR
   B["浏览器 / 桌面壳"] --> W["Vue 3 + TypeScript<br/>Vite 构建"]
   W -->|"/api"| A["Spring Boot 3.3 API<br/>Java 17 · 分层架构"]
-  A --> DB[("MySQL 8.4<br/>Flyway V1–V39")]
+  A --> DB[("MySQL 8.4<br/>Flyway V1–V40")]
   A --> WK["AI 任务工作器<br/>HEAVY / LIGHT 双队列"]
   WK --> LLM["百炼模型链<br/>7 个模型顺序降级"]
   A --> PDF["PDF 渲染"]
@@ -151,7 +151,7 @@ bash scripts/deploy-direct.sh
 
 ```text
 server/            Spring Boot API（分层：controller / service / repository / domain）
-  └─ db/migration/ Flyway 迁移 V1–V39
+  └─ db/migration/ Flyway 迁移 V1–V40
 web/               Vue 3 + TypeScript 前端（views / components / api / stores）
 pdf-service/       Node.js + Puppeteer 私有 PDF 渲染服务
 scripts/           部署、探针、持久化门禁、全流程验证
