@@ -162,9 +162,16 @@ public class ApplicationService {
         return response(saved, readHistory(saved.getId()));
     }
 
+    /**
+     * 软删除（V40 起）：置 {@code deleted_at}，行在恢复期（30 天）+ 宽限期（7 天）后由
+     * {@code RetentionPurgeService} 物理删除。此前是硬删，与 docs/04 §7.1 的承诺不一致
+     * （用户误删不可逆）。状态历史是 ON DELETE CASCADE 的从属内容，物理删除时随行消亡。
+     */
     @Transactional
     public void delete(Long id, Long userId) {
-        repository.delete(owned(id, userId));
+        ApplicationRecord record = owned(id, userId);
+        record.setDeletedAt(LocalDateTime.now());
+        repository.save(record);
     }
 
     @Transactional(readOnly = true)

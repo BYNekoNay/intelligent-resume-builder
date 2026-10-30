@@ -11,7 +11,9 @@ import org.springframework.test.context.ActiveProfiles;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -80,16 +82,24 @@ class RetentionPurgeRepositorySchemaTest {
                 "job_description 的引用判定 SQL 必须能在真实 schema 上执行（含 8 处 NOT EXISTS）");
         assertDoesNotThrow(() -> assertNotNull(repository.findSnapshottableJobDescriptions(cutoff, 10)),
                 "job_description 的 B 档候选 SQL 必须能在真实 schema 上执行");
+        assertDoesNotThrow(() -> assertNotNull(repository.findPurgeableApplicationRecords(cutoff, 10)),
+                "application_record 的候选 SQL 必须能在真实 schema 上执行");
+        assertDoesNotThrow(() -> assertNotNull(repository.findPurgeableInterviewAssets(cutoff, 10)),
+                "interview_answer_asset 的候选 SQL 必须能在真实 schema 上执行");
+        assertDoesNotThrow(() -> assertNotNull(repository.findSnapshottableInterviewAssets(cutoff, 10)),
+                "interview_answer_asset 的 B 档候选 SQL 必须能在真实 schema 上执行");
     }
 
     @Test
-    @DisplayName("引用清单完整性：候选 SQL 覆盖迁移里所有指向该资源的外键（漏判会误删，不可逆）")
+    @DisplayName("引用清单完整性：候选 SQL 覆盖迁移里所有指向该资源的**阻塞型**外键（漏判会误删，不可逆）")
     void purgeSqlCoversEveryForeignKey() throws Exception {
         assertCoverage("resume_version", RetentionPurgeRepository.PURGEABLE_RESUME_VERSIONS);
         assertCoverage("career_material", RetentionPurgeRepository.PURGEABLE_CAREER_MATERIALS);
         assertCoverage("resume", RetentionPurgeRepository.PURGEABLE_RESUMES);
         assertCoverage("job_description", RetentionPurgeRepository.PURGEABLE_JOB_DESCRIPTIONS);
         assertCoverage("job_description", RetentionPurgeRepository.SNAPSHOTTABLE_JOB_DESCRIPTIONS);
+        assertCoverage("application_record", RetentionPurgeRepository.PURGEABLE_APPLICATION_RECORDS);
+        assertCoverage("interview_answer_asset", RetentionPurgeRepository.PURGEABLE_INTERVIEW_ASSETS);
     }
 
     @Test
@@ -99,6 +109,8 @@ class RetentionPurgeRepositorySchemaTest {
         assertGuardedDelete("career_material", RetentionPurgeRepository.DELETE_CAREER_MATERIAL);
         assertGuardedDelete("resume", RetentionPurgeRepository.DELETE_RESUME);
         assertGuardedDelete("job_description", RetentionPurgeRepository.DELETE_JOB_DESCRIPTION);
+        assertGuardedDelete("application_record", RetentionPurgeRepository.DELETE_APPLICATION_RECORD);
+        assertGuardedDelete("interview_answer_asset", RetentionPurgeRepository.DELETE_INTERVIEW_ASSET);
     }
 
     @Test
@@ -107,6 +119,7 @@ class RetentionPurgeRepositorySchemaTest {
         assertGuardedUpdate("resume_version", RetentionPurgeRepository.SNAPSHOT_RESUME_VERSION);
         assertGuardedUpdate("career_material", RetentionPurgeRepository.SNAPSHOT_CAREER_MATERIAL);
         assertGuardedUpdate("job_description", RetentionPurgeRepository.SNAPSHOT_JOB_DESCRIPTION);
+        assertGuardedUpdate("interview_answer_asset", RetentionPurgeRepository.SNAPSHOT_INTERVIEW_ASSET);
     }
 
     @Test
@@ -122,6 +135,10 @@ class RetentionPurgeRepositorySchemaTest {
         assertSameReferencers("job_description",
                 RetentionPurgeRepository.PURGEABLE_JOB_DESCRIPTIONS,
                 RetentionPurgeRepository.SNAPSHOTTABLE_JOB_DESCRIPTIONS);
+        // application_record 不在此列：唯一引用者是 ON DELETE CASCADE 的从属内容（无 B 档）
+        assertSameReferencers("interview_answer_asset",
+                RetentionPurgeRepository.PURGEABLE_INTERVIEW_ASSETS,
+                RetentionPurgeRepository.SNAPSHOTTABLE_INTERVIEW_ASSETS);
     }
 
     @Test
@@ -138,8 +155,10 @@ class RetentionPurgeRepositorySchemaTest {
     private void assertSameReferencers(String resource, String purgeable, String snapshottable) {
         Set<String> inPurgeable = mentionedTables(purgeable);
         Set<String> inSnapshottable = mentionedTables(snapshottable);
-        assertTrue(inPurgeable.size() >= 2,
-                resource + " 的候选查询提及的表过少（" + inPurgeable + "），解析可能已失效");
+        // 解析失效自检（不得空转）：下限取 1 而非固定值 —— 各资源的阻塞型引用者数量本来就不同
+        // （resume_version 11 处、interview_answer_asset 仅 1 处）；解析坏掉时会是 0，照样被抓住。
+        assertTrue(inPurgeable.size() >= 1,
+                resource + " 的候选查询没有提及任何引用者表（" + inPurgeable + "），解析可能已失效");
         assertEquals(inPurgeable, inSnapshottable,
                 resource + " 的 A 档（NOT EXISTS）与 B 档（EXISTS）引用了**不同的**表集合 —— "
                         + "两者必须是同一份清单的两种极性，否则会有行既不被删也不被快照（或反之）：\n"
@@ -173,31 +192,59 @@ class RetentionPurgeRepositorySchemaTest {
                         + "否则候选查询一旦被改坏就会**改写活数据**（比误删更隐蔽）：\n" + sql);
     }
 
-    /** 候选 SQL 必须提及（作为 {@code NOT EXISTS} 子查询）迁移里每一个引用 {@code resource} 的表。 */
+    /**
+     * 候选 SQL 的引用者覆盖判定：
+     * <ul>
+     *   <li><b>阻塞型</b>外键（无 CASCADE）必须被候选 SQL 提及（作为 {@code NOT EXISTS} 子查询）——
+     *       漏判会把**被引用的行**当作无引用者物理删除（不可逆）；</li>
+     *   <li><b>CASCADE 从属内容</b>（{@code ON DELETE CASCADE}）**禁止**被提及 —— 它随父行一起
+     *       消亡是预期行为（同一逻辑记录的从属轨迹，非独立引用者），写进 {@code NOT EXISTS}
+     *       会让带从属内容的行**永远无法进入清扫**（V36 之后的所有投递记录都带状态历史）。</li>
+     * </ul>
+     */
     private void assertCoverage(String resource, String sql) throws Exception {
-        Set<String> referencing = tablesReferencing(resource);
-        assertFalse(referencing.isEmpty(),
+        ReferencingForeignKeys referencers = referencingForeignKeys(resource);
+        Set<String> all = referencers.all();
+        assertFalse(all.isEmpty(),
                 "解析迁移后查不到任何引用 " + resource + " 的外键 —— 本用例的解析方式可能已失效，"
                         + "此时它会永远通过（比失败更危险），故显式失败");
 
-        Set<String> mentioned = new LinkedHashSet<>();
-        Matcher matcher = MENTIONED_TABLE.matcher(sql);
-        while (matcher.find()) {
-            mentioned.add(matcher.group(1).toLowerCase());
-        }
+        Set<String> mentioned = mentionedTables(sql);
 
-        Set<String> missing = new LinkedHashSet<>(referencing);
+        Set<String> missing = new LinkedHashSet<>(referencers.blocking());
         missing.removeAll(mentioned);
 
+        Set<String> wronglyBlocking = new LinkedHashSet<>(referencers.cascadeChildren());
+        wronglyBlocking.retainAll(mentioned);
+
         assertTrue(missing.isEmpty(),
-                "候选 SQL 没有把以下引用表纳入 NOT EXISTS —— 它们的外键指向 " + resource
+                "候选 SQL 没有把以下**阻塞型**引用表纳入 NOT EXISTS —— 它们的外键指向 " + resource
                         + "，漏判会让**被引用的行**被当作无引用者物理删除（不可逆）：" + missing
-                        + "（SQL 中已出现：" + mentioned + "；迁移中引用者：" + referencing + "）");
+                        + "（SQL 中已出现：" + mentioned + "；迁移中阻塞型引用者：" + referencers.blocking()
+                        + "，CASCADE 从属内容：" + referencers.cascadeChildren() + "）");
+        assertTrue(wronglyBlocking.isEmpty(),
+                "候选 SQL 把 ON DELETE CASCADE 的**从属内容**写进了引用判定：" + wronglyBlocking
+                        + " —— 它们随父行一起消亡是预期行为（不是引用者），写进 NOT EXISTS 会让"
+                        + "带从属内容的 " + resource + " 行永远无法进入清扫");
     }
 
-    /** 扫全部 Flyway 迁移，返回所有「语句主角表」中通过 FOREIGN KEY 引用 {@code resource} 的表名。 */
-    private Set<String> tablesReferencing(String resource) throws Exception {
-        Set<String> referencing = new LinkedHashSet<>();
+    /** 一条外键对清扫语义的分类：阻塞型（必须进 NOT EXISTS）与 CASCADE 从属内容（禁止进）。 */
+    private record ReferencingForeignKeys(Set<String> blocking, Set<String> cascadeChildren) {
+        Set<String> all() {
+            Set<String> merged = new LinkedHashSet<>(blocking);
+            merged.addAll(cascadeChildren);
+            return merged;
+        }
+    }
+
+    /**
+     * 扫全部 Flyway 迁移，把所有「语句主角表」中通过 FOREIGN KEY 引用 {@code resource} 的表
+     * 按是否声明 {@code ON DELETE CASCADE} 分类。CASCADE 判定按**单个约束**切分（取相邻两个
+     * FK 匹配之间的片段），避免同一条语句里多个约束互相污染。
+     */
+    private ReferencingForeignKeys referencingForeignKeys(String resource) throws Exception {
+        Set<String> blocking = new LinkedHashSet<>();
+        Set<String> cascadeChildren = new LinkedHashSet<>();
         Resource[] migrations = new PathMatchingResourcePatternResolver()
                 .getResources("classpath:db/migration/*.sql");
         assertTrue(migrations.length > 0, "找不到 db/migration/*.sql —— 门禁必须在仓库内运行");
@@ -215,14 +262,27 @@ class RetentionPurgeRepositorySchemaTest {
                 }
                 String referencingTable = table.group(1).toLowerCase();
                 Matcher fk = FK_REFERENCE.matcher(statement);
+                List<Integer> starts = new ArrayList<>();
                 while (fk.find()) {
-                    if (fk.group(1).equalsIgnoreCase(resource)) {
-                        referencing.add(referencingTable);
+                    starts.add(fk.start());
+                }
+                for (int i = 0; i < starts.size(); i++) {
+                    fk.find(starts.get(i));   // 复位到第 i 个匹配
+                    int groupEnd = fk.end();
+                    int nextStart = i + 1 < starts.size() ? starts.get(i + 1) : statement.length();
+                    if (!fk.group(1).equalsIgnoreCase(resource)) {
+                        continue;
+                    }
+                    String segment = statement.substring(groupEnd, nextStart);
+                    if (segment.toUpperCase().contains("ON DELETE CASCADE")) {
+                        cascadeChildren.add(referencingTable);
+                    } else {
+                        blocking.add(referencingTable);
                     }
                 }
             }
         }
-        return referencing;
+        return new ReferencingForeignKeys(blocking, cascadeChildren);
     }
 
     /** 删除语句必须形如 {@code DELETE FROM <table> WHERE id = ? AND deleted_at IS NOT NULL}。 */

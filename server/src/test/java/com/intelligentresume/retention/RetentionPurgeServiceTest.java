@@ -127,6 +127,51 @@ class RetentionPurgeServiceTest {
     }
 
     @Test
+    @DisplayName("A 档 · 投递记录：无 CASCADE 从属外的引用 —— 物理删除并计入 purged（无 B 档资源）")
+    void applicationRecord_isDeletedNotSnapshotted() {
+        properties.setEnabled(true);
+        properties.setDryRun(false);
+        when(repository.findPurgeableApplicationRecords(any(), anyInt())).thenReturn(List.of(11L));
+        when(repository.deleteApplicationRecord(11L)).thenReturn(1);
+
+        assertEquals(1, service.purgeExpiredSoftDeleted());
+
+        verify(repository).deleteApplicationRecord(11L);
+        // 无 B 档：快照 finder 恒空、snapper 永不调用（与 resume 同范式）
+        verify(repository, never()).snapshotInterviewAsset(anyLong());
+        verify(observability).recordRetentionPurge("application_record", 1, 1, 0, 0);
+    }
+
+    @Test
+    @DisplayName("A 档 · 面试回答资产：无 section 引用 —— 物理删除")
+    void unreferencedInterviewAsset_isDeleted() {
+        properties.setEnabled(true);
+        properties.setDryRun(false);
+        when(repository.findPurgeableInterviewAssets(any(), anyInt())).thenReturn(List.of(21L));
+        when(repository.deleteInterviewAsset(21L)).thenReturn(1);
+
+        assertEquals(1, service.purgeExpiredSoftDeleted());
+
+        verify(repository).deleteInterviewAsset(21L);
+        verify(observability).recordRetentionPurge("interview_answer_asset", 1, 1, 0, 0);
+    }
+
+    @Test
+    @DisplayName("B 档 · 面试回答资产：有 section 引用 —— 转快照（不删除），计入 snapshotted")
+    void referencedInterviewAsset_isSnapshottedNotDeleted() {
+        properties.setEnabled(true);
+        properties.setDryRun(false);
+        when(repository.findSnapshottableInterviewAssets(any(), anyInt())).thenReturn(List.of(22L));
+        when(repository.snapshotInterviewAsset(22L)).thenReturn(1);
+
+        assertEquals(0, service.purgeExpiredSoftDeleted());
+
+        verify(repository, never()).deleteInterviewAsset(anyLong());
+        verify(repository).snapshotInterviewAsset(22L);
+        verify(observability).recordRetentionPurge("interview_answer_asset", 0, 0, 0, 1);
+    }
+
+    @Test
     @DisplayName("护栏 G3：一次调度每档只处理一批（LIMIT = batch-size），不循环耗尽")
     void singleRunProcessesOnlyOneBatch() {
         properties.setEnabled(true);
@@ -141,6 +186,10 @@ class RetentionPurgeServiceTest {
         verify(repository, times(1)).findSnapshottableResumeVersions(any(), eq(1));
         verify(repository, times(1)).findPurgeableCareerMaterials(any(), eq(1));
         verify(repository, times(1)).findSnapshottableCareerMaterials(any(), eq(1));
+        // 新增资源同样每档一批
+        verify(repository, times(1)).findPurgeableApplicationRecords(any(), eq(1));
+        verify(repository, times(1)).findPurgeableInterviewAssets(any(), eq(1));
+        verify(repository, times(1)).findSnapshottableInterviewAssets(any(), eq(1));
         verify(repository).deleteResumeVersion(7L);
     }
 

@@ -334,9 +334,10 @@ app:
   # 数据生命周期分档清扫（决策 D2；方案 docs/plans/2026-10-01-001-data-retention-tiered-purge.md）
   # ⚠ 两条护栏都落在「安全侧」：enabled=false + dry-run=true —— 部署后**不会**删除任何数据；
   #    需显式解除才会真正物理删除。
-  # 现状（2026-10-23 按代码核实）：阶段 1（A 档无引用者物理删除）、阶段 2 / 2b（B 档被引用者转最小快照，
-  #    见 RetentionPurgeRepository#snapshotResumeVersion/snapshotCareerMaterial/snapshotJobDescription）
-  #    均已实现。此前注释写「阶段 2 未实现、docs 承诺仍标计划中」，是落后于实现的描述。
+  # 现状（2026-10-30 B7 后核实）：阶段 1（A 档无引用者物理删除）、阶段 2 / 2b（B 档被引用者转最小快照，
+  #    见 RetentionPurgeRepository#snapshotResumeVersion/snapshotCareerMaterial/snapshotJobDescription/snapshotInterviewAsset）
+  #    均已实现，覆盖六个资源（V40 起新增 application_record 与 interview_answer_asset，
+  #    两表同批获得 deleted_at 列）。此前注释写「阶段 2 未实现、docs 承诺仍标计划中」，是落后于实现的描述。
   #    账户侧（阶段 3）走独立开关 ACCOUNT_PURGE_ENABLED，与本作业无关。
   retention:
     purge:

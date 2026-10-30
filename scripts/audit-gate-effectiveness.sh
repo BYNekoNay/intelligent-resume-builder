@@ -134,6 +134,8 @@ SelectionReasonContractTest	server/src/main/java/com/intelligentresume/ai/confir
 RetryReuseContractTest	server/src/main/java/com/intelligentresume/ai/task/service/AiTaskService.java	<<PREPEND>>	// 反例：task.setInputSnapshotJson(task.getInputSnapshotJson()) 只是注释
 NormalizerSingleSourceContractTest	server/src/main/java/com/intelligentresume/scoring/service/ResumeKeywordExtractor.java	<<PREPEND>>	// 反例：注释里的 cleaned.replaceAll("[^\\p{L}\\p{N}\\s\\-]", "") 不得被当作第二处定义
 NginxRateLimitContractTest	deploy/nginx/host.conf	<<PREPEND>>	# 反例：limit_req zone=api_per_ip burst=60 只是注释
+RetentionPurgeRepositorySchemaTest	server/src/main/java/com/intelligentresume/retention/RetentionPurgeRepository.java	AND NOT EXISTS (SELECT 1 FROM interview_asset_section t WHERE t.asset_id = ia.id)	AND 1=1
+RetentionPurgeRepositorySchemaTest	server/src/main/java/com/intelligentresume/retention/RetentionPurgeRepository.java	WHERE ar.deleted_at IS NOT NULL AND ar.deleted_at <= ?	WHERE ar.deleted_at IS NOT NULL AND ar.deleted_at <= ? AND NOT EXISTS (SELECT 1 FROM application_status_history t WHERE t.application_record_id = ar.id)
 SecurityHeaderDeliveryContractTest	deploy/nginx/security-headers.conf	<<PREPEND>>	# 反例：report-uri /api/system/csp-reports 只是注释
 GOOD_EOF
 )

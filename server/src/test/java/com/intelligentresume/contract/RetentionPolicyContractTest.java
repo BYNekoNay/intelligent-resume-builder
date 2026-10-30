@@ -53,10 +53,14 @@ class RetentionPolicyContractTest {
 
     /** A/B 两档均已实施的生命周期行（行首标记）。 */
     private static final List<String> IMPLEMENTED_TIER_ROWS = List.of(
-            "职业资料", "简历版本", "JD、简历主记录");
+            "职业资料", "简历版本", "JD、简历主记录", "投递记录", "面试回答资产");
 
-    /** 硬删承诺完全未实现的生命周期行（行首标记）。第 74 批后账户侧已实现，仅剩投递与面试数据。 */
-    private static final List<String> PENDING_ROWS = List.of("投递与面试数据");
+    /**
+     * 硬删/处置承诺未完全实现的生命周期行（行首标记）。
+     * B7 后投递记录与面试回答资产已实施；剩余为面试会话与作答记录 —— 它们没有用户级删除入口，
+     * 当前仅随账户删除级联硬删，必须保留「计划中」标注防止被读作已兑现。
+     */
+    private static final List<String> PENDING_ROWS = List.of("面试会话与作答记录");
 
     /** 表示「还没做完」的措辞。账户行与手册里的账户句都不得在窗口内出现。 */
     private static final List<String> UNFINISHED = List.of("尚未实现", "仍无实现", "仍待实现", "计划中");
@@ -132,8 +136,9 @@ class RetentionPolicyContractTest {
         for (String marker : PENDING_ROWS) {
             String row = lifecycleRow(lifecycle, marker);
             assertTrue(row.contains("计划中") || row.contains("尚未实现"),
-                    "该资源的硬删承诺尚无实现（`RetentionPurgeService` 未覆盖投递/面试相关表），"
-                            + "必须显式标注「计划中」或「尚未实现」，否则读者会当作已兑现：\n" + row);
+                    "该资源的处置承诺尚无实现（面试会话与作答记录无用户级删除入口，"
+                            + "`RetentionPurgeService` 未覆盖），必须显式标注「计划中」或「尚未实现」，"
+                            + "否则读者会当作已兑现：\n" + row);
         }
     }
 

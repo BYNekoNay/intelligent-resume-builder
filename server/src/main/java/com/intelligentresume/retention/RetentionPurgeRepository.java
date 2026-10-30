@@ -140,6 +140,47 @@ public class RetentionPurgeRepository {
             LIMIT ?
             """;
 
+    /**
+     * 超期的软删投递记录（A 档，**无 B 档**）。
+     *
+     * <p>迁移中唯一指向本表的外键是 {@code application_status_history.application_record_id}，
+     * 但它声明为 <b>ON DELETE CASCADE</b> —— 历史行是投递记录的**从属内容**（同一逻辑记录的
+     * 状态轨迹，无独立 PII 主体），随父行一起消亡是预期行为，**不得**进入 {@code NOT EXISTS}：
+     * 否则任何留过状态轨迹的投递记录（即全部 V36 之后创建的记录）将永远无法进入清扫。
+     * 该约束由 {@code RetentionPurgeRepositorySchemaTest} 守护（cascade 从属内容既不要求
+     * 覆盖、也不允许出现在引用判定里）。
+     *
+     * <p>别名刻意用 {@code ar} 而非 {@code t}：{@code t} 是引用判定子查询的约定别名，
+     * 主查询不用它（schema 门禁据此区分「主表」与「引用者」）。
+     */
+    static final String PURGEABLE_APPLICATION_RECORDS = """
+            SELECT ar.id FROM application_record ar
+            WHERE ar.deleted_at IS NOT NULL AND ar.deleted_at <= ?
+            ORDER BY ar.id
+            LIMIT ?
+            """;
+
+    /**
+     * 超期且无任何 section 引用的软删面试回答资产（A 档）。
+     * 唯一引用者 {@code interview_asset_section}（NOT NULL 外键、无 CASCADE）。
+     */
+    static final String PURGEABLE_INTERVIEW_ASSETS = """
+            SELECT ia.id FROM interview_answer_asset ia
+            WHERE ia.deleted_at IS NOT NULL AND ia.deleted_at <= ?
+              AND NOT EXISTS (SELECT 1 FROM interview_asset_section t WHERE t.asset_id = ia.id)
+            ORDER BY ia.id
+            LIMIT ?
+            """;
+
+    /** 超期且**存在** section 引用的软删面试回答资产（B 档）。极性反转自 {@link #PURGEABLE_INTERVIEW_ASSETS}。 */
+    static final String SNAPSHOTTABLE_INTERVIEW_ASSETS = """
+            SELECT ia.id FROM interview_answer_asset ia
+            WHERE ia.deleted_at IS NOT NULL AND ia.deleted_at <= ?
+              AND EXISTS (SELECT 1 FROM interview_asset_section t WHERE t.asset_id = ia.id)
+            ORDER BY ia.id
+            LIMIT ?
+            """;
+
     /** 删除语句：一律带 {@code deleted_at IS NOT NULL}，作为**二次保护**（见类注释）。 */
     static final String DELETE_RESUME_VERSION =
             "DELETE FROM resume_version WHERE id = ? AND deleted_at IS NOT NULL";
@@ -152,6 +193,16 @@ public class RetentionPurgeRepository {
 
     static final String DELETE_JOB_DESCRIPTION =
             "DELETE FROM job_description WHERE id = ? AND deleted_at IS NOT NULL";
+
+    /**
+     * 投递记录删除：状态历史（{@code application_status_history}）由数据库
+     * ON DELETE CASCADE 一并删除 —— 两端（MySQL / H2）都支持该语义，见 V36。
+     */
+    static final String DELETE_APPLICATION_RECORD =
+            "DELETE FROM application_record WHERE id = ? AND deleted_at IS NOT NULL";
+
+    static final String DELETE_INTERVIEW_ASSET =
+            "DELETE FROM interview_answer_asset WHERE id = ? AND deleted_at IS NOT NULL";
 
     /**
      * 简历版本快照化：正文/上下文/摘要全部丢弃，只留「已被清空」这一事实。
@@ -194,6 +245,20 @@ public class RetentionPurgeRepository {
             SET jd_text = CASE WHEN CHAR_LENGTH(jd_text) > 200
                                THEN CONCAT(SUBSTRING(jd_text, 1, 197), '...')
                                ELSE jd_text END
+            WHERE id = ? AND deleted_at IS NOT NULL
+            """;
+
+    /**
+     * 面试回答资产快照化：两列 NOT NULL 的正文置**常量标记**（与 career_material 的
+     * {@code JSON_OBJECT('__purged', TRUE)} 同思路 —— 常量写入天然幂等），可空的
+     * 反馈 JSON 与建议答案清空。题型列（{@code section} 关联）与元数据保留。
+     */
+    static final String SNAPSHOT_INTERVIEW_ASSET = """
+            UPDATE interview_answer_asset
+            SET question_text = '__purged',
+                original_answer_text = '__purged',
+                suggested_answer_text = NULL,
+                feedback_json = NULL
             WHERE id = ? AND deleted_at IS NOT NULL
             """;
 
@@ -253,5 +318,29 @@ public class RetentionPurgeRepository {
 
     public int snapshotJobDescription(Long id) {
         return jdbc.update(SNAPSHOT_JOB_DESCRIPTION, id);
+    }
+
+    public List<Long> findPurgeableApplicationRecords(LocalDateTime cutoff, int limit) {
+        return jdbc.queryForList(PURGEABLE_APPLICATION_RECORDS, Long.class, cutoff, limit);
+    }
+
+    public int deleteApplicationRecord(Long id) {
+        return jdbc.update(DELETE_APPLICATION_RECORD, id);
+    }
+
+    public List<Long> findPurgeableInterviewAssets(LocalDateTime cutoff, int limit) {
+        return jdbc.queryForList(PURGEABLE_INTERVIEW_ASSETS, Long.class, cutoff, limit);
+    }
+
+    public List<Long> findSnapshottableInterviewAssets(LocalDateTime cutoff, int limit) {
+        return jdbc.queryForList(SNAPSHOTTABLE_INTERVIEW_ASSETS, Long.class, cutoff, limit);
+    }
+
+    public int deleteInterviewAsset(Long id) {
+        return jdbc.update(DELETE_INTERVIEW_ASSET, id);
+    }
+
+    public int snapshotInterviewAsset(Long id) {
+        return jdbc.update(SNAPSHOT_INTERVIEW_ASSET, id);
     }
 }

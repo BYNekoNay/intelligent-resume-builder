@@ -1,13 +1,23 @@
 package com.intelligentresume.application.domain;
 
-import com.intelligentresume.common.persistence.BaseEntity;
+import com.intelligentresume.common.persistence.SoftDeletableEntity;
 import jakarta.persistence.*;
+import org.hibernate.annotations.SQLRestriction;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "application_record")
-public class ApplicationRecord extends BaseEntity {
+// ⚠ 必须在实体类上重复声明：@SQLRestriction 标在 @MappedSuperclass（SoftDeletableEntity）
+// 上**不会被实体继承**（Hibernate 只认直接标注），与 Resume / JobDescription 同款。
+// 漏声明的后果：软删行依然出现在列表里（ApplicationControllerIT 实测抓住）。
+@SQLRestriction("deleted_at IS NULL")
+/**
+ * 投递记录。软删除（V40 起）：{@code extends SoftDeletableEntity} 全局过滤已删行；
+ * 清扫作业 {@code RetentionPurgeService} 在恢复期结束后物理删除（唯一引用者
+ * {@code application_status_history} 是 ON DELETE CASCADE 的从属内容，随行一起消亡）。
+ */
+public class ApplicationRecord extends SoftDeletableEntity {
     @Column(name = "user_id", nullable = false)
     private Long userId;
     @Column(name = "job_description_id", nullable = false)

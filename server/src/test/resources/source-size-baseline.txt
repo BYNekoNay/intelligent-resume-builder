@@ -45,3 +45,5 @@ src/test/java/com/intelligentresume/interview/service/InterviewContextSanitizerT
 src/test/java/com/intelligentresume/ai/generation/service/JobGenerationServiceTest.java=418
 src/test/java/com/intelligentresume/resume/service/ResumeVersionServiceTest.java=417
 src/test/java/com/intelligentresume/database/FlywayMigrationIT.java=402
+src/main/java/com/intelligentresume/retention/RetentionPurgeRepository.java=346
+src/test/java/com/intelligentresume/retention/RetentionPurgeIntegrationIT.java=432

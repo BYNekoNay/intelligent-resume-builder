@@ -13,6 +13,8 @@ import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -105,11 +107,18 @@ public class InterviewAssetService {
         return response(asset, userId);
     }
 
+    /**
+     * 软删除（V40 起）：置 {@code deleted_at}，行由 {@code RetentionPurgeService} 在恢复期后
+     * 按引用分档处置。章节关联行（{@code interview_asset_section}）无 PII，随删 ——
+     * 这同时解除了被关联 {@code career_material} 的引用，让无其他引用者的素材可以正常进入清扫；
+     * 若保留关联行，资产必须走 B 档快照（清扫 SQL 两条路径都支持，见 RetentionPurgeRepository）。
+     */
     @Transactional
     public void delete(Long id, Long userId) {
         InterviewAnswerAsset asset = owned(id, userId);
         sectionRepository.deleteByAssetId(asset.getId());
-        repository.delete(asset);
+        asset.setDeletedAt(LocalDateTime.now());
+        repository.save(asset);
     }
 
     private void validateRecord(Long recordId, Long userId) {

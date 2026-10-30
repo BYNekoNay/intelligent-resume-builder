@@ -248,6 +248,88 @@ class RetentionPurgeIntegrationIT {
                 "短文本不得被截断或追加标记（否则第二次执行会越来越长）");
     }
 
+    // ---------- B7（V40 起新纳入的两个资源） ----------
+
+    @Test
+    @DisplayName("A 档 · 投递记录：超期软删 → 物理删除，状态历史随 ON DELETE CASCADE 一并消亡")
+    void expiredApplicationRecord_isDeletedWithCascadeHistory() {
+        long user = insertUser("ret-app-1");
+        long resume = insertResume(user, "R-APP1", null);
+        long version = insertVersion(resume, user, 1, "{\"basics\":{}}", null, null);
+        long jd = insertJobDescription(user, "后端实习", "招聘后端实习生……", null);
+        long record = insertApplicationRecord(user, jd, version, "DRAFT", expired());
+        jdbc.update("INSERT INTO application_status_history "
+                        + "(application_record_id, from_status, to_status, changed_at) VALUES (?, NULL, 'DRAFT', ?)",
+                record, LocalDateTime.now());
+
+        service.purgeExpiredSoftDeleted();
+
+        assertEquals(0, count("application_record", record), "无阻塞引用的超期软删投递记录应被物理删除");
+        assertEquals(0, jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM application_status_history WHERE application_record_id = ?",
+                        Integer.class, record),
+                "状态历史是 ON DELETE CASCADE 的从属内容，必须随投递记录一起消亡"
+                        + "（若它反而挡住了删除，说明候选 SQL 误把它当引用者）");
+    }
+
+    @Test
+    @DisplayName("投递记录未超期（恢复期内）→ 不动")
+    void applicationRecordWithinRecovery_isUntouched() {
+        long user = insertUser("ret-app-2");
+        long resume = insertResume(user, "R-APP2", null);
+        long version = insertVersion(resume, user, 1, "{\"basics\":{}}", null, null);
+        long jd = insertJobDescription(user, "后端实习", "招聘后端实习生……", null);
+        long record = insertApplicationRecord(user, jd, version, "DRAFT",
+                LocalDateTime.now().minusDays(3));
+
+        service.purgeExpiredSoftDeleted();
+
+        assertEquals(1, count("application_record", record), "恢复期内的投递记录不得被动");
+    }
+
+    @Test
+    @DisplayName("A 档 · 面试回答资产：无 section 引用 + 超期 → 物理删除")
+    void unreferencedExpiredInterviewAsset_isDeleted() {
+        long user = insertUser("ret-ia-1");
+        long asset = insertInterviewAsset(user, "介绍一个项目", "我做了……（大段答案）", expired());
+
+        service.purgeExpiredSoftDeleted();
+
+        assertEquals(0, count("interview_answer_asset", asset), "无引用的超期软删资产应被物理删除");
+    }
+
+    @Test
+    @DisplayName("B 档 · 面试回答资产：有 section 引用 + 超期 → 行保留、正文常量化、重跑幂等")
+    void referencedExpiredInterviewAsset_isSnapshottedIdempotently() {
+        long user = insertUser("ret-ia-2");
+        long asset = insertInterviewAsset(user, "介绍一个项目", "我做了……（大段答案 PII）", expired());
+        insertAssetSection(user, asset, "PROJECT");
+
+        service.purgeExpiredSoftDeleted();
+        String answerFirst = text("SELECT original_answer_text FROM interview_answer_asset WHERE id = ?", asset);
+        service.purgeExpiredSoftDeleted();
+        String answerSecond = text("SELECT original_answer_text FROM interview_answer_asset WHERE id = ?", asset);
+
+        assertEquals(1, count("interview_answer_asset", asset),
+                "被 section 引用的资产不得物理删除（fk_asset_section_asset 会挡、历史会断）");
+        // 注意按 asset_id 数（section 行的主键 id 不是 asset 的 id，count(table, id) 会数错列）
+        assertEquals(1, jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM interview_asset_section WHERE asset_id = ?",
+                        Integer.class, asset),
+                "引用它的 section 行必须保留");
+        assertEquals("__purged", answerFirst, "NOT NULL 的正文应以常量标记快照化");
+        assertEquals("__purged", text("SELECT question_text FROM interview_answer_asset WHERE id = ?", asset),
+                "问题正文同样是用户内容，一并快照化");
+        assertNull(text("SELECT suggested_answer_text FROM interview_answer_asset WHERE id = ?", asset),
+                "建议答案是 AI 生成内容，应清空");
+        assertNull(text("SELECT feedback_json FROM interview_answer_asset WHERE id = ?", asset),
+                "反馈 JSON 应清空");
+        assertNotNull(text("SELECT deleted_at FROM interview_answer_asset WHERE id = ?", asset),
+                "deleted_at 必须保留（它是「已软删」的证据）");
+        assertFalse(answerFirst.contains("PII"), "PII 不得残留在正文列");
+        assertEquals(answerFirst, answerSecond, "常量快照必须幂等：重跑内容不变");
+    }
+
     // ---------- 夹具 ----------
 
     private LocalDateTime expired() {
@@ -290,6 +372,29 @@ class RetentionPurgeIntegrationIT {
                 userId, title, jdText, LocalDateTime.now(), LocalDateTime.now(), deletedAt);
     }
 
+    private long insertApplicationRecord(long userId, long jobDescriptionId, long resumeVersionId,
+                                         String status, LocalDateTime deletedAt) {
+        return insert("INSERT INTO application_record (user_id, job_description_id, resume_version_id, status, "
+                        + "created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                userId, jobDescriptionId, resumeVersionId, status,
+                LocalDateTime.now(), LocalDateTime.now(), deletedAt);
+    }
+
+    private long insertInterviewAsset(long userId, String questionText, String answerText,
+                                      LocalDateTime deletedAt) {
+        return insert("INSERT INTO interview_answer_asset (user_id, question_text, original_answer_text, "
+                        + "suggested_answer_text, feedback_json, created_at, updated_at, deleted_at) "
+                        + "VALUES (?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)",
+                userId, questionText, answerText, "建议答案（AI 生成）", "{\"score\":80}",
+                LocalDateTime.now(), LocalDateTime.now(), deletedAt);
+    }
+
+    private long insertAssetSection(long userId, long assetId, String sectionKey) {
+        return insert("INSERT INTO interview_asset_section (user_id, asset_id, section_key, "
+                        + "created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                userId, assetId, sectionKey, LocalDateTime.now(), LocalDateTime.now());
+    }
+
     private long insert(String sql, Object... args) {
         KeyHolder keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
@@ -299,9 +404,11 @@ class RetentionPurgeIntegrationIT {
             }
             return ps;
         }, keys);
-        Number key = keys.getKey();
-        assertNotNull(key, "夹具插入未返回自增主键：" + sql);
-        return key.longValue();
+        // 不能用 keys.getKey()：H2 会把带 DEFAULT CURRENT_TIMESTAMP 的列一并报为 generated key
+        //（多键时 getKey 抛 InvalidDataAccessApiUsageException），必须按列名精确取 ID。
+        Object id = keys.getKeyList().isEmpty() ? null : keys.getKeyList().get(0).get("ID");
+        assertNotNull(id, "夹具插入未返回自增主键：" + sql);
+        return ((Number) id).longValue();
     }
 
     private int count(String table, long id) {

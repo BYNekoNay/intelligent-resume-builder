@@ -42,8 +42,10 @@ import java.util.function.ToIntFunction;
  *   <li>G7 数值配置由 {@code NumericConfigurationValidator} 在启动时校验（0/负值即拒绝）。</li>
  * </ul>
  *
- * <p><b>本作业覆盖四个资源</b>：{@code resume_version}（11 处引用）、{@code career_material}（2 处）、
- * {@code resume}（1 处，**无 B 档**：只有 {@code title}，被引用者原样保留）、{@code job_description}（8 处）。
+ * <p><b>本作业覆盖六个资源</b>：{@code resume_version}（11 处引用）、{@code career_material}（2 处）、
+ * {@code resume}（1 处，**无 B 档**：只有 {@code title}，被引用者原样保留）、{@code job_description}（8 处）、
+ * {@code application_record}（**无 B 档**：唯一引用者 {@code application_status_history} 是
+ * ON DELETE CASCADE 的从属内容）、{@code interview_answer_asset}（1 处：{@code interview_asset_section}）。
  * 两个资源的「间接引用」担忧由分档设计本身消解：被引用的行会**原地保留**，FK 因而始终成立。
  */
 @Component
@@ -92,7 +94,18 @@ public class RetentionPurgeService {
                 process("job_description", cutoff, limit,
                         l -> repository.findPurgeableJobDescriptions(cutoff, l), repository::deleteJobDescription,
                         l -> repository.findSnapshottableJobDescriptions(cutoff, l),
-                        repository::snapshotJobDescription));
+                        repository::snapshotJobDescription),
+                // application_record 没有 B 档：唯一引用者 application_status_history 是
+                // ON DELETE CASCADE 的从属内容，随行消亡（见 PURGEABLE_APPLICATION_RECORDS 注释）
+                process("application_record", cutoff, limit,
+                        l -> repository.findPurgeableApplicationRecords(cutoff, l),
+                        repository::deleteApplicationRecord,
+                        l -> List.of(), id -> 0),
+                process("interview_answer_asset", cutoff, limit,
+                        l -> repository.findPurgeableInterviewAssets(cutoff, l),
+                        repository::deleteInterviewAsset,
+                        l -> repository.findSnapshottableInterviewAssets(cutoff, l),
+                        repository::snapshotInterviewAsset));
 
         outcomes.forEach(this::record);
 
