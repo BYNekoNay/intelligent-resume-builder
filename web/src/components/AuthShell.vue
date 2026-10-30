@@ -47,7 +47,10 @@ const stages = [
         <LanguageSwitcher />
       </header>
       <div class="auth-content"><slot /></div>
-      <footer>{{ t('auth.secureSession') }}</footer>
+      <footer>
+        <span>{{ t('auth.secureSession') }}</span>
+        <RouterLink to="/privacy">{{ t('privacy.title') }}</RouterLink>
+      </footer>
     </section>
   </main>
 </template>

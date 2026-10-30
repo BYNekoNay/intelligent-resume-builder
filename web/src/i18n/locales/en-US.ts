@@ -54,6 +54,34 @@ const enUS: MessageTree = {
       communications: 'Messages', answerAssets: 'Answer library', achievements: 'Achievements',
     },
     actions: { aiConsent: 'AI data consent', signOut: 'Sign out', signIn: 'Sign in', signUp: 'Create account' },
+    privacy: {
+      eyebrow: 'Data & privacy',
+      title: 'Privacy policy',
+      updated: 'Everything described here is implemented and guarded by automated tests; if the product and this page ever disagree, the product wins and this page is updated to match.',
+      backHome: 'Back to workspace',
+      sections: {
+        scope: {
+          title: 'What we store',
+          body: 'Account details: username and sign-in email; passwords are stored only as irreversible hashes.\nYour resume content with full version history, job descriptions, the applications and interview records you enter yourself, and the profile used for display.\nThere are no hidden collection points: the system never reads content you did not enter, and no third-party analytics or ad scripts are embedded.',
+        },
+        ai: {
+          title: 'How AI touches your data',
+          body: 'AI features are off by default: your data is only processed after you explicitly opt in via AI data consent, and you can withdraw at any time.\nBefore every AI call you see the exact content that will be sent (send-time preview); nothing leaves without your confirmation.\nAI task inputs and results are kept for 90 days, then non-essential content is removed and only audit fields remain; clearing AI task history removes them immediately.\nAI output is a suggestion: you confirm what is kept, and the system never writes AI results into your data as fact.',
+        },
+        retention: {
+          title: 'How long data is kept',
+          body: 'Exported PDF files are deleted automatically after 24 hours.\nDeleted resumes, jobs and materials enter a 30-day recovery window; after it ends, unreferenced rows are physically deleted, while rows still referenced by scoring, applications or AI tasks become a minimal non-editable snapshot with the original text removed.\nAccount deletion starts a 7-day cancellation window during which you can restore the account from the sign-in page with your username and password; after the window everything is permanently removed.',
+        },
+        rights: {
+          title: 'What you can do at any time',
+          body: 'Export all of your data from the account page (confirmed with your current password) as a complete backup of your account and resumes.\nDelete your account on the same page; deletion takes effect immediately and starts the cancellation window above.\nWithdraw AI consent or clear AI task history at any time; neither affects resumes you have saved.',
+        },
+        boundary: {
+          title: 'What the system will never do',
+          body: 'It never sends applications, emails or messages to any external platform on its own — every outbound action is performed by you.\nIt never presents AI output as an employer ATS result, hiring probability or recruitment decision.\nContact details and other sensitive fields are excluded from AI-sent content by default: what you see in the preview is exactly what gets sent.',
+        },
+      },
+    },
     account: { eyebrow: 'Account', title: 'Account and profile', subtitle: 'Maintain the personal details displayed in the platform and your account settings.', profileTitle: 'Profile', profileDescription: 'These details identify your account and are not written into resumes automatically.', displayName: 'Display name', username: 'Username', email: 'Sign-in email', save: 'Save profile', saveSuccess: 'Profile saved.', saveError: 'Unable to save your profile. Please try again.', securityTitle: 'Sign-in and security', securityDescription: 'Manage how you sign in and your account password. Confirm your current password before making a change.', changeEmail: 'Change email', newEmail: 'New email', emailHint: 'Used to sign in and receive account notices', emailDialogDescription: 'Enter the new sign-in email and confirm this change with your current password.', currentPassword: 'Current password', saveEmail: 'Confirm email change', changePassword: 'Change password', password: 'Password', passwordProtected: 'Set', passwordHint: 'Update your password regularly to keep the account secure', passwordDialogDescription: 'Confirm your current password, then set a new password with at least 8 characters.', newPassword: 'New password', confirmPassword: 'Confirm new password', savePassword: 'Confirm password change', passwordMismatch: 'The new passwords do not match.', credentialError: 'Unable to update. Check your current password and try again.', securityNotice: 'After a successful change, every device must sign in again.', privacyTitle: 'AI data and consent', privacyDescription: 'AI use requires your explicit consent. You can review or withdraw it at any time.', manageAiConsent: 'Manage AI data consent', clearAiHistory: 'Clear AI task history', clearingAiHistory: 'Clearing…', clearAiHistoryConfirm: 'Clear completed AI task history? In-progress and unconfirmed tasks are kept.', clearAiHistoryDone: 'Cleared {count} task records.', clearAiHistoryError: 'Unable to clear task history. Please try again.', dataTitle: 'Data and privacy', dataDescription: 'Export your account data as a backup, or delete the account when you need to.', exportData: 'Export my data', exporting: 'Exporting…', exportDone: 'Your data export has been downloaded.', exportError: 'Unable to export your data. Please try again.', exportPasswordTitle: 'Confirm data export', exportPasswordHint: 'The export file contains your account and resume data. Enter your current password to confirm this export.', exportPasswordTooShort: 'Use at least 8 characters.', exportConfirmAction: 'Export now', deleteAccount: 'Delete account', deleteDialogDescription: 'Deleting the account disables it immediately, revokes all sessions, and signs you out. Your data is kept for a 7-day grace period — restore it from the sign-in page with your username and password. After the grace period, data is permanently deleted and cannot be recovered. Type the username {username} to confirm.', deleteConfirmLabel: 'Type your username to confirm', deleteConfirmAction: 'Delete account permanently', deleting: 'Deleting…', deleteError: 'Unable to delete the account. Please try again.' },
     language: { label: 'Interface language', chinese: '中文', english: 'EN' },
     auth: {

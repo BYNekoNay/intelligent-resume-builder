@@ -61,6 +61,34 @@ const messages: Partial<Record<Locale, MessageTree>> = {
       communications: '文案', answerAssets: '答案库', achievements: '成就引导',
     },
     actions: { aiConsent: 'AI 数据处理同意', signOut: '退出登录', signIn: '登录', signUp: '注册' },
+    privacy: {
+      eyebrow: '数据与隐私',
+      title: '隐私政策',
+      updated: '本页描述的能力均已实现并由自动化测试守护；实现与本页不一致时以实现为准并同步修订本页。',
+      backHome: '返回工作台',
+      sections: {
+        scope: {
+          title: '我们保存哪些数据',
+          body: '账户信息：用户名与登录邮箱；密码只保存不可逆的哈希值，无法从库里还原。\n简历内容与全部历史版本、岗位描述、你手动录入的投递与面试记录、用于展示的个人资料。\n除以上数据外没有隐藏收集项：不读取你未主动录入的内容，也不嵌入任何第三方统计或广告脚本。',
+        },
+        ai: {
+          title: 'AI 如何处理你的数据',
+          body: 'AI 功能默认关闭：需要你在「AI 数据授权」中显式同意后才会处理你的数据，且可以随时撤回。\n每次调用前你都能看到将要发送的确切内容（发送前预览），未确认不会发出。\nAI 任务的原始输入与生成结果保存 90 天，之后清理非必要内容、只保留审计字段；「清空 AI 任务历史」可以立即删除。\nAI 输出只是建议：采纳与否由你确认，系统不会把 AI 结果直接当成事实写入你的数据。',
+        },
+        retention: {
+          title: '数据保存多久',
+          body: '导出的 PDF 文件 24 小时后自动删除。\n删除简历、岗位或资料后进入 30 天恢复期；到期后，未被引用的数据物理删除，被评分、投递或 AI 任务引用的数据转为不可编辑的最小快照并清除原文。\n删除账号后进入 7 天撤销窗口，期内可在登录页凭用户名和密码恢复；窗口结束后数据永久删除、无法找回。',
+        },
+        rights: {
+          title: '你可以随时做什么',
+          body: '导出全部数据：在账户页发起，输入当前密码确认后得到一份包含账户与简历数据的完整备份。\n删除账号：同在账户页，删除立即生效并进入上述撤销窗口。\n撤回 AI 授权 / 清空 AI 任务历史：随时可用，不影响你已保存的简历内容。',
+        },
+        boundary: {
+          title: '系统不会做的事',
+          body: '不会自动向任何外部平台发送投递、邮件或消息——所有发出动作都由你手动完成。\n不会把 AI 输出表述为企业的 ATS 结果、录用概率或招聘决定。\n联系方式等敏感字段默认排除在 AI 发送内容之外：预览里可见的才是真正会发送的。',
+        },
+      },
+    },
     account: { eyebrow: '账户', title: '账户与个人资料', subtitle: '维护用于平台显示的个人资料和账户设置。', profileTitle: '个人资料', profileDescription: '这些信息只用于账户识别，不会自动写入简历。', displayName: '显示名称', username: '用户名', email: '登录邮箱', save: '保存资料', saveSuccess: '个人资料已保存。', saveError: '保存失败，请稍后重试。', securityTitle: '登录与安全', securityDescription: '管理你的登录方式和账户密码。修改前需要验证当前密码。', changeEmail: '修改邮箱', newEmail: '新邮箱', emailHint: '用于登录和接收账户通知', emailDialogDescription: '输入新的登录邮箱，并使用当前密码确认本次修改。', currentPassword: '当前密码', saveEmail: '确认修改邮箱', changePassword: '修改密码', password: '登录密码', passwordProtected: '已设置', passwordHint: '定期更新密码可以提升账户安全性', passwordDialogDescription: '先验证当前密码，再设置一个至少 8 位的新密码。', newPassword: '新密码', confirmPassword: '确认新密码', savePassword: '确认修改密码', passwordMismatch: '两次输入的新密码不一致。', credentialError: '修改失败，请检查当前密码后重试。', securityNotice: '修改成功后，所有设备都需要重新登录。', privacyTitle: 'AI 数据与授权', privacyDescription: 'AI 使用前需要你的明确授权，你可以随时查看或撤回授权。', manageAiConsent: '管理 AI 数据授权', clearAiHistory: '清空 AI 任务历史', clearingAiHistory: '正在清空…', clearAiHistoryConfirm: '确定清空已完成的 AI 任务历史吗？进行中的任务与待确认任务会保留。', clearAiHistoryDone: '已清空 {count} 条任务历史。', clearAiHistoryError: '清空任务历史失败，请稍后重试。', dataTitle: '数据与隐私', dataDescription: '导出账号数据留作备份，或在需要时删除账号。', exportData: '导出个人数据', exporting: '正在导出…', exportDone: '已导出个人数据。', exportError: '导出失败，请稍后重试。', exportPasswordTitle: '确认导出个人数据', exportPasswordHint: '导出文件包含你的账户与简历数据。请输入当前密码以确认本次导出。', exportPasswordTooShort: '密码至少需要 8 位。', exportConfirmAction: '确认导出', deleteAccount: '删除账号', deleteDialogDescription: '删除后账号立即停用、所有会话失效且无法再登录。账号数据将保留 7 天撤销期，期间可在登录页凭用户名和密码恢复；撤销期结束后数据将被永久删除、无法找回。请输入用户名 {username} 以确认。', deleteConfirmLabel: '输入用户名以确认', deleteConfirmAction: '确认删除账号', deleting: '正在删除…', deleteError: '删除失败，请稍后重试。' },
     language: { label: '界面语言', chinese: '中文', english: 'EN' },
     auth: {

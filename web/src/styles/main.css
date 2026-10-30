@@ -219,6 +219,15 @@ h3 { font-size: 15px; font-weight: 600; color: var(--text-primary); }
   position: relative;
 }
 
+/* 页脚（B6-4）：目前只有隐私政策入口。链接用次要色，不与主内容争夺注意力。 */
+.app-footer {
+  width: 100%; max-width: 1280px; margin: 0 auto;
+  padding: 0 24px 28px;
+  font-size: 12px;
+}
+.app-footer a { color: var(--text-secondary); text-decoration: none; }
+.app-footer a:hover { color: var(--accent); }
+
 .app-main:has(.resume-studio) {
   max-width: none;
   padding: 0;

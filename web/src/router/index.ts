@@ -15,6 +15,8 @@ import { useDesktopMode } from '@/composables/useDesktopMode'
 const HomeView = () => import('@/views/HomeView.vue')
 const LoginView = () => import('@/views/LoginView.vue')
 const RegisterView = () => import('@/views/RegisterView.vue')
+// 隐私政策（B6-4）：纯静态页，未登录也必须可达（登录页与页脚都有入口）
+const PrivacyPolicyView = () => import('@/views/PrivacyPolicyView.vue')
 
 const ResumeListView = () => import('@/views/ResumeListView.vue')
 const ResumeDetailView = () => import('@/views/ResumeDetailView.vue')
@@ -97,6 +99,7 @@ const router = createRouter({
     },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/register', name: 'register', component: RegisterView },
+    { path: '/privacy', name: 'privacy', component: PrivacyPolicyView },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView },
   ],
 })

@@ -152,5 +152,8 @@ async function retrySession() {
     <main class="app-main">
       <RouterView />
     </main>
+    <footer class="app-footer">
+      <RouterLink to="/privacy">{{ t('privacy.title') }}</RouterLink>
+    </footer>
   </div>
 </template>

@@ -31,6 +31,7 @@ const viewsDir = join(projectRoot, 'src', 'views')
  */
 const EXEMPT = new Map([
   ['NotFoundView.vue', '纯静态页：没有数据源，也就不存在加载/空/失败三态'],
+  ['PrivacyPolicyView.vue', '纯静态页（B6-4）：内容来自 i18n 常量，没有数据源，也就不存在加载/空/失败三态'],
   ['RouteLoadErrorView.vue', '错误兜底页本身：它的存在就是 error 态，不需要再包一层'],
   ['LoginView.vue', '表单页：提交态由按钮 loading 表达，无列表 → 无空态'],
   ['RegisterView.vue', '表单页：同上'],
