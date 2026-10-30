@@ -247,6 +247,24 @@ public class AppObservability {
         }
     }
 
+    /**
+     * 记录一份 CSP 违规报告（B6-1）。
+     *
+     * <p>{@code directive} 必须已由调用方映射到**封闭集**
+     * （{@code CspReportController} 的白名单 + {@code other}/{@code unparseable}）。
+     * 这里刻意不再做清洗 —— 报告来自浏览器且可被任意伪造，标签基数约束必须
+     * 在进入本类之前成立。
+     *
+     * <p>消费方式：Report-Only 观察期看「报告是否为零」判定能否转 enforcement；
+     * 转 enforcement 后任何非零读数都意味着策略挡住了真实资源，需要立即排查。
+     */
+    public void recordCspViolation(String directive) {
+        Counter.builder("security_csp_violation_reports")
+                .tag("directive", directive)
+                .register(registry)
+                .increment();
+    }
+
     private void incrementIfPositive(String metric, String resource, int amount) {
         if (amount > 0) {
             Counter.builder(metric).tag("resource", resource).register(registry).increment(amount);

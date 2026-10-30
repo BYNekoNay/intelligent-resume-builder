@@ -1,5 +1,6 @@
 package com.intelligentresume.contract;
 
+import com.intelligentresume.system.controller.CspReportController;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -62,7 +63,7 @@ class SecurityHeaderDeliveryContractTest {
             Pattern.compile("(?m)^[ \\t]*include\\s+(snippets/[\\w.-]+)\\s*;");
 
     @Test
-    @DisplayName("片段本身完整：4 条头一条不少，且都带 always")
+    @DisplayName("片段本身完整：4 条头一条不少，都带 always，且 CSP 头带 report-uri（与后端端点对拍）")
     void snippetCarriesAllFourHeaders() throws Exception {
         String snippet = read(SNIPPET_PATH);
 
@@ -73,6 +74,13 @@ class SecurityHeaderDeliveryContractTest {
         long withAlways = REQUIRED_HEADERS.stream().filter(h -> h.endsWith("always")).count();
         assertTrue(withAlways >= 2, "样本自身失效：应有多条头带 always（当前 " + withAlways + "）");
         assertTrue(CONFIGS.size() >= 4, "受检配置清单过短，本门禁会失去意义");
+
+        // B6-1：CSP 报告收集通道。没有 report-uri 时 Report-Only 观察期**永远无法判定**
+        // （报告无处投递，"报告为零"的切换条件① 形同虚设）；路径必须与后端端点逐字一致，
+        // 否则浏览器把报告发到 404 上，同样是静默丢失 —— 所以与 CspReportController.PATH 对拍。
+        assertTrue(snippet.contains("report-uri " + CspReportController.PATH),
+                "CSP 头必须带 report-uri 且指向 " + CspReportController.PATH
+                        + "（路径漂移 = 报告发到 404，收集通道静默失效）");
     }
 
     @Test

@@ -66,6 +66,9 @@ public class SecurityConfig {
                         "/api/auth/refresh",
                         "/api/auth/logout",
                         "/api/system/health",
+                        // CSP 违规报告（B6-1）：由浏览器自动发出、不带凭证，必须匿名可达；
+                        // 恒返回 204，解析与计数细节见 CspReportController
+                        "/api/system/csp-reports",
                         // /actuator/* 在公网经 nginx 不可达（nginx 无 /actuator/ location，请求落入 SPA 回退返回 index.html）；
                         // permitAll 仅供本地 monitoring/ 栈经容器网络直连 api:8080 使用。
                         "/actuator/health/**",
