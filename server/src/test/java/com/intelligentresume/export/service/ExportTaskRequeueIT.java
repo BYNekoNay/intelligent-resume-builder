@@ -57,9 +57,13 @@ class ExportTaskRequeueIT {
         Seeded seeded = seed();
 
         ExportTask waiting = saveTask(seeded.userId(), seeded.versionId(), LocalDateTime.now().plusMinutes(5));
-        ExportTask due = saveTask(seeded.userId(), seeded.versionId(), LocalDateTime.now().minusSeconds(1));
+        // 用「10 分钟前」而不是「1 秒前」：这条用例曾在 CI 上稳定红、本地单跑稳定绿。
+        // 根因不是 SQL，是时间余量太小 —— 共享 H2 里其它用例可能留下大量 PENDING 行，
+        // 而 claimableTasks 是 ORDER BY id ASC LIMIT n，新行 id 最大、最容易被截断挤出。
+        // 改用全表扫描（见 claimableSweep）+ 明确的过期量，两句断言才真正生效。
+        ExportTask due = saveTask(seeded.userId(), seeded.versionId(), LocalDateTime.now().minusMinutes(10));
 
-        List<ExportTask> claimable = exportTaskRepository.claimableTasks(500);
+        List<ExportTask> claimable = claimableSweep();
 
         assertFalse(claimable.stream().anyMatch(t -> t.getId().equals(waiting.getId())),
                 "未到 next_attempt_at 的任务不得被领取，否则重排等于无视下游给的等待时长");
@@ -89,9 +93,25 @@ class ExportTaskRequeueIT {
         assertNotNull(stored.getNextAttemptAt(), "必须记录下次可尝试时刻");
         assertTrue(stored.getNextAttemptAt().isAfter(LocalDateTime.now().plusSeconds(20)),
                 "延迟应基本等于 Retry-After（30s），实际：" + stored.getNextAttemptAt());
-        assertFalse(exportTaskRepository.claimableTasks(500).stream()
+        assertFalse(claimableSweep().stream()
                         .anyMatch(t -> t.getId().equals(task.getId())),
                 "重排后的任务在到期前不得被再次领取");
+    }
+
+    /**
+     * 全表扫描「可领取」集合。
+     *
+     * <p>不能直接用 {@code claimableTasks(500)}：该查询是 {@code ORDER BY id ASC LIMIT n}
+     * 的「取一批」语义（worker 每次领 500），而本类是 {@code @SpringBootTest}，共享同一个 H2。
+     * 全量套件跑到这里时，其它用例留下的 PENDING 行会把**新插入的行**（id 最大）挤出 LIMIT：
+     * <ul>
+     *   <li>「不在集合里」的断言因截断而恒真 → <b>假绿</b>；</li>
+     *   <li>「在集合里」的断言则假红（2026-10-30 起 CI 持续红的就是这一句）。</li>
+     * </ul>
+     * 用 {@code count + 1} 保证不截断，断言才真正检验 SQL 的 {@code next_attempt_at} 条件。
+     */
+    private List<ExportTask> claimableSweep() {
+        return exportTaskRepository.claimableTasks((int) exportTaskRepository.count() + 1);
     }
 
     // ------------------------------------------------------------------ 夹具
