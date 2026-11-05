@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 生产口径的持久化门禁：在真实 MySQL 8.4 上从零执行全部迁移（V1 → V38）。
+ * 生产口径的持久化门禁：在真实 MySQL 8.4 上从零执行全部迁移（V1 → V40）。
  *
  * <p>CI：`ci.yml` 的 `migration-84` job 会起 mysql:8.4 并跑本类，随后用
  * `scripts/assert-tests-ran.py` 断言它**真的执行**（被跳过不算通过）。
@@ -25,8 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>与 {@link MySql57MigrationLiveIT} 的分工：
  * <ul>
- *   <li>本类 = <b>全新安装</b>（V1→V38，38 条），对齐生产版本 8.4；</li>
- *   <li>5.7 类 = <b>存量升级</b>（V19 基线→V38，19 条），只证明老库能升上来，
+ *   <li>本类 = <b>全新安装</b>（V1→V40，40 条），对齐生产版本 8.4；</li>
+ *   <li>5.7 类 = <b>存量升级</b>（V19 基线→V40，21 条），只证明老库能升上来，
  *       不宣称「5.7 可以全新安装」（V18 的窗口函数在 5.7 上不存在）。</li>
  * </ul>
  *
@@ -34,17 +34,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * （{@code scripts/persistence-gate.remote.sh}）解析 surefire 报告确认「真的跑了」，
  * 而不是把「跳过」当「通过」。
  *
- * <p>⚠ 新增 Flyway 迁移时必须同步改本类的 {@code 36}；{@code MySql57BaselineContractTest}
+ * <p>⚠ 新增 Flyway 迁移时必须同步改本类的 {@code 40}；{@code MySql57BaselineContractTest}
  * 也会静态对账迁移条数，两处都不要漏。
  */
 @EnabledIfEnvironmentVariable(named = "MYSQL84_LIVE_TEST", matches = "true")
 class MySql84FreshMigrationIT {
 
-    /** 迁移总数（V1~V38）。新增迁移时同步改这里。 */
-    private static final int EXPECTED_MIGRATIONS = 38;
+    /** 迁移总数（V1~V40）。新增迁移时同步改这里。 */
+    private static final int EXPECTED_MIGRATIONS = 40;
 
-    /** 最新版本号（V38）。新增迁移时同步改这里。 */
-    private static final String EXPECTED_LATEST_VERSION = "38";
+    /** 最新版本号（V40）。新增迁移时同步改这里。 */
+    private static final String EXPECTED_LATEST_VERSION = "40";
 
     @Test
     void freshInstallRunsEveryMigrationOnMySql84() throws Exception {
