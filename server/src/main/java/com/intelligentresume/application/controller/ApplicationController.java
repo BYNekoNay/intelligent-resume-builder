@@ -14,6 +14,29 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * 投递看板的 HTTP 入口（{@code /api/applications}）。
+ *
+ * <h2>端点分组</h2>
+ * <ul>
+ *   <li>{@code GET ""} —— 列表，{@code followUp} 只接受 {@code TODAY} / {@code OVERDUE} / {@code ALL}
+ *       （其它值静默降级为 {@code ALL}，不报错）；</li>
+ *   <li>{@code GET /{id}}、{@code GET /stats} —— 详情与转化统计；</li>
+ *   <li>{@code POST ""} —— 创建，返回 <b>201</b>；初始状态只能是 {@code DRAFT}，否则 409；</li>
+ *   <li>{@code PUT /{id}} —— 编辑文案/跟进时间。<b>不能改状态</b>：请求里的 status 与当前值不同即 409；</li>
+ *   <li>{@code PATCH /{id}/status} —— <b>唯一</b>合法的状态变更入口（白名单 + 乐观锁 + 写历史）；</li>
+ *   <li>{@code DELETE /{id}} —— 软删（V40 起），保留期内可恢复。</li>
+ * </ul>
+ *
+ * <h2>两条贯穿所有端点的约定</h2>
+ * <ol>
+ *   <li><b>归属过滤在服务端做</b>：每个方法都用 {@code currentUserId} 取当前用户，
+ *       拿不到即 {@code UNAUTHENTICATED}；不要新增"按 id 直查"的旁路，那是跨用户越权。</li>
+ *   <li><b>写操作带 {@code version}</b>：乐观锁冲突返回 409，而不是覆盖别人的编辑。</li>
+ * </ol>
+ *
+ * <p>业务规则与状态机说明见 {@code ApplicationService} 的类注释。
+ */
 @RestController
 @RequestMapping("/api/applications")
 public class ApplicationController {

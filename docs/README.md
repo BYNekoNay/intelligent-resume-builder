@@ -17,6 +17,7 @@
 | 文档 | 用途 |
 | --- | --- |
 | [项目上下文](../PROJECT_CONTEXT.md) | 产品目标、真实流程、模块职责、数据边界与协作约束；后续 AI 与新开发者的首读入口 |
+| [上手指南](./ONBOARDING.md) | 30 分钟串讲：一句话理解产品、代码地图、跑起来、改代码前的 8 条红线、五个最容易踩的坑 |
 | [根目录 README](../README.md) | 项目能力、环境配置与快速开始 |
 | [本地验证指南](./LOCAL_VALIDATION.md) | 不依赖 Docker 的本地启动、测试与真实百炼 AI 验收 |
 | [部署运行手册](./DEPLOYMENT.md) | Docker 路线：GitHub Actions 构建、阿里云 ACR、ECS 部署、验证、回滚与注销前备份 |
@@ -88,6 +89,7 @@
 | [2026-09-23-remote-ai-smoke-report](./reviews/2026-09-23-remote-ai-smoke-report.md) | 远程 AI 全链路冒烟：7 类 AI 任务实测结果、模型链线上降级证据、发现的缺陷与待决策项 |
 | [agent-frontend-regression-review](./reviews/agent-frontend-regression-review.md) | 前端回归审查 |
 | [agent-testing-evidence-review](./reviews/agent-testing-evidence-review.md) | 测试与证据回归审查 |
+| [2026-11-05-documentation-health](./reviews/2026-11-05-documentation-health.md) | **文档健康报告**：抽样 14 项核对，确认 3 处漂移（版本副本 11→13、索引缺 RELEASES 分类、技术栈表写了并不存在的 Element Plus），均已在同批修复 |
 
 ### 2.3 decisions/ —— 决策登记册（ADR 与悬而未决项）
 
@@ -136,6 +138,21 @@
 | 文档 | 内容 |
 | --- | --- |
 | [browser-audit-log-2026-09](./archive/browser-audit-log-2026-09.md) | 2026-09-03 ~ 09-04 浏览器手工回归与逐轮审计日志（从 `LOCAL_VALIDATION.md` 析出） |
+
+### 2.8 RELEASES/ —— 发布说明
+
+> **破坏性变更、升级步骤、精确测试条数只在这里写**。发布说明是**某一天的快照**（不可改写），
+> 与当前实现不一致时以代码和 `PROJECT_CONTEXT.md` 为准。
+
+| 版本 | 内容 |
+| --- | --- |
+| [v0.5.0](./RELEASES/v0.5.0.md) | 运维可信度 + 产品口径收口：告警规则首次真正评估、备份保底份数、探针扩项、确认草稿缺项改 `40904`（**破坏性变更**） |
+| [v0.4.4](./RELEASES/v0.4.4.md) | AI 发送前预览（R32）覆盖五领域端点；缺失 `X-AI-Preview-Token` 返回 `40001`（**破坏性变更**） |
+| [v0.4.3](./RELEASES/v0.4.3.md) | 见发布说明 |
+| [v0.4.2](./RELEASES/v0.4.2.md) | 见发布说明 |
+| [v0.4.1](./RELEASES/v0.4.1.md) | 桌面导入冲突解决的用例归因纠正与启用 |
+| [v0.4.0](./RELEASES/v0.4.0.md) | 见发布说明 |
+| [v0.3.0](./RELEASES/v0.3.0.md) | 见发布说明 |
 
 ---
 

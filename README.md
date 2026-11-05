@@ -80,7 +80,7 @@ flowchart LR
   W -->|"/api"| A["Spring Boot 3.3 API<br/>Java 17 · 分层架构"]
   A --> DB[("MySQL 8.4<br/>Flyway V1–V40")]
   A --> WK["AI 任务工作器<br/>HEAVY / LIGHT 双队列"]
-  WK --> LLM["百炼模型链<br/>7 个模型顺序降级"]
+  WK --> LLM["百炼模型链<br/>有序降级 + 失效冷却"]
   A --> PDF["PDF 渲染"]
   PDF --> P1["Puppeteer 服务<br/>在线"]
   PDF --> P2["PDFBox<br/>桌面端"]
@@ -88,7 +88,7 @@ flowchart LR
 
 | 层 | 选型 | 版本锚定 |
 | --- | --- | --- |
-| 前端 | Vue 3 + TypeScript + Vite | Vue 3 / Element Plus |
+| 前端 | Vue 3 + TypeScript + Vite | Vue 3.5 / Vite 5 · 自研组件（无第三方 UI 库，仅 lucide 图标） |
 | 后端 | Spring Boot + JPA + Flyway | 3.3.2 / Java 17 |
 | 数据库 | MySQL（生产权威）/ H2 file（桌面） | 8.4 / 2.x |
 | PDF | Puppeteer 渲染服务 · PDFBox 本地渲染 | Node 20+ / PDFBox 2.0.32 |
@@ -168,7 +168,7 @@ deploy/            nginx 站点配置与 systemd 单元（随部署幂等同步�
 
 | 门禁 | 拦的是什么 |
 | --- | --- |
-| 版本号一致性 | 同一版本号有 11 处独立副本（含 jar 名），任一处不一致即红 |
+| 版本号一致性 | 同一版本号有 13 处独立副本（含 jar 名与桌面壳），任一处不一致即红 |
 | 单文件行数棘轮 | 生产代码 ≤300 行、测试代码 ≤400 行；超限文件必须登记并锁定上限，只许下调；每个扫描根单独校验扫描下限，任一根扫空即失败（防门禁空转） |
 | API 文档覆盖 | 新增端点未写入接口文档即红 |
 | Schema 文档契约 | 新增表未写入数据库文档即红 |

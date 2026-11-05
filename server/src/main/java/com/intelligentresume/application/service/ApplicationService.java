@@ -21,8 +21,34 @@ import java.util.Objects;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 
+/**
+ * 投递记录与 9 态状态机。三条不变量：
+ * <ol>
+ *   <li><b>迁移是白名单</b>：只有 {@code TRANSITIONS} 里的边可通行，其余一律 {@code CONFLICT}。新增状态必须
+ *       同步改这里、前端状态数组与 {@code docs/04} 表格（门禁逐格比对），否则出现「后端能迁、前端画不出」。</li>
+ *   <li><b>状态只能走 {@link #updateStatus}</b>：{@link #update} 发现 status 与当前值不同即拒绝，
+ *       否则「编辑备注」会绕过状态历史改状态。</li>
+ *   <li><b>{@code stageEnteredAt} 只在真正迁移时刷新</b>：它是「各阶段平均停留天数」的唯一依据；历史缺陷
+ *       P1-4 把它错当 {@code updatedAt}，任意编辑都会重置停留时长，看板转化周期因此系统性偏短。</li>
+ * </ol>
+ * <p>每个状态都允许自环（「仍是此状态，只补备注」）。禁止自环会逼前端先跳走再跳回，在审计时间线上
+ * **伪造一次从未发生的迁移** —— 比多一条无变化的记录危险得多。
+ * <p>并发与删除：写操作基于 {@code version} 乐观锁；删除自 V40 起为软删（置 {@code deleted_at}），
+ * 保留期后由 {@code RetentionPurgeService} 物理删除，状态历史随父行级联消亡。
+ * <p>统计口径不在本类：{@code ApplicationStatsCalculator} 是纯函数。
+ */
 @Service
 public class ApplicationService {
+
+    /**
+     * 允许的状态迁移（白名单）。每行第一项是源状态，集合内是可去的目标状态。
+     *
+     * <p>三个终态（{@code HIRED} / {@code REJECTED} / {@code WITHDRAWN}）**只能自环**，
+     * 进入后不再回流 —— 需要回到流程中时应当新建一条投递记录，而不是篡改历史。
+     * {@code NO_RESPONSE} 是唯一「可被重新打开」的准终态：雇主后来回复时，用户要能一步走到
+     * {@code SCREENING}/{@code INTERVIEWING}；若强制经过 {@code APPLIED}，就会在时间线上
+     * 伪造一次 {@code NO_RESPONSE → APPLIED} 的事件。
+     */
     private static final Map<ApplicationStatus, Set<ApplicationStatus>> TRANSITIONS = Map.ofEntries(
             Map.entry(ApplicationStatus.DRAFT, Set.of(ApplicationStatus.DRAFT, ApplicationStatus.APPLIED, ApplicationStatus.WITHDRAWN)),
             Map.entry(ApplicationStatus.APPLIED, Set.of(ApplicationStatus.APPLIED, ApplicationStatus.SCREENING, ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.REJECTED, ApplicationStatus.WITHDRAWN, ApplicationStatus.NO_RESPONSE)),
