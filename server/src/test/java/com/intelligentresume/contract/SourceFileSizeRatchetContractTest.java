@@ -31,10 +31,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       「拆干净了又长回去」不会被发现）。</li>
  * </ul>
  *
- * <p><b>口径：总物理行数</b>（{@code Files.readAllLines().size()}，空行与注释都算）。
- * 为什么不用「非空行」或「非空非注释」：项目规则的原话是「单文件 ≤ 300 行」，判据必须与规则
- * **字面一致**；按非空行量，会把 694 行的 {@code JavaResumePdfRenderer} 记成 629，
- * 同一事实出现两份口径——本仓已经为此吃过亏。宁可判据比规则更严，也不要口径漂移。
+ * <p><b>口径：代码行</b>（不含注释与空行）。2026-11-05 起由「总物理行数」改为本口径。
+ *
+ * <p>为什么改：旧口径把注释和空行也算进额度，结果是**越需要解释的文件越加不进解释**——
+ * 当时有 8 个已登记文件的行数**正好等于上限**（{@code InterviewAiService} 403/403、
+ * {@code CareerMaterialService} 394/394 等），连一行注释都会让门禁变红。
+ * 这条门禁真正要挡的是「代码长到看不清」，不是「文字多」；判据必须与守护的事实同宽，
+ * 否则会逼人删注释，而不是拆代码。
+ *
+ * <p>代价：历史发布说明与评审文档里的「行数」是旧口径（物理行），**不要与新数字直接比较**；
+ * 需要对比时以本文件的计数实现为准。
  *
  * <p><b>范围：生产代码 + 测试代码</b>（2026-10-24 起，批次 3）。两侧**上限不同**：
  * <ul>
@@ -55,7 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class SourceFileSizeRatchetContractTest {
 
-    /** 一个被扫描的源码根：上限（总物理行数）+ 扫描下限（防该根静默失效）。 */
+    /** 一个被扫描的源码根：上限（**代码行**，不含注释与空行）+ 扫描下限（防该根静默失效）。 */
     private record ScanRoot(String path, int limit, int minFiles) {
     }
 
@@ -187,11 +193,11 @@ class SourceFileSizeRatchetContractTest {
         return entries;
     }
 
-    /** 扫描到的每个文件的总物理行数（键为相对 server/ 的路径，排序稳定便于对比失败输出）。 */
+    /** 扫描到的每个文件的代码行数（键为相对 server/ 的路径，排序稳定便于对比失败输出）。 */
     private Map<String, Integer> lineCounts() throws IOException {
         Map<String, Integer> counts = new TreeMap<>();
         for (Path file : javaFiles()) {
-            counts.put(toRelative(file), totalLines(file));
+            counts.put(toRelative(file), codeLines(file));
         }
         return counts;
     }
@@ -230,9 +236,43 @@ class SourceFileSizeRatchetContractTest {
         return rootOf(relativePath).limit();
     }
 
-    /** 总物理行数（空行与注释都算 —— 见类注释里的口径理由）。 */
-    static int totalLines(Path file) throws IOException {
-        return Files.readAllLines(file, StandardCharsets.UTF_8).size();
+    /**
+     * 代码行数：**不含**注释与空行（口径理由见类注释）。
+     *
+     * <p>按块注释状态机逐行扫描，而不是用正则判断整行 —— 否则「代码后面跟一段行内注释」的行
+     * 会被误判成注释行而漏计，让门禁比规则更松。
+     */
+    static int codeLines(Path file) throws IOException {
+        int count = 0;
+        boolean inBlock = false;
+        for (String raw : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+            String rest = raw.trim();
+            if (inBlock) {
+                int end = rest.indexOf("*/");
+                if (end < 0) {
+                    continue;
+                }
+                rest = rest.substring(end + 2).trim();
+                inBlock = false;
+            }
+            while (!rest.isEmpty()) {
+                if (rest.startsWith("//")) {
+                    break;
+                }
+                if (rest.startsWith("/*")) {
+                    int end = rest.indexOf("*/", 2);
+                    if (end < 0) {
+                        inBlock = true;
+                        break;
+                    }
+                    rest = rest.substring(end + 2).trim();
+                    continue;
+                }
+                count++;
+                break;
+            }
+        }
+        return count;
     }
 
     private String toRelative(Path file) {
