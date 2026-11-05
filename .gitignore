@@ -40,6 +40,10 @@ Thumbs.db
 
 # Personal documents (not for repository)
 docs/实习面试项目应对手册.md
+# 个人求职材料：项目描述方法、面试卡片等。2026-11-05 起排除——
+# 内容是「怎么在简历/面试里讲这些项目」，不是项目本身的文档，入库会造成两个后果：
+# ① 每次 git status 都显示未跟踪；② 与 docs/ 的索引契约（indexCoversEveryDocument）冲突。
+docs/career/
 
 # Package manager diagnostics
 npm-debug.log*
