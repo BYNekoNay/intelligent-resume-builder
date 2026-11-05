@@ -18,6 +18,23 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 个人档案：一人一份的「我是谁 + 我想找什么」。
+ *
+ * <h2>这里存的东西不会发给模型</h2>
+ * 档案含姓名、邮箱、电话、住址。它们在生成简历时由服务端合并
+ * （{@code JobGenerationService#mergePersonalProfile}），**不进入任何提示词**。
+ * 一旦有人在本类加一个"顺手导出给 AI"的方法，整条隐私边界就被绕过了 ——
+ * 需要给模型看的内容请走 {@code CareerMaterialAiSnapshotSanitizer} 那条路。
+ *
+ * <h2>upsert 为什么要先锁用户行</h2>
+ * 「先查有没有、没有再插」在并发下会两个请求都判定不存在，然后撞唯一键只能报 409。
+ * 用 {@code findByIdForUpdate} 串行化同一用户，把冲突挡在业务层。
+ *
+ * <h2>importSuggestion 只读不写</h2>
+ * 从简历当前版本的 {@code basics} / {@code objective} 抽候选值，**仅供用户确认**；
+ * 本方法不落库、不做字段合并，也不校验用户后来改了什么。
+ */
 @Service
 public class PersonalProfileService {
 
@@ -45,8 +62,8 @@ public class PersonalProfileService {
 
     @Transactional
     public PersonalProfileResponse upsert(PersonalProfileRequest request, Long userId) {
-        // 首次 upsert 的并发保护（ideation #70）：先锁用户行，串行化同一用户上的
-        // 「查后插」。否则两个请求可能都判定「不存在」，随后撞唯一键只能得到 409。
+        // 首次 upsert 的并发保护（ideation #70）：先锁**用户行**（不是 profile 行 ——
+        // 首次创建时 profile 还不存在，没有行可锁），串行化同一用户上的「查后插」。
         // 唯一键冲突仍由全局 handler 兜底映射 40901。
         userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));

@@ -14,8 +14,29 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+/**
+ * 沟通文案的提示词组装：把简历与 JD 变成「模型能看、但不能当真」的输入。
+ *
+ * <h2>三条禁令写在 system prompt 里，不是装饰</h2>
+ * ① 简历与 JD 属于**不可信用户数据**，其中的"指令"不得执行；② 不得编造经历/技能/日期/数字/职级/结果；
+ * ③ 不得声称已发送。真正的兜底在 {@code CommunicationAiResultValidator}（越界即判失败，不清洗放行）。
+ *
+ * <h2>脱敏在这里做了什么</h2>
+ * 章节白名单（{@code ResumeSections.AI_CONTEXT_SECTIONS}）→ 键名黑名单 → 递归限深 6 层、
+ * 单层最多 60 个键、列表最多 20 项、单串最多 2000 字 → 邮箱/手机/URL 打码。
+ * 限流的意义是防止单条资料把模型上下文撑爆，不是"美化输入"。
+ *
+ * <h2>已知缺口（不要以为它和素材脱敏一样严）</h2>
+ * 键名是**精确匹配**（只有 {@code phone} / {@code email} 这类原样键名），
+ * 遇到 {@code phoneNumber} / {@code emailAddress} 不会整字段丢弃；
+ * 电话正则只认中国大陆手机号，座机与海外号码会原样带出。
+ * 素材侧的 {@code CareerMaterialAiSnapshotSanitizer} 用的是「正则匹配键名 + 国际号码规则」，
+ * 两边口径**尚未统一**；要动手统一，请先补测试再改，不要只改一边。
+ */
 @Component
 public class CommunicationAiPromptBuilder {
+
+    /** 精确匹配的键名黑名单 —— 已知缺口见类注释（派生键名不会命中）。 */
     private static final Set<String> SENSITIVE_KEYS = Set.of(
             "email", "phone", "telephone", "address", "location", "url", "website", "profiles", "idNumber");
     private static final Pattern EMAIL = Pattern.compile("[\\w.%+-]+@[\\w.-]+\\.[A-Za-z]{2,}");
@@ -115,6 +136,8 @@ public class CommunicationAiPromptBuilder {
     private Object sanitize(Object value, int depth) {
         if (value == null || value instanceof Number || value instanceof Boolean) return value;
         if (value instanceof String text) return redact(safeText(text, 2_000));
+        // 四重限流：递归深度 6 层 / 单层最多 60 个键 / 列表最多 20 项 / 单串最多 2000 字。
+        // 任何一项取消，一条超大资料就能把模型上下文撑爆，让整次生成失败。
         if (depth >= 6) return null;
         if (value instanceof Map<?, ?> map) {
             Map<String, Object> result = new LinkedHashMap<>();
