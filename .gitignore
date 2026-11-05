@@ -61,6 +61,10 @@ desktop-shell/node_modules/
 desktop-shell/release*/
 desktop-shell/vendor/
 desktop-shell/dist/
+# 归档区：旧版本安装包不删，但移出主目录树（2026-11-05 起）。
+# 放这里而不是 release*/ 下，是因为 release*/ 是 electron-builder 的输出前缀，
+# 混进去容易被下次打包误扫。
+desktop-shell/.archive/
 
 # 桌面模式的数据目录（H2 文件库 + 备份 + DPAPI 凭据）。在仓库根跑桌面模式就会生成
 desktop-data/
