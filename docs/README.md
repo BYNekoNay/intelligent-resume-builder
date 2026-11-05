@@ -18,6 +18,7 @@
 | --- | --- |
 | [项目上下文](../PROJECT_CONTEXT.md) | 产品目标、真实流程、模块职责、数据边界与协作约束；后续 AI 与新开发者的首读入口 |
 | [上手指南](./ONBOARDING.md) | 30 分钟串讲：一句话理解产品、代码地图、跑起来、改代码前的 8 条红线、五个最容易踩的坑 |
+| [代码导读与 Review 地图](./CODE-REVIEW-GUIDE.md) | 六条业务链路的人话版说明 + Review 优先级 TOP 15（含注释率与"该盯什么"），以及为什么不能全量重注释 |
 | [根目录 README](../README.md) | 项目能力、环境配置与快速开始 |
 | [本地验证指南](./LOCAL_VALIDATION.md) | 不依赖 Docker 的本地启动、测试与真实百炼 AI 验收 |
 | [部署运行手册](./DEPLOYMENT.md) | Docker 路线：GitHub Actions 构建、阿里云 ACR、ECS 部署、验证、回滚与注销前备份 |

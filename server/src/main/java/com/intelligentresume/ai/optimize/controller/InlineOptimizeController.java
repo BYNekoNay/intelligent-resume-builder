@@ -20,6 +20,29 @@ import org.springframework.web.bind.annotation.*;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * AI 内联能力的两个创建入口：{@code /api/ai/inline-optimize}（改表达）与
+ * {@code /api/ai/achievement-guidance}（引导补量化成果）。
+ *
+ * <h2>这两个接口在做什么（人话）</h2>
+ * 用户在简历编辑器里选中一段文字 → 这里把「哪份简历、哪一节、什么内容、关联哪个 JD」打包成一个任务 →
+ * 立刻返回 <b>202 + taskId</b>，前端轮询结果。两个端点逻辑相同，只有任务类型不同。
+ *
+ * <h2>三个前置检查，顺序不能换</h2>
+ * <ol>
+ *   <li><b>幂等键必填</b>：缺失、空白或超过 128 字符直接 400。编辑器容易重复触发，
+ *       没有幂等键就会为一句话创建好几个 AI 任务，白烧当日配额；</li>
+ *   <li><b>资源归属</b>：简历版本必须属于当前用户且未删除，JD 同理。这一步必须在建任务<b>之前</b>，
+ *       否则别人的简历内容会被拼进你的提示词；</li>
+ *   <li><b>再建任务</b>：只有前两步都通过才落库。</li>
+ * </ol>
+ *
+ * <h2>重试为什么不带幂等键</h2>
+ * {@code /tasks/{id}/retry} 重跑的是**已经落库的同一个任务**，不产生新记录，所以不需要键。
+ *
+ * <p>按 R32 约定，创建类端点还应携带 {@code X-AI-Preview-Token}；本类不直接读取该头，
+ * 改链路时不要在别处绕开它单独放行。
+ */
 @RestController
 @RequestMapping("/api/ai")
 public class InlineOptimizeController {
@@ -97,6 +120,7 @@ public class InlineOptimizeController {
         return map;
     }
 
+    /** 两个资源都按「不存在」处理（而不是 403）：不告诉调用方"这个 id 存在，只是不属于你"。 */
     private void validateOwnedResources(InlineOptimizeRequest request, Long userId) {
         resumeVersionRepository.findByIdAndCreatedByAndDeletedAtIsNull(request.getResumeVersionId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Resume version not found"));

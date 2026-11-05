@@ -11,6 +11,25 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * 校验 AI 返回的 ATS 分析结果：模型的自由文本在这里被翻译成可信数据，或者被拒绝。
+ *
+ * <h2>要防的三件事</h2>
+ * <ol>
+ *   <li><b>字段乱造</b>：顶层字段必须**完全等于** {@code TOP_LEVEL} 那 6 个（多一个或漏一个都拒绝），
+ *       数组里每一项的字段集合也要完全一致；</li>
+ *   <li><b>输出失控</b>：每个数组都有条数上限（覆盖 20 / 证据 12 / 可读性 10 / 建议 8），
+ *       每段文本都有长度上限，超长是**截断**而不是报错（文本长了不该让整次分析作废）；</li>
+ *   <li><b>编造原文</b>：{@code evidenceFindings[].quote} 必须能在简历 JSON 里逐字找到，找不到就置空 ——
+ *       否则界面会展示一段"用户简历里根本不存在"的引文。</li>
+ * </ol>
+ *
+ * <h2>失败之后</h2>
+ * 任何不合规都抛 {@link AtsAiAnalysisException}（{@code INVALID_RESPONSE}，标记为不可重试），
+ * 上层据此降级成规则结果并告知原因。<b>宁可不给 AI 结论，也不给错的结论。</b>
+ *
+ * <p>边界：本类只校验结构与引文真实性，不评价分析质量 —— 观点对不对，规则管不了。
+ */
 @Component
 public class AtsAiResultValidator {
     private static final Set<String> TOP_LEVEL = Set.of(
@@ -43,6 +62,9 @@ public class AtsAiResultValidator {
         for (Map<String, Object> item : objects(output.get("evidenceFindings"), "evidenceFindings", 12, EVIDENCE_KEYS)) {
             String quote = optionalText(item.get("quote"), 500);
             if (quote != null) {
+                // 防编造：模型给的"原文引用"必须真的出现在简历里。
+                // 这里只做序列化后的逐字子串比对，不做模糊匹配 —— 宁可丢掉一条证据，
+                // 也不能让界面展示一段用户简历里不存在的引文。
                 if (resumeText == null) resumeText = serialize(resumeJson);
                 if (!resumeText.contains(quote)) quote = null;
             }
