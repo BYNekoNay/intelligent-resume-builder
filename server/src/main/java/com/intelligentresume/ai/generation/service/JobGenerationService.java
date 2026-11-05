@@ -25,6 +25,33 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * 岗位简历生成：把「已确认的选材快照」变成一份可审核的简历草稿。
+ *
+ * <h2>两条执行路径，新任务只准走第一条</h2>
+ * <ul>
+ *   <li><b>快照路径</b>（快照里有 {@code jobSnapshot}）：用不可变快照重建 JD、资料与 prompt，
+ *       与「发送前预览」共用 {@code JobGenerationInputAssembler} —— 预览看到的就是实际发出的；</li>
+ *   <li><b>旧任务路径</b>（没有 {@code jobSnapshot}）：只为升级时仍在队列里的任务保留，
+ *       会重新查库取资料，<b>不具备快照语义</b>。不要给它加新能力，也不要让新任务落到这里。</li>
+ * </ul>
+ *
+ * <h2>后处理顺序不能换</h2>
+ * <pre>normalizeAliases → schemaValidator → mergePersonalProfile → collectSources</pre>
+ * <ol>
+ *   <li><b>先归一别名</b>：模型常用 {@code title} / {@code institution} 这类同义字段，
+ *       不归一会直接被 schema 判成非法，整个任务白跑；</li>
+ *   <li><b>再校验 schema</b>：校验同时确认「引用的 materialId 必须在本次候选里」，挡住幻觉引用；</li>
+ *   <li><b>最后合并联系方式</b>：把模型可能编造或回显的 name/email/phone/location/website 整段删掉，
+ *       换成服务端档案里的真值 —— 这是「联系方式不进模型」的收口点，顺序提前会让 schema 先拒掉它们；</li>
+ *   <li>{@code collectSources} 只记录<b>真实存在</b>的引用（用 {@code byId} 过滤），
+ *       幻觉 ID 不会进 {@code selected} —— 否则留存清扫会误判"这条资料还有人用"，永远删不掉。</li>
+ * </ol>
+ *
+ * <h2>注入检测只告警，不阻断</h2>
+ * 命中可疑模式时只写 {@code PromptInjectionDetected} 警告并记日志，<b>任务继续执行</b>：
+ * 误判的代价（用户拿不到简历）高于收益；真正的防线是 system prompt + 输出 schema 校验。
+ */
 @Service
 public class JobGenerationService {
 
@@ -112,6 +139,8 @@ public class JobGenerationService {
 
         List<String> sourceTexts = materials.stream().map(CareerMaterial::getSourceText)
                 .filter(Objects::nonNull).toList();
+        // 只扫 JD 正文与资料原文：用户自己写的"忽略以上指令"可能是正常业务词汇，
+        // 所以这里只产生警告，不据此拒绝任务（见类注释）。
         PromptInjectionDetector.DetectionResult detection = injectionDetector.detect(job.getJdText(), sourceTexts);
         List<String> warnings = new ArrayList<>();
         if (detection.suspicious()) {
@@ -136,6 +165,8 @@ public class JobGenerationService {
         } catch (BusinessException e) {
             throw new BusinessException(ErrorCode.AI_FAILURE, "Draft schema validation failed: " + e.getMessage());
         }
+        // 联系方式只在这里落地：删掉模型给的那一份，换成服务端档案的真值。
+        // 顺序必须在 schema 校验之后 —— 提前会因 basics 多了字段而校验失败。
         mergePersonalProfile(draft, profile);
 
         Map<String, CareerMaterial> byId = new HashMap<>();
@@ -295,6 +326,16 @@ public class JobGenerationService {
         }
     }
 
+    /**
+     * 把服务端档案里的联系方式写进草稿的 {@code basics}。
+     *
+     * <p>实现上先<b>无条件删除</b>模型输出的 name/email/phone/location/website，再按档案补回 ——
+     * 不是"有就覆盖"，而是"先清空再写"。原因：模型可能把 JD 里的招聘方联系方式、
+     * 或自己编的邮箱写进 basics，这类内容必须整段丢弃，不能因为"档案里没填"就留下。
+     *
+     * <p>档案值缺失时对应键直接不存在（{@code putKnown} 跳过空白），前端因此能区分
+     * "用户没填"与"填了空字符串"。
+     */
     @SuppressWarnings("unchecked")
     private void mergePersonalProfile(Map<String, Object> draft, Map<String, Object> profile) {
         Map<String, Object> basics = draft.get("basics") instanceof Map<?, ?> raw
@@ -338,6 +379,10 @@ public class JobGenerationService {
      * Produces a small, user-facing review summary. It intentionally measures
      * only top-level resume entries because those are the items users can
      * accept, edit, or reject on the confirmation page.
+     *
+     * <p>readiness 三档：有条目缺来源或没有来源（pending/unsupported &gt; 0）→ {@code REQUIRES_ACTION}；
+     * 否则若仍有缺口或未覆盖要求 → {@code REVIEW_RECOMMENDED}；两者都没有才是 {@code READY}。
+     * 把 {@code REQUIRES_ACTION} 放宽成提示，等于让"没有出处的编造内容"直接进确认页。
      */
     @SuppressWarnings("unchecked")
     private Map<String, Object> buildQualitySummary(Map<String, Object> draft, Collection<?> draftGaps,
@@ -414,6 +459,13 @@ public class JobGenerationService {
         }
     }
 
+    /**
+     * 递归收集草稿里**真实存在**的资料来源引用。
+     *
+     * <p>只认 {@code byId} 里有的 materialId：模型常给出不存在或已删除的 ID，
+     * 原样记进 {@code selected} 会让留存清扫认为"这条资料还被引用"，从而永远不进入 A 档清理。
+     * 同时兼容旧任务的 {@code _source} 字符串形态（{@code materialId=123}）。
+     */
     @SuppressWarnings("unchecked")
     private void collectSources(Object value, String path, Map<String, CareerMaterial> byId,
                                 List<SelectedMaterialEntry> selected) {
