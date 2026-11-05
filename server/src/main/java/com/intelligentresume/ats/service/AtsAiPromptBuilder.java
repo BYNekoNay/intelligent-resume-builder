@@ -12,6 +12,22 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * ATS 分析的提示词：把简历、JD 与本地规则结果打包成一次模型调用。
+ *
+ * <h2>提示词里写死的一条边界</h2>
+ * 「本地规则分是权威」—— 模型<b>不得</b>返回分数、录用概率或录用结论，只做语义覆盖、证据与可读性建议。
+ * 这条不只靠模型自觉：返回体还要过 {@code AtsAiResultValidator} 的字段白名单，多一个字段就整份拒绝。
+ *
+ * <h2>脱敏只做到「丢键」，没做到「打码」（已知缺口）</h2>
+ * {@link #SENSITIVE_KEYS} 按小写精确匹配丢掉 email/phone/address 等**字段**；
+ * 但 {@link #sanitize} 对字符串只截断、不打码 —— 简历正文里手写的「手机 138xxxx」会原样进模型。
+ * 素材侧的 {@code CareerMaterialAiSnapshotSanitizer} 有值级打码，两边口径不一致；要统一先补测试。
+ *
+ * <h2>版本号取自配置，不取任务快照（#85）</h2>
+ * {@link #promptVersion()} 返回的是**本次实际构建请求**用的版本，结果记录必须用它；
+ * 用快照里的副本会在改配置后写出「记录说 v1、实际按 v2 跑」的假账。
+ */
 @Component
 public class AtsAiPromptBuilder {
     private final ObjectMapper objectMapper;
@@ -118,6 +134,7 @@ public class AtsAiPromptBuilder {
 
     private Object sanitize(Object value, int depth) {
         if (value == null || value instanceof Number || value instanceof Boolean) return value;
+        // 只截断、不打码 —— 正文里的手机号/邮箱会原样带走。已知缺口，见类注释。
         if (value instanceof String text) return text.length() <= 6_000 ? text : text.substring(0, 6_000);
         if (value instanceof Map<?, ?> map) {
             Map<String, Object> converted = new LinkedHashMap<>();

@@ -7,6 +7,26 @@ import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 import java.util.Map;
 
+/**
+ * 面试 AI 的一次尝试 —— 幂等与失败重试的载体（ADR-010）。
+ *
+ * <h2>两个唯一约束各挡一类重复</h2>
+ * <ul>
+ *   <li>{@code (user_id, idempotency_key)}：同一个请求重复提交只落一条，防止网络重试变成两次计费；</li>
+ *   <li>{@code (session_id, operation_type, round_no)}：同一场面试的同一轮同一操作只能有一次尝试，
+ *       防止并发点两次「作答」生成两份评估。</li>
+ * </ul>
+ * 删掉任意一条，重复调用的成本直接翻倍，而且两份结果谁生效取决于写入顺序 —— 排查时几乎无法复现。
+ *
+ * <h2>两个容易忽略的字段</h2>
+ * <ul>
+ *   <li>{@code pendingAnswer}：AI 处理期间先把用户答案存下来，进程崩溃也不会丢；</li>
+ *   <li>{@code retryable}：区分「稍后重试可能成功」（超时/限流）与「重试也没用」（schema 不合法），
+ *       前端据此决定要不要显示重试按钮。</li>
+ * </ul>
+ *
+ * <p>状态推进与陈旧丢弃策略在 {@code InterviewAiService}；本类只负责持久化形态。
+ */
 @Entity
 @Table(name = "interview_ai_attempt", uniqueConstraints = {
         @UniqueConstraint(name = "uq_iai_user_idempotency", columnNames = {"user_id", "idempotency_key"}),
