@@ -91,6 +91,7 @@
 | [agent-frontend-regression-review](./reviews/agent-frontend-regression-review.md) | 前端回归审查 |
 | [agent-testing-evidence-review](./reviews/agent-testing-evidence-review.md) | 测试与证据回归审查 |
 | [2026-11-05-documentation-health](./reviews/2026-11-05-documentation-health.md) | **文档健康报告**：抽样 14 项核对，确认 3 处漂移（版本副本 11→13、索引缺 RELEASES 分类、技术栈表写了并不存在的 Element Plus），均已在同批修复 |
+| [2026-11-05-code-review-findings](./reviews/2026-11-05-code-review-findings.md) | **代码疑点清单**：注释工程副产品，40 条未修改的发现（脱敏三口径、若干 NPE/口径问题、死代码），引用前必须逐条核实 |
 
 ### 2.3 decisions/ —— 决策登记册（ADR 与悬而未决项）
 
