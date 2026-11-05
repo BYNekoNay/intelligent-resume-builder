@@ -91,6 +91,8 @@ function parseDraft(resultJson: any) {
           provenance: sourceMeta(entry),
           source: entry._source ?? (entry._sources ? MATERIAL_SOURCE : null),
           pending: entry._pending?.reason ?? (typeof entry._pending === 'string' ? entry._pending : null),
+          // 有 _pending 的条目默认「待处理」（decision=null），其余默认「接受」：
+          // 待补充的条目必须人工表态，不能默认放行
           decision: entry._pending ? null : 'ACCEPT',
           editedValue: null,
         })
@@ -232,6 +234,8 @@ function moveSection(offset: number) {
 
 function toggleAttentionOnly() {
   attentionOnly.value = !attentionOnly.value
+  // 开启过滤时若当前章节不在过滤结果里，自动跳到第一个待处理章节，
+  // 否则右侧会出现「导航里看不到、但正在显示」的错位
   if (attentionOnly.value && !activeEntry.value?.needsAttention) {
     const nextAttention = sectionEntries.value.find(section => section.needsAttention)
     if (nextAttention) selectSection(nextAttention.key)
@@ -250,6 +254,8 @@ function openEdit(item: DraftItem) {
 function saveEdit() {
   if (!editingItem.value) return
   const cleanedValue = removeEmptyFields(editValue.value)
+  // 编辑结果要和 provenance 合并：_source / _sources 是提交时追溯来源的依据，
+  // 只在 content 上保存清洗后的值会让来源信息丢失
   editingItem.value.editedValue = Object.assign({}, cleanedValue as Record<string, unknown>, editingItem.value.provenance)
   editingItem.value.content = cleanedValue
   editingItem.value.decision = 'EDIT'

@@ -14,6 +14,18 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/**
+ * 系统健康端点：匿名探针与认证明细两个口径。
+ *
+ * <p>为什么分两个：
+ * <ul>
+ *   <li>{@code /health} 匿名可达，只给服务名与聚合状态——够 nginx/容器探活，不泄露版本与依赖拓扑；</li>
+ *   <li>{@code /health/detail} 需要认证，返回版本、能力清单与逐项状态，供运维定位。</li>
+ * </ul>
+ *
+ * <p>检查项刻意包含 {@code ai-provider}（密钥是否配置）与 {@code ai-model-chain}（当前是否真有可用模型）：
+ * 只查前者会把「密钥有效但额度耗尽」掩盖成 UP，这是曾经的线上事故口径。
+ */
 @RestController
 @RequestMapping("/api/system")
 public class SystemController {
@@ -57,6 +69,10 @@ public class SystemController {
     //   ai-provider    —— 提供者是否已配置（密钥是否就位）
     //   ai-model-chain —— 现在是否真的有可调度的模型（额度未耗尽、未处于冷却期）
     // 只查前者会漏掉「密钥有效但所有模型额度耗尽」——那正是曾经把 AI 全线故障掩盖成 UP 的原因。
+    /**
+     * 逐项探测：会发起真实的出站检查（模型链可用数、PDF 服务健康），因此本端点在限流表里
+     * 是**唯一受限的 GET**；新增检查项时要评估是否也带来出站成本。
+     */
     private List<SystemHealthResponse.CapabilityStatus> checks() {
         String providerStatus = providerRegistry.hasAvailableProvider() ? "UP" : "DOWN";
         int availableModels = providerRegistry.availableModelCount();

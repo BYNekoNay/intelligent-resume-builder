@@ -32,6 +32,23 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.List;
 
+/**
+ * 选材 / 确认 / 生成三组「预览 + 执行」端点（全部挂在 /api/ai 下）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>每组都是"先 /preview 拿 messages + 令牌 → 再带 {@code X-AI-Preview-Token} 提交"，
+ *       预览与提交必须用**同一个 body**：令牌是服务端拿自己组装的 providerInput 重算的，
+ *       任何字段变化都会变成 409（CONFLICT）。</li>
+ *   <li>{@link #select} 上的 {@code @Transactional} 是为了让"粘贴 JD 时顺带建的临时岗位"与
+ *       "建任务"同生共死：令牌校验失败抛异常时，临时岗位一起回滚，不留下孤儿 JD。</li>
+ *   <li>幂等策略不对称：发起选材不带 {@code Idempotency-Key} 时生成随机 UUID（等于不幂等）；
+ *       而确认选材不带 key 时会退化成确定性的 {@code selection-confirm:<taskId>}。改这里前先确认前端到底带不带。</li>
+ *   <li>粘贴 JD 的重放比对（{@link #matchesPastedRequest}）只比 jdText / 标题 / 公司名 / 三个素材 ID 列表，
+ *       <b>不比 resumeTitle</b> —— 只改了简历标题的重试会命中幂等，返回旧任务。</li>
+ *   <li>用户身份来自过滤器写入的 request attribute，缺失即 401；本类不做任何权限推断。</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/ai")
 public class JobMaterialSelectionController {
@@ -66,6 +83,12 @@ public class JobMaterialSelectionController {
         this.previewGuard = previewGuard;
     }
 
+    /**
+     * 发起选材任务（返回 202 + 任务状态）。
+     *
+     * <p>顺序：幂等预检（仅粘贴 JD 分支）→ 建临时岗位 → 归属/素材校验 → 预览令牌校验 → 建任务。
+     * 令牌校验放在所有落库之后、建任务之前，靠外层事务回滚保证"被拒时不留脏数据"。
+     */
     @PostMapping("/select-materials-for-job")
     @Transactional
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> select(
@@ -78,6 +101,7 @@ public class JobMaterialSelectionController {
         if (provided != null && !provided.isEmpty() && provided.length() > 128) {
             throw new BusinessException(ErrorCode.VALIDATION, "Idempotency-Key 最长 128 字符");
         }
+        // 未带 Idempotency-Key 时用随机 UUID 兜底 —— 即"不幂等"，每次调用都会新建一个任务与（可能）一条临时岗位
         String key = provided == null || provided.isEmpty() ? UUID.randomUUID().toString() : provided;
         Long jobId = request.jobDescriptionId();
         if (jobId == null && request.jdText() != null && !request.jdText().isBlank()) {
@@ -126,6 +150,9 @@ public class JobMaterialSelectionController {
      *
      * <p>只读：不落库、不调 provider。粘贴 JD 时用**未持久化**的瞬时岗位对象参与组装 ——
      * 字段与创建时持久化的那条相同，因此 prompt 与 worker 组装结果一致。
+     *
+     * <p>没有候选素材时返回 400（而不是给一份空 prompt 的预览）：worker 侧遇到空候选同样
+     * 不会发请求，两边行为对齐。
      */
     @PostMapping("/select-materials-for-job/preview")
     public ApiResponse<AiPreviewService.PreviewResponse> preview(
@@ -165,6 +192,12 @@ public class JobMaterialSelectionController {
         return job;
     }
 
+    /**
+     * 确认选材 → 创建 JOB_GENERATION 子任务，返回 202 + 子任务状态。
+     *
+     * <p>除了任务归属，所有校验（同意书 / 幂等 / 状态戳 / 令牌 / 配额）都在
+     * {@link MaterialSelectionConfirmationService#confirm} 里，控制器只做身份提取与响应包装。
+     */
     @PostMapping("/tasks/{taskId}/confirm-materials")
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> confirm(
             @PathVariable Long taskId,

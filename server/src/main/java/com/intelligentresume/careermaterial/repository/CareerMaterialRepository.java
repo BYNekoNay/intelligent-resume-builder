@@ -14,6 +14,20 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 职业资料仓储。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>隔离维度只有 userId：除 {@code findById}（仅测试/内部使用）外，所有查询都把
+ *       {@code user_id} 写进 where，新增方法也必须带；</li>
+ *   <li>软删由实体上的 {@code @SQLRestriction} 统一过滤，本接口不需要也不应再写
+ *       {@code deleted_at is null}——重复写会让 JPQL 与原生查询口径分叉；</li>
+ *   <li>返回实体的方法会带出 MEDIUMTEXT 原文，列表/摘要类场景请用投影方法；</li>
+ *   <li>需要在 AI 生成等链路保证"同毫秒写入也稳定"时，只能用
+ *       {@code findByUserIdOrderByUpdatedAtDescIdDesc}，单键排序不够。</li>
+ * </ul>
+ */
 public interface CareerMaterialRepository extends JpaRepository<CareerMaterial, Long> {
 
     Optional<CareerMaterial> findByIdAndUserId(Long id, Long userId);
@@ -44,6 +58,18 @@ public interface CareerMaterialRepository extends JpaRepository<CareerMaterial, 
             @Param("userId") Long userId,
             @Param("materialType") MaterialType materialType);
 
+    /**
+     * 搜索：三列包含匹配（标题 / 原文 / contentJson 文本投影），全部 lower 后比较。
+     *
+     * <p>key 点：
+     * <ul>
+     *   <li>{@code escape '\\'} 与调用方 {@code normalizeQuery} 的转义必须成对，
+     *       单边改动会让含 {@code %} / {@code _} 的搜索词行为突变；</li>
+     *   <li>{@code contentJsonText} 是 {@code @Formula} 投影，依赖 JSON→字符串隐式转换，
+     *       换成其他数据库或显式 cast 时这里要跟着改；</li>
+     *   <li>三个 like 均无索引可用，属全表包含扫描，靠调用方的长度/分页上限控成本。</li>
+     * </ul>
+     */
     @Query("""
             select material from CareerMaterial material
             where material.userId = :userId
@@ -61,6 +87,10 @@ public interface CareerMaterialRepository extends JpaRepository<CareerMaterial, 
             @Param("query") String query,
             Pageable pageable);
 
+    /**
+     * 按类型分组计数（不忽略空类型，故无资料的枚举值不会出现）。
+     * 只用于筛选标签的总数，不随搜索条件变化。
+     */
     @Query("""
             select new com.intelligentresume.careermaterial.dto.CareerMaterialTypeCount(
                 material.materialType, count(material))
@@ -70,5 +100,6 @@ public interface CareerMaterialRepository extends JpaRepository<CareerMaterial, 
             """)
     List<CareerMaterialTypeCount> countByType(@Param("userId") Long userId);
 
+    /** 当前用户的资料条数（软删已由 @SQLRestriction 排除）。 */
     long countByUserId(Long userId);
 }

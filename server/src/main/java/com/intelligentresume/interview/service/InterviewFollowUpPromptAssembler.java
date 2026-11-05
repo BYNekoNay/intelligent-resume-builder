@@ -63,6 +63,9 @@ public class InterviewFollowUpPromptAssembler {
     /**
      * 组装 worker 真正交给 provider 的 input（`_systemPrompt` / `_taskPrompt`）。
      * 预览与执行都走这里，因此两侧内容逐字节相同。
+     *
+     * <p>上下文直接复用 {@link InterviewPromptContextAssembler#buildFirstQuestionContext}：
+     * 追问练习只需要「JD + 简历 + 面试模式」，不需要历史问答，避免把整场记录再发一遍。
      */
     public Map<String, Object> buildProviderInput(InterviewSession session, String weakness, Long userId) {
         String context = promptContextAssembler.buildFirstQuestionContext(session, userId);

@@ -20,6 +20,13 @@ import org.springframework.web.bind.annotation.*;
  *   <li>POST {@code /api/scoring/match} — 计算并保存</li>
  *   <li>GET {@code /api/scoring/results/{id}} — 查询</li>
  * </ul>
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@code userId} 只从请求属性取，取不到即 401；查询按 userId 过滤是跨用户隔离的唯一防线，不要在 service 之外再放开。</li>
+ *   <li>两个端点都返回 {@code MatchResponse}，字段口径由 {@code ScoringService#toResponse} 统一。</li>
+ *   <li>两条路由都是同步、纯计算，<b>不涉及任何 AI 配额或异步任务</b>。</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/scoring")

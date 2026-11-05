@@ -31,6 +31,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * AI 任务的通用 HTTP 入口:预览、创建、查询、续办列表、清空历史。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>创建走"两步确认":先 {@code POST /tasks/preview} 拿到 previewToken,再带 token 提交;
+ *       缺少或载荷已变都会被拒,且拒绝发生在 service 之前,不会留下 ai_task 行(R32)。</li>
+ *   <li>只有 {@code genericEndpointAllowed=true} 的任务类型能走这里;其余必须用各自的领域端点,
+ *       否则会得到 VALIDATION。</li>
+ *   <li>input 按序列化后的字节数设上限(默认 256KB),超限直接拒绝而不是截断 ——
+ *       截断会静默丢数据并污染 prompt。</li>
+ *   <li>userId 只从 {@code currentUserId} 请求属性取(由认证过滤器写入),不信任任何请求参数。</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/ai")
 public class AiTaskController {
@@ -67,6 +81,14 @@ public class AiTaskController {
                 (String) servletRequest.getAttribute(TraceIdFilter.TRACE_ID_ATTRIBUTE));
     }
 
+    /**
+     * 创建任务并立即返回 202。
+     *
+     * <p>校验顺序:任务类型已登记 → 允许走通用端点 → input 大小 → 预览令牌 → 幂等键长度。
+     * 幂等键缺省时生成随机 UUID(等于"每次都是新请求"),不会因此报错。
+     *
+     * <p>返回的是 PENDING 状态,不是最终结果;客户端需要轮询 {@code GET /tasks/{id}}。
+     */
     @PostMapping("/tasks")
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> createTask(
             @Valid @RequestBody CreateAiTaskRequest request,

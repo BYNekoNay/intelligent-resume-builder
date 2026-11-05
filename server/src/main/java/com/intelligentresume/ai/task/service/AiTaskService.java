@@ -23,7 +23,21 @@ import java.util.Optional;
 import java.util.List;
 
 /**
- * AI 任务服务。处理任务创建(含幂等性检查)和查询。
+ * AI 任务服务 —— 任务的创建(含同意校验、配额、幂等)与读取。
+ *
+ * <p>不负责执行:任务落库后由 {@code DatabaseTaskWorker} 异步领取。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>创建流程的步骤顺序是语义的一部分,不能随意调换:同意 → 指纹 → 幂等重放判定 →
+ *       调用方守卫(previewToken) → 配额 → 落库。被拒的请求既不消耗配额,也不产生 ai_task 行。</li>
+ *   <li>"先放行重放、再查配额"是有意的:同一个幂等键的重试不该因为配额刚用完而失败,
+ *       它本来就不会新增消耗。</li>
+ *   <li>刻意不加外层事务:并发同键插入的唯一键冲突会污染持久化上下文,幂等回读需要干净会话。</li>
+ *   <li>{@code errorMessage} 落库的是 provider/异常原文,出网关前必须经
+ *       {@code PublicFailureCopy} 类别化,否则会把内部细节泄露给前端。</li>
+ *   <li>所有按 id 的读写都带 userId 过滤;越权与不存在同一处理成 NOT_FOUND,不泄露存在性。</li>
+ * </ul>
  */
 @Service
 public class AiTaskService {
@@ -144,6 +158,8 @@ public class AiTaskService {
 
     /**
      * 查询任务状态。
+     *
+     * <p>返回的 errorMessage 已经过类别化处理,与库里的原文不是同一份(原文仍在库与日志里)。
      */
     @Transactional(readOnly = true)
     public AiTaskStatusResponse get(Long id, Long userId) {
@@ -164,6 +180,13 @@ public class AiTaskService {
                 .toList();
     }
 
+    /**
+     * 组装用于幂等指纹与 prompt 的输入快照。
+     *
+     * <p>只有非空字段才写入,空串与 null 等价(避免"传了空 jdText"和"没传"被算成两个不同的请求)。
+     * 这个 map 会原样落进 {@code input_snapshot_json},也是下游 {@code AiTaskConsentPolicy}
+     * 判断"是否含 JD"的依据。
+     */
     private Map<String, Object> buildInputSnapshot(CreateAiTaskRequest req) {
         Map<String, Object> snapshot = new HashMap<>();
         snapshot.put("taskType", req.taskType().name());
@@ -233,6 +256,15 @@ public class AiTaskService {
         return null;
     }
 
+    /**
+     * 用户手动重试失败任务:把它退回 PENDING 交给工作器重新领取。
+     *
+     * <p>注意 {@code retryCount} **不会被清零**,所以它同时限制着"用户还能点几次"
+     * ({@code maxRetries})和工作器的"崩溃循环收口"({@code maxAttempts})。
+     *
+     * <p>重试前要重新过同意与配额:用户可能在此期间撤回了授权,或当日额度已用完;
+     * 这与 R33"不自动重试"是配套的 —— 消耗必须由人明确发起。
+     */
     @Transactional
     public AiTaskStatusResponse retry(Long taskId, Long userId) {
         AiTask task = taskRepository.findByIdAndUserId(taskId, userId)

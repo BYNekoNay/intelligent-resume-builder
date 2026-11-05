@@ -1,3 +1,8 @@
+<!--
+设计系统最小按钮：只把 variant / size / block 映射到 styles/main.css 已有的 .btn-* 类，不重写样式。
+type 默认 button，避免放进 form 时被浏览器当成提交按钮；loading 时同时置 disabled 与 aria-busy。
+不声明 emits，点击等原生事件通过 attrs 透传到内部 button，调用方仍可写 @click。
+-->
 <script setup lang="ts">
 /**
  * 统一按钮（2026-10-29 设计系统最小层）。

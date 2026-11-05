@@ -1,3 +1,10 @@
+<!--
+  面试问答资产库：把「问题 + 原始回答 + AI 建议答案」沉淀成可复用条目，并可挂到简历章节与职业素材上。
+  依赖 @/api/interviewAsset 的增删改查、@/api/jobDescription（筛选下拉）、@/api/careerMaterial（可关联素材标题）。
+  筛选（岗位/章节/关键词）是手动提交的，submit 才调 load()；新增/编辑成功后直接改本地数组，不重拉列表。
+  状态分支：loading 用于禁用查询按钮、saving 用于提交按钮、error 统一承载加载/保存/删除失败提示；删除前 window.confirm 二次确认。
+  易错点：本地数组更新不会重新套用当前筛选条件，新条目可能与筛选条件不符却仍显示在列表中。
+-->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { Archive, BookmarkPlus, Pencil, Search, Trash2 } from 'lucide-vue-next'

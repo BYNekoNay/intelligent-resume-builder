@@ -5,7 +5,13 @@ import org.slf4j.MDC;
 
 import java.util.UUID;
 
-/** Creates a fresh trace for an asynchronous execution and clears MDC afterwards. */
+/**
+ * 异步 worker 的 trace 上下文：每次执行新开一个 {@code worker-} 前缀的 traceId，并带上 executionId/taskId。
+ *
+ * <p>用法必须是 try-with-resources（实现 {@link AutoCloseable}）：close 会按打开的相反顺序还原 MDC，
+ * 否则调度线程被复用后，下一个任务的日志会串上上一个任务的 traceId。异步线程没有请求上下文，
+ * 因此不能复用 {@code TraceIdFilter} 的 id。
+ */
 public final class WorkerTraceContext implements AutoCloseable {
 
     private final MDC.MDCCloseable traceId;

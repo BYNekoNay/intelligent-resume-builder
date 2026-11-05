@@ -15,10 +15,20 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 /**
- * 导出文件本地存储服务。
+ * 导出文件本地存储服务（按 key 直接落本地磁盘，不接对象存储）。
  *
  * <p>storageKey = UUID 随机生成,不含 userId/简历标题/时间戳等可猜信息。
  * 文件按 key 前两位字符分子目录存储,避免单目录文件过多。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>{@code store} 用 {@code CREATE_NEW}：key 重复会直接失败而不是静默覆盖（UUID 重名视同异常）。</li>
+ *     <li>{@code read} 文件不存在返回 {@code null}（由调用方转 404），IO 异常才抛。</li>
+ *     <li>{@code delete} 对 {@code null} key 返回 true：没有文件也算"已清理"，便于过期流程幂等。</li>
+ *     <li>{@code storageKey} 必须是本服务生成的值，**不能直接来自用户输入**——{@code resolvePath} 只按前两位
+ *         拼目录，不做路径规范化。</li>
+ *     <li>本类没有并发控制：唯一性靠 {@code CREATE_NEW}，重复写同一 key 会抛 {@code FileAlreadyExistsException}。</li>
+ * </ul>
  */
 @Service
 public class ExportStorageService {

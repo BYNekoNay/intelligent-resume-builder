@@ -1,3 +1,8 @@
+<!--
+  桌面版工作区（/desktop，需 requiresDesktop）：承载备份导出与企业微信/本地导入两个面板。
+  可用性由 useDesktopMode().probe() 探测，探测失败（在线部署没有桌面端点）就整块替换为不可用提示，而不是让面板各自报错。
+  进入页面前路由守卫已 await 过一次探测，这里的 onMounted 再调是幂等补充，覆盖直接刷新本页的情况。
+-->
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useLocale } from '@/i18n'

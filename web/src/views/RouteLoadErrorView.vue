@@ -1,3 +1,8 @@
+<!--
+  路由分包加载失败的兜底页（router.onError 在自动强刷一次仍失败后跳到 /route-load-error?retry=原路径）。
+  retryPath 只接受以单个 / 开头的站内路径（拒绝 // 开头的协议相对 URL），避免把用户带到外部地址。
+  重试时先清掉 lazyChunkRetryKey 标记再 router.replace，让这次导航重新获得一次「自动强刷」的机会。
+-->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RefreshCw, RotateCcw } from 'lucide-vue-next'

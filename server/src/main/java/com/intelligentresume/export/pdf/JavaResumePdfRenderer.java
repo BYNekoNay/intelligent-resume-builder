@@ -32,6 +32,18 @@ import java.util.Map;
  *
  * <p><b>已知差异</b>：与在线版（Chrome 打印）的排版会有细微差别（字形宽度不同 → 换行位置可能不同）。
  * 两边共享的是同一份内容模型与设计 token（边距/字号/行距/颜色），差异只在绘制实现。
+ *
+ * <p>要点（改渲染逻辑前必读）：
+ * <ul>
+ *     <li>模板代号未知时**不报错**，回落到 {@code classic}（{@code STYLES.getOrDefault}）。</li>
+ *     <li>{@code STYLES}/{@code Layout} 必须与 {@code pdf-service/src/templates/classic.js} 对齐，
+ *         否则桌面版与在线版导出的样式会分叉。</li>
+ *     <li>字体来自 Windows 系统目录，找不到就抛 {@code IOException}（不静默画豆腐块）；
+ *         {@code .ttc} 不能关闭 collection，否则 PDFBox 嵌入子集时会 NPE。</li>
+ *     <li>文本块必须成对 {@code beginText/endText}：漏掉 endText 会让后续 {@code addRect} 抛异常、整份 PDF 报废。</li>
+ *     <li>所有绘制都靠同一个 {@code y} 游标自上而下推进，{@code ensureRoom} 负责换页；改动任一间距都会影响分页结果。</li>
+ *     <li>缺字（字体无法编码）只跳过该片段，不让整份导出失败。</li>
+ * </ul>
  */
 @org.springframework.stereotype.Component
 public class JavaResumePdfRenderer {
@@ -178,6 +190,13 @@ public class JavaResumePdfRenderer {
             }
         }
 
+        /**
+         * 逐章节绘制。章节顺序即输出顺序，与在线模板保持同一套内容模型。
+         *
+         * <p>注意：这里只绘制 basics / objective / links / work / skills / projects / education /
+         * certificates / languages；{@code volunteering}、{@code awards}、{@code publications}、
+         * {@code courses}、{@code customSections} 目前不参与桌面版渲染。
+         */
         void draw(Map<String, Object> resume) throws IOException {
             Map<String, Object> basics = asMap(resume.get("basics"));
             Map<String, Object> objective = asMap(resume.get("objective"));
@@ -278,6 +297,15 @@ public class JavaResumePdfRenderer {
             List<Line> lines(Map<String, Object> item);
         }
 
+        /**
+         * 画一个列表型章节：章节标题 + 若干条目。
+         *
+         * <p>特殊分支：{@code skills}/{@code languages} 不按条目排版，改成横向标签（chips）流式排布；
+         * 其余章节走 {@link EntryRenderer}，{@code renderer} 为 null 时用默认的"名称 + 角色"条目。
+         *
+         * <p>条目的 {@code description} 与 {@code highlights} 是逐条目重复绘制的——同一个条目有多行
+         * {@code Line} 时会重复画描述，调用方不要返回多行（当前各章节都只返回一行）。
+         */
         private void drawEntries(Map<String, Object> resume, String key, String sectionTitle, EntryRenderer renderer)
                 throws IOException {
             List<Object> items = asList(resume.get(key));
@@ -386,6 +414,14 @@ public class JavaResumePdfRenderer {
             return drawWrapped(content, size, color, font, 0);
         }
 
+        /**
+         * 按字符宽度折行绘制文本，返回绘制后的 {@code y}。
+         *
+         * <p>折行是"逐字符累加宽度"，对中英混排都能断行（不依赖空格），代价是英文单词会被从中间断开。
+         * 每画一行前先 {@code ensureRoom}，放不下就换页——换页后 {@code y} 由 {@link #newPage()} 重置。
+         *
+         * @param indent 整体右移量：每一行都缩进，同时从可用宽度里扣掉（不是悬挂缩进）
+         */
         private float drawWrapped(String content, float size, String color, PDFont font, float indent)
                 throws IOException {
             float lineHeight = size * (float) layout.lineHeight();
@@ -515,6 +551,12 @@ public class JavaResumePdfRenderer {
             stream.stroke();
         }
 
+        /**
+         * 空间不足时换页。
+         *
+         * <p>换页只做三件事：关旧流、加空白 A4 页、重置 {@code y}（需要时铺背景色）。
+         * **不会重画页眉/姓名**——续页从页顶直接续内容。
+         */
         private void ensureRoom(float needed) throws IOException {
             if (y - needed < margin) {
                 newPage();

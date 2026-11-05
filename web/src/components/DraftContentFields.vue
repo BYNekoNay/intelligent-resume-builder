@@ -1,3 +1,10 @@
+<!--
+AI 草稿内容的递归渲染器，只读展示与编辑抽屉共用：editable 为 true 时才渲染输入控件。
+modelValue 可能是标量、对象或数组；对象 / 数组递归到自身，只在最内层渲染 input / textarea / select，
+并通过 update:modelValue 冒泡一份新的整棵值（不改原对象），父组件因此无需感知层级。
+布尔用下拉、长文本用 textarea、数字与字符串用 input，类型由原始值的 typeof 决定，写回时用 coerceValue 还原。
+未在 FIELD_LABEL_KEYS 登记的键会退回驼峰拆词的英文标签，漏配就会把内部字段名暴露给用户。
+-->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useLocale } from '@/i18n'

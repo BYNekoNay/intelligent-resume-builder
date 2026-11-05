@@ -40,6 +40,20 @@ import java.util.stream.Collectors;
  *
  * <p>本类**只读**：不写库、不调 provider。worker 拿 {@link Context#providerInput()} 去调用，
  * 预览拿同一份 map 去渲染，因此两边内容逐字节相同。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>候选筛选顺序：剔除无有效证据 → 剔除手工排除 → 剔除非强制加入的"全局排除" → 打分排序
+ *       → 截断到 {@link #MAX_CANDIDATES}（60 条）。打分不改变"能不能用"，但决定截断时谁能留下。</li>
+ *   <li>强制加入（included）既参与打分（直接 100000 分顶到最前）也必须留在候选里：截断后
+ *       若 included 有遗漏直接 400，而不是静默丢弃 —— 用户明确说过"必须用"。</li>
+ *   <li>强制加入超过 30 条直接 400；手工排除的 ID 会先被从 included/preferred 里剔除，
+ *       所以"排除"永远赢。</li>
+ *   <li>候选为空时不生成 providerInput（三段 prompt 一个都不放）—— 调用方必须自己判断
+ *       {@link Context#hasCandidates()}，否则会把空 prompt 发出去。</li>
+ *   <li>profile 段只放职业定位类字段：联系方式在 {@code profileContext} 组装时就被挑掉，
+ *       模型拿不到邮箱/电话。</li>
+ * </ul>
  */
 @Component
 public class MaterialSelectionContextBuilder {
@@ -79,6 +93,9 @@ public class MaterialSelectionContextBuilder {
     /**
      * @param job   已解析的岗位（预览用**未持久化**的瞬时对象，worker 用库里的那条 —— 字段相同即同源）
      * @param input 任务快照里的 input：includedMaterialIds / preferredMaterialIds / excludedMaterialIds
+     *
+     * <p>排序用三个键：分数降序 → updatedAt 降序（null 排最后）→ id 降序。最后那个 id 兜底
+     * 不是装饰：少了它，同分同秒的资料顺序不稳定，截断到 60 条时每次丢的可能不是同一批。
      */
     public Context build(Long userId, JobDescription job, Map<String, Object> input) {
         Map<String, Object> safeInput = input != null ? input : Map.of();
@@ -158,6 +175,13 @@ public class MaterialSelectionContextBuilder {
         return score;
     }
 
+    /**
+     * 把文本切成可比较的词元：英文/数字按非字母数字分隔后取长度 ≥ 2 且含 ASCII 的片段；
+     * 中文没有空格，改用 2-gram + 3-gram 滑窗（{@code 数据分析} → {@code 数据}/{@code 据分}/…/{@code 数据分析}），
+     * 这样"数据分析师"和"数据分析"能命中同一个 bigram。
+     *
+     * <p>这是纯字符串匹配，不是语义匹配 —— 同义词/缩写仍然匹配不上，打分只用于排序。
+     */
     private Set<String> tokens(String text) {
         String normalized = Objects.toString(text, "").toLowerCase(Locale.ROOT);
         Set<String> result = Arrays.stream(TOKEN_SPLIT.split(normalized))

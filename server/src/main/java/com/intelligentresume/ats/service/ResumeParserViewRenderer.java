@@ -21,6 +21,20 @@ import java.util.regex.Pattern;
  * <p>章节顺序 = {@code layout.sectionOrder} 里认识的键（保持用户顺序）+ 剩余已知章节按默认顺序补齐，
  * 与前端 {@code resolveSectionOrder()} 语义一致（未知键丢弃、缺失键追加）。
  * 章节键与标题的定义在 {@link ParserViewSections}（跨语言契约的一方）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>纯函数</b>：不读库、不调 AI，同一份 {@code resumeJson} 永远得到同一份文本与告警。
+ *       这是产品前提（用户要拿"解析器看到的"和"我编辑的"逐行对照），别在这里加任何随机/时间因素。</li>
+ *   <li>输出是**线性纯文本** + 固定的英文标准章节标题；标题是给"解析器找边界"用的，
+ *       不是界面本地化文案，改标题等于改解析结果。</li>
+ *   <li>告警只返回码（{@code MISSING_EMAIL} / {@code UNKNOWN_SECTION} / {@code ITEM_MISSING_DATES} …），
+ *       文案由前端映射，服务端不下发中文句子。</li>
+ *   <li>未知顶层键必须告警：这次内容整块读不到，是最隐蔽的内容丢失；
+ *       {@code template} / {@code layout} 属于排版配置，已列入豁免。</li>
+ *   <li>{@code sections} 的第 0 项固定是 {@code basics}（页头块，无标题）；它的 {@code present}
+ *       只看 name/email/phone 三者，location/title/links 不参与 —— 改判定会同时影响前端高亮。</li>
+ * </ul>
  */
 @Component
 public class ResumeParserViewRenderer {
@@ -28,6 +42,13 @@ public class ResumeParserViewRenderer {
     private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]{2,}$");
     private static final Pattern PHONE = Pattern.compile("^[+()\\-\\s\\d]{7,}$");
 
+    /**
+     * 渲染顺序：页头（basics + links + summary）→ 各正文章节 → 三类告警（缺联系方式 / 未知键 / 覆盖度）。
+     *
+     * <p>{@code charCount} 与 {@code lineCount} 都基于**去掉尾部空白之后**的文本统计；
+     * 各 SectionView 的 {@code charCount} 则是"渲染前后 StringBuilder 长度差"，**含章节末尾补的空行**，
+     * 因此各章节之和 ≥ 总字数（末尾空行被 {@code stripTrailing} 去掉），不要用它做精确占比。
+     */
     public ParserViewResponse render(Long resumeVersionId, Map<String, Object> resumeJson) {
         Map<String, Object> json = resumeJson == null ? Map.of() : resumeJson;
         List<ParserViewResponse.Warning> warnings = new ArrayList<>();
@@ -106,6 +127,12 @@ public class ResumeParserViewRenderer {
                 name != null, email != null, emailValid, phone != null, location != null, links.size());
     }
 
+    /**
+     * 渲染单个章节并返回条目数。{@code customSections} 是两级结构（节 → entries），走单独分支；
+     * 其余章节支持 List（多条，标题 + 逐条）/ Map（单条）/ 纯字符串三种形态，都为空则整段不输出。
+     *
+     * <p>缺时间告警只在"有条目且属于 DATED_SECTIONS"时统计，且计的是"缺 start/end 或 period"的条目数。
+     */
     private ParserViewResponse.SectionView renderSection(ParserViewSections.Spec spec, String code, Object raw,
                                                          StringBuilder sb, List<ParserViewResponse.Warning> warnings) {
         int before = sb.length();

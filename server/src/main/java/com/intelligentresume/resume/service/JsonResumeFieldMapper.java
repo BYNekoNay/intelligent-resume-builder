@@ -18,6 +18,16 @@ import static com.intelligentresume.resume.service.JsonResumeText.textList;
 /**
  * 平台章节 → JSON Resume 标准对象/条目的逐字段映射。
  *
+ * <p>职责一句话：把每个平台条目的字段名与形状对齐官方 schema，不做任何内容加工。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>字段取值用"按优先级取第一个非空"（{@code firstText}），别名顺序即兼容顺序，调整会改变导出结果。</li>
+ *     <li>日期交给 {@code putDate} 过滤：不符合官方 iso8601 的值宁可不写，原文由 {@code period} 承载。</li>
+ *     <li>{@code links} 在标准里没有对应章节，只能落到 {@code basics.profiles}。</li>
+ *     <li>技能/项目关键词既可能是数组也可能是逗号串，两种都要能转成标准的关键词数组。</li>
+ * </ul>
+ *
  * <p>单独成类的原因：这是"格式互操作"的全部知识密度所在（哪个平台的字段叫什么、
  * 标准里对应的 key 是哪个），与编排、序列化、下载头无关。混在一起会既难测也难改。
  *
@@ -66,6 +76,7 @@ public class JsonResumeFieldMapper {
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> link : links) {
             String url = firstText(link, "url");
+            // 标准 profile 必须有 url：缺 url 的链接无法表达，只能跳过（不补空串）
             if (url == null) continue;
             String label = firstText(link, "label", "network", "name");
             Map<String, Object> profile = new LinkedHashMap<>();
@@ -172,6 +183,7 @@ public class JsonResumeFieldMapper {
         List<String> keywords = textList(item.get("technologies"));
         if (keywords.isEmpty()) keywords = splitKeywords(firstText(item, "technologies", "keywords"));
         if (!keywords.isEmpty()) out.put("keywords", keywords);
+        // 标准里 roles 是数组，平台只有单个 role，包成单元素数组
         String role = firstText(item, "role", "position");
         if (role != null) out.put("roles", List.of(role));
         putText(out, "period", firstText(item, "period"));

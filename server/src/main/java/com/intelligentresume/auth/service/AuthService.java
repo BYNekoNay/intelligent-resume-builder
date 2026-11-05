@@ -82,6 +82,7 @@ public class AuthService {
         this.deletionGraceDays = deletionGraceDays;
     }
 
+    /** 注册：先做「用户名或邮箱被占用」的统一提示，再创建账号并直接签发令牌（等价注册即登录）。 */
     @Transactional
     public TokenResponse register(RegisterRequest request) {
         // 统一冲突消息,避免区分"用户名/邮箱"导致账号枚举
@@ -100,6 +101,12 @@ public class AuthService {
         return issueNewFamily(user, "register");
     }
 
+    /**
+     * 登录：用户名或邮箱 + 密码，成功后新开一个令牌族。
+     *
+     * <p>顺序是先查账号、再判状态、最后验口令（BCrypt 比对故意放在状态判断之后，
+     * 避免为不存在/已停用的账号付出散列成本）。密码错误与账号不存在共用同一句文案。
+     */
     @Transactional
     public TokenResponse login(LoginRequest request) {
         User user = userRepository.findByUsername(request.username())
@@ -225,6 +232,7 @@ public class AuthService {
         return tokensFor(user, newRefresh);
     }
 
+    /** 登出单个会话：令牌缺失直接成功；已撤销的会话保留原 revoke_reason，不覆盖取证信息。 */
     @Transactional
     public void logout(String presentedRefreshToken) {
         if (presentedRefreshToken == null || presentedRefreshToken.isBlank()) {
@@ -242,6 +250,7 @@ public class AuthService {
         });
     }
 
+    /** 撤销该用户全部未失效会话：统一使用同一个 revokedAt，便于审计「一次全端登出」。 */
     @Transactional
     public void logoutAll(Long userId) {
         List<AuthSession> active = authSessionRepository.findByUserIdAndRevokedAtIsNull(userId);
@@ -253,6 +262,12 @@ public class AuthService {
         authSessionRepository.saveAll(active);
     }
 
+    /**
+     * 删号第一步（可撤销）：行锁串行化同一用户，置 DISABLED + deletedAt、撤回 AI 授权、
+     * 取消进行中的 AI/导出任务、撤销全部会话，并落一条 PENDING 任务（窗口内可恢复）。
+     *
+     * <p>物理删除不在这里发生：{@code AccountPurgeService} 在 {@code cancel_until} 之后才级联硬删。
+     */
     @Transactional
     public void deleteAccount(Long userId) {
         User user = userRepository.findByIdForUpdate(userId)
@@ -292,6 +307,7 @@ public class AuthService {
         }
     }
 
+    /** 读当前用户；userId 为空或查不到都按 401（已软删的账号在这里也查不到）。 */
     public CurrentUserResponse currentUser(Long userId) {
         if (userId == null) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED);
@@ -305,6 +321,7 @@ public class AuthService {
                 user.getDisplayName());
     }
 
+    /** 只更新展示名（trim 后落库）；其余字段各有专门入口，不从这里改。 */
     @Transactional
     public CurrentUserResponse updateProfile(Long userId, UpdateProfileRequest request) {
         User user = userRepository.findById(userId)
@@ -314,6 +331,10 @@ public class AuthService {
         return new CurrentUserResponse(user.getId(), user.getUsername(), user.getEmail(), user.getDisplayName());
     }
 
+    /**
+     * 改邮箱：先验当前密码（401），再判新邮箱是否被他人占用（409），落库后撤销全部会话。
+     * 邮箱统一存小写——查重与写入必须使用同一个归一化值，否则大小写差异会绕过占用判断（取决于库排序规则）。
+     */
     @Transactional
     public void changeEmail(Long userId, ChangeEmailRequest request) {
         User user = requireCurrentPassword(userId, request.currentPassword());
@@ -326,6 +347,10 @@ public class AuthService {
         logoutAll(userId);
     }
 
+    /**
+     * 改密码：先验当前密码（401），重新 BCrypt 散列后落库，并撤销全部会话。
+     * 这里刻意不校验「新旧密码是否相同」——重复设置同一密码是允许的。
+     */
     @Transactional
     public void changePassword(Long userId, ChangePasswordRequest request) {
         User user = requireCurrentPassword(userId, request.currentPassword());
@@ -338,6 +363,12 @@ public class AuthService {
     // private helpers
     // ----------------------------------------------------------------
 
+    /**
+     * 注册/登录/删除恢复共用的签发入口：新建一个令牌族（familyId）并写入第一行会话。
+     *
+     * <p>副作用：{@code session.user_agent} 在这里存的是**签发原因**（register/login/deletion_restored），
+     * 不是浏览器 UA——UA 只在 refresh 轮换时写入。改动该列语义前需同步排查审计/桌面端读取方。
+     */
     private TokenResponse issueNewFamily(User user, String reason) {
         String familyId = tokenService.newTokenFamilyId();
         String refresh = tokenService.issueRefreshToken();
@@ -358,6 +389,10 @@ public class AuthService {
         requireCurrentPassword(userId, currentPassword);
     }
 
+    /**
+     * 再认证：查用户并比对当前密码；任一失败都是 401。
+     * 供导出等「必须证明是本人」的入口复用，不要各自再写一份口令比对。
+     */
     private User requireCurrentPassword(Long userId, String currentPassword) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));

@@ -27,6 +27,17 @@ import java.nio.charset.StandardCharsets;
  * <p>白名单采用精确端点而非 {@code /api/auth/**} 通配，确保 {@code /me}、
  * {@code /logout-all} 等需要登录的端点由安全框架统一返回 401，
  * 而不是落到应用层 {@code currentUserId()} 抛异常兜底。
+ *
+ * <p>修改前必须确认的四件事:
+ * <ul>
+ *   <li><b>新增公开端点要显式加进 permitAll</b>;漏加会被 401 拦在控制器之前,且不会有业务日志。</li>
+ *   <li><b>会话是无状态的</b>:不创建 HttpSession,refresh 走 Cookie。CSRF 因此关闭,
+ *       依赖 Cookie 的 {@code SameSite=Lax} 与「写操作不靠 Cookie 鉴权」这两个前提。</li>
+ *   <li><b>过滤器顺序有语义</b>:限流与 JWT 都在 {@code UsernamePasswordAuthenticationFilter} 之前,
+ *       SPA 回落挂在 JWT 之后;调换会让 429 与鉴权的先后、以及 SPA 深路由的行为改变。</li>
+ *   <li><b>401 的响应体由 authenticationEntryPoint 统一生成</b>(JSON 信封 + traceId),
+ *       不要退回框架默认的 HTML/空响应,前端按信封解包。</li>
+ * </ul>
  */
 @Configuration
 public class SecurityConfig {
@@ -49,6 +60,13 @@ public class SecurityConfig {
         this.spaFallbackFilter = spaFallbackFilter;
     }
 
+    /**
+     * 安全过滤链。
+     *
+     * <p>顺序副作用：限流先于 JWT 注册，意味着超限请求在解析令牌之前就被 429；
+     * 桌面模式下 {@code anyRequest().permitAll()} 只放行非 /api 的 SPA 资源，
+     * {@code /api/**} 仍需认证（由 JwtAuthenticationFilter 注入的本地用户满足）。
+     */
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http

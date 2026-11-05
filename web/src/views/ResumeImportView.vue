@@ -1,3 +1,9 @@
+<!--
+  简历导入页：上传 pdf/docx/txt，调用 @/api/resumeImport 的 parseResumeFile 解析出文本与结构化字段。
+  流程分两段：先选文件并解析（loading/error 都在这一段），解析成功后再展示可编辑的 extractedText 复核区。
+  复核确认后把文本与 normalizedResumeInput 写入 sessionStorage（键 resume-import-text / resume-import-candidates），再跳 material-generation；
+  因此下一个页面依赖这两个 sessionStorage 键，清空或改名会断链。顶部的 activeStep 只根据「是否选了文件/是否有结果」推导，不代表真实上传进度。
+-->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -21,6 +27,7 @@ function formatFileSize(bytes: number) {
 }
 
 function choose(event: Event) {
+  // 重新选文件时清掉上一次的解析结果，避免旧文本被当成新文件的解析内容继续流转
   selected.value = (event.target as HTMLInputElement).files?.[0] ?? null
   result.value = null
   extractedText.value = ''

@@ -1,3 +1,10 @@
+<!--
+  沟通文案工作台（/communications）：两个 Tab ——「AI 生成」写求职信/邮件/开场白，「模板库」管理可复用的模板并预览套用。
+  依赖 @/api/communication（generateCommunication / generateCommunicationWithAi / 预览与保存草稿 / 模板增删改查）、@/api/ai（getTask / retryTask 轮询）、
+  useAiTaskPreview（AI 发送前预览令牌）、useResumeJobOptions（简历版本与岗位）、useToast（轻提示）。
+  状态分支：loadingMode 区分 AI / 模板 / 重试三种发起；failureKind 区分缺少同意、额度不足、一般失败；waitingInBackground 表示轮询超时后任务仍在后端。
+  易错点：AI 调用必须先拿预览令牌，用户取消则完全不发请求；同一请求沿用幂等键，避免重复计费；输出语言跟随当前 locale（en-US → EN，其余 → ZH_CN）。
+-->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

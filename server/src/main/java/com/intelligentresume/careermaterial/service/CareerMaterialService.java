@@ -34,6 +34,20 @@ import java.util.Set;
  *     <li>软删设置 deleted_at;被历史快照引用的资料删除后快照仍可读。</li>
  *     <li>contentJson 字节数不超过 {@code app.career-material.content-json.max-bytes}。</li>
  * </ul>
+ *
+ * <p>实现要点：
+ * <ul>
+ *     <li>所有入口先拿 {@code findOwned(id, userId)}，跨用户与不存在<b>同样</b>返回 NOT_FOUND，
+ *         不区分两者，避免用状态码探测资料是否存在；</li>
+ *     <li>写路径的校验顺序固定为「字节上限 → 类型必填 → 证据可用」；调整顺序会改变用户
+ *         看到的第一个报错，前端依赖该信息定位字段，勿随意重排；</li>
+ *     <li>关联资料（{@code relatedMaterialId(s)}）必须经本用户查回并限定为
+ *         WORK_EXPERIENCE / PROJECT_EXPERIENCE，既防越权也防挂到不相干的类型上；</li>
+ *     <li>列表走读模型投影、搜索走包含扫描，两条路径的 evidenceReady 都复用
+ *         {@link CareerMaterialEvidence}，不要各写一份；</li>
+ *     <li>搜索词长度与分页大小是硬上限（100），超出直接报错而不是静默截断，
+ *         因为静默截断会让用户以为搜到了全部结果。</li>
+ * </ul>
  */
 @Service
 public class CareerMaterialService {
@@ -64,6 +78,13 @@ public class CareerMaterialService {
         this.maxContentBytes = maxContentBytes;
     }
 
+    /**
+     * 新建资料。
+     *
+     * <p>校验顺序：字节上限 → 类型必填 → 证据可用。三者针对不同失败原因，
+     * 顺序决定了用户先看到哪条错误，改动前先确认前端提示文案的依赖。
+     * usagePreference 缺省填 NORMAL，不依赖库默认值。
+     */
     @Transactional
     public CareerMaterialDetail create(CreateCareerMaterialRequest req, Long userId) {
         validateContentJsonSize(req.contentJson());
@@ -92,6 +113,17 @@ public class CareerMaterialService {
                 .toList();
     }
 
+    /**
+     * 搜索：标题 / 原文 / contentJson 三列包含匹配，可叠加类型与使用偏好过滤。
+     *
+     * <p>注意三点：
+     * <ul>
+     *   <li>入参校验是"拒绝"而非"纠正"：page/size/sort 越界直接报错；</li>
+     *   <li>typeCounts 是<b>全量</b>按类型计数，不随 q / type / usagePreference 变化，
+     *       供筛选标签展示总数；改成分页内计数会让徽标随翻页跳变；</li>
+     *   <li>query 已做 LIKE 通配符转义，与仓储层 {@code escape '\\'} 必须成对存在。</li>
+     * </ul>
+     */
     @Transactional(readOnly = true)
     public CareerMaterialSearchPage search(Long userId, String query, MaterialType type,
                                            UsagePreference usagePreference, int page, int size,
@@ -117,6 +149,17 @@ public class CareerMaterialService {
         return toDetail(findOwned(id, userId));
     }
 
+    /**
+     * 部分更新。字段为 null 视为"不改"，因此要先合并出 next 值再校验，
+     * 不能只看本次请求体：例如单独改 usagePreference 时，证据校验用的是库里的旧原文/旧 JSON。
+     *
+     * <p>两处易错：
+     * <ul>
+     *   <li>title 空白串会被<b>忽略</b>（保留旧标题），而 sourceText 空串会真的清空原文，
+     *       两者语义不一致，前端做"清空"操作前需确认；</li>
+     *   <li>类型取自库里的 materialType，请求无法改类型，故校验针对旧类型执行。</li>
+     * </ul>
+     */
     @Transactional
     public CareerMaterialDetail update(Long id, UpdateCareerMaterialRequest req, Long userId) {
         CareerMaterial material = findOwned(id, userId);
@@ -143,6 +186,7 @@ public class CareerMaterialService {
         return toDetail(material);
     }
 
+    /** 软删：只置 deleted_at，实体仍留在库里，供历史快照与引用关系继续解析。 */
     @Transactional
     public void softDelete(Long id, Long userId) {
         CareerMaterial material = findOwned(id, userId);
@@ -157,6 +201,7 @@ public class CareerMaterialService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "资料不存在"));
     }
 
+    /** 按 JSON 序列化后的实际字节数判上限（不是字符数），序列化失败也归为参数错误。 */
     private void validateContentJsonSize(Object contentJson) {
         try {
             byte[] bytes = objectMapper.writeValueAsBytes(contentJson);
@@ -185,6 +230,10 @@ public class CareerMaterialService {
      * that warns (without rejecting) on half-filled structured content; see
      * {@link CareerMaterialSchema} and the three-step migration plan in
      * {@code docs/plans/2026-09-30-001-career-material-schema-soft-validation.md}.
+     *
+     * <p>中文说明：三类走硬校验（缺字段即拒绝），其余类型只走软校验（半填形态记 warn 日志）。
+     * 新增硬校验类型必须同时改这里和 {@link CareerMaterialSchema}，否则同一类型会同时
+     * 出现在两套规则里，行为取决于 switch 是否覆盖到。
      */
     private void validateTypeSpecificContent(MaterialType type, Map<String, Object> content, Long userId) {
         if (content == null) {
@@ -210,6 +259,11 @@ public class CareerMaterialService {
         }
     }
 
+    /**
+     * 成就类：先锁死归属关系，再按 metricDisplayMode 决定"量化值"字段哪个必填。
+     * EXACT 要 metricExactValue；RANGE/QUALITATIVE 都要 metricDisplayValue。
+     * 只改三选一的枚举值而不改字段名，会让已有的历史数据在新规则下变成非法。
+     */
     private void validateAchievement(Map<String, Object> content, Long userId) {
         validateRelatedExperience(requiredId(content, "relatedMaterialId"), userId, "relatedMaterialId");
         requireText(content, "scenario");
@@ -239,6 +293,11 @@ public class CareerMaterialService {
         requireText(content, "result");
     }
 
+    /**
+     * 技能证据：七个文本字段全必填；{@code relatedMaterialIds} 是<b>可选</b>的
+     * （缺省直接放行），一旦给了就必须是非空数组且每个 id 都过归属+类型校验。
+     * 注意数组里出现 null 或 0/负数会被 {@link #toId} 拒掉。
+     */
     private void validateSkillEvidence(Map<String, Object> content, Long userId) {
         requireText(content, "skillName");
         requireText(content, "category");
@@ -260,6 +319,10 @@ public class CareerMaterialService {
         }
     }
 
+    /**
+     * 关联资料的两道门槛：必须属于当前用户，且只能是工作或项目经历——
+     * 其他类型没有"时间段/上下文"，挂上去会产生无法解释的引用。
+     */
     private void validateRelatedExperience(Long materialId, Long userId, String field) {
         CareerMaterial related = repository.findByIdAndUserId(materialId, userId)
                 .orElseThrow(() -> validation(field + " must reference one of your materials"));
@@ -276,6 +339,11 @@ public class CareerMaterialService {
         return toId(content.get(field), field);
     }
 
+    /**
+     * 兼容 JSON 反序列化后的两种形态：数字（前端传 int/long）与数字字符串
+     * （表单/旧数据）。只接受正数 ID；解析失败统一报同一条用户可读错误，
+     * 不把 NumberFormatException 抛出去。
+     */
     private Long toId(Object value, String field) {
         if (value instanceof Number number && number.longValue() > 0) {
             return number.longValue();
@@ -312,6 +380,7 @@ public class CareerMaterialService {
                 CareerMaterialEvidence.isReady(material));
     }
 
+    /** sort 走白名单而非字符串拼接：外部传入的排序字段只能落在 {@code SEARCH_SORTS} 内。 */
     private void validateSearchParameters(int page, int size, String sortValue) {
         if (page < 0) {
             throw validation("page must be greater than or equal to 0");
@@ -324,6 +393,11 @@ public class CareerMaterialService {
         }
     }
 
+    /**
+     * 归一化搜索词：空白视为"无关键词"（返回 null，SQL 侧跳过 like 条件）；
+     * 超过长度上限直接拒绝；反斜杠先转义，再转义 {@code %} 与 {@code _}，
+     * 顺序不能反，否则会把自己插入的转义符再转一次。
+     */
     private String normalizeQuery(String query) {
         if (query == null || query.isBlank()) {
             return null;
@@ -338,10 +412,15 @@ public class CareerMaterialService {
                 .replace("_", "\\_");
     }
 
+    /** 用户选定的排序 + id 升序兜底：同毫秒更新的多行必须稳定，否则翻页会重复/漏行。 */
     private Sort searchSort(String sortValue) {
         return SEARCH_SORTS.get(sortValue).and(Sort.by(Sort.Direction.ASC, "id"));
     }
 
+    /**
+     * 摘要片段：有原文就用原文；没有则按类型挑 contentJson 里的代表性字段拼接。
+     * 未列出的类型返回空串（不是异常），新增类型若想让搜索卡片有摘要，需要在此补分支。
+     */
     private String excerpt(CareerMaterial material) {
         String sourceText = normalizeExcerptPart(material.getSourceText());
         if (!sourceText.isEmpty()) {

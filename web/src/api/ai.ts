@@ -1,3 +1,8 @@
+/**
+ * AI 能力总入口：同意（consent）、任务创建/查询/重试/确认/拒绝、发送前预览、结果轮询。
+ * 边界：所有会调模型的创建请求都要带 Idempotency-Key，且多数要先拿 X-AI-Preview-Token（预览与实际请求体必须同源，否则被服务端拒绝）；
+ * 任务型接口返回 AiTask，这里不做轮询，只有 waitForAiTaskResult 提供「同步等待」封装（超时抛 AiTaskTimeoutError，表示任务仍在后台而非失败）。
+ */
 import { http } from './client'
 
 export interface ConsentRequest {

@@ -24,6 +24,7 @@ import java.util.List;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    /** 请求属性名：AuthController 等取当前用户的唯一入口，改名要全局同步。 */
     public static final String CURRENT_USER_ID_ATTRIBUTE = "currentUserId";
 
     private static final String BEARER_PREFIX = "Bearer ";
@@ -56,6 +57,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
+        // 只认 "Bearer " 前缀。令牌无效、过期或用户非 ACTIVE 时**静默放行**（不在此处返回 401）：
+        // 白名单端点（登录/注册/健康检查）也走这条过滤器，提前拒绝会误伤匿名请求；
+        // 需要登录的端点由 SecurityConfig 的 authenticated() 统一兜 401。
         String header = request.getHeader("Authorization");
         if (header != null && header.startsWith(BEARER_PREFIX)) {
             String token = header.substring(BEARER_PREFIX.length()).trim();

@@ -5,6 +5,16 @@ import org.springframework.stereotype.Component;
 
 /**
  * AI 工作器配置属性。绑定 {@code app.ai.worker.*}。
+ *
+ * <p>要点 / 易错点:
+ * <ul>
+ *   <li>这里的**默认值**只在 yml 缺键时生效;yml 里一旦写了同名键,以 yml 为准。
+ *       改默认值时务必同步 {@code application.yml},否则两处不一致会导致"配置缺省时行为悄悄变了"。</li>
+ *   <li>{@code leaseSeconds} 必须大于单任务最坏执行时长(模型链总预算 600s),否则任务会在执行中失去租约。</li>
+ *   <li>{@code maxRetries}(用户可点几次)与 {@code maxAttempts}(被领取几次后强制终止)是**两个不同的问题**,
+ *       不要合并成一个配置:测试/CI 常把 maxRetries 调成 1,合并会误杀正常接管。</li>
+ *   <li>{@code heavyConcurrency}/{@code lightConcurrency} 与线程池大小是两套上限,只调一个不改变实际并发。</li>
+ * </ul>
  */
 @Component
 @ConfigurationProperties(prefix = "app.ai.worker")

@@ -10,6 +10,15 @@ import com.intelligentresume.interview.domain.InterviewStatus;
 
 /**
  * 面试会话状态响应。开始、回答、重试、规则降级统一返回此结构。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>前端轮询本结构判断「继续等 / 重试 / 转规则 / 看报告」，因此状态与 aiFailure 必须同时准确。</li>
+ *   <li>{@code completedQuestionCount} 是已落库轮数；{@code currentQuestionNo} 只在已有完成轮次时给出
+ *       （= 完成数 + 1），首题阶段为 null。</li>
+ *   <li>{@code aiFailure} 只在 {@code AI_ACTION_REQUIRED} 时有值，且只暴露 errorCode 而非文案。</li>
+ *   <li>题数区间 min/target/max 一并下发，前端据此显示进度而不必自己推算。</li>
+ * </ul>
  */
 public class InterviewStateResponse {
 

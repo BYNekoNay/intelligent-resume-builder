@@ -27,6 +27,18 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 沟通文案编排：模板兜底生成、AI 异步任务创建、发送前预览、草稿保存。
+ *
+ * <p>职责边界（改这里前先确认不会越界）：
+ * <ul>
+ *   <li><b>只产草稿，绝不发送</b>：本类没有任何发信/发消息调用，{@code sentAutomatically} 恒为 false。</li>
+ *   <li><b>归属校验统一走 {@code ownedXxx}</b>：先判 {@code createdBy} 再判归档，避免用归档状态反推他人数据是否存在。</li>
+ *   <li><b>AI 路径不在此执行</b>：只组装 input 并交给 {@code AiTaskService}，真正调用模型在 worker 的
+ *       {@link CommunicationAiService}；预览与控制台看到的 prompt 必须同源，故两者共用 {@link #prepareInput}。</li>
+ *   <li><b>模板路径是纯字符串拼接</b>：不经过模型、不扣 AI 配额，{@code generationSource} 固定 TEMPLATE。</li>
+ * </ul>
+ */
 @Service
 public class CommunicationService {
     private final ResumeVersionRepository versionRepository;
@@ -76,6 +88,13 @@ public class CommunicationService {
         return new PreparedInput(taskInput, promptBuilder.build(taskInput));
     }
 
+    /**
+     * 创建 AI 生成任务（异步）。
+     *
+     * <p>{@code previewToken} 必填：令牌用服务端自己组装的 providerInput 重算比对，
+     * 客户端无法用「改过的输入」换一份预览承诺。任务 input 里只放 taskInput，不含 prompt 文本，
+     * 由 worker 现场重建，保证提示词版本升级后旧任务也按新模板执行。
+     */
     public AiTaskStatusResponse generateWithAi(GenerateCommunicationRequest request, String idempotencyKey,
                                                String previewToken, Long userId) {
         PreparedInput prepared = prepareInput(request, userId);
@@ -141,6 +160,15 @@ public class CommunicationService {
                 CommunicationGenerationSource.TEMPLATE);
     }
 
+    /**
+     * 模板生成：按 type 拼固定句式，语言取 {@code normalizedLanguage()}（缺省中文）。
+     *
+     * <p>占位数据缺失时有降级：无姓名 → "候选人"/"the candidate"，无公司 → "贵公司"/"your company"，
+     * 无技能 → 改用"详见简历"句式。都不报错，因此这里产出的文案**总是完整可发**，
+     * 但也意味着不能靠它判断简历字段是否齐全。
+     *
+     * <p>与 AI 路径的区别：不落 {@code match_result} 之外的任何统计数据，只写一条 communication_draft。
+     */
     @Transactional
     public CommunicationResponse generate(GenerateCommunicationRequest request, Long userId) {
         ResumeVersion version = ownedResumeVersion(request.resumeVersionId(), userId);
@@ -199,6 +227,7 @@ public class CommunicationService {
         };
     }
 
+    /** 取简历第一项技能名；skills 可能是字符串数组或 {@code {name: ...}} 对象数组，两种都要兼容。 */
     private String firstSkill(Object value) {
         if (!(value instanceof List<?> skills) || skills.isEmpty()) return "";
         Object first = skills.get(0);

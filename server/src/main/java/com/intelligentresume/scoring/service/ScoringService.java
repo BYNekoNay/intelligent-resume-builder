@@ -28,6 +28,16 @@ import java.util.*;
  *
  * <p>流程：校验归属 → 读/解析 JD 关键词 → 抽取简历 token →
  * 三项规则评分 → 加权总分 → 写 match_result → 返回响应。
+ *
+ * <p>改这里要守住的几条：
+ * <ul>
+ *   <li><b>确定性</b>：同一份简历 + 同一份 JD + 同一规则版本必须得到同一分数；任何模型/随机/时间因素都不能进来。</li>
+ *   <li><b>先归属后归档</b>：先按 {@code resumeId → userId} 校验，再看 {@code deletedAt}，否则会用归档状态泄露他人版本是否存在。</li>
+ *   <li><b>结果可复用但不可串号</b>：复用条件是「同版本 + 同 JD + 同规则版本 + JD 未晚于结果更新」，
+ *       放宽任一条都会把过期分数当新结果返回。</li>
+ *   <li><b>GET 与 POST 共用 {@link #toResponse}</b>：两处字段口径必须一致，持久化字段名不得直接外泄。</li>
+ *   <li>{@code ruleVersion} 取配置（默认 v1.0.0），改规则逻辑就必须同时改它，否则新旧结果无法区分。</li>
+ * </ul>
  */
 @Service
 public class ScoringService {
@@ -193,6 +203,13 @@ public class ScoringService {
 
     // ---- helpers ----
 
+    /**
+     * 读取 JD 已解析的关键词快照；结构不合适返回 null（调用方据此重新解析）。
+     *
+     * <p>兼容两种落库形态：外层包了 {@code data} 的（导出/包装结构）与直接平铺的。
+     * 判据是「有没有 keywords 键」——缺这个键说明不是可用的解析结果，宁可重算也不能当空关键词集合
+     * （那会直接把 keyword 维度算成 100 分）。
+     */
     @SuppressWarnings("unchecked")
     private ParsedJdSnapshot readParsedJd(Map<String, Object> parsed) {
         if (parsed == null) {

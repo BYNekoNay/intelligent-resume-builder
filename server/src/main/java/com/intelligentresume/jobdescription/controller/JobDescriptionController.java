@@ -19,6 +19,16 @@ import java.util.List;
  *
  * <p>路由与前端 {@code jobDescription.ts} 契约一致:
  * PATCH 更新;POST /{id}/parse 返回完整 JobDescriptionDetail。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>每个入口都要求登录态（从 request attribute 取 userId），缺失即 401；</li>
+ *     <li>列表不分页、不接收过滤参数，按 updatedAt 倒序返回该用户全部 JD，
+ *         前端要搜索只能自行过滤——改动前先确认是否已引入大数据量用户；</li>
+ *     <li>{@code /{id}/reference} 专供"只需要标题/公司"的关联展示，不要用 GET /{id} 替代；</li>
+ *     <li>parse 是"重算并覆盖"：解析确定性保证同文同结果，但每次都会刷新 parsedAt；
+ *         返回解析后的完整详情，前端可直接刷新页面，无需再发 GET。</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/jobs")

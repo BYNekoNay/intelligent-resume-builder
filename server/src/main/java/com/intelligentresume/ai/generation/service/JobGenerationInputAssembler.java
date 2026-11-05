@@ -29,6 +29,21 @@ import java.util.Objects;
  * 因此两边拿到的字节完全相同。
  *
  * <p>本类**只读**：不写库、不调 provider。
+ *
+ * <p>要点（改这里之前先看）：
+ * <ul>
+ *   <li>快照缺 {@code jobSnapshot}，或其中的 {@code id} 与 {@code jobDescriptionId} 不一致 → 409
+ *       （CONFLICT）。这条是"半写完的快照"的唯一拦截点，别为了"容错"放宽成补查库。</li>
+ *   <li>确认为空资料（{@code materialSnapshots} 为空）→ 400。生成任务必须至少有一条素材，
+ *       否则模型只会凭空编造。</li>
+ *   <li>{@code providerInput} 的键固定为 {@code _systemPrompt} / {@code _taskPrompt} /
+ *       {@code _dataPrompt} 三段，worker 侧按这三段原样发给 provider，改名即断链。</li>
+ *   <li>{@code materialsFromSnapshot} 用 {@code Enum.valueOf} 还原枚举，非法值抛的是
+ *       {@code IllegalArgumentException}（不是 BusinessException），表现为 500 —— 快照里出现
+ *       未知 materialType / usagePreference 说明数据已损坏，不要在这里吞异常。</li>
+ *   <li>{@code promptVersion} 与 {@code JobGenerationService} 必须读同一个配置键，
+ *       否则"预览显示的版本"和"实际执行的版本"会对不上。</li>
+ * </ul>
  */
 @Component
 public class JobGenerationInputAssembler {
@@ -54,6 +69,7 @@ public class JobGenerationInputAssembler {
                                   Map<String, Object> profile) {
     }
 
+    /** 由已确认快照重建实体并拼出 provider input；三次校验全部先于 prompt 组装，避免半成品进入 prompt。 */
     public GenerationInput fromSnapshot(Map<String, Object> snapshot) {
         Map<String, Object> safeSnapshot = snapshot != null ? snapshot : Map.of();
         JobDescription job = jobFromSnapshot(safeSnapshot.get("jobSnapshot"));
@@ -66,6 +82,8 @@ public class JobGenerationInputAssembler {
         if (materials.isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION, "No confirmed career materials");
         }
+        // 确认后的素材全部按 Fixed（MUST use）传入，preferred / candidates 两段传空（prompt 里显示为 (none)）：
+        // 到这一步只剩"用户勾选的那批"，不再有优先级之分。
         JobGenerationPromptBuilder.Prompt prompt = promptBuilder.build(job, materials, List.of(), List.of(),
                 careerProfileContext(profile), promptVersion);
         Map<String, Object> providerInput = new LinkedHashMap<>();

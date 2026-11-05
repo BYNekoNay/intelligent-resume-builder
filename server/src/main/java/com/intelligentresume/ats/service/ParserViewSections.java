@@ -14,6 +14,19 @@ import java.util.Set;
  *
  * <p>章节标题刻意用 **ATS 通用英文标准名**：解析器就是按这些名字找章节边界的，
  * 这里展示的是「机器在找什么」，不是界面上本地化后的标题。
+ *
+ * <p>要点（改动前必读）：
+ * <ul>
+ *   <li>{@link #SECTION_KEYS} 必须与前端 {@code SECTION_KEYS}、后端 {@code ResumeSections.AI_CONTEXT_SECTIONS}
+ *       逐键相等；它是契约门禁的对拍对象，改键名要三处同时改。</li>
+ *   <li>{@link #CONTENT_SPECS} 的顺序就是**默认章节顺序**，必须与前端 {@code DEFAULT_SECTION_ORDER} 一致；
+ *       用户的 {@code layout.sectionOrder} 只改变渲染顺序，不会增删章节。</li>
+ *   <li>{@code Spec.fields()} 的顺序决定输出文本的字段顺序 —— 顺序变了，同一份简历渲染出的解析文本就变了，
+ *       任何依赖文本稳定的对比/快照都会失效。</li>
+ *   <li>{@link #CUSTOM_ENTRY_FIELDS} 是"取最后一项的 fields"，即依赖 customSections 排在 CONTENT_SPECS 末尾；
+ *       调整顺序时别把它挪走。</li>
+ *   <li>{@link #DATED_SECTIONS} 决定哪些章节会报"缺时间"—— 加章节但漏加这里，是不会报错的静默漏检。</li>
+ * </ul>
  */
 public final class ParserViewSections {
 

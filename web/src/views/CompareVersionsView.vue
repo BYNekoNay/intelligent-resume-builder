@@ -1,3 +1,9 @@
+<!--
+  版本对比页（/resumes/:id/compare）：选两个版本，按章节展示差异（新增/删除/修改/未变），并支持从某一版本恢复。
+  依赖 @/api/resume 的 getResume / listVersions / getResumeVersion / restoreResumeVersion，diff 计算在 @/utils/resumeDiff。
+  状态分支：loading 覆盖两侧 JSON 拉取；error 提示拉取或恢复失败；只有 baseJson 与 compareJson 都到位才计算 diff，否则差异区为空。
+  易错点：切换版本会并发多次请求，用 diffEpoch 只让最新一次写入结果，避免旧响应覆盖新 diff。
+-->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

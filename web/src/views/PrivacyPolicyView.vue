@@ -1,3 +1,7 @@
+<!--
+  隐私政策静态页（/privacy）：纯展示，无接口、无交互，未登录也可访问（登录页与页脚都有入口）。
+  文案全部来自 i18n 的 privacy.*，正文五节刻意逐段写死而不是循环渲染，以满足 i18n 校验对完整字面量 key 的要求。
+-->
 <script setup lang="ts">
 import { useLocale } from '@/i18n'
 import { ArrowLeft, ShieldCheck } from 'lucide-vue-next'

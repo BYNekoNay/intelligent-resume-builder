@@ -8,6 +8,17 @@ import java.util.Map;
 
 /**
  * 规则注册表：持有各规则实例与权重配置。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>启动即校验</b>：每个权重必须落在 [0,1]，且三者之和必须精确等于 1.0，否则 Bean 创建失败
+ *       （宁可起不来，也不要带着错权重静默出分）。</li>
+ *   <li><b>weightedTotal 要求结果集合与注册表键集合完全相等</b>：新增规则时忘记在 service 里产出分数会直接抛错，
+ *       不会悄悄少算一个维度。</li>
+ *   <li>权重键固定为 {@code keyword} / {@code skill} / {@code experience}（来自各规则的 {@code name()}），
+ *       与 {@code app.scoring.weights.*} 配置键一一对应。</li>
+ *   <li>本类无状态，构造后只读；改权重只需改配置并重启，不要在运行时改 Map。</li>
+ * </ul>
  */
 @Component
 public class RuleRegistry {

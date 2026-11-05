@@ -1,3 +1,8 @@
+/**
+ * 账号与认证接口层：注册/登录/登出/刷新、当前用户读写、改邮箱改密码、数据导出、删号与撤销删号。
+ * 边界：只返回 token 与用户信息，会话持久化（存 token、拉用户、清本地数据）在 stores/auth 里完成；
+ * 导出接口返回的是纯文本 JSON（不是 ApiResponse 信封），因此单独用 responseType: 'text' 且放宽超时到 60s。
+ */
 import { http } from './client'
 
 export interface RegisterPayload {

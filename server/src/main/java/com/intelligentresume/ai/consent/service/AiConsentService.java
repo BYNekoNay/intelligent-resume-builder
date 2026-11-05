@@ -15,6 +15,20 @@ import java.util.Collection;
 
 /**
  * AI 同意服务。事件溯源模型:每次操作追加新事件,不修改历史。
+ *
+ * <p>判定规则很朴素:**最新一条事件**说了算。最新是 GRANTED 才算已授权,撤回同样只是追加一条。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>表是 append-only:不要 UPDATE 或删除历史行,否则"用户何时同意过什么"就无法举证。</li>
+ *   <li>细粒度校验({@code hasValidConsent(userId, taskScope, dataCategories)})额外要求
+ *       policyVersion 与当前配置一致 —— **改 {@code app.ai.consent.policy-version} 后,
+ *       所有存量授权都过不了这项校验**,用户必须重新同意。这是合规要求,不是 bug。</li>
+ *   <li>范围匹配是列表精确包含:{@code taskScopes} 必须原样含有任务类型名,
+ *       {@code dataCategories} 必须包含本次要求的全部类别(用 {@code containsAll})。</li>
+ *   <li>撤回时沿用最新事件的 policyVersion/providerCode 等字段,不要从请求里取,避免伪造。</li>
+ *   <li>当前只接受 {@code bailian} 一个 providerCode,其它值一律 VALIDATION。</li>
+ * </ul>
  */
 @Service
 public class AiConsentService {
@@ -118,6 +132,12 @@ public class AiConsentService {
                 .orElse(false);
     }
 
+    /**
+     * 细粒度校验:最新事件必须是 GRANTED、政策版本与当前配置一致、
+     * 且授权范围覆盖本次任务类型与全部数据类别。
+     *
+     * <p>任一条不满足都返回 false(不区分原因),调用方统一报 CONSENT_REQUIRED。
+     */
     @Transactional(readOnly = true)
     public boolean hasValidConsent(Long userId, String taskScope, Collection<String> dataCategories) {
         return repository.findFirstByUserIdOrderByCreatedAtDescIdDesc(userId)

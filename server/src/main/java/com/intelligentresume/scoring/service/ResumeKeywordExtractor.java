@@ -20,6 +20,16 @@ import java.util.*;
  *
  * <p>每个文本字段同时产出**单词**与**连续词组**（见 {@link Normalizer#tokenizeWithPhrases}），
  * 以支持 {@code Spring Boot} 这类含空格的多词 JD 关键词。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>只抽"可见的专业内容"</b>：basics 只取 label/summary，姓名、邮箱、电话一律不参与，避免联系方式混进关键词。</li>
+ *   <li><b>raw 与 normalized 的区别</b>：raw 只做小写去标点（{@code Normalizer.clean}），normalized 再多一步同义词归一；
+ *       前者用于判断"是否逐字命中"，后者用于判断"是否命中"。</li>
+ *   <li><b>skills 的规范字段是 {@code items}</b>，{@code keywords} 只是历史别名，两者都读；新增结构时以 items 为准。</li>
+ *   <li><b>词组会放大 token 数量</b>（每个拉丁词向后最多再拼 5 个词），这是精度换体积的有意选择，不要在热路径上无限加长。</li>
+ *   <li>抽取是纯函数式的读操作，不改 {@code resumeJson}；但每次调用都会重新遍历全量 JSON，别在循环里反复调。</li>
+ * </ul>
  */
 @Service
 public class ResumeKeywordExtractor {

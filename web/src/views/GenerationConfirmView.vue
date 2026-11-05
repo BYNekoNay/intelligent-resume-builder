@@ -1,3 +1,11 @@
+<!--
+  生成确认页（/generate/confirm?taskId=…）：AI 已产出简历草稿，用户逐节复核/编辑后确认或拒绝，确认即落成正式简历版本。
+  依赖 @/api/ai 的 getTask / confirmTask / rejectTask / retryTask、useTaskPolling（任务未完成时轮询）、
+  @/api/resume 的 getResumeVersion / listResumesByJd（已确认任务回跳已有简历、提示同 JD 已有简历）。
+  状态分支：缺 taskId、加载失败、FAILED（可重试）、RUNNING/PENDING（保持 loading 由轮询推进，不能提前置 false 否则内容区空白）、
+  SUCCESS+PENDING 进入复核；SUCCESS+CONFIRMED 直接给出已生成的简历入口。
+  易错点：确认/拒绝都要带幂等键，避免重复点击产生多个版本；草稿复核状态由 useDraftReview 统一维护。
+-->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

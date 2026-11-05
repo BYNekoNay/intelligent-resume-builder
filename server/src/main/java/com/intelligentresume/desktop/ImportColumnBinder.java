@@ -22,6 +22,13 @@ import java.util.Set;
  *
  * <p>元数据的坑（已在导入写入那一批踩过并在此固化）：H2 的 {@code information_schema} 把
  * 表名/列名/类型名全部回成**大写**，而包里字段转下划线后是小写 —— 不统一转小写就一列都对不上。
+ *
+ * <p>其他约束：
+ * <ul>
+ *   <li><b>两个缓存按表名常驻、从不失效</b>：只在"进程内 schema 不变"时成立；备份恢复若换了一套表结构，需重启进程再导入。</li>
+ *   <li>元数据查询只按 {@code table_name} 过滤、不带 schema 条件：桌面端单库可用，换多 schema 部署必须补条件。</li>
+ *   <li>{@link #valueFor} 只把<b>非字符串</b>的 JSON 值序列化；字符串原样交给 {@code ? FORMAT JSON} 解析。</li>
+ * </ul>
  */
 final class ImportColumnBinder {
 

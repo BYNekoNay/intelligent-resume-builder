@@ -16,6 +16,14 @@ import java.time.LocalDateTime;
  * R34 又明确「凭据不得进备份 / Web 导出包 / 桌面迁移包」。备份是整库 {@code SCRIPT TO}，
  * 密钥一旦入表就必然被打包带走。{@code credentialPresent} 只表示「本机是否保存过密钥」，
  * 供界面提示「恢复工作区后需要重新配置」（密文本就不随工作区迁移）。
+ *
+ * <p>要点:
+ * <ul>
+ *   <li>{@code user_id} 有唯一约束:一个本地用户只有一行设置,读写都按 userId 找。</li>
+ *   <li>密文在 {@code <dataDir>/ai-credentials/} 下,本表只记"有没有"。</li>
+ *   <li>{@code last_test_*} 是"显式测试连接"的副作用,不影响实际调用是否使用该配置。</li>
+ *   <li>时间戳没有回调维护,由 service 在保存时显式赋值。</li>
+ * </ul>
  */
 @Entity
 @Table(name = "local_ai_setting")

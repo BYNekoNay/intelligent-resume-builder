@@ -141,6 +141,10 @@ public class RetentionPurgeService {
      *
      * <p>与方案 §6 G3「单轮每表最多 batch-size 行」一致 —— 让每次**破坏性/写**操作的规模有界；
      * 未处理完的候选留待下次调度按 interval 逐批收敛。
+     *
+     * <p>两个实现细节别改坏：① 两批 id 在**任何写操作之前**一次性取出，因此 A/B 必须是互斥判据，
+     * 否则同一行可能既被删又被快照；② 单行失败只捕获 {@link DataIntegrityViolationException} 并继续本批，
+     * 依赖 MySQL/H2「语句失败不中止整个事务」的语义；换成会中止事务的数据库时要改成逐行独立事务。
      */
     private PurgeOutcome process(String resource, LocalDateTime cutoff, int limit,
                                  IntFunction<List<Long>> purgeFinder, ToIntFunction<Long> deleter,

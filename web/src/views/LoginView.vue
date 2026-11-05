@@ -1,3 +1,9 @@
+<!--
+  登录页：用户名 + 密码登录，成功后跳 route.query.redirect（路由守卫拦截时写入的原路径），默认回首页。
+  特殊分支：登录被 40303 拒绝说明账号处于删号撤销窗口，此时用同一组凭据自动尝试恢复账号，恢复成功直接进入，
+  恢复失败（如窗口已结束 40903）按登记错误码给出文案，不透传服务端 message。
+  query.changed=1 用于提示「改邮箱/密码后需重新登录」，账号信息来自 useAuthStore().signIn。
+-->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

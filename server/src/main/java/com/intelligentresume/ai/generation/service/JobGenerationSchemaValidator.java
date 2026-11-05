@@ -25,6 +25,19 @@ import java.util.HashSet;
  *   <li>序列化字节数 ≤ max-output-bytes</li>
  *   <li>schemaVersion 不匹配抛 VALIDATION</li>
  * </ol>
+ *
+ * <p>要点（红线）：
+ * <ul>
+ *   <li>第 2 条的互斥只对**要求溯源**的节点生效；{@code basics}/{@code objective} 来自已确认的
+ *       个人档案，本来就没有 materialId 可引，对它们强制互斥会让整份草稿作废（线上踩过）。</li>
+ *   <li>{@link #CURRENT_VERSION} 是硬编码常量，而调用方传进来的 {@code schemaVersion} 来自配置
+ *       {@code app.ai.generation.schema-version}。两处必须同步改 —— 只改配置不改常量，
+ *       所有生成任务都会在这里被判 400。</li>
+ *   <li>传入 {@code allowedMaterialIds} 时，草稿引用的每个 materialId 都必须在确认快照内，
+ *       用于挡住模型幻觉出来的 ID；传 null 则跳过这道检查（两参重载目前只有测试在用）。</li>
+ *   <li>本类只校验结构与引用，不校验文案质量；生产调用方（{@code JobGenerationService} 两条路径）
+ *       会把这里的异常统一改写成 {@code AI_FAILURE}，所以对外看到的不是 VALIDATION。</li>
+ * </ul>
  */
 @Component
 public class JobGenerationSchemaValidator {
@@ -49,6 +62,12 @@ public class JobGenerationSchemaValidator {
         validate(draft, schemaVersion, null);
     }
 
+    /**
+     * 校验顺序固定：版本 → 空草稿 → 顶层键白名单 → 逐节点溯源 → 字节数。
+     *
+     * <p>{@code basics} / {@code objective} 传 {@code requiresProvenance=false}：它们由
+     * 已确认的个人档案派生，没有 materialId 可引。
+     */
     public void validate(Map<String, Object> draft, String schemaVersion, Set<Long> allowedMaterialIds) {
         if (!CURRENT_VERSION.equals(schemaVersion)) {
             throw new BusinessException(ErrorCode.VALIDATION,
@@ -76,6 +95,14 @@ public class JobGenerationSchemaValidator {
         checkByteSize(draft);
     }
 
+    /**
+     * 递归遍历草稿。{@code requiresProvenance} 的传递规则是**刻意不对称**的：
+     * Map 的子节点一律传 false（溯源只在"条目"层级要求，嵌套字段不该各自再带一份），
+     * List 的元素一律传 true（每个条目都是可引用的最小单元）。
+     *
+     * <p>List 分支在递归前先单独查一次元素的 {@code _source}/{@code _pending}，是为了给出
+     * 带下标的报错（能直接定位到第几条），递归里还会再查一次同样的条件。
+     */
     @SuppressWarnings("unchecked")
     private void validateValue(Object value, String path, boolean requiresProvenance, Set<Long> allowedMaterialIds) {
         if (value instanceof Map) {
@@ -127,6 +154,13 @@ public class JobGenerationSchemaValidator {
         }
     }
 
+    /**
+     * 收集该节点引用的全部 materialId（{@code _sources} 复数形态与 {@code _source} 单数旧形态都收），
+     * 然后要求：至少有一个 ID，且全部落在本次确认的快照里。
+     *
+     * <p>注意 {@code _sources} 里任何一项不是对象、或 materialId 缺失/非正数，都会整份草稿判失败 ——
+     * 这里不做"跳过坏项继续"的容错。
+     */
     @SuppressWarnings("unchecked")
     private void validateSourceIds(Map<String, Object> map, String path, Set<Long> allowedMaterialIds) {
         Set<Long> sourceIds = new HashSet<>();
@@ -164,6 +198,7 @@ public class JobGenerationSchemaValidator {
         sourceIds.add(id);
     }
 
+    /** 上限来自 {@code app.ai.generation.max-output-bytes}；序列化本身就是 JSON 合法性的一次隐式检查。 */
     private void checkByteSize(Map<String, Object> draft) {
         try {
             byte[] bytes = objectMapper.writeValueAsBytes(draft);

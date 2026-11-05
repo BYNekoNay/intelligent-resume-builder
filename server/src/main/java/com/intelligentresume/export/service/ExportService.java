@@ -25,12 +25,15 @@ import java.util.List;
 /**
  * 导出服务。编排创建、查询、下载流程。
  *
+ * <p>职责一句话：把"用户点了导出"变成一条任务行，并保证下载只发生在"属于你、已成功、未过期"的前提下。
+ *
  * <p>关键不变量:
  * <ul>
  *   <li>templateCode 必须属于统一支持列表</li>
- *   <li>跨用户 → NOT_FOUND(不泄露存在性)</li>
+ *   <li>跨用户 → NOT_FOUND(不泄露存在性)；归属校验必须排在归档校验之前</li>
  *   <li>下载必须 status=SUCCESS 且未过期</li>
  *   <li>不暴露 storageKey</li>
+ *   <li>落库的 errorMessage 可能是上游原文，出口一律经 {@code PublicFailureCopy} 转成稳定文案</li>
  * </ul>
  */
 @Service
@@ -64,6 +67,11 @@ public class ExportService {
 
     /**
      * 创建导出任务。校验简历版本归属后创建 PENDING 任务,由 worker 异步渲染。
+     *
+     * <p>顺序是刻意的：先模板白名单 → 再归属 → 再归档状态，保证"不是你的版本"永远只会得到 404，
+     * 不会因为归档与否而暴露它存在。
+     *
+     * <p>命中可复用任务时直接返回旧任务（可能已在 RUNNING/SUCCESS），不会重复排队。
      */
     @Transactional
     public ExportTaskStatusResponse create(CreateExportRequest req, Long userId) {
@@ -111,6 +119,9 @@ public class ExportService {
 
     /**
      * 查询导出任务状态。
+     *
+     * <p>有副作用：查到已过期（SUCCESS 且 expiresAt 已过）会把任务落成 EXPIRED 并删文件，
+     * 见 {@link #resolveExpiry}。因此它不是只读接口，不能加 {@code readOnly}。
      */
     public ExportTaskStatusResponse get(Long taskId, Long userId) {
         return toResponse(resolveExpiry(findForUser(taskId, userId), userId));

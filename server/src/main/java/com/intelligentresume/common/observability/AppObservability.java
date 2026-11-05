@@ -24,6 +24,16 @@ import java.util.function.IntSupplier;
  * Centralizes operational metrics and deliberately restricts every tag to a
  * finite set of technical values. No business payload or user identifier is
  * accepted by this class.
+ *
+ * <p>中文补充（改指标前必读）：
+ * <ul>
+ *   <li>所有标签必须是**有限封闭集**（任务类型、模型名、模板码、失败类别）；用户 id、JD 文本、
+ *       原始错误消息一律不得进标签，否则 Prometheus 基数会失控。</li>
+ *   <li>指标名与标签形状被历史面板与 {@code AlertRuleContractTest} 依赖：能改取值来源，不能改名字/标签。</li>
+ *   <li>Gauge 对 state 只持弱引用，注册时必须像 {@link #registerModelChainAvailabilityGauge} 那样
+ *       自己强引用住 supplier，否则读数为 NaN。</li>
+ *   <li>配额相关指标用 30s 快照而非每次抓取查库：监控允许一个周期陈旧，但不能变成 DB 负载。</li>
+ * </ul>
  */
 @Component
 public class AppObservability {

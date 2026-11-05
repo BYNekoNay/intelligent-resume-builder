@@ -9,9 +9,24 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.util.Locale;
 
+/**
+ * 失败归类：把异常/错误文本收敛成**低基数枚举**，供指标标签、重试语义与公开文案共用。
+ *
+ * <p>关键点：
+ * <ul>
+ *   <li>优先看**异常类型**（BusinessException / ResourceAccessException / RestClientResponseException），
+ *       只有拿不到类型时才退回文本匹配——文本匹配是会随上游措辞漂移的启发式。</li>
+ *   <li>{@code aiMessage}/{@code pdfMessage} 的判断**顺序即优先级**：先匹配 schema/selection/consent，
+ *       最后才匹配 5xx/4xx 数字。调换顺序会改变归类结果，进而改变重试策略与用户文案。</li>
+ *   <li>归类结果被 {@link com.intelligentresume.common.error.PublicFailureCopy} 映射成对外文案、也可能被 worker 当成「可重试」判据，
+ *       新增/合并类别前先确认这两处消费者。</li>
+ *   <li>{@code pdfMessage} 同时匹配中文文案：落库的失败原因可能是中文，只匹配英文会漏判。</li>
+ * </ul>
+ */
 @Component
 public class FailureCategoryClassifier {
 
+    /** 异常对象 → AI 失败类别；未知一律 INTERNAL（不可重试语义由上层决定）。 */
     public AiFailureCategory ai(Throwable error) {
         if (error instanceof BusinessException business) {
             if (business.getErrorCode() == ErrorCode.CONSENT_REQUIRED) return AiFailureCategory.CONSENT_REVOKED;
@@ -27,6 +42,10 @@ public class FailureCategoryClassifier {
         return aiMessage(error == null ? null : error.getMessage());
     }
 
+    /**
+     * 纯文本归类（用于已落库的 error_message）。**顺序敏感**：越具体的业务失败越靠前，
+     * 数字码（429/5xx/4xx）放在最后，避免正文里恰好出现的 "400" 抢走真正的 schema 失败。
+     */
     public AiFailureCategory aiMessage(String message) {
         if (contains(message, "schema", "draft schema")) return AiFailureCategory.SCHEMA_INVALID;
         if (contains(message, "selection", "recommended list", "candidate")) return AiFailureCategory.SELECTION_INVALID;
@@ -57,6 +76,7 @@ public class FailureCategoryClassifier {
         return pdfMessage(error == null ? null : error.getMessage());
     }
 
+    /** PDF 文本归类。storage 判断放在前面：存储失败的解释比通用渲染失败更具体。 */
     public PdfFailureCategory pdfMessage(String message) {
         if (contains(message, "storage", "store")) return PdfFailureCategory.STORAGE;
         // 体积上限的中文文案（PdfServiceClient 在调用前后各自的判据）：输入＝导出数据，

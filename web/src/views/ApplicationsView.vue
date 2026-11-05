@@ -1,3 +1,10 @@
+<!--
+  投递管理页（/applications）：9 状态看板 + 统计页头 + 新建/编辑投递记录 + 卡片展开看详情和状态历史，支持拖拽换列。
+  依赖 @/api/application（listApplications / getApplicationStats / getApplication / 增删改 / updateApplicationStatus）、useResumeJobOptions（简历版本与岗位下拉）、
+  useToast（操作反馈）、@/api/resume 的 getResumeVersion（展示封面文案实际使用的版本）。
+  状态分支：loading 首屏、saving 提交、loadingEdit 拉详情；error 承载加载/保存失败；筛选（关键词 + 跟进状态）在前端对列表做过滤，看板按状态分列。
+  易错点：列表摘要不含三段长文本，展开/编辑时才按需 getApplication 并缓存（draftTexts）；改状态时若备注未编辑则省略 feedbackText，交由服务端保留现值。
+-->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {

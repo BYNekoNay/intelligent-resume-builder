@@ -31,6 +31,16 @@ import java.util.Optional;
  *   <li><b>测试连接可以带"未保存的" key</b>：用户填完就能先测再存，避免"存了才发现错"；</li>
  *   <li><b>不自动重试、不自动换供应商</b>（D7）：测试失败就把原因写回设置行，由人决定下一步。</li>
  * </ul>
+ *
+ * <p>易错点:
+ * <ul>
+ *   <li>带 {@code apiKey} 的保存是三件事:写密文、写行(credentialPresent=true)、
+ *       {@link #publishToRuntime}。少最后一步就会出现"设置页显示新值、实际调用还在用旧配置"。</li>
+ *   <li>保存时 {@code apiKey} 传空表示"只改其它字段",不会清掉已存密钥;要删密钥只能走 delete。</li>
+ *   <li>{@code publishToRuntime} 的三条分支(未启用/解不出密钥/正常)都必须显式处理,
+ *       其中前两条是**清空覆盖**、回落到配置文件,而不是抛错。</li>
+ *   <li>测试连接用独立短超时(连接 10s / 读 30s),不能复用生产的 300s 读超时,否则页面会卡住。</li>
+ * </ul>
  */
 @Service
 public class LocalAiSettingService {

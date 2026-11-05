@@ -41,6 +41,15 @@ import java.util.Objects;
  *
  * <p>被 start/answer/retry/rule 流程共享，禁止反向依赖流程类。
  * 日志只记录 id/状态/错误码，不记录简历/JD/回答内容。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@code attempt.attemptCount} 一物两用：既是配额计数，也是「第几代重试」。重试开始时 +1，
+ *       后台结果落地前用 {@link #isCurrentRetry} 比对代数，代数不符即视为过期结果丢弃。</li>
+ *   <li>指纹是 SHA-256，规范化时对每个值写「长度:内容;」，避免拼接歧义（"ab"+"c" 与 "a"+"bc"）。</li>
+ *   <li>配额按「今日所有 attempt 的 attemptCount 之和」计算，因此修复调用与重试都会消耗配额。</li>
+ *   <li>本类个别方法自带事务（{@link #reserveRepairCall}），其余假定调用方已在事务内并已锁会话行。</li>
+ * </ul>
  */
 @Component
 public class InterviewOperationSupport {
@@ -106,11 +115,24 @@ public class InterviewOperationSupport {
                 || aiException.retryable();
     }
 
+    /**
+     * 判断 PROCESSING 是否已超时（可被接管）。
+     *
+     * <p>{@code updatedAt} 为空视为「未超时」：没有时间戳时宁可不接管，也不要误杀刚创建的行。
+     * 阈值语义见 {@link #PROCESSING_TAKEOVER_SECONDS}，必须大于单次模型调用最坏耗时。
+     */
     public boolean isStale(InterviewAiAttempt attempt, LocalDateTime now) {
         return attempt.getUpdatedAt() != null
                 && attempt.getUpdatedAt().isBefore(now.minusSeconds(PROCESSING_TAKEOVER_SECONDS));
     }
 
+    /**
+     * 判断「这次后台结果是否仍属于当前这一次重试」。
+     *
+     * <p>四个条件缺一不可：会话仍处于预期状态、仍是 AI 模式（未被降级成规则）、attempt 仍 PROCESSING、
+     * 代数（attemptCount）与发起时一致。代数是最关键的一条 —— 用户可能在上一次还在跑时又点了重试，
+     * 那时 attemptCount 已变，旧结果必须丢弃，否则会用旧 prompt 的结论覆盖新状态。
+     */
     public boolean isCurrentRetry(InterviewSession session, InterviewAiAttempt attempt,
                                   int generation, InterviewStatus expectedStatus) {
         return session.getStatus() == expectedStatus
@@ -119,6 +141,7 @@ public class InterviewOperationSupport {
                 && Objects.equals(attempt.getAttemptCount(), generation);
     }
 
+    /** {@link #isCurrentRetry} 的断言版本：不满足就抛 CONFLICT，让调用方事务整体回滚。 */
     public void assertRetryStillCurrent(InterviewSession session, InterviewAiAttempt attempt,
                                         int generation, InterviewStatus expectedStatus) {
         if (!isCurrentRetry(session, attempt, generation, expectedStatus)) {
@@ -126,6 +149,13 @@ public class InterviewOperationSupport {
         }
     }
 
+    /**
+     * 校验模型给的「是否继续」与本地题数上限是否自洽。
+     *
+     * <p>只有一种情况判失败：还没到最大题数、也不满足「已到最低题数且模型认为信息够了」，
+     * 却没有给出可用的下一题。这会让面试无法继续，必须当失败处理（可重试）。
+     * 注意这里只管「能不能继续」，真正推进状态在 {@link #applyEvaluationOutcome}。
+     */
     public void validateEvaluationProgress(InterviewSession session, int completedCount,
                                            InterviewCoachResponse.AnswerEvaluation evaluation,
                                            String providerRequestId) {
@@ -141,6 +171,16 @@ public class InterviewOperationSupport {
         }
     }
 
+    /**
+     * 根据本轮评估推进会话状态（判序不可调换）。
+     *
+     * <ol>
+     *   <li>先判最大题数：到上限一律结束，模型说「信息还不够」也不听 —— 上限是硬约束。</li>
+     *   <li>再判「已达最低题数 且 模型认为信息完整」：提前结束，这是正常收尾。</li>
+     *   <li>其余情况进入下一题。调用前必须已通过 {@link #validateEvaluationProgress}，
+     *       否则这里可能 NPE（nextQuestion 为 null）。</li>
+     * </ol>
+     */
     public void applyEvaluationOutcome(InterviewSession session, int completedCount,
                                        InterviewCoachResponse.AnswerEvaluation evaluation) {
         if (completedCount >= session.getMaxQuestionCount()) {
@@ -158,6 +198,12 @@ public class InterviewOperationSupport {
         }
     }
 
+    /**
+     * 把评估结果拍平成 {@code interview_record.feedback_json}。
+     *
+     * <p>key 名是持久化契约：状态接口（LastEvaluation）、报告聚合、资产导出都按这些 key 回读。
+     * 这里的可空列表统一落空数组，保证读取侧不需要再判 null。
+     */
     public Map<String, Object> buildAiFeedback(InterviewCoachResponse.AnswerEvaluation evaluation) {
         Map<String, Object> feedback = new LinkedHashMap<>();
         feedback.put("dimensionScores", Map.of(
@@ -181,6 +227,12 @@ public class InterviewOperationSupport {
         return feedback;
     }
 
+    /**
+     * 统一失败落库：会话置 {@code AI_ACTION_REQUIRED}，attempt 置 FAILED 并写入错误码/可重试标记。
+     *
+     * <p>错误文案经 {@code AsyncFailureMessages.persisted(...)} 处理，因为该字段要存库且可能被回显，
+     * 不能直接放 provider 原文。调用方必须已持有会话行锁并负责提交事务。
+     */
     public void markAttemptFailed(InterviewSession session, InterviewAiAttempt attempt,
                                   String errorCode, String errorMessage, boolean retryable,
                                   String providerRequestId) {
@@ -194,6 +246,12 @@ public class InterviewOperationSupport {
         attemptRepository.save(attempt);
     }
 
+    /**
+     * 创建一次 AI attempt，初始即 PROCESSING、代数 1。
+     *
+     * <p>同时快照 provider/model/prompt 版本，用于事后判断「当时的模型与提示词」。
+     * {@code user_id / session_id / operation_type / round_no} 与唯一约束共同决定了同一轮同一操作只能有一条。
+     */
     public InterviewAiAttempt createAttempt(Long userId, Long sessionId,
                                             AiAttemptOperationType opType, Integer roundNo,
                                             String idempotencyKey, String pendingAnswer,
@@ -217,6 +275,12 @@ public class InterviewOperationSupport {
         return attemptRepository.save(attempt);
     }
 
+    /**
+     * 规则模式的 attempt 占位记录。
+     *
+     * <p>与 AI attempt 的差异是刻意的：代数记 0（不占配额）、没有 provider/model 快照、
+     * promptVersion 固定为 {@code rule-v1}。这样统计配额时规则评分不会被计入。
+     */
     public InterviewAiAttempt createRuleAttempt(Long userId, Long sessionId, Integer roundNo,
                                                 String idempotencyKey, String answer,
                                                 String fingerprint) {
@@ -234,10 +298,15 @@ public class InterviewOperationSupport {
         return attemptRepository.save(attempt);
     }
 
+    /** 回答评估的请求指纹：会话 + 轮次 + 答案。三者任一变化都视为另一个请求。 */
     public String buildFingerprint(Long sessionId, Integer roundNo, String answer) {
         return secureFingerprint(sessionId, roundNo, answer);
     }
 
+    /**
+     * 开场请求指纹。所有会影响首题内容的入参都要列进来，否则「改了 JD 但用同一幂等键」
+     * 会被误判为重放。注意这里用的是 request 原值（未夹逼的 targetQuestionCount 等）。
+     */
     public String buildStartFingerprint(Long userId, StartInterviewRequest request) {
         return secureFingerprint("start", userId,
                 request.sourceType(), request.resumeVersionId(),
@@ -246,6 +315,12 @@ public class InterviewOperationSupport {
                 request.outputLanguage() != null ? request.outputLanguage() : InterviewOutputLanguage.ZH_CN);
     }
 
+    /**
+     * 计算 SHA-256 指纹。
+     *
+     * <p>规范化格式为 {@code len:value;}：长度前缀消除拼接歧义，null 统一写成 {@code <null>}，
+     * 这样不同入参组合不会算出同一个摘要。指纹列宽 128，hex 摘要为 64 字符，安全。
+     */
     public String secureFingerprint(Object... values) {
         StringBuilder canonical = new StringBuilder();
         for (Object value : values) {
@@ -261,6 +336,13 @@ public class InterviewOperationSupport {
         }
     }
 
+    /**
+     * 面试每日配额校验。
+     *
+     * <p>为什么要锁用户行：并发提交时若不加锁，多个请求会同时读到「未超额」而全部放行。
+     * 计数口径是 {@code sum(attemptCount)}（今天创建的所有 attempt），所以一次评估的契约修复
+     * 与一次手动重试都会各自计 1 次。
+     */
     public void checkInterviewQuota(Long userId) {
         userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> notFound("用户不存在"));
@@ -271,6 +353,13 @@ public class InterviewOperationSupport {
         }
     }
 
+    /**
+     * 为「契约修复」这次额外调用预占配额并把 attempt 代数 +1。
+     *
+     * <p>必须是独立事务：由 {@code InterviewAiService} 在真正发起第二次模型调用前回调，
+     * 若这里抛异常（配额不足/attempt 已失效）修复调用就不会发生。
+     * 代数 +1 使重试流程能识别出「这次结果属于第几代」，详见 {@link #isCurrentRetry}。
+     */
     public void reserveRepairCall(Long userId, Long attemptId) {
         tx.executeWithoutResult(status -> {
             checkInterviewQuota(userId);
@@ -284,6 +373,12 @@ public class InterviewOperationSupport {
         });
     }
 
+    /**
+     * 同意校验：数据类别由 {@code AiTaskConsentPolicy} 按任务类型 + 快照（是否带 JD）推导，
+     * 与通用 AI 任务链路共用同一份策略，避免两处判断不一致。
+     *
+     * <p>快照只放 {@code jobDescriptionId}：带了 JD 就会多出 JD 这一数据类别，需要额外授权。
+     */
     public boolean hasInterviewConsent(Long userId, InterviewSession session) {
         Map<String, Object> snapshot = session.getJobDescriptionId() == null
                 ? Map.of()

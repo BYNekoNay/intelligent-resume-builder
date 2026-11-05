@@ -1,3 +1,8 @@
+/**
+ * axios 实例与统一请求入口：请求统一带 Bearer token，响应统一解包 ApiResponse 信封。
+ * 边界：业务失败以 ApiError（带 code / traceId）抛出，各 api 模块只暴露 http.get/post/put/patch/delete，视图层拿不到信封；
+ * 401 时会做一次透明刷新并重放原请求（并发请求共享同一个 refreshPromise），/api/auth/ 自身与重放过的请求不再重试。
+ */
 import axios, { type AxiosError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth'
 

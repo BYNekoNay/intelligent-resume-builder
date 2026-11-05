@@ -34,6 +34,14 @@ import java.util.Map;
  * </ul>
  * 本类只保留对外的 API 契约与编排。**嵌套子记录（简历版本 / 投递状态历史）是独立条目**：
  * 它们参与预览、逐条分类、逐条解决冲突，不再依附「父记录是否新增」这一分支。
+ *
+ * <p>改这里的红线：
+ * <ul>
+ *   <li><b>preview 必须无副作用</b>：只读库、只分类；真正写数据只能在 {@link #apply} 且必须在事务内。</li>
+ *   <li><b>apply 会重新 plan 一次</b>，不复用预览结果 —— 预览与写入之间本地库可能变化，写入以最新状态为准。</li>
+ *   <li><b>含不支持的集合 → 整份拒绝</b>，不做"跳过未知集合继续导"：静默丢数据无法向用户交代。</li>
+ *   <li>{@code resolutions} 的键是 <b>stableId</b>（嵌套记录用自己的），不是本地主键也不是包内 id。</li>
+ * </ul>
  */
 @Service
 public class DesktopImportService {
@@ -94,6 +102,12 @@ public class DesktopImportService {
                                 List<PreviewItem> items) {
     }
 
+    /**
+     * 应用结果计数。
+     *
+     * <p>口径：{@code keptLocal} 包含"冲突但没给解决方式"和"给了无法识别的解决方式"两种，
+     * 即<b>凡是没写入的冲突都算保留本地</b>；{@code insertedStableIds} 只记新增的条目，可用于前端做二次定位。
+     */
     public record ImportResult(int inserted,
                                int updated,
                                int skipped,

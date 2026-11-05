@@ -1,3 +1,9 @@
+/**
+ * 全局 AI 任务状态：保存「当前正在跟进的异步任务」并负责轮询。
+ * 边界：任务 id 按用户维度存在 localStorage（storageKey 带 userId），所以未登录时不记住也不恢复；
+ * 每个请求发出前记下当时的 storageKey，响应回来若 key 已变（切换账号/退出）就丢弃结果。
+ * 轮询只在任务未进入终态时继续；SUCCESS 但 confirmationStatus 仍是 PENDING 的任务也要恢复，因为还需要用户确认结果。
+ */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getTask, type AiTask } from '@/api/ai'
@@ -33,6 +39,7 @@ export const useAiTaskStore = defineStore('ai-task', () => {
   }
 
   function needsRecovery(task: AiTask) {
+    // 终态且不需要确认的任务才可以从 localStorage 里丢弃
     if (!TERMINAL_STATUSES.has(task.status)) return true
     return task.status === 'SUCCESS' && task.confirmationStatus === 'PENDING'
   }
@@ -90,6 +97,7 @@ export const useAiTaskStore = defineStore('ai-task', () => {
           return
         }
         attempt += 1
+        // 退避节奏固定为 1s/2s/4s/5s，第 4 次之后恒定 5s，避免长任务把后端打满
         const delay = [1000, 2000, 4000, 5000][Math.min(attempt - 1, 3)]
         timer = window.setTimeout(tick, delay)
       } catch {

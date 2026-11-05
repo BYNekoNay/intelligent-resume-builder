@@ -1,3 +1,10 @@
+/**
+ * 职业资料的类型与使用偏好选项表（纯常量 + 一个查找函数）。
+ *
+ * value 是后端 MaterialType / UsagePreference 的枚举值，key 是 careerMaterial.* 文案键。
+ * 新增枚举值必须同时补 zh-CN 与 en-US 文案并同步后端枚举，否则 optionLabel 会回落到
+ * 原始枚举值（界面上直接出现 WORK_EXPERIENCE 这类大写常量）。
+ */
 import type { MaterialType, UsagePreference } from '@/api/careerMaterial'
 
 export const MATERIAL_TYPE_OPTIONS: { value: MaterialType; key: string }[] = [

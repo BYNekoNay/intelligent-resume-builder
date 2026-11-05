@@ -1,9 +1,16 @@
+/**
+ * 「简历 → 版本 → 目标岗位」三组下拉选项的加载器，供生成、沟通文案、ATS 等
+ * 需要同时选简历和 JD 的流程复用。
+ *
+ * 边界：只负责取数与选中态，不做业务校验；hasVersions 供调用方决定是否禁用提交。
+ * 关键约束：选择器可连续切换，旧请求可能晚于新请求返回，因此每次加载都带 epoch，
+ * 只有最新一次的响应允许写入状态，否则旧简历的版本列表会覆盖新选择。
+ */
 import { computed, ref } from 'vue'
 import { listJobs, type JobDescriptionSummary } from '@/api/jobDescription'
 import { listResumes, listVersions, type ResumeSummary, type ResumeVersionSummary } from '@/api/resume'
 import { useLocale } from '@/i18n'
 
-/** Loads the choices shared by workflows that need a resume version and a target job. */
 export function useResumeJobOptions() {
   const { t } = useLocale()
   const resumes = ref<ResumeSummary[]>([])

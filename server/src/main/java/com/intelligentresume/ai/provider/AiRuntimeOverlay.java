@@ -24,6 +24,16 @@ import java.util.function.BiFunction;
  *
  * <p>解析逻辑（"覆盖生效就用覆盖值，否则用传入的兜底"）放在本类而不是 provider 里：
  * provider 踩着行数棘轮（只许下调），而这些是纯分支判断，放这里还能单独测。
+ *
+ * <p>不变量 / 易错点:
+ * <ul>
+ *   <li>{@link #current()} 只在快照"可用"(apiKey 非空白)时才返回,因此 {@link #apply} 传入
+ *       空 key 等价于清空 —— 调用方不需要自己判两次。</li>
+ *   <li>覆盖生效时候选模型**只剩一个**(设置里的 model),配置里的模型链被整体旁路。
+ *       这是 D7 的约束:不能"看起来换了设置、实际还在用旧链"。</li>
+ *   <li>客户端按快照对象相等性缓存:同内容的新快照({@code record equals})会命中缓存,
+ *       只有真正换了 baseUrl/key 才重建 {@code RestClient}。</li>
+ * </ul>
  */
 @Component
 public class AiRuntimeOverlay {

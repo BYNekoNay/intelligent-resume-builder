@@ -17,6 +17,16 @@ import java.time.LocalDateTime;
 
 /**
  * 导出任务仓库。DDL 含 user_id,跨用户校验直接 findByIdAndUserId。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>下载/查询用 {@code findByIdAndUserId}（一箭双雕：不存在与不属于你都是空结果）。</li>
+ *     <li>领取与释放的互斥靠 {@code acquireLease} 的条件更新 + {@code findRunningByIdAndOwnerForUpdate} 的行锁，
+ *         不能只靠 {@code claimableTasks} 的 {@code FOR UPDATE}。</li>
+ *     <li>{@code claimableTasks}/{@code acquireLease} 是 {@code nativeQuery = true} 的原生 SQL，
+ *         直接写了 {@code NOW()}/状态字面量；改这两条时要确认 H2 测试仍能执行。</li>
+ *     <li>{@code failActiveByUserId} 用于账号注销时把在途任务一次性判失败，避免给已注销用户继续渲染。</li>
+ * </ul>
  */
 public interface ExportTaskRepository extends JpaRepository<ExportTask, Long> {
 

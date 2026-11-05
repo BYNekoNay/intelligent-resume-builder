@@ -1,3 +1,10 @@
+<!--
+桌面版「导入 Web 导出包」面板，流程固定为：选文件 → 解析 JSON → 预览分类 → 处理冲突 → 应用。
+预览里出现本版不支持的集合时 canApply 为 false，整包拒绝是后端语义，前端不做部分导入的兜底。
+冲突默认 KEEP_LOCAL，用户必须显式改成「用导入的覆盖」才会丢本地数据。
+reasonText 在中文界面直接用后端 reason（能区分同编号版本被占用这类特例），英文界面用本地三档文案。
+应用成功后清空 preview 但保留 result 摘要，方便用户回看本次写入数量。
+-->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { FileJson, Upload } from 'lucide-vue-next'

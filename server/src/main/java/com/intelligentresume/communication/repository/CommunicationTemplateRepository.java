@@ -12,6 +12,18 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 沟通模板仓储。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@link #search} 的可见性写在 SQL 里（{@code userId = :userId OR userId IS NULL}）：内置模板对所有用户可见。
+ *       三个过滤参数为 null 表示不过滤，不要改成「null 即不匹配」。</li>
+ *   <li>排序固定为「内置在前 → usageCount 降序 → id 升序」，最后一级保证分页/重复请求结果稳定。</li>
+ *   <li>{@link #incrementUsageCount} 是原子自增，<b>不要换成读实体再 set</b>：并发下会丢增量；
+ *       该语句不推进 {@code @Version}，所以不会制造伪冲突。</li>
+ * </ul>
+ */
 public interface CommunicationTemplateRepository extends JpaRepository<CommunicationTemplate, Long> {
 
     @Query("""

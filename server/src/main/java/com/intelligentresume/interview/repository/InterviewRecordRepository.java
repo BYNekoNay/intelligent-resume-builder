@@ -11,6 +11,18 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 面试轮次记录的查询入口。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>轮次排序一律以 {@code round_no} 为准（有唯一约束保证），{@code id} 只作并列兜底。</li>
+ *   <li>状态接口是轮询热路径，所以有「只取末条」与「只取分数」两个专用查询，
+ *       新增调用时不要随手用全量方法。</li>
+ *   <li>两个带 {@code findOwned} 的查询用「记录 ⋈ 会话」判断归属，避免直接信任 recordId。</li>
+ *   <li>{@code findOwnedForUpdate} 会加悲观写锁，只在需要串行化写时使用。</li>
+ * </ul>
+ */
 public interface InterviewRecordRepository extends JpaRepository<InterviewRecord, Long> {
     /**
      * 按轮次升序返回（#75）：轮次是面试的领域顺序，且 V18 的
@@ -46,6 +58,7 @@ public interface InterviewRecordRepository extends JpaRepository<InterviewRecord
     List<ScoreProjection> findScoresBySessionIdInOrderByRoundNoAscIdAsc(
             @Param("sessionIds") Collection<Long> sessionIds);
 
+    /** 本会话已完成轮数 —— 系统里「进度」的唯一口径。 */
     long countBySessionId(Long sessionId);
     @Query("SELECT r FROM InterviewRecord r, InterviewSession s WHERE r.id = :id AND r.sessionId = s.id AND s.userId = :userId")
     Optional<InterviewRecord> findOwned(@Param("id") Long id, @Param("userId") Long userId);

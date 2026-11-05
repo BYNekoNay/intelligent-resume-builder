@@ -16,6 +16,17 @@ import java.util.regex.Pattern;
  * <p>为什么需要这一层：{@code FailureCategoryClassifier.aiStatus()} 把 403 一律归为
  * {@code PROVIDER_4XX}，无法区分「密钥无效」与「免费额度耗尽」。前者换模型也没用
  * （应立即终止），后者换模型即可恢复（应顺延）。两者混在一起时，模型链无从决策。
+ *
+ * <p>要点 / 易错点:
+ * <ul>
+ *   <li>所有关键字匹配都是「转小写后做 contains」,所以新增关键字请一律写小写,
+ *       并确认它足够具体 —— 过短的词会误命中其它错误码。</li>
+ *   <li>判定顺序有语义:凭据类 → 限流类 → 额度类 → HTTP 状态。限流必须先于额度,
+ *       因为 {@code Throttling.RateQuota} 里也含 "quota"。</li>
+ *   <li>{@link #extractErrorCode} 只取正文里第一个 {@code "code"} 字段,没有才退回 {@code "type"};
+ *       两者都抽不到就返回 null,调用方会退化为按 HTTP 状态判定。</li>
+ *   <li>本类**不得**接收或记录响应体以外的东西,也不得把 body 传给日志;它只返回错误码字符串。</li>
+ * </ul>
  */
 final class BailianFailureClassifier {
 
@@ -152,10 +163,16 @@ final class BailianFailureClassifier {
             // 含 400 InvalidParameter：快速失败，跳过该模型继续尝试
             return Disposition.NEXT_MODEL_SHORT_COOLDOWN;
         }
+        // 兜底同样顺延:除了凭据类,本方法不会返回 ABORT
         return Disposition.NEXT_MODEL_SHORT_COOLDOWN;
     }
 
-    /** 非 HTTP 异常（传输层、响应结构异常）按已判定的分类映射动作。 */
+    /** 非 HTTP 异常（传输层、响应结构异常）按已判定的分类映射动作。
+     *
+     * <p>只有列出的分类才顺延;其余(含 {@code PROVIDER_4XX}、{@code SCHEMA_INVALID}、
+     * {@code CONSENT_REVOKED}、{@code INTERNAL})一律 ABORT —— 这些要么是请求/授权层面的问题,
+     * 要么换模型同样会失败。
+     */
     static Disposition dispositionForCategory(AiFailureCategory category) {
         return switch (category) {
             case NONE -> Disposition.SUCCEEDED;

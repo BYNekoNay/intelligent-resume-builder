@@ -8,6 +8,14 @@ import java.util.Map;
  *
  * <p>{@code modelAttempts} 是 R33 的落点：模型链顺延以前只写日志，用户看不到"这次换了几个模型"。
  * 现在每次尝试都记进结果，由 worker 落到任务结果里 —— **换可以换，但不能静默**。
+ *
+ * <p>要点:
+ * <ul>
+ *   <li>成功时 {@code data} 非空、{@code errorMessage} 为 null;失败时相反。
+ *       两个工厂方法({@link #ok}/{@link #fail})维持这个不变量,不要手工 new 出半成品。</li>
+ *   <li>{@code retryable} 只是给调用方的提示:worker 按 R33 一律不自动重试,当前只用于日志。</li>
+ *   <li>{@code errorMessage} 会进任务结果与错误展示,不得包含 prompt 或响应体原文。</li>
+ * </ul>
  */
 public record AiCallResult(
         boolean success,

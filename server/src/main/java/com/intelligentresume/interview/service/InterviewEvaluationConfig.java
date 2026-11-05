@@ -59,7 +59,9 @@ public class InterviewEvaluationConfig {
         ThreadPoolExecutor pool = new ThreadPoolExecutor(
                 WORKERS, WORKERS, 60L, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(QUEUE_CAPACITY), factory,
+                // AbortPolicy：拒绝时抛 RejectedExecutionException，由调用方转成「可重试失败」
                 new ThreadPoolExecutor.AbortPolicy());
+        // 核心线程也允许空闲回收：评估是突发型负载，常驻线程在低峰期没有意义
         pool.allowCoreThreadTimeOut(true);
         return pool;
     }

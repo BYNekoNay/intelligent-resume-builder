@@ -15,6 +15,15 @@ import java.util.List;
  *
  * <p>文案策略：本响应只返回**码**（{@code section} / {@code code}），
  * 由前端映射成中英文；服务端不下发中文句子，避免 en-US 界面出现中文。
+ *
+ * <p>不变量：
+ * <ul>
+ *   <li>{@code plainText} 就是"解析器读到的正文"，已去掉尾部空白；前端展示时不要再自己拼章节标题。</li>
+ *   <li>{@code sections} 的第 0 项固定是 {@code basics}（页头块），其余按用户自定义顺序或默认顺序排列。</li>
+ *   <li>{@code warnings} 只含码与可选上下文（section / count），文案完全由前端决定。</li>
+ *   <li>{@code charCount} / {@code lineCount} 基于 {@code plainText} 统计，与各 SectionView 的口径略有差异
+ *       （章节数含末尾空行）。</li>
+ * </ul>
  */
 public record ParserViewResponse(
         Long resumeVersionId,

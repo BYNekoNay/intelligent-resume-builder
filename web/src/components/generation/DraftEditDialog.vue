@@ -1,3 +1,10 @@
+<!--
+草稿单条内容的编辑抽屉。显隐、当前编辑项与编辑值都来自 useDraftReview 的模块级单例，
+所以本组件不接收 props，谁打开谁就往单例里写，弹窗自然出现。
+DraftContentFields 以 editable 模式承载字段编辑，v-model 直接改 editValue。
+确认走 saveEdit（写回 content 并把 decision 置为 EDIT），关闭走 closeEdit；两者都会清空 editingItem。
+遮罩用 @click.self，点内容区不会误关。
+-->
 <script setup lang="ts">
 import { X } from 'lucide-vue-next'
 import { useLocale } from '@/i18n'

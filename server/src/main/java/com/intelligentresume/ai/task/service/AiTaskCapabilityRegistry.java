@@ -11,12 +11,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Single registration point for the server-side AI task contract.
+ * AI 任务能力的唯一登记处 —— 一个 {@link AiTaskType} 能不能被接受、走哪个执行分支、归哪个领取分组、
+ * 需要哪些数据类别授权,全部由这里的描述符决定。
  *
- * <p>A task enum value is not a capability by itself. Every value must have a
- * descriptor here before it can be accepted by the generic task endpoint or
- * reach a worker/provider. The explicit completeness check deliberately fails
- * closed when a new enum value is added without its capability entry.</p>
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>"枚举有值"不等于"能力可用":{@link #requireRegistered} 是通用端点、工作器、provider 三处的
+ *       统一入口,未登记一律 VALIDATION。</li>
+ *   <li>{@link #descriptors()} 末尾会做完整性校验:新增枚举值但忘了登记,应用启动即失败(fail closed),
+ *       这是刻意设计,不要为了"先跑起来"去掉这段。</li>
+ *   <li>{@link Group} 决定工作器的线程池与并发额度。分错组会让长任务挤占短任务的执行机会。</li>
+ *   <li>{@code genericEndpointAllowed=false} 的类型只能从各自的领域端点创建,不能走 {@code POST /api/ai/tasks}。</li>
+ *   <li>{@code baseConsentCategories} 是授权下限;{@code addJobDescriptionWhenPresent=true} 时,
+ *       只要快照里出现 JD 字段就追加 {@code JOB_DESCRIPTION} 要求(见 {@link Descriptor})。</li>
+ * </ul>
  */
 public final class AiTaskCapabilityRegistry {
 
@@ -40,6 +48,9 @@ public final class AiTaskCapabilityRegistry {
         LIGHT
     }
 
+    /**
+     * 一个任务类型的完整契约。record 不可变,列表字段都已 copyOf,调用方无法改到注册表内部状态。
+     */
     public record Descriptor(
             AiTaskType type,
             ExecutionMode executionMode,
@@ -48,6 +59,12 @@ public final class AiTaskCapabilityRegistry {
             List<String> baseConsentCategories,
             boolean addJobDescriptionWhenPresent
     ) {
+        /**
+         * 计算该次输入需要的授权数据类别。
+         *
+         * <p>只在确实带 JD 时才追加 {@code JOB_DESCRIPTION},避免"没传 JD 也要用户授权 JD 类别"
+         * 这种多余拦截。
+         */
         public List<String> requiredConsentCategories(Map<String, Object> inputSnapshot) {
             if (!addJobDescriptionWhenPresent || !containsJobDescription(inputSnapshot)) {
                 return baseConsentCategories;
@@ -57,6 +74,12 @@ public final class AiTaskCapabilityRegistry {
             return List.copyOf(categories);
         }
 
+        /**
+         * 在快照里找 JD 痕迹:先看顶层,再看嵌套的 {@code input} 对象。
+         *
+         * <p>清单覆盖了四种既有写法({@code jobDescriptionId}/{@code jdText}/{@code targetJdText}/{@code jdContext}),
+         * 少一个就可能让某条链路的 JD 数据绕过授权校验 —— 新增 JD 字段时要同步加到这里。
+         */
         private static boolean containsJobDescription(Map<String, Object> inputSnapshot) {
             return present(field(inputSnapshot, "jobDescriptionId"))
                     || present(field(inputSnapshot, "jdText"))

@@ -20,6 +20,9 @@ final class AiTaskResults {
      * 把「这次顺延过哪些模型」写进任务结果，而不是只留一行日志。
      *
      * <p>常规单模型成功不写（避免给结果增加噪音）；只有真的发生过失败尝试才记录。
+     *
+     * <p>没有尝试轨迹时直接返回原 map（不复制）；有轨迹时复制一份再追加，
+     * 避免改到 provider 返回的原始数据。
      */
     static Map<String, Object> withModelAttempts(Map<String, Object> taskResult, AiCallResult result) {
         if (result.modelAttempts() == null || result.modelAttempts().isEmpty() || taskResult == null) {

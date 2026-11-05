@@ -1,3 +1,9 @@
+<!--
+远程图片包装：占位渐变 + 加载闪光 + 加载完成后淡入，加载失败只保留占位、不显示裂图。
+eager 为 false（默认）时用 IntersectionObserver 在进入视口前 120px 才真正请求 src；
+eager 为 true 或环境没有 IntersectionObserver 时立即加载，保证首屏关键图不被拦截。
+preset 决定预设宽高比与圆角，fallback 决定占位渐变；组件额外提供默认插槽供上层叠加内容。
+-->
 <script setup lang="ts">
 /**
  * 远程图片组件(Unsplash 等)。

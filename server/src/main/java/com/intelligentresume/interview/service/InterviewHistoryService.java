@@ -17,6 +17,9 @@ import java.util.stream.Collectors;
 
 /**
  * 历史面试会话列表。服务端聚合 actualQuestionCount / totalScore。
+ *
+ * <p>要点：列表只返回已完成会话；所有计数与均值都由记录聚合得出，
+ * 查询走投影（只取元数据列），避免把简历原文、题目、答案等大字段读进内存。
  */
 @Service
 public class InterviewHistoryService {
@@ -35,6 +38,8 @@ public class InterviewHistoryService {
 
     @Transactional(readOnly = true)
     public List<InterviewSessionSummaryResponse> list(Long userId, Long jobDescriptionId) {
+        // 传了 JD 筛选时先校验归属：不存在的/他人的 JD 直接 404，
+        // 而不是静默返回空列表让调用方分不清「没有面试」和「JD 用错了」
         if (jobDescriptionId != null) {
             jobRepository.findByIdAndUserId(jobDescriptionId, userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "岗位不存在"));
@@ -59,7 +64,9 @@ public class InterviewHistoryService {
 
     private InterviewSessionSummaryResponse summary(InterviewSessionRepository.SessionSummaryProjection session,
                                                     IntSummaryStatistics scores) {
+        // 没有记录时（理论上不该出现，因为只查已完成会话）按 0 处理，避免 NPE
         int actual = scores == null ? 0 : (int) scores.getCount();
+        // totalScore 是平均分四舍五入，与报告页口径一致
         int totalScore = scores == null ? 0 : (int) Math.round(scores.getAverage());
         return new InterviewSessionSummaryResponse(session.getId(), session.getJobDescriptionId(),
                 session.getResumeVersionId(), session.getSourceType(), session.getInterviewMode(),

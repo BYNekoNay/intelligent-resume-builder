@@ -17,6 +17,18 @@ import java.util.Map;
  * 「预览里有的内容实际没发」这种最难排查的偏差。
  *
  * <p>本类**只读**：不写库、不调 provider。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@code taskInput} 是要落库的那一份，{@code providerInput} 是由它再 build 出来的 messages；
+ *       worker 是拿库里的 taskInput 现场再 build 一次，所以两者必须由**同一份** taskInput 派生。</li>
+ *   <li>{@code resumeJson} 先过 {@code promptBuilder.sanitizeResume}，整份 input 再过
+ *       {@code sanitizeInput}（{@code build} 内部还会再做一次，重复调用是幂等的）。
+ *       脱敏口径只在 prompt builder 维护一处，本类不要再加自己的过滤。</li>
+ *   <li>{@code localSnapshot} 只挑 checks / passedChecks / risks / priorities / disclaimer 五个键 ——
+ *       给模型看的是规则结论而非整份 result_json（后者含状态机字段，模型不需要也不该看到）。</li>
+ *   <li>{@code promptVersion} / {@code schemaVersion} 写进 taskInput，用于事后对账"这条结果由哪版 prompt 产出"。</li>
+ * </ul>
  */
 @Component
 public class AtsAiInputAssembler {

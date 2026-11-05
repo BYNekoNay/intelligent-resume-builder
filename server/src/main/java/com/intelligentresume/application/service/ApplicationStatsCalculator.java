@@ -14,6 +14,19 @@ import java.util.Map;
 /**
  * 投递统计的**口径与算法**（从 {@code ApplicationService} 搬出，纯函数、无 Spring 依赖）。
  *
+ * <p>职责一句话：给定"状态计数 + 时长明细行"，算出一份漏斗统计（占比、转化率、各阶段平均停留）。
+ *
+ * <p>要点（口径改动会直接影响用户看到的数字）：
+ * <ul>
+ *     <li>分母为 0 时返回 {@code null} 而不是 0——前端据此显示"—"，0 会被误读成真实值。</li>
+ *     <li>占比保留 1 位小数、转化率保留 3 位、平均停留保留 1 位；三处取整实现不同，改动时不要统一成一个。</li>
+ *     <li>转化率的分母只统计"已投递及之后"（APPLIED/SCREENING/INTERVIEWING/OFFERED/HIRED），
+ *         草稿、被拒、撤回、无回应都不进分母。</li>
+ *     <li>时间一律用 {@code stageEnteredAt} 作进入时刻、{@code appliedAt} 回退 {@code createdAt} 作起点；
+ *         缺失时跳到下一条，不按 0 天计。</li>
+ *     <li>所有状态都会出现在 {@code byStatus} 里（先初始化为 0），SQL 没聚合到的状态不能缺行。</li>
+ * </ul>
+ *
  * <p>拆出来的理由只有一个：`ApplicationService` 单文件已超 300 行硬上限，统计算法是
  * 职责最内聚的一块。搬出来之后它成为纯函数（入参是纯数据、无 repository、无事务），
  * 统计口径可以被单元测试直接钉住，不必再起 Spring 容器。
@@ -59,6 +72,8 @@ public final class ApplicationStatsCalculator {
         }
 
         // 转化率：排除 REJECTED/WITHDRAWN 对分母的干扰
+        // 注意 naming 与实际口径的差异：interviewingOrFurther 实际从 SCREENING 起算（含筛选中），
+        // 所以 appliedToInterviewing 的含义是"进入筛选及之后"，不是严格的"进入面试"。
         long appliedOrFurther = countIn(counts, ApplicationStatus.APPLIED, ApplicationStatus.SCREENING,
                 ApplicationStatus.INTERVIEWING, ApplicationStatus.OFFERED, ApplicationStatus.HIRED);
         long interviewingOrFurther = countIn(counts, ApplicationStatus.SCREENING,
@@ -91,6 +106,10 @@ public final class ApplicationStatsCalculator {
         return Math.round(numerator * 1000.0 / denominator) / 1000.0;
     }
 
+    /**
+     * 「已投递/筛选中」的平均停留天数：起点是 appliedAt（缺失回退 createdAt），终点是**现在**，
+     * 因此这是"仍在进行中"的停留，不是已完成时长。
+     */
     private static Double avgAppliedDuration(List<ApplicationRecordRepository.StatsProjection> records,
                                              LocalDateTime now) {
         List<Double> days = records.stream()
@@ -122,6 +141,12 @@ public final class ApplicationStatsCalculator {
         return days.isEmpty() ? null : Math.round(days.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10.0) / 10.0;
     }
 
+    /**
+     * 「投递 → 拿到 offer」的总天数：起点 appliedAt/createdAt，终点 stageEnteredAt/updatedAt。
+     *
+     * <p>只取状态为 {@code OFFERED} 的行——{@code HIRED}（已入职）不参与这条口径，
+     * 所以入职的投递不会把平均值拉高。
+     */
     private static Double avgTotalToOffer(List<ApplicationRecordRepository.StatsProjection> records) {
         List<Double> days = records.stream()
                 .filter(record -> record.getStatus() == ApplicationStatus.OFFERED)

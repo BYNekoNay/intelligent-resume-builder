@@ -15,6 +15,17 @@ import java.util.Map;
 /**
  * 简历版本。字段与 V1 DDL {@code resume_version} 完全一致。
  *
+ * <p>职责一句话：一条版本 = 某个时刻的完整简历内容快照（含版式配置），只增不改。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>{@code source_type} 记录版本从哪来（手工/AI 优化/JD 定制/素材定制/恢复），是审计入口。</li>
+ *     <li>{@code deleted_at} 在这里表示**归档**而非删除：行还在，只是不出现在活跃列表。</li>
+ *     <li>{@code template_code} 是 {@code resume_json.template.code} 的归一化派生列，
+ *         写入时必须与 {@code ResumeTemplateCodes.normalize} 保持一致，不能各算各的。</li>
+ *     <li>{@code generation_context} 只在特定来源（如 ATS 恢复）写入，可为空。</li>
+ * </ul>
+ *
  * <p>历史版本不可修改（本卡不提供 update 接口）。
  * 版本号 {@code (resume_id, version_no)} 由数据库唯一约束保障。
  */

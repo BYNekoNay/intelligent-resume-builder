@@ -20,6 +20,19 @@ import java.util.regex.Pattern;
  *     <li>role:取 jdText 第一行非空内容,>60 字符截断</li>
  *     <li>空或纯空白输入、或长度短于 {@code app.job.jd-text.min-length}:返回 role=null, keywords=[], requirements=[]</li>
  * </ol>
+ *
+ * <p>实现要点（与上面的口径说明有出入处以代码为准）：
+ * <ul>
+ *   <li>关键词是<b>子串匹配</b>，没有词边界：词典里的 "Java" 也会命中 "JavaScript"，
+ *       词典项越短误报越多，扩充词典时优先用带空格/带版本的写法；</li>
+ *   <li>关键词输出顺序实际是<b>词典声明顺序</b>（遍历词典命中即加入 LinkedHashSet），
+ *       不是"文中首次出现顺序"；需要按出现位置排序必须另写一遍匹配；</li>
+ *   <li>关键词/经验去重都不敏感，但教育关键词用 {@code jdText.contains(edu)} 是
+ *       <b>大小写敏感</b>的，词典里的 "Bachelor"/"Master" 只能匹配到原样大小写；</li>
+ *   <li>短文本不报错，返回三个空值——「招 Java 工程师」这类 JD 是合法输入，只是信息量不足；</li>
+ *   <li>解析结果会带规则版本落库；改词典/正则后同一份 JD 会抽出不同结果，
+ *       需评估是否同步 {@link JdParserRuleVersion#CURRENT}，否则新旧结果无法区分。</li>
+ * </ul>
  */
 @Component
 public class JdKeywordParser {
@@ -32,6 +45,7 @@ public class JdKeywordParser {
     private final Pattern experiencePattern;
     private final int minLength;
 
+    /** 生产用构造：词典与正则来自 {@link JdParserProperties}。多构造器时 Spring 需要显式 @Autowired。 */
     @Autowired
     public JdKeywordParser(JdParserProperties properties,
                            @Value("${app.job.jd-text.min-length:20}") int minLength) {
@@ -52,6 +66,10 @@ public class JdKeywordParser {
         this.minLength = minLength;
     }
 
+    /**
+     * 解析入口：三个结果互相独立，任一为空不影响其他两个。
+     * 正则只编译一次（构造时），因为每次 parse 都 compile 会在批量场景放大开销。
+     */
     public ParsedKeywordsResponse parse(String jdText) {
         if (jdText == null || jdText.isBlank()) {
             return new ParsedKeywordsResponse(null, List.of(), List.of());
@@ -70,6 +88,7 @@ public class JdKeywordParser {
         return new ParsedKeywordsResponse(role, keywords, requirements);
     }
 
+    /** 取首行非空文本作为岗位名；超 60 字符硬截断，不按词边界回退。 */
     private String extractRole(String jdText) {
         String[] lines = jdText.split("\n");
         for (String line : lines) {
@@ -81,6 +100,7 @@ public class JdKeywordParser {
         return null;
     }
 
+    /** 遍历词典做大小写不敏感子串命中，输出去重且按词典顺序；返回的是词典原样大小写。 */
     private List<String> extractKeywords(String jdText) {
         String lower = jdText.toLowerCase();
         LinkedHashSet<String> result = new LinkedHashSet<>();
@@ -92,6 +112,10 @@ public class JdKeywordParser {
         return new ArrayList<>(result);
     }
 
+    /**
+     * 需求项 = 经验年限（正则全量命中，去掉内部空白）+ 教育关键词（原样大小写、按词典顺序）。
+     * 两类共用同一个去重集合，先经验后教育，所以输出顺序固定为"经验在前"。
+     */
     private List<String> extractRequirements(String jdText) {
         LinkedHashSet<String> result = new LinkedHashSet<>();
 

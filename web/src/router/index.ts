@@ -1,3 +1,9 @@
+/**
+ * 路由表与全局导航守卫。
+ * 除 AppLayout / NotFound / RouteLoadError 外，所有页面都是懒加载路由；requiresAuth 由 beforeEach 统一拦截，
+ * 未登录且不是网络错误时重定向到 login 并带 redirect；已登录访问 login/register 直接回首页。
+ * 惰性分包失败（发版后旧 chunk 404）走 recoverStaleLazyChunk：同一路径只强刷一次，二次失败落到 route-load-error。
+ */
 import { createRouter, createWebHistory } from 'vue-router'
 
 import AppLayout from '@/layouts/AppLayout.vue'

@@ -1,5 +1,19 @@
 package com.intelligentresume.common.error;
 
+/**
+ * 业务错误码的**唯一权威**：前端按 {@code code} 映射文案，不直接展示服务端 message。
+ *
+ * <p>编码规则：前三位对齐 HTTP 状态，后两位是该状态下的序号（{@code 40901} → 409 / 01）。
+ *
+ * <p>新增或改动时必做三件事：
+ * <ol>
+ *   <li>在 {@code GlobalExceptionHandler.statusFor} 的穷尽 switch 里登记——漏登记会**编译失败**，
+ *       这是刻意设计，防止新码静默降级成 500；</li>
+ *   <li>确认「处置动作」是否与既有码不同：不同就必须新开码（例如 40902 可恢复、
+ *       40904 需重新载入选材、40901 只需刷新重试），不要图省事复用 CONFLICT；</li>
+ *   <li>同步前端文案与 docs/05 的错误码表；码值只增不改，日志与客服话术都按它对齐。</li>
+ * </ol>
+ */
 public enum ErrorCode {
     VALIDATION(40001, "参数错误"),
     UNAUTHENTICATED(40101, "未登录或 Token 无效"),
@@ -35,7 +49,9 @@ public enum ErrorCode {
     AI_FAILURE(50002, "AI 调用失败"),
     PDF_FAILURE(50003, "PDF 导出失败");
 
+    /** 数值码：随信封返回，前端分支判断用这个而不是 message。 */
     private final int code;
+    /** 默认用户文案：可被 BusinessException 的具体 message 覆盖。 */
     private final String message;
 
     ErrorCode(int code, String message) {

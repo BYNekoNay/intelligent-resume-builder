@@ -1,3 +1,8 @@
+<!--
+  匹配评分结果页（/match/:matchResultId）：展示总分 + 关键词/技能/经验分项，以及命中/部分命中/缺失/建议四组解释。
+  数据只读：onMounted 调 useMatchResultStore().load(id) 回读已存结果，本页不发起重新评分。
+  状态分支：loading 显示加载文案；store.error 命中显示错误提示；都没有数据时显示空态；文案与免责声明由服务端 explanation 提供。
+-->
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { AlertTriangle, CheckCircle2, Gauge, Lightbulb, MinusCircle } from 'lucide-vue-next'

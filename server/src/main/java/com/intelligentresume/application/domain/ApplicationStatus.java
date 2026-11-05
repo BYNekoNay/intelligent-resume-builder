@@ -3,6 +3,16 @@ package com.intelligentresume.application.domain;
 /**
  * 投递状态（9 态）。
  *
+ * <p>职责一句话：描述"这次投递走到哪一步了"，是投递漏斗统计与状态历史的唯一取值域。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>以 {@code EnumType.STRING} 落库（列长 32），枚举名即数据库值（含历史表），改名等于改数据契约。</li>
+ *     <li>每次真实迁移都要写一条 {@code application_status_history}，这是"发生过什么"的唯一证据。</li>
+ *     <li>统计口径依赖 {@code appliedAt} / {@code stageEnteredAt}，后者只能在状态变化时刷新。</li>
+ *     <li>与本枚举无关的 {@code ai_task}/{@code export_task} 状态不要复用这里的字符串。</li>
+ * </ul>
+ *
  * <h2>主链与旁支</h2>
  * 主链：{@link #DRAFT} → {@link #APPLIED} → {@link #SCREENING} → {@link #INTERVIEWING} →
  * {@link #OFFERED} → {@link #HIRED}。三个旁支（{@link #REJECTED}、{@link #WITHDRAWN}、

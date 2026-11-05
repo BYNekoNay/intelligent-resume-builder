@@ -10,6 +10,13 @@ import java.util.Optional;
 
 /**
  * 匹配评分结果仓储。跨用户校验通过 JOIN resume_version → resume 间接完成。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@link #findByIdAndUserId} 是<b>唯一</b>安全的按 ID 读取方式；{@code findById} 不带归属校验，不要在控制器里直接用。</li>
+ *   <li>{@link #findFirstBy...OrderByIdDesc} 取"最近一条"，用 ID 而非 created_at 排序 —— 同一秒内的多条也能稳定取到后写的。</li>
+ *   <li>{@code findByResumeVersionIdOrderByCreatedAtDesc} 不做用户过滤，调用方必须已确认该版本归属。</li>
+ * </ul>
  */
 public interface MatchResultRepository extends JpaRepository<MatchResult, Long> {
 

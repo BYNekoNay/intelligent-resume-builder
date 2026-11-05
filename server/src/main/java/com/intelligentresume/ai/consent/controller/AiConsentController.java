@@ -15,6 +15,14 @@ import org.springframework.web.bind.annotation.*;
 
 /**
  * AI 同意管理控制器。
+ *
+ * <p>要点:
+ * <ul>
+ *   <li>{@code GET /api/ai/consent} 返回最新事件;用户从未同意过时返回 body 为 null 的成功响应,
+ *       不是 404 —— 前端据此展示"未同意"。</li>
+ *   <li>授权与撤回都是"追加事件",重复调用是安全的(撤回除外:没有历史记录会报 NOT_FOUND)。</li>
+ *   <li>userId 只从认证过滤器写入的请求属性取,不接受请求参数。</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/ai/consent")

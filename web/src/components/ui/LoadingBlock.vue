@@ -1,3 +1,8 @@
+<!--
+骨架屏：纯 CSS 闪光线，行数由 rows 控制，宽度按行号在 100% / 88% / 76% 间循环制造错落感。
+必须同时给 role="status" 与 sr-only 可读文本，否则读屏只知道「忙」、不知道在等什么。
+label 缺省取 common.loading；prefers-reduced-motion 下关闭动画，只留静态灰条。
+-->
 <script setup lang="ts">
 /**
  * 骨架屏（2026-10-29）。

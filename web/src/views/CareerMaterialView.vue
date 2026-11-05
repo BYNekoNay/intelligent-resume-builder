@@ -1,3 +1,10 @@
+<!--
+  职业素材库工作台：左侧筛选 + 列表，右侧详情/编辑/新建面板，另有「个人档案」编辑视图。
+  依赖 @/api/careerMaterial（搜索分页/详情/增删改）、@/api/personalProfile（档案读写与从简历导入建议）、@/api/resume（导入建议的可选简历）。
+  筛选条件、分页、排序、当前选中素材都写在 URL query 上（q/type/usage/page/sort/selected），因此刷新和前进后退都能还原视图。
+  状态分支：列表有 loading / workspaceError / 空态；详情有 detailLoading / detailError；任何表单有未保存改动时切换或离开都会 confirmDiscard。
+  易错点：搜索、详情、档案、面板各自用请求代次（searchRequest/detailRequest/profileRequest/paneEpoch）丢弃过期响应；分页越界会回写 query 修正。
+-->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
@@ -137,6 +144,7 @@ async function loadWorkspace() {
     })
     if (request !== searchRequest) return
     result.value = response
+    // 编辑/删除导致总页数变小时，把越界的 page 拉回最后一页
     if (result.value.totalPages > 0 && routePage.value >= result.value.totalPages) {
       if (request !== searchRequest) return
       await updateQuery({ page: result.value.totalPages })
@@ -149,6 +157,7 @@ async function loadWorkspace() {
 }
 
 async function loadDetail(id: number): Promise<CareerMaterial | null> {
+  // 已在展示同一条、或同一条详情正在请求中，直接复用结果，避免重复请求
   if (detail.value?.id === id) return detail.value
   if (detailLoad?.id === id) return detailLoad.promise
   const request = ++detailRequest

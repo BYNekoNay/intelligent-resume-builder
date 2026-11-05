@@ -20,6 +20,15 @@ import java.util.regex.Pattern;
  * <p>占位符白名单：{{candidateName}} {{jobTitle}} {{companyName}} {{topSkill}}
  * {{location}} {{email}} {{phone}}。联系方式（email/phone）由服务端从简历 basics 合并，
  * 模板填充为纯字符串替换，不经过任何模型。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>名称大小写敏感</b>：白名单是原样字符串比对，{@code {{CandidateName}}} 属非法，保存时 40001。</li>
+ *   <li><b>只认 {@code [a-zA-Z0-9_]} 的名字</b>：{@code {{名字}}} 不会被 Pattern 匹配，
+ *       校验放行、替换时也原样保留 —— 它既不算非法也不在 missing 里，属于静默残留。</li>
+ *   <li><b>缺失值不改写</b>：无值占位符原样留在正文中，只通过 {@code missingPlaceholders} 提示前端高亮。</li>
+ *   <li>新增占位符要同步三处：{@code PLACEHOLDER_WHITELIST}、{@link #buildValues}、前端模板编辑器提示。</li>
+ * </ul>
  */
 @Component
 public class TemplatePlaceholderService {

@@ -14,7 +14,23 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Atomically claims PDF tasks so multiple API instances cannot render one task twice. */
+/**
+ * Atomically claims PDF tasks so multiple API instances cannot render one task twice.
+ *
+ * <p>租约服务：负责"领取"以及三种"释放"（成功 / 失败 / 稍后重试）。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>领取用条件更新 {@code acquireLease} 判胜负：只有返回 1 才算抢到，
+ *         候选行被别人先抢走时静默跳过，不报错。</li>
+ *     <li>{@code retryCount} 在**领取时**自增——它统计的是"尝试次数"，不是"失败次数"。</li>
+ *     <li>三种释放都先按 {@code (id, RUNNING, owner)} 加锁复查；查不到说明租约已过期并被他人接管，
+ *         本次结果必须丢弃（stale），绝不能覆盖新持有者的进度。</li>
+ *     <li>释放成功只写元数据，文件由 worker 先落盘再调用；返回 false 时调用方负责删掉孤儿文件。</li>
+ *     <li>{@code nextAttemptAt} 的三种归宿：成功/失败释放清空，容量重排设为未来时刻；
+ *         {@code expiresAt}（产物过期时间）在释放阶段不动，只在创建与手动重试时刷新。</li>
+ * </ul>
+ */
 @Service
 public class ExportTaskLeaseService {
 
@@ -29,6 +45,15 @@ public class ExportTaskLeaseService {
         this.leaseSeconds = leaseSeconds;
     }
 
+    /**
+     * 领取至多 {@code batchSize} 条任务。
+     *
+     * <p>{@code owner} 是本次 worker 的身份串（调用方用 {@code pdf-<UUID>}），后续释放校验靠它。
+     * 返回的实体同时被改成 RUNNING/带租约，worker 直接用即可，无需回查。
+     *
+     * <p>注意：{@code claimableTasks} 带 {@code FOR UPDATE}，同批候选会被串行化；真正的互斥仍由
+     * {@code acquireLease} 的条件更新兜底。
+     */
     @Transactional
     public List<ExportTask> claimBatch(String owner, int batchSize) {
         LocalDateTime leaseUntil = LocalDateTime.now().plusSeconds(leaseSeconds);

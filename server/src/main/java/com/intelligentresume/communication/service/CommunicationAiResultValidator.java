@@ -7,6 +7,18 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+/**
+ * 模型输出的结构与语言闸门：不合格直接判失败，不做任何"清洗后放行"。
+ *
+ * <p>红线：
+ * <ul>
+ *   <li><b>字段集合必须精确等于 {@code {subject, body}}</b>：多字段、少字段都拒，防止模型自造字段被下游忽略后静默错位。</li>
+ *   <li><b>subject 与 type 强绑定</b>：EMAIL 必须有 subject，其它类型必须为 null。</li>
+ *   <li><b>语言判定是启发式</b>：中文要求「出现汉字」或「拉丁词少于 6 个」；英文只要出现汉字就拒。
+ *       纯数字/短英文夹杂在中文文案里不会被误判，但大段未翻译英文会被拦。</li>
+ *   <li>所有异常都是不可重试的 {@code CommunicationAiException}；调用方据此只做一次修复重问。</li>
+ * </ul>
+ */
 @Component
 public class CommunicationAiResultValidator {
     private static final Set<String> KEYS = Set.of("subject", "body");

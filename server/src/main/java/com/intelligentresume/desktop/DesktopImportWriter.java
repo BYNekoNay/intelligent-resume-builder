@@ -26,6 +26,14 @@ import java.util.Map;
  *   <li><b>当前版本指针最后统一回填</b>：{@code resume.current_version_id} 有外键指向版本行，
  *       逐条插一条回填一次会退化成「指向最后插入的那条」，与包里的 {@code currentVersionId} 无关。</li>
  * </ol>
+ *
+ * <p>其他约束：
+ * <ul>
+ *   <li><b>只写包里给出的列</b>：本地独有列（解析结果、统计字段）保持原值，UPDATE 不会清空它们。</li>
+ *   <li><b>主键必须取回并播种</b>：H2 返回整行键值，{@code keyOf} 按列名取 {@code id}，取不到直接抛错。</li>
+ *   <li>{@code desktop_import_map} 用「先 UPDATE 后 INSERT」而不是 upsert 语法，兼容 H2。</li>
+ *   <li>本类不做归属/权限校验，调用方必须已确认是本地工作区（单用户）。</li>
+ * </ul>
  */
 final class DesktopImportWriter {
 

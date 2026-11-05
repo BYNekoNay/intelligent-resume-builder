@@ -1,3 +1,8 @@
+/**
+ * 个人档案（求职画像）接口层：单条用户级记录，GET 可能返回 null 表示从未填写。
+ * 边界：normalizePersonalProfile 负责把 null/缺字段的响应补成完整结构，调用方可以放心绑定表单；
+ * getPersonalProfileImportSuggestion 只做「从某份简历生成建议值」，不写库，保存仍走 updatePersonalProfile。
+ */
 import { http } from './client'
 
 export interface PersonalProfile {

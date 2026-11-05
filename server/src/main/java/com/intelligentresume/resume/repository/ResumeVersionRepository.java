@@ -11,6 +11,18 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 简历版本仓储。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>列表查询一律走 {@link VersionSummaryProjection} 投影：{@code resume_json} 单行可达 256KB，
+ *         列表页不需要它，全量实体查询会把内存和网络都拖垮。</li>
+ *     <li>活跃/归档用 {@code deleted_at} 区分：{@code IS NULL} 是活跃，{@code IS NOT NULL} 是已归档。</li>
+ *     <li>{@link #findMaxVersionNoByResumeId} 不排除归档行——归档版本仍占用版本号，否则会撞唯一约束。</li>
+ *     <li>注意本仓储没有 {@code @SQLRestriction}：归档行必须能被查到，过滤由各查询自己表达。</li>
+ * </ul>
+ */
 public interface ResumeVersionRepository extends JpaRepository<ResumeVersion, Long> {
 
     Optional<ResumeVersion> findByIdAndResumeId(Long id, Long resumeId);

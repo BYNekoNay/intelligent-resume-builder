@@ -17,7 +17,19 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * 任务租约服务。管理任务的领取、续租、释放。
+ * 任务租约服务 —— 负责"领取、续租、落终态"三件事,是任务状态迁移的唯一入口。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>跨实例互斥靠 SQL 条件更新,不靠 JVM 锁:{@code acquireLease} 返回 0 就是没抢到,必须跳过。
+ *       查询到可领取 ≠ 已持有租约(查询与更新之间可能被别的实例抢先)。</li>
+ *   <li>写终态前一律用 {@code findRunningByIdAndOwnerForUpdate} 校验 owner:租约已被接管时
+ *       本次结果直接丢弃(返回 false),避免两个 worker 争着写同一行。</li>
+ *   <li>成功与失败都必须清空 lease 字段,否则任务会被后续查询当成"仍在执行"。</li>
+ *   <li>失败一律落 FAILED,不自动重试(R33):失败也占配额,重试必须由用户显式发起。</li>
+ *   <li>原生 SQL 不会刷新已加载实体,所以领取后要手工把 status/owner/retryCount 同步到内存对象,
+ *       否则调用方拿到的仍是旧状态。</li>
+ * </ul>
  */
 @Service
 public class TaskLeaseService {
@@ -82,6 +94,9 @@ public class TaskLeaseService {
 
     /**
      * 续租:延长任务的租约过期时间。
+     *
+     * <p>返回 false 表示"租赁关系已不属于自己"(被接管或已落终态)。调用方只记日志、不重试,
+     * 因为此时任务的重跑者已经是别人。
      */
     @Transactional
     public boolean renew(Long taskId, String owner) {
@@ -156,6 +171,12 @@ public class TaskLeaseService {
         return true;
     }
 
+    /**
+     * 把落库后的真实状态拷回调用方手里的实体。
+     *
+     * <p>调用方(执行服务)用的是领取时的那个实体对象;写终态写的是重新查出来的 {@code stored}。
+     * 不拷回来的话,执行服务在统计"本次结果是 success 还是 failed"时读到的还是 RUNNING。
+     */
     private void copyExecutionState(AiTask source, AiTask target) {
         target.setStatus(source.getStatus());
         target.setResultJson(source.getResultJson());

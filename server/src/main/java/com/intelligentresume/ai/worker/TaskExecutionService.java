@@ -40,8 +40,19 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 任务执行服务。按 taskType 分发:JOB_GENERATION(含 jobDescriptionId)
- * 走岗位定制生成流程;其余走通用 Provider 调用。
+ * 任务执行服务 —— 按任务能力描述符把一条已领取的任务分发到对应的业务流程,并统一收尾。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>执行前会**再查一次**授权:任务创建到真正执行之间可能隔了很久,用户可能已撤回同意。</li>
+ *   <li>分支依据是 {@code AiTaskCapabilityRegistry} 的 executionMode,不是 if-else 猜类型;
+ *       新增任务类型时只改注册表,这里不需要额外分支(INTERVIEW 例外,见下)。</li>
+ *   <li>INTERVIEW_COACH 走队列的只有 {@code FOLLOW_UP_PRACTICE}:未知 operation 必须显式失败,
+ *       不能落到 {@code executeDefault},否则任意客户端输入都会被直接送进模型。</li>
+ *   <li>无论成功、失败还是抛异常,finally 里都要取消心跳并记录指标 —— 指标漏记比少记一条日志严重得多。</li>
+ *   <li>执行方法内部会自行 {@code releaseSuccess}/{@code releaseFailed};{@code execute} 本身
+ *       不写任务状态,只负责调度与观测。</li>
+ * </ul>
  */
 @Service
 public class TaskExecutionService {
@@ -102,6 +113,11 @@ public class TaskExecutionService {
 
     /**
      * 执行单个 AI 任务。
+     *
+     * <p>流程:取能力描述符 → 开心跳 → 校验授权 → 按 executionMode 分发 → 收尾(取消心跳、记指标)。
+     *
+     * <p>注意 JOB_GENERATION 只有在快照里带 {@code jobDescriptionId} 时才走领域生成流程;
+     * 不带的话会落到通用 provider 分支,由 {@code PromptTemplates} 拼 prompt。
      */
     public void execute(AiTask task, String owner) {
         AiTaskCapabilityRegistry.Descriptor capability = AiTaskCapabilityRegistry.requireRegistered(task.getTaskType());
@@ -297,6 +313,13 @@ public class TaskExecutionService {
         return value instanceof Number number ? number.longValue() : null;
     }
 
+    /**
+     * 启动租约心跳:固定延迟续租,间隔为 {@code leaseSeconds/3},下限 1 秒。
+     *
+     * <p>续租失败只记日志、不在这里终止任务:租约一旦过期,任务会被别的 worker 接管并重跑,
+     * 本次结果会在写终态时被租约校验丢弃。也就是说"漏续租"的代价是重复调用 provider(重复计费),
+     * 调大 {@code lease-seconds} 或调小间隔时都要意识到这一点。
+     */
     private ScheduledFuture<?> startHeartbeat(Long taskId, String owner) {
         long intervalSeconds = Math.max(1, workerProperties.getLeaseSeconds() / 3L);
         return heartbeatExecutor.scheduleAtFixedRate(() -> {

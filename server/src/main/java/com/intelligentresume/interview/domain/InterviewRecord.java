@@ -6,6 +6,19 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import java.util.Map;
 
+/**
+ * 一轮「题目 + 回答 + 评估」的落库记录，也是会话进度的唯一事实来源。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>一轮一行，{@code (session_id, round_no)} 有唯一约束；轮次号 = 落库前的记录数 + 1。</li>
+ *   <li>{@code feedbackJson} 的 key 是跨模块契约（分数字段、strengths/improvements、
+ *       suggestedAnswer、coverageTags 等），报告、状态接口、资产导出都按 key 读取。</li>
+ *   <li>{@code roundScore} 是五维之和（0-100），不是模型单独给的总分。</li>
+ *   <li>{@code aiAttemptId} 指回生成这条记录的 attempt，便于追溯来源与排查。</li>
+ *   <li>记录一旦写入即视为该轮完成；状态接口的「已完成轮数」直接计数本表。</li>
+ * </ul>
+ */
 @Entity
 @Table(name = "interview_record")
 public class InterviewRecord extends BaseEntity {

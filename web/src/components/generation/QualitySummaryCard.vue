@@ -1,3 +1,10 @@
+<!--
+草稿质量摘要卡：四项计数（有资料依据 / 草稿待补充 / 待核实 / 未覆盖岗位要求）加 readiness 结论。
+readiness 决定整体配色（READY / REVIEW_RECOMMENDED / REQUIRES_ACTION），详情默认折叠。
+两条渲染分支互斥：qualitySummary 存在时只渲染摘要卡；不存在但仍有 warnings 或 missingInfo 时，
+退回一个简化提示块，避免同一批告警被渲染两遍。
+processedCount 与 draftItems.length 来自 useDraftReview，用于显示「已处理 n / 总数」。
+-->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'

@@ -10,6 +10,18 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 投递记录仓储。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>所有查询都带 {@code userId}，软删除由实体上的 {@code @SQLRestriction} 过滤。</li>
+ *     <li>统计走两条专用投影：计数用 SQL {@code GROUP BY}，时长只取 4 个状态的行——
+ *         不要把 {@code findByUserIdOrderByUpdatedAtDesc} 拿去做统计（会带上长文本）。</li>
+ *     <li>时长在 Java 侧用 {@code ChronoUnit} 计算，避免依赖 MySQL 方言函数，保证 H2 测试一致。</li>
+ *     <li>跟进过滤的日界由调用方传入，服务端不做时区换算。</li>
+ * </ul>
+ */
 public interface ApplicationRecordRepository extends JpaRepository<ApplicationRecord, Long> {
     Optional<ApplicationRecord> findByIdAndUserId(Long id, Long userId);
 

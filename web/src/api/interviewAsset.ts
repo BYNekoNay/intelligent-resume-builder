@@ -1,3 +1,8 @@
+/**
+ * 面试问答资产（interview answer assets）接口层：把面试中的问答 + AI 建议答案沉淀成可复用条目。
+ * 边界：仅封装 /api/interview-answer-assets 的增删改查；关联关系由 sectionKeys（简历章节）与 materialIds（职业素材）表达，
+ * 服务端按这些字段做过滤，前端不负责拼装关联。
+ */
 import { http } from './client'
 
 export interface InterviewAsset {

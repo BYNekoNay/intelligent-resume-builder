@@ -25,6 +25,18 @@ import java.util.Set;
  *     <li>含任一 {@code subjectKeys} → 视为完整。</li>
  * </ul>
  * 观察期结束后，再据告警数据决定各类型是否升级为硬校验。
+ *
+ * <p>维护要点：
+ * <ul>
+ *   <li>键名必须与真实读取方对齐（简历编辑器插材料、AI 快照清洗器、选材/生成提示词），
+ *       凭想象加键会让"半填"永远不触发、告警数据失真；</li>
+ *   <li>{@code KNOWN_KEYS} 与 {@code SUBJECT_KEYS} 成对维护：{@code SUBJECT_KEYS} 必须是
+ *       前者的子集，否则该键既算"已填写"又算"缺主体"，判定自相矛盾；</li>
+ *   <li>已硬校验的三类（ACHIEVEMENT / LEADERSHIP_EXPERIENCE / SKILL_EVIDENCE）
+ *       <b>刻意不在此表</b>，所以它们的 {@code presentKnownKeys} 恒为空——本类只服务软校验；</li>
+ *   <li>本类只决定"要不要告警"，永不抛异常；把这里改成抛错等于跳过观察期直接上线硬校验；</li>
+ *   <li>判定用的是"非空"而非"存在"：值为空串/空集合视同没填，避免前端提交空壳键绕过。</li>
+ * </ul>
  */
 public final class CareerMaterialSchema {
 

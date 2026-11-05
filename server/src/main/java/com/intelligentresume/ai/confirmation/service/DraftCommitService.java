@@ -38,6 +38,19 @@ import java.util.*;
  *   <li>写入 resume_material_reference（含 source_snapshot_json）</li>
  *   <li>更新 ai_task 为 CONFIRMED</li>
  * </ol>
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>校验必须全部发生在**任何写库之前**(尤其 6b 的溯源准入):一旦提前写了 resume_version
+ *       再失败,就只能靠事务回滚兜底,而回滚会掩盖真正的问题。</li>
+ *   <li>{@code ai_task} 行先被 {@code SELECT FOR UPDATE} 锁住,同一任务的并发确认会被串行化。</li>
+ *   <li>EDIT 决策会为每条被编辑的条目**新建**一条 career_material(标题固定为"用户确认编辑"),
+ *       所以一次确认可能产生多条资料,返回的 {@code newMaterialIds} 就是它们。</li>
+ *   <li>只有 ACCEPT 的选材才写 {@code resume_material_reference};EDIT 引用的是新建的用户资料
+ *       (reason 固定 USER_EDITED),不能继续引用 AI 生成时的原始素材。</li>
+ *   <li>{@code targetResumeIdOverride} 非空时要求该简历的 jobDescriptionId 与本次任务一致,
+ *       否则 VALIDATION —— 防止把 A 岗位的生成结果覆盖到 B 岗位简历上。</li>
+ * </ul>
  */
 @Service
 public class DraftCommitService {
@@ -258,6 +271,8 @@ public class DraftCommitService {
 
     /**
      * 确定岗位简历标题。优先级：用户指定 > snapshot.resumeTitle > "公司名 - 岗位名" > "岗位定制简历"
+     *
+     * <p>中间两级是逐级降级的:只有公司名或只有岗位名时用剩下的那个;两者都没有才用兜底名。
      */
     private String resolveResumeTitle(String override, Map<String, Object> snapshot) {
         if (override != null && !override.isBlank()) {
@@ -334,6 +349,12 @@ public class DraftCommitService {
         return value;
     }
 
+    /**
+     * 由草稿路径的**第一段**推断资料类型({@code work[0].x} → WORK_EXPERIENCE)。
+     *
+     * <p>只认 JSON Resume 的固定章节名;新增可编辑章节时要同步加分支,
+     * 否则该章节编辑出的资料会被归成 HIGHLIGHT。
+     */
     private MaterialType inferTypeFromPath(String outputPath) {
         if (outputPath == null) {
             return MaterialType.HIGHLIGHT;

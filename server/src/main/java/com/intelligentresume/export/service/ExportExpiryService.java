@@ -14,6 +14,19 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * 导出产物过期处理：删文件 + 把任务落成 EXPIRED。
+ *
+ * <p>职责一句话：保证"过期后既下不到文件，也不再占着存储"。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>只有 {@code SUCCESS} 且 {@code expiresAt < now} 的行才会过期；PENDING/RUNNING/FAILED 不碰。</li>
+ *     <li>删除文件失败时**不改状态**并返回 false，留给下一轮重试——先把文件删了再改状态是顺序红线。</li>
+ *     <li>已经 EXPIRED 的行直接返回 true（幂等），重复调用不会重复删。</li>
+ *     <li>行锁（{@code findByIdForUpdate}）避免与其它状态更新路径互相覆盖。</li>
+ * </ul>
+ */
 @Service
 public class ExportExpiryService {
     private static final Logger log = LoggerFactory.getLogger(ExportExpiryService.class);
@@ -29,6 +42,12 @@ public class ExportExpiryService {
         this.batchSize = batchSize;
     }
 
+    /**
+     * 按需过期单条任务（下载/查询时的惰性清理）。
+     *
+     * @return true 表示该任务现在是 EXPIRED（本次刚过期，或本来就是）；
+     *         false 表示不满足过期条件或删文件失败，调用方应回查数据库最新状态
+     */
     @Transactional
     public boolean expireIfDue(Long taskId, LocalDateTime now) {
         ExportTask task = taskRepository.findByIdForUpdate(taskId).orElse(null);
@@ -40,6 +59,10 @@ public class ExportExpiryService {
         return deleteAndExpire(task);
     }
 
+    /**
+     * 定时批量清理：每轮最多处理 {@code app.pdf.cleanup-batch-size} 条（默认 100），
+     * 删除失败的行保持 SUCCESS 状态，下一轮还会被捞到。
+     */
     @Scheduled(fixedDelayString = "${app.pdf.cleanup-interval-ms:60000}")
     @Transactional
     public void cleanupExpired() {

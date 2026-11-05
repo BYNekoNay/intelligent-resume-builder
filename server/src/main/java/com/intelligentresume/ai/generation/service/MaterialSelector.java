@@ -22,6 +22,19 @@ import java.util.stream.Collectors;
  * <p>确定性约束：{@code normal} 的截断（subList 取前 limit 条）按传入的
  * {@code allMaterials} 顺序进行，调用方必须按 (updated_at desc, id desc)
  * 传入资料；同毫秒并列时单键排序会让被截断丢弃的素材集合 run-to-run 变化。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>排除优先于固定/优选</b>：同一 ID 同时出现在 excluded 与 included 时会被从 included/preferred
+ *       里剔除，且不报错 —— 排除语义优先，见 {@code select} 开头三行 removeAll。</li>
+ *   <li>included 里出现"无有效证据"的资料直接 400（这是用户显式要求必须用的）；
+ *       preferred 里的同类资料只静默剔除，不阻断。</li>
+ *   <li>excluded 里不存在或不属于本人的 ID 静默忽略（用户可能在别处已经删掉了资料）。</li>
+ *   <li>配额只约束 normal 段：fixed + preferred 先占名额，剩余名额给 normal，超出的记
+ *       {@code EXCEEDS_MAX_SELECTED}。因此 fixed + preferred 超过上限时 normal 会被整体清空。</li>
+ *   <li>返回的 {@code unselectedReasons} 目前只有单测在读（生产链路尚未消费），
+ *       新增原因码前先确认到底有没有消费方。</li>
+ * </ul>
  */
 @Service
 public class MaterialSelector {
@@ -33,6 +46,13 @@ public class MaterialSelector {
         this.maxSelected = maxSelected;
     }
 
+    /**
+     * 四段分类：fixed / preferred / excluded / normal，四段互不重叠（normal 是"剩下能用的"）。
+     * 顺序敏感：先剔除排除项 → 再判可用性 → 再校验归属 → 最后才截断 normal。
+     *
+     * <p>{@code userId} 在方法体内**没有被使用**：越权安全完全依赖调用方传入的
+     * {@code allMaterials} 已按用户过滤（{@code findByUserId...}）。改签名前先记住这一点。
+     */
     public SelectionResult select(Long userId,
                                   List<CareerMaterial> allMaterials,
                                   JobGenerationRequest req) {
@@ -105,7 +125,7 @@ public class MaterialSelector {
                 .filter(m -> !unusableIds.contains(m.getId()))
                 .collect(Collectors.toList());
 
-        // 截断至 maxSelected
+        // 截断至 maxSelected：按传入顺序保留前 limit 条，所以 allMaterials 的排序就是"谁被保留"的规则
         int usedSlots = fixed.size() + preferred.size();
         if (normal.size() > maxSelected - usedSlots) {
             int limit = Math.max(0, maxSelected - usedSlots);

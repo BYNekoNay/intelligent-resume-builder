@@ -10,6 +10,15 @@ import org.hibernate.annotations.SQLRestriction;
 /**
  * 简历主表。字段与 V1 DDL {@code resume} 完全一致。
  *
+ * <p>职责一句话：只存"这份简历是谁的、叫什么、当前指向哪个版本"，内容全在 {@link ResumeVersion}。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>{@code current_version_id} 可为 null（主档刚建、还没存过任何版本），所有读取方必须容忍。</li>
+ *     <li>{@code job_description_id} 只标识"这份简历针对哪个岗位"，不参与权限判断——权限永远看 {@code user_id}。</li>
+ *     <li>内容与版式都在 {@link ResumeVersion}，本表不放任何简历正文，避免两处数据不一致。</li>
+ * </ul>
+ *
  * <p>软删除：继承 {@link SoftDeletableEntity}，全局过滤 {@code deleted_at IS NULL}。
  *
  * <p>乐观锁（#38）：{@code current_version_id} 此前没有版本条件——标题/软删等

@@ -7,8 +7,19 @@ import java.time.LocalDateTime;
 /**
  * PDF 导出任务实体。字段与 V1 DDL {@code export_task} 完全一致。
  *
- * <p>DDL 含 user_id 列,跨用户校验直接 findByIdAndUserId。
- * storage_key 为随机 UUID,不含任何业务字段。
+ * <p>职责一句话：一行 = 一次导出请求的完整生命周期（排队 → 渲染 → 成功/失败 → 过期清理）。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>{@code status} 默认 PENDING；后续只由 worker（租约服务）、过期清理与手动重试三处推进，
+ *         不要把状态变更散落到其它服务里。</li>
+ *     <li>{@code retry_count} 由**领取**动作（{@code acquireLease}）自增，不是失败时自增；
+ *         手动重试另有上限（{@code app.pdf.worker.max-manual-retries}）。</li>
+ *     <li>{@code lease_owner}/{@code lease_expires_at} 是并发保护：同一时刻只允许一个实例渲染同一行。</li>
+ *     <li>{@code next_attempt_at} 只在容量拒绝重排时写入，NULL 表示立即可领取。</li>
+ *     <li>{@code storage_key} 是随机 UUID，不含任何业务信息；对外只暴露 taskId，不暴露它。</li>
+ *     <li>时间字段由本类的 {@code @PrePersist}/{@code @PreUpdate} 维护（本实体不继承审计基类）。</li>
+ * </ul>
  */
 @Entity
 @Table(name = "export_task")

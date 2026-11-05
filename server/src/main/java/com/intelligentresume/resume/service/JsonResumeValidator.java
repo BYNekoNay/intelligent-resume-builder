@@ -13,15 +13,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * JSON Resume 结构校验器。
+ * JSON Resume 结构校验器：写库前的最后一道门，只做"顶层形状 + 体积"级别的校验，不递归校验条目内部。
  *
- * <p>校验规则（MVP 级别，不递归校验内部结构）：
- * <ol>
- *     <li>resumeJson 不能为空</li>
- *     <li>顶层必须包含 {@code require-top-level} 中列出的 key（默认 "basics"）</li>
- *     <li>序列化后字节数不超过 {@code max-bytes}（默认 256 KB）</li>
- *     <li>顶层 key 必须在 {@code allow-sections} 中</li>
- * </ol>
+ * <p>要点：
+ * <ul>
+ *     <li>顶层 key 是**白名单**（{@code allow-sections}）：多一个键就拒绝，不做静默裁剪——
+ *         静默裁剪会让用户以为内容存下了。</li>
+ *     <li>必需 key 与白名单均由配置注入，改配置即改契约，前端章节注册表要跟着同步。</li>
+ *     <li>大小限制按**序列化后字节数**算（不是字符数），默认 256KB；超限直接 400。</li>
+ *     <li>{@code template} / {@code layout} 在允许列表里，因为版式与内容同存于 {@code resume_json}。</li>
+ * </ul>
  */
 @Component
 public class JsonResumeValidator {
@@ -42,6 +43,12 @@ public class JsonResumeValidator {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 校验顺序：非空 → 必需顶层字段 → 顶层字段白名单 → 序列化体积。体积检查放最后，
+     * 因为要真的序列化一次；前面的检查都是纯内存判断，能更早给出更具体的错误。
+     *
+     * <p>序列化失败（如值里含不可序列化对象）同样按 400 处理，不会让脏数据落库。
+     */
     public void validate(Map<String, Object> resumeJson) {
         if (resumeJson == null || resumeJson.isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION, "简历 JSON 不能为空");

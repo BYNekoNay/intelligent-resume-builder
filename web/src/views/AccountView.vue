@@ -1,3 +1,9 @@
+<!--
+  账号设置页：资料修改、邮箱/密码变更、AI 同意记录清理、数据导出、删号，全部为本人对自己账号的自助操作。
+  依赖 @/api/auth（changeEmail / changePassword / deleteAccount / exportAccountData）与 @/api/ai（clearAiTaskHistory），当前用户信息来自 useAuthStore。
+  危险操作一律二次确认：改邮箱/密码需当前密码且成功后强制退出重新登录；导出需密码且长度 >= 8（与服务端校验对齐）；删号需输入用户名完全匹配。
+  三个弹层都用 Teleport 挂到 body，打开时聚焦首个输入框、关闭后焦点回到触发按钮，避免键盘/读屏焦点丢失。
+-->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { Download, IdCard, KeyRound, Mail, ShieldAlert, ShieldCheck, Trash2, UserRound, X } from 'lucide-vue-next'

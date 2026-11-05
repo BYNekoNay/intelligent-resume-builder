@@ -1,3 +1,7 @@
+/**
+ * 匹配评分结果的共享状态：current 保存最近一次评分（新建或回读）。
+ * 边界：score() 每次都会重新计算并覆盖 current，load() 只回读已存结果；两者都把失败收敛成 error 文案，不向外抛。
+ */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { scoreMatch, getMatchResult, type MatchResponse } from '@/api/scoring'

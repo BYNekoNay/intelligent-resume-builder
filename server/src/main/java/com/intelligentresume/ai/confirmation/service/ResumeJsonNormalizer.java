@@ -24,6 +24,19 @@ import java.util.regex.Pattern;
  *   <li>REJECT：从 JSON 中移除该路径。</li>
  *   <li>EDIT：用 editedValue 覆盖该路径。</li>
  * </ul>
+ *
+ * <p>要点 / 易错点:
+ * <ul>
+ *   <li>路径语法是 {@code work[0].highlights[1]} —— 对象用点、数组用方括号。父路径 ACCEPT
+ *       会覆盖其下所有子路径({@link #isPathAccepted})。</li>
+ *   <li>必须在**原始树**上一次性递归:先删数组元素再按原路径编辑会让后续下标漂移
+ *       (work[0] 被拒后 work[1] 变成 work[0])。</li>
+ *   <li>EDIT 的生效前提是 {@code editedValue != null};传 EDIT 但不给值会落到"原样保留",
+ *       不会报错。</li>
+ *   <li>EDIT 值内部一旦残留 {@code _pending} 会抛 CONFLICT:替换内容时传入的 acceptedPaths
+ *       是空集合,没有任何路径被豁免。</li>
+ *   <li>返回的是一份深拷贝,原 draft 不会被修改;根节点被移除时抛 VALIDATION。</li>
+ * </ul>
  */
 @Component
 public class ResumeJsonNormalizer {
@@ -60,6 +73,12 @@ public class ResumeJsonNormalizer {
         return (Map<String, Object>) normalized;
     }
 
+    /**
+     * 递归处理单个节点。
+     *
+     * <p>先看当前路径有没有决策:REJECT/EDIT 直接返回,不再向下递归 ——
+     * 也就是说父路径上的决策会"吃掉"其下所有子路径的决策。只有没有决策时才继续下钻。
+     */
     @SuppressWarnings("unchecked")
     private Object normalizeNode(Object node, String currentPath,
                                  Map<String, ConfirmedDraftItem> decisions,

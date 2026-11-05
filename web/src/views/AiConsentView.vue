@@ -1,3 +1,9 @@
+<!--
+  AI 数据处理同意页（/ai-consent）：展示政策版本与授权范围，支持授予 / 撤回，撤回后 AI 相关调用会被服务端以 40302 拒绝。
+  依赖 @/api/ai 的 getConsent / grantConsent / withdrawConsent / hasFullAiConsent，policyVersion 与 noticeHash 是固定常量，随政策文本升级。
+  状态分支：loading 覆盖首屏加载与两个按钮；granted 由 hasFullAiConsent 判定，决定文案是「已授权 / 已撤回 / 待授权」。
+  授予成功后若带合法的 redirect（必须是单个 / 开头的站内路径），直接跳回原页面；否则留在本页展示成功提示。
+-->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { CheckCircle2, Database, Eye, RotateCcw, ShieldCheck, ShieldOff } from 'lucide-vue-next'

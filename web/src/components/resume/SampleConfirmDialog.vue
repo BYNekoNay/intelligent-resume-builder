@@ -1,3 +1,7 @@
+<!--
+加载示例数据前的确认弹窗：文案明确告知会覆盖已填写内容且不可撤销。
+confirm / close 上抛；遮罩用 @click.self 关闭，点击卡片内部不会误关。
+-->
 <script setup lang="ts">
 import { useLocale } from '@/i18n'
 

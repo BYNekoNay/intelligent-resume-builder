@@ -22,6 +22,19 @@ import java.util.Map;
  * <p>软删除:{@code @SQLRestriction("deleted_at IS NULL")} 全局过滤。
  * 被 {@code resume_material_reference.source_snapshot_json} 引用的资料,
  * 删除后历史快照仍可读。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@code user_id} 是唯一隔离维度：除按 id 的主键查询外，所有读路径都必须同时带
+ *       userId（{@code findByIdAndUserId}），漏掉就是越权漏洞；</li>
+ *   <li>软删只写 {@code deleted_at}，不物理删除；也不清空关联，因为引用方保存的是快照副本；</li>
+ *   <li>{@code contentJson} 是 json 列，必须走 {@code @JdbcTypeCode(SqlTypes.JSON)}，
+ *       换成普通 varchar 映射会导致 ddl-auto=validate 失败；</li>
+ *   <li>实体直接参与账号数据导出（#7），所以任何"只给内部用"的投影字段都要加
+ *       {@code @JsonIgnore}，否则会漏进导出文件；</li>
+ *   <li>{@code version} 由 Hibernate 自增，不要手动 set；并发更新冲突时由
+ *       全局异常处理器转 40901。</li>
+ * </ul>
  */
 @Entity
 @Table(name = "career_material")
@@ -35,13 +48,16 @@ public class CareerMaterial extends BaseEntity {
     @Column(name = "material_type", nullable = false, length = 32)
     private MaterialType materialType;
 
+    /** 展示用标签，不参与"是否有证据"的判定（见 {@code CareerMaterialEvidence}）。 */
     @Column(name = "title", nullable = false, length = 255)
     private String title;
 
+    /** 结构化正文：键约定见 {@code CareerMaterialSchema}，单条字节上限由服务层校验。 */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "content_json", nullable = false, columnDefinition = "json")
     private Map<String, Object> contentJson;
 
+    /** 导入/粘贴得到的来源原文，MEDIUMTEXT。列表页不读它，只读非空标志。 */
     @Column(name = "source_text", columnDefinition = "MEDIUMTEXT")
     private String sourceText;
 

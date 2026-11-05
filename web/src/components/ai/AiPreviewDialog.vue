@@ -1,3 +1,9 @@
+<!--
+AI 任务「发送前预览」的纯展示弹窗：消息、脱敏计数、是否包含联系方式全部由父组件传入。
+刻意不在这里发请求：预览→确认→才发任务的顺序由 useAiTaskPreview 的 Promise 保证，
+视图绕不过去，本组件只把 confirm / cancel / toggle-contact 回抛给调用方。
+loading / errorMessage / preview 三态互斥；无预览或加载中时确认按钮禁用。
+-->
 <script setup lang="ts">
 import { useLocale } from '@/i18n'
 import type { AiTaskPreview } from '@/api/ai'

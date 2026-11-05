@@ -12,6 +12,9 @@ import org.springframework.stereotype.Component;
  *   <li>{@code enabled} 默认 <b>false</b> —— 未显式开启时作业不做任何写操作；</li>
  *   <li>{@code dryRun} 默认 <b>true</b> —— 即使开启也只记「计划动作」，必须显式置 false 才真正删除。</li>
  * </ul>
+ *
+ * <p>其余两点容易误解：{@code batchSize} 是**每个资源、每档各一批**的上限（一轮最多 2×batchSize×资源数 次写），
+ * 不是全局限额；保留期从 {@code deleted_at} 起算，{@code cutoffFrom} = now −（恢复期 + 宽限期）。
  */
 @Component
 @ConfigurationProperties(prefix = "app.retention.purge")

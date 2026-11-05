@@ -38,6 +38,13 @@ import java.util.Map;
  * <b>分数不受影响</b>，仅匹配明细的分类失去区分度；调用方（评分报告的消费端）
  * 因此<b>无法区分</b>「词典未配置」与「恰好全部关键词直接逐字命中」这两种情况。
  * 该降级不抛错、不打日志、不改变分数计算——这是有意为之的静默契约。
+ *
+ * <p>绑定细节：
+ * <ul>
+ *   <li>setter 对 null 做兜底（置空 Map），因此「显式配置为空」与「完全没配」在运行时表现一致。</li>
+ *   <li>词条的大小写与首尾空白由 {@link Normalizer} 构造时统一处理，配置里写 {@code Spring Boot} 也能命中。</li>
+ *   <li>本类只负责绑定，不校验词典内容；写错 canonical 不会报错，只会让同义词命中变少。</li>
+ * </ul>
  */
 @Component
 @ConfigurationProperties(prefix = "app.scoring")

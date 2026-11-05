@@ -18,6 +18,16 @@ import java.util.Map;
  * 是否包含联系方式由 input 里的内部键 {@code _includeContact} 决定（默认 false = 排除）。
  * 以 {@code _} 开头的键本来就不会进入 prompt 正文（{@code PromptTemplates} 会过滤），
  * 因此这个开关不会污染内容。
+ *
+ * <p>要点 / 易错点:
+ * <ul>
+ *   <li>两条构造路径:input 里给了 {@code _systemPrompt} 就直接用它(领域流程已拼好的三段式
+ *       task/data 分段),否则回落到 {@link PromptTemplates}。判断依据是 {@code _systemPrompt}
+ *       是否存在 —— 只给 {@code _taskPrompt} 不给 system 会被当成空。</li>
+ *   <li>脱敏只覆盖四类中的两类(邮箱、手机号),见 {@link ContactRedactor} 的取舍。</li>
+ *   <li>{@link #preview} 与 {@link #assemble} 必须共用 {@code rawMessages} 的结果;
+ *       任何"为了预览顺手优化一下"的分支都会让展示内容与实际发送内容漂移。</li>
+ * </ul>
  */
 public final class AiMessageAssembler {
 

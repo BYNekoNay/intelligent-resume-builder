@@ -14,6 +14,20 @@ import org.springframework.web.bind.annotation.*;
 import com.intelligentresume.common.error.BusinessException;
 import com.intelligentresume.common.error.ErrorCode;
 
+/**
+ * ATS 体检的 HTTP 入口（/api/ats）：检查、查询、AI 重试、发送前预览、解析器视角。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@code Idempotency-Key} 只在 {@code POST /check} 上强制：缺失、空白或超过 128 字符直接 400；
+ *       查询 / 预览 / 解析器视角都不要求它。</li>
+ *   <li>预览令牌走请求头 {@code X-AI-Preview-Token}，是否真正校验由 service 决定：
+ *       {@code /check} 缺令牌不报错（降级成规则结果），{@code /checks/{id}/ai-retry} 缺令牌报错。</li>
+ *   <li>用户身份取自过滤器写入的 {@code request.currentUserId}，缺失即 401；控制器本身不做归属判断，
+ *       归属由 service 的 {@code findByIdAndUserId} 兜住。</li>
+ *   <li>响应统一包 {@code ApiResponse} 并带 traceId；traceId 取不到时为 null，不影响成功响应。</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/ats")
 public class AtsController {

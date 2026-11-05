@@ -17,7 +17,22 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * AI 任务仓储。包含工作器租约相关的原生 SQL。
+ * AI 任务仓储 —— 既有一批派生查询,也承载工作器的租约原生 SQL。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>租约相关方法({@code claimableTasksByTypes} / {@code acquireLease} / {@code renewLease} /
+ *       {@code abandonExhausted})是跨实例互斥的唯一防线:条件更新返回 0 表示没抢到,
+ *       调用方必须据此跳过该任务,不能假设"查到了就归我"。</li>
+ *   <li>{@code acquireLease} 会顺带把 {@code retry_count} +1,这个计数同时被每日配额和
+ *       {@code abandonExhausted} 使用;改其中一个必须同时确认另一个。</li>
+ *   <li>配额聚合类查询用 {@code retry_count < 1 ? 1 : retry_count} 计"尝试数",
+ *       与 {@code AiQuotaService#check} 的口径必须字面一致,否则"消耗"和"限额"不可比。</li>
+ *   <li>涉及"待确认"的查询都显式排除 {@code confirmationStatus = PENDING}:
+ *       那是用户还没处理完的工作,不能被清理或删除。</li>
+ *   <li>部分查询走 JPQL,部分走原生 SQL(为了 {@code FOR UPDATE} / {@code LIMIT})。
+ *       原生 SQL 里的枚举值写成字面量,新增枚举值时要回来检查这些字符串。</li>
+ * </ul>
  */
 public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
 
@@ -77,6 +92,12 @@ public interface AiTaskRepository extends JpaRepository<AiTask, Long> {
                              @Param("message") String message,
                              @Param("now") LocalDateTime now);
 
+    /**
+     * 某用户某任务类型在 {@code after} 之后的「尝试数」—— 每日配额的判定依据。
+     *
+     * <p>口径:retryCount 为 0 的行算 1 次,否则按 retryCount 算。也就是说被失败重试过的任务
+     * 会按实际执行次数计入消耗,而不是只算 1 次。
+     */
     @Query("SELECT COALESCE(SUM(CASE WHEN t.retryCount < 1 THEN 1 ELSE t.retryCount END), 0) FROM AiTask t " +
             "WHERE t.userId = :userId AND t.taskType = :taskType AND t.createdAt > :after")
     long countAttemptsByUserIdAndTaskTypeAndCreatedAtAfter(@Param("userId") Long userId,

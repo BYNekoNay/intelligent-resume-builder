@@ -17,10 +17,26 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * AI 任务。字段与 V1 DDL {@code ai_task} 完全一致。
+ * AI 任务 —— 一次异步 AI 请求的唯一持久化载体。
  *
- * <p>不继承 BaseEntity:工作器通过原生 SQL 手动控制 updated_at,
- * 使用 {@code @PrePersist}/{@code @PreUpdate} 回调管理时间戳。
+ * <p>用户提交后先落一行 PENDING，工作器领取后转 RUNNING，最终落到 SUCCESS / FAILED / CANCELLED。
+ * 输入快照、生成结果、人工确认状态与跨实例的租约都在这一行上。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>字段与 V1 DDL {@code ai_task} 逐列对应。改字段前必须先有迁移，否则 Hibernate 校验不过。</li>
+ *   <li>{@code (user_id, task_type, idempotency_key)} 上有唯一键。并发同键创建由数据库兜底,
+ *       服务层靠捕获唯一键冲突回读赢家({@code AiTaskService#create}),不要在这里加去重逻辑。</li>
+ *   <li>{@code lease_owner}/{@code lease_expires_at} 是抢占凭证:只有租约仍属于自己的工作器
+ *       才能把任务推到终态,否则该次结果会被丢弃(TaskLeaseService 会校验)。</li>
+ *   <li>{@code retry_count} 由原生 SQL 在领取租约时 +1,同时被"每日尝试配额"
+ *       ({@code countAttempts...})和"崩溃循环收口"({@code AiTaskWorkerProperties#maxAttempts})使用;
+ *       改这个语义会同时改动配额口径与任务终结条件。</li>
+ *   <li>{@code input_snapshot_json} 可能内联 JD/资料/简历原文,保留期清理会把它换成
+ *       {@code {"_purged": true}} 并置 {@code snapshot_purged};所有读快照的代码必须容忍这个占位值。</li>
+ *   <li>不继承 BaseEntity:工作器用原生 SQL 显式写 {@code updated_at},而本类用
+ *       {@code @PrePersist}/{@code @PreUpdate} 回调维护时间戳。两条路径并存,不要在 service 再加一层。</li>
+ * </ul>
  */
 @Entity
 @Table(name = "ai_task")
@@ -40,6 +56,8 @@ public class AiTask {
     @Column(name = "task_type", nullable = false, length = 32)
     private AiTaskType taskType;
 
+    // idempotency_key 与 request_fingerprint 必须成对看:
+    // 同 key + 同指纹 = 客户端重试,返回原任务;同 key + 不同指纹 = 内容被改动,抛 CONFLICT。
     @Column(name = "idempotency_key", nullable = false, length = 128)
     private String idempotencyKey;
 
@@ -68,6 +86,7 @@ public class AiTask {
     @Column(name = "result_resume_version_id")
     private Long resultResumeVersionId;
 
+    /** 列为 NOT NULL:创建任务时显式置 0,之后由领取租约的 SQL 自增。 */
     @Column(name = "retry_count", nullable = false)
     private Integer retryCount = 0;
 
@@ -78,6 +97,8 @@ public class AiTask {
     @Column(name = "snapshot_purged", nullable = false)
     private boolean snapshotPurged;
 
+    // 租约对:领取时由原生 SQL 写入,任务落终态时必须一并清空(Null),
+    // 否则后续查询会把已结束的任务当成"仍在执行"。
     @Column(name = "lease_owner", length = 64)
     private String leaseOwner;
 

@@ -28,6 +28,21 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p>轮询间隔由 {@code app.ai.worker.poll-interval-ms} 控制。
  * 测试环境通过 {@code app.worker-scheduling.enabled=false} 关闭自动调度。</p>
+ *
+ * <p>要点 / 易错点:
+ * <ul>
+ *   <li>领取必须保持"单线程串行":同一个 JVM 内只有一个调度线程执行 {@code dispatch},
+ *       不要给 {@link #poll()} 加 {@code @Async} 或并行流,否则 {@code inFlight} 计数会失真、
+ *       并发额度形同虚设。</li>
+ *   <li>{@code inFlight} 是进程内的"已提交未完成"计数:必须在提交前 +1、在任务 finally 里 -1。
+ *       漏减会让该分组永久卡在满额,后续任务永远领不到。</li>
+ *   <li>一次 poll 里两组共用一个 try:HEAVY 派发抛异常会顺带跳过本轮的 LIGHT,
+ *       下一轮才恢复(只丢一个周期,不影响正确性)。</li>
+ *   <li>每批领取共用一个 owner 字符串({@code 实例ID:UUID});终态写入要求 owner 与租约一致,
+ *       所以不要在派发过程中更换 owner。</li>
+ *   <li>线程池在 {@code AiTaskWorkerConfig} 里按分组固定大小,与这里的并发额度是两套独立上限,
+ *       只调其中一个不会改变实际并发。</li>
+ * </ul>
  */
 @Component
 public class DatabaseTaskWorker {
@@ -91,6 +106,12 @@ public class DatabaseTaskWorker {
         }
     }
 
+    /**
+     * 执行单个已领取的任务。
+     *
+     * <p>异常在这里被吞掉并记日志:单条任务失败不能让线程池里的 worker 线程死掉,
+     * 否则该分组会永久少一个执行槽。额度回收放在 finally,保证异常路径也不漏减。
+     */
     private void runTask(AiTask task, String owner, Group group, AtomicInteger running) {
         try {
             executionService.execute(task, owner);

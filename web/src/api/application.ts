@@ -1,3 +1,8 @@
+/**
+ * 投递（求职申请）接口层：9 状态流转、列表/详情、统计、增删改。
+ * 边界：列表用 ApplicationSummary（无三段长文本，只有 draftCount），详情才拿 ApplicationRecord 全文；
+ * updateApplicationStatus 带 version 做乐观锁，feedbackText 只在显式传入时才提交（不传表示保留服务端现值）。
+ */
 import { http } from './client'
 
 export type ApplicationStatus = 'DRAFT' | 'APPLIED' | 'SCREENING' | 'INTERVIEWING' | 'OFFERED' | 'HIRED' | 'REJECTED' | 'WITHDRAWN' | 'NO_RESPONSE'

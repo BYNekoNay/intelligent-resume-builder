@@ -38,6 +38,17 @@ import java.util.concurrent.RejectedExecutionException;
  * 而前端该接口超时仅 60s，4 轮全部超时 → 用户卡在无法前进的面试里。
  * 详见 {@link InterviewEvaluationConfig} 的类注释与
  * {@code docs/reviews/2026-09-25-full-functional-verification.md} §2。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@link #answer} 返回时评估<b>通常还没开始</b>；调用方看到的是 {@code EVALUATING_ANSWER}，
+ *       终态必须靠轮询 {@code GET /interviews/{id}} 获取。</li>
+ *   <li>TX1 里「校验状态 → 建 attempt → 置 EVALUATING_ANSWER」必须在同一事务，
+ *       否则并发两次作答会各自建 attempt 并双双通过状态校验。</li>
+ *   <li>后台段所有异常都必须落到 attempt（{@link #markEvaluationFailed}），
+ *       否则会话会停在 EVALUATING_ANSWER，只能等 getState 的陈旧接管兜底。</li>
+ *   <li>轮次号 = 已落库记录数 + 1，而不是读会话上的计数字段；记录写入与轮次号必须同事务。</li>
+ * </ul>
  */
 @Service
 public class InterviewAnswerService {
@@ -75,13 +86,25 @@ public class InterviewAnswerService {
         this.evaluationExecutor = evaluationExecutor;
     }
 
+    /**
+     * TX1 结果。{@code outcome} 决定请求线程下一步：
+     * PROCEED=需要提交后台评估；其余=直接按已有 attempt 组装响应返回。
+     */
     private enum AnswerOutcome { PROCEED, SUCCESS, FAILURE, PROCESSING }
 
     private record AnswerPreparation(Long sessionId, int roundNo,
                                      AnswerOutcome outcome, Long attemptId) {}
 
+    /**
+     * 提交一次回答。
+     *
+     * <p>幂等语义：同一 Idempotency-Key 且指纹一致时，<b>不重新评估</b>，只按已有 attempt 的状态回放
+     * （失败→返回失败信息、处理中→原样返回 EVALUATING_ANSWER、成功→返回当前状态）。
+     * 键相同但会话/操作类型/指纹任一不同即 409，避免把 A 的评估结果当作 B 的。
+     */
     public InterviewStateResponse answer(Long id, String answerText, Long userId, String idempotencyKey) {
         AnswerPreparation preparation = tx.execute(status -> {
+            // 先锁会话行：本事务内会写入状态，且后续所有状态判断都基于锁住后的快照
             InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(id, userId)
                     .orElseThrow(() -> stateAssembler.notFound("面试会话不存在"));
 
@@ -89,6 +112,7 @@ public class InterviewAnswerService {
                     .findByUserIdAndIdempotencyKey(userId, idempotencyKey);
             if (existing.isPresent()) {
                 InterviewAiAttempt previous = existing.get();
+                // 指纹用「上一轮的 roundNo」重算：这样同一份答案在同一轮重复提交才能判定为同一请求
                 String replayFingerprint = operationSupport.buildFingerprint(id, previous.getRoundNo(), answerText);
                 if (!Objects.equals(previous.getSessionId(), id)
                         || previous.getOperationType() != AiAttemptOperationType.ANSWER_EVALUATION
@@ -97,13 +121,17 @@ public class InterviewAnswerService {
                 }
                 if (previous.getStatus() == AiAttemptStatus.PROCESSING
                         && operationSupport.isStale(previous, LocalDateTime.now())) {
+                    // 卡死超过阈值的旧请求：这里顺手判死，让用户能走 /ai/retry 而不是一直看着轮询
                     operationSupport.markAttemptFailed(session, previous, "PROCESSING_TIMEOUT",
                             "AI 请求处理超时，请重试", true, null);
                 }
+                // 回放不重新调用 AI：PROCESSING 就继续让前端轮询，避免重复评估与重复计费
                 return new AnswerPreparation(session.getId(), previous.getRoundNo(),
                         replayOutcome(previous), previous.getId());
             }
 
+            // 只有 AWAITING_ANSWER 才接受作答；EVALUATING_ANSWER 时重复提交会落到上面的幂等分支，
+            // 走到这里说明是「另一个」回答，必须拒绝，否则会覆盖正在进行的那一轮
             if (session.getStatus() == InterviewStatus.COMPLETED) {
                 throw new BusinessException(ErrorCode.CONFLICT, "面试已完成");
             }
@@ -114,7 +142,8 @@ public class InterviewAnswerService {
                 throw new BusinessException(ErrorCode.CONFLICT, "当前无待回答的问题");
             }
 
-            // 校验同意
+            // 校验同意：与 start 一致，失败也落一条 FAILED attempt（FORBIDDEN、不可重试），
+            // 但此时答案不会被保存，用户需授权后重新提交
             if (!operationSupport.hasInterviewConsent(userId, session)) {
                 session.setStatus(InterviewStatus.AI_ACTION_REQUIRED);
                 sessionRepository.save(session);
@@ -155,9 +184,12 @@ public class InterviewAnswerService {
             }
 
             long completedCount = recordRepository.countBySessionId(session.getId());
+            // 轮次号取「已落库记录数 + 1」：记录只在 TX2 落库，因此并发下同一轮只可能有一个事务拿到同一 roundNo，
+            // 再由 (session_id, operation_type, round_no) 唯一约束兜底
             int roundNo = (int) completedCount + 1;
             String fingerprint = operationSupport.buildFingerprint(session.getId(), roundNo, answerText);
 
+            // 先落 attempt（PROCESSING）再改会话状态：attempt 是「这轮在做 AI」的唯一凭据
             InterviewAiAttempt attempt = operationSupport.createAttempt(userId, session.getId(),
                     AiAttemptOperationType.ANSWER_EVALUATION, roundNo, idempotencyKey, answerText, fingerprint);
 
@@ -170,6 +202,7 @@ public class InterviewAnswerService {
 
         Long sessionId = preparation.sessionId();
         int roundNo = preparation.roundNo();
+        // 非 PROCEED：幂等回放或同意/配额失败，本次不再触达模型，直接把现状返回
         if (preparation.outcome() != AnswerOutcome.PROCEED) {
             InterviewSession session = sessionRepository.findById(sessionId).orElseThrow();
             InterviewAiAttempt attempt = attemptRepository.findById(preparation.attemptId()).orElseThrow();
@@ -183,9 +216,12 @@ public class InterviewAnswerService {
         // 因此无需改动前端，即可从"同步等待 108s"变为"秒回 + 轮询取终态"。
         Long attemptId = preparation.attemptId();
         try {
+            // 只提交任务，不 join：请求线程立刻返回，避免撞前端 60s 超时
             evaluationExecutor.execute(() -> runEvaluation(sessionId, roundNo, answerText, userId, attemptId));
         } catch (RejectedExecutionException rejected) {
             // 队列已满：快速失败并标记为**可重试**，而不是让会话静默停在 EVALUATING_ANSWER
+            // 注意此时 TX1 已提交（attempt 为 PROCESSING、会话为 EVALUATING_ANSWER），
+            // 所以必须显式回写失败，否则前端要一直轮询到 600s 陈旧接管才可能脱困
             log.warn("interview evaluation rejected (queue full): sessionId={} attemptId={}",
                     sessionId, attemptId);
             markEvaluationFailed(sessionId, userId, attemptId, "QUEUE_REJECTED",
@@ -219,6 +255,8 @@ public class InterviewAnswerService {
                     evaluationCall.providerRequestId());
 
             // TX2: 保存结果
+            // 两个守卫都必须有：会话状态守卫防止覆盖并发的状态变更，attempt 状态守卫防止
+            // 已被陈旧接管判死的 attempt 又被写回 SUCCESS（那会造出「记录已写、attempt 已失败」的矛盾）
             InterviewCoachResponse.AnswerEvaluation evaluationResult = evaluationCall.value();
             tx.executeWithoutResult(s -> {
                 InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
@@ -234,7 +272,8 @@ public class InterviewAnswerService {
 
                 int totalScore = evaluationResult.getDimensionScores().total();
 
-                // 保存回答记录
+                // 保存回答记录：questionText 取会话当前题（AI 未换题前它仍是本轮题目），
+                // feedbackJson 由评估结果拍平而成，报告与状态接口都从这里回读
                 InterviewRecord record = new InterviewRecord();
                 record.setSessionId(session.getId());
                 record.setRoundNo(roundNo);
@@ -253,6 +292,7 @@ public class InterviewAnswerService {
                 attempt.setProviderRequestId(evaluationCall.providerRequestId());
                 attemptRepository.save(attempt);
 
+                // 推进会话：到上限/信息已足够则 COMPLETED，否则写入下一题回到 AWAITING_ANSWER
                 operationSupport.applyEvaluationOutcome(session, roundNo, evaluationResult);
 
                 sessionRepository.save(session);
@@ -272,6 +312,13 @@ public class InterviewAnswerService {
         }
     }
 
+    /**
+     * 把失败落到 attempt 并让会话进入 {@code AI_ACTION_REQUIRED}。
+     *
+     * <p>用新事务而不是复用调用方上下文：调用点可能在后台线程、也可能在异常栈里，
+     * 原事务可能已回滚，独立事务可避免失败写入被一并回滚。
+     * 连这里都失败时无法再做补偿，只能记日志并依赖 getState 的陈旧接管。
+     */
     private void markEvaluationFailed(Long sessionId, Long userId, Long attemptId, String errorCode,
                                       String errorMessage, boolean retryable, String providerRequestId) {
         try {
@@ -291,6 +338,10 @@ public class InterviewAnswerService {
         }
     }
 
+    /**
+     * 幂等回放时的状态映射。{@code RULE_FALLBACK} 视为成功（该轮结论已经落库，只是来源是规则），
+     * {@code PROCESSING} 单独返回，调用方据此决定「继续轮询」而不是再发一次评估。
+     */
     private AnswerOutcome replayOutcome(InterviewAiAttempt attempt) {
         return switch (attempt.getStatus()) {
             case FAILED -> AnswerOutcome.FAILURE;

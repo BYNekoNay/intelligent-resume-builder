@@ -16,7 +16,18 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 面试会话的查询入口。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>所有按 id 的查询都带 {@code userId}：越权与不存在统一返回空，由调用方转 404。</li>
+ *   <li>{@code findByIdAndUserIdForUpdate} 是写路径的强制入口，用于把「读状态 → 判断 → 写」串行化。</li>
+ *   <li>历史列表走 {@link SessionSummaryProjection}，避免加载简历原文等大字段。</li>
+ * </ul>
+ */
 public interface InterviewSessionRepository extends JpaRepository<InterviewSession, Long> {
+    /** 只读查询，不加锁；需要写或需要状态稳定时请改用带 {@code ForUpdate} 的版本。 */
     Optional<InterviewSession> findByIdAndUserId(Long id, Long userId);
 
     /** 账号数据导出（#7）：当前用户全部面试会话（含外部简历原文等大字段），创建时间升序。 */

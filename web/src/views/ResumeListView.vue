@@ -1,3 +1,9 @@
+<!--
+  简历库页面：新建空白简历 + 列出已有简历，是「手工创建 / 上传导入」两条入口的起点。
+  数据源为 useResumeStore（列表与 loading 状态）、@/api/resume 的 createResume / deleteResume；每次写操作后都重新 store.load() 刷新列表。
+  状态分支：store.loading 显示加载文案，列表为空显示空态，否则渲染行；创建失败写入 error 提示。
+  易错点：新建只提交空骨架（basics.name），正文内容在编辑页补全。
+-->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ArrowRight, FilePlus2, FileText, FolderOpen, Trash2, Upload } from 'lucide-vue-next'

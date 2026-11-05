@@ -28,6 +28,18 @@ import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 
+/**
+ * 沟通文案接口：模板生成、AI 异步生成、发送前预览、模板库、草稿保存。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>所有端点都要 {@code currentUserId}</b>，取不到即 401；归属校验在 service 层做，控制器不重复判断。</li>
+ *   <li><b>{@code /ai-generate} 强制 {@code Idempotency-Key}</b>（非空、≤128 字符），返回 202；
+ *       幂等重放与配额扣减的顺序由 {@code AiTaskService} 保证。</li>
+ *   <li><b>{@code /ai-generate/preview} 不要求幂等键</b>：它只读，不落库、不扣配额。</li>
+ *   <li>响应统一包 {@code ApiResponse} 并回填 traceId；未知路径/未登录不要在这里吞异常。</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/communications")
 public class CommunicationController {
@@ -43,6 +55,7 @@ public class CommunicationController {
         return ApiResponse.success(service.generate(request, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    // 幂等键在此强制：缺键或超 128 字符直接 400，避免把不合格键传进任务层后再失败
     @PostMapping("/ai-generate")
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> generateWithAi(
             @Valid @RequestBody GenerateCommunicationRequest request,

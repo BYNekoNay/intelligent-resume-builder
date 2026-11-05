@@ -1,6 +1,12 @@
 package com.intelligentresume.common.observability;
 
-/** Stable, low-cardinality categories for PDF operations. */
+/**
+ * PDF 导出失败的稳定低基数类别（指标标签 + 公开文案的分类键）。
+ *
+ * <p>约定与 {@link AiFailureCategory} 相同：新增值必须同步 {@code PublicFailureCopy.pdfCopy}
+ * 的穷尽 switch（漏了编译失败）与 {@link FailureCategoryClassifier#pdfMessage}，并检查按标签过滤的告警规则。
+ * 体积超限分成 INPUT/OUTPUT 两类，是因为两者给用户的处置建议不同（减少简历内容 vs 减少导出内容）。
+ */
 public enum PdfFailureCategory {
     NONE,
     TIMEOUT,

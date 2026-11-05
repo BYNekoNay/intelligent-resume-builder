@@ -1,3 +1,9 @@
+<!--
+资料库中栏列表：loading / error / 空列表 / 有数据四态，分页条只在 totalPages 大于 1 时出现。
+分页窗口最多 5 个页码，起点夹在 0 到 totalPages 减 5 之间，避免末页只剩一两个页码。
+select / edit / delete / retry / page 全部上抛，列表本身不改数据。
+updatedAt 按当前 locale 格式化为「月 日」；evidenceReady 为 false 时额外提示缺少证据。
+-->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ChevronLeft, ChevronRight, Database, Pencil, RotateCcw, Trash2 } from 'lucide-vue-next'

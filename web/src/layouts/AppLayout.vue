@@ -1,3 +1,9 @@
+<!--
+  全局外壳布局：顶部导航（分组下拉 + 语言切换 + 登录态入口）、移动端菜单、会话异常提示条，内容区由 <RouterView> 承载。
+  导航项来自 @/navigation/registry，requiresDesktop 的入口只在 useDesktopMode().probe() 探测成功后渲染（在线部署没有这些端点）。
+  activeGroup 通过匹配当前路径反查所属分组；/match/:id 与 /exports/:id 没有独立导航项，统一归属 resume 组。
+  状态分支：未登录显示登录/注册入口、已登录显示账号菜单；auth.initializationError === 'NETWORK' 时显示页内重试而不是直接登出。
+-->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { AlertTriangle, FilePenLine, LogIn, LogOut, Menu, Sparkles, UserRound, UserRoundPlus, X } from 'lucide-vue-next'

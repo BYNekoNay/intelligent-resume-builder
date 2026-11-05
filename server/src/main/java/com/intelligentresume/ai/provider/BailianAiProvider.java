@@ -53,6 +53,19 @@ import java.util.regex.Pattern;
  *
  * <p>对于 JOB_GENERATION 任务,使用上游 JobGenerationService 构建的三段式 prompt;
  * 对于其他任务类型,使用内置 PromptTemplates 构建 prompt。
+ *
+ * <p>要点 / 易错点:
+ * <ul>
+ *   <li>缺少 API Key 时 {@link #call} 返回失败结果而非抛异常,任务会照常落 FAILED,
+ *       不会把 worker 线程打崩。</li>
+ *   <li>链总预算取 {@code max(chain-total-budget-seconds, read-timeout-seconds)}:
+ *       配置的预算不会小到装不下一次读超时。预算判定从第 2 个模型才开始
+ *       (index > 0),所以第一个候选总能被尝试一次。</li>
+ *   <li>{@code modelCode()} 在链为空时返回空串而不是抛越界 —— 它会在每次调用与指标上报里被调用。</li>
+ *   <li>响应解析失败不算调用失败:{@link #parseResponseContent} 会把原文塞进 {@code rawContent},
+ *       由下游 schema 校验决定成败。否则同一个坏 prompt 会在整条链上重复消耗额度。</li>
+ *   <li>日志只允许出现任务类型、模型名、失败分类、HTTP 状态、请求标识;prompt 与响应体禁止入库或落日志。</li>
+ * </ul>
  */
 @Component
 public class BailianAiProvider implements AiProvider {
@@ -304,6 +317,15 @@ public class BailianAiProvider implements AiProvider {
      * @param requestId 本次调用标识，用于排障关联
      * @param invoker   单模型调用实现
      * @return 成功结果，或全部候选失败后的聚合失败结果
+     */
+    /**
+     * 模型链调度 + 预算/冷却记账。
+     *
+     * <p>候选为空(全部冷却)时直接返回可重试失败,不发任何网络请求。
+     * 成功时把此前失败的尝试轨迹一并带回(R33:换模型可以,但不能静默)。
+     *
+     * <p>预算只在 {@code index > 0} 时检查:第一个候选无论耗时多久都会被尝试,
+     * 后续顺延才受总预算约束。
      */
     AiCallResult callChain(AiCallContext ctx, String requestId, ModelInvoker invoker) {
         List<String> candidates = runtimeOverlay == null ? chain.candidates() : runtimeOverlay.candidatesOr(chain.candidates());

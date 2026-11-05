@@ -8,7 +8,19 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * AI 提供者注册表。根据任务类型路由到合适的提供者。
+ * AI 提供者注册表 —— 按任务类型从 Spring 注入的 {@link AiProvider} 列表里挑一个来调用。
+ *
+ * <p>要点 / 易错点:
+ * <ul>
+ *   <li>路由是「第一个 supports() 返回 true 的实现」,顺序由 Spring 注入的 List 决定
+ *       (可再受 {@code @Order}/{@code Ordered} 影响)。当前只有一个百炼实现且它对所有类型
+ *       都返回 true,所以顺序暂时无关紧要;一旦加入第二个提供者,顺序就变成业务决策。</li>
+ *   <li>路由**不看**是否已配置密钥:密钥缺失由 provider 在 call 时返回失败结果,
+ *       或由调用方先查 {@link #hasAvailableProvider()}。这样缺少密钥只会让任务失败,
+ *       不会把整个端点变成 500。</li>
+ *   <li>两个健康检查口径不同:{@link #hasAvailableProvider()} 回答"配没配",
+ *       {@link #availableModelCount()} 回答"现在能不能调"(模型链全部冷却时为 0)。</li>
+ * </ul>
  */
 @Component
 public class AiProviderRegistry {

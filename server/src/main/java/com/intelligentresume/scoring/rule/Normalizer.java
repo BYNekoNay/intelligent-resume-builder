@@ -13,6 +13,16 @@ import java.util.regex.Pattern;
  * <p>同义词词典格式（配置注入）：canonical → [synonym1, synonym2, ...]。
  * 例如 {@code spring: ["spring", "spring boot", "spring cloud"]}，
  * 则 "Spring Boot" 归一化为 "spring"。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>清洗只有一个入口</b>（{@link #clean}）：匹配侧与简历抽取侧共用，任何一处另写字符集都会造成「提取得到、匹配不上」。</li>
+ *   <li><b>构造后只读</b>：两个索引在构造函数里建好后不再修改，可安全被多线程共享；新增热更新要自己加同步。</li>
+ *   <li><b>{@code tokenize} 与 {@code tokenizeOrdered} 成员集合相同、顺序不同</b>：后者保留出现顺序，
+ *       词组匹配必须用它 —— 用错会把被中文隔开的两个词拼成伪词组。</li>
+ *   <li><b>词典为空是静默降级</b>：归一退化成恒等映射，命中全部记 direct（分数不受影响，明细失去区分度），
+ *       详见 {@link ScoringProperties}。</li>
+ * </ul>
  */
 @Component
 public class Normalizer {

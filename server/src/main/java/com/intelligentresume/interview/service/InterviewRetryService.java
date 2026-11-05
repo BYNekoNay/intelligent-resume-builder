@@ -30,6 +30,17 @@ import java.util.concurrent.RejectedExecutionException;
  *
  * <p>含 retryGeneration 计数（attemptCount）与 stale 丢弃判定，须整体保留。
  * 日志只记录 id/状态/错误码。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>重试是<b>原地重跑同一条 attempt</b>：不新建 attempt、不重新组装 prompt，因此不要求预览令牌。</li>
+ *   <li>只有 {@code AI_ACTION_REQUIRED} 且存在最近一次失败 attempt 时才允许重试。</li>
+ *   <li>{@code retryable=false} 的失败默认不可重试，唯一例外是 {@code FORBIDDEN} —— 若用户此刻
+ *       已补上同意，则允许把 retryable 翻回 true 继续。</li>
+ *   <li>代数（attemptCount）是判断「结果是否过期」的核心依据：TX1 里 +1 得到本次代数，
+ *       若期间发生契约修复则代数再 +1，后台落地前必须用最新代数比对。</li>
+ *   <li>后台段异常必须落到 attempt，否则会话停在 GENERATING_QUESTION / EVALUATING_ANSWER。</li>
+ * </ul>
  */
 @Service
 public class InterviewRetryService {
@@ -69,10 +80,13 @@ public class InterviewRetryService {
 
     public InterviewStateResponse retryAi(Long id, Long userId) {
         // TX1: 校验 + 增加重试计数
+        // 返回值用 long[] 传递 5 个标量（sessionId/attemptId/roundNo/opType/generation），
+        // 下标含义与下方解构一一对应，改动顺序必须两边同改。
         long[] phase1Result = tx.execute(status -> {
             InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(id, userId)
                     .orElseThrow(() -> stateAssembler.notFound("面试会话不存在"));
 
+            // 只有「AI 失败待处理」才可重试；生成中/评估中再点重试会与进行中的调用打架
             if (session.getStatus() != InterviewStatus.AI_ACTION_REQUIRED) {
                 throw new BusinessException(ErrorCode.CONFLICT, "当前状态不允许重试");
             }
@@ -80,6 +94,8 @@ public class InterviewRetryService {
             InterviewAiAttempt lastFailed = stateAssembler.latestFailedAttempt(session.getId())
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "未找到失败的操作记录"));
 
+            // 不可重试的失败默认直接拒绝。FORBIDDEN 是例外：它代表「缺授权」，
+            // 用户可能刚刚补签，此时补签后再重试是合法且用户预期的行为。
             if (!lastFailed.getRetryable()) {
                 boolean consentRestored = "FORBIDDEN".equals(lastFailed.getErrorCode())
                         && operationSupport.hasInterviewConsent(userId, session);
@@ -93,7 +109,8 @@ public class InterviewRetryService {
             try {
                 operationSupport.checkInterviewQuota(userId);
             } catch (BusinessException e) {
-                // 配额不足，保持 AI_ACTION_REQUIRED
+                // 配额不足，保持 AI_ACTION_REQUIRED；只更新错误码与文案，不改状态、不发起调用。
+                // 这里的 -1 只占位（roundNo 在此分支不会被使用）。
                 lastFailed.setErrorMessage(AsyncFailureMessages.persisted(e.getMessage()));
                 lastFailed.setErrorCode("RATE_LIMITED");
                 attemptRepository.save(lastFailed);
@@ -102,10 +119,12 @@ public class InterviewRetryService {
                         lastFailed.getAttemptCount()};
             }
 
+            // 复用同一条 attempt：代数 +1 表示「新的一次重试」，并回到 PROCESSING
             lastFailed.setAttemptCount(lastFailed.getAttemptCount() + 1);
             lastFailed.setStatus(AiAttemptStatus.PROCESSING);
             attemptRepository.save(lastFailed);
 
+            // 会话状态按操作类型回到对应的「进行中」状态，前端据此继续轮询
             if (lastFailed.getOperationType() == AiAttemptOperationType.INITIAL_QUESTION) {
                 session.setStatus(InterviewStatus.GENERATING_QUESTION);
             } else {
@@ -113,6 +132,7 @@ public class InterviewRetryService {
             }
             sessionRepository.save(session);
 
+            // opType 编码为 0=首题 / 1=评估，后续跨线程按此分支
             long opType = lastFailed.getOperationType() == AiAttemptOperationType.INITIAL_QUESTION ? 0 : 1;
             return new long[]{session.getId(), lastFailed.getId(), lastFailed.getRoundNo() != null ? lastFailed.getRoundNo() : 0,
                     opType, lastFailed.getAttemptCount()};
@@ -124,7 +144,7 @@ public class InterviewRetryService {
         long opType = phase1Result[3];
         int retryGeneration = (int) phase1Result[4];
 
-        // 配额失败
+        // 配额失败：TX1 只改了错误码未改状态，这里按 FAILED 组装 aiFailure 返回（不提交后台任务）
         InterviewSession checkSession = sessionRepository.findById(sessionId).orElseThrow();
         if (checkSession.getStatus() == InterviewStatus.AI_ACTION_REQUIRED) {
             InterviewAiAttempt failedAttempt = attemptRepository.findById(attemptId).orElseThrow();
@@ -164,17 +184,19 @@ public class InterviewRetryService {
      * 否则会话会一直停在 PROCESSING（虽有陈旧超时兜底，但不该依赖它）。
      */
     private void runRetry(Long sessionId, Long userId, Long attemptId, int roundNo, long opType, int generation) {
+        // 用单元素数组而不是局部变量：闭包（reserveRepairCall 回调）里要回写代数
         int[] retryGeneration = {generation};
         try {
             InterviewSession session = sessionRepository.findById(sessionId).orElseThrow();
             if (opType == 0) {
-                // 首题重试
+                // 首题重试：输入与首次生成完全相同（同一会话的上下文），因此不需要重建 prompt
                 var initialCall = operationSupport.callAiForFirstQuestion(session, userId);
                 String question = initialCall.value().getQuestion();
 
                 tx.executeWithoutResult(s -> {
                     InterviewSession locked = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId).orElseThrow();
                     InterviewAiAttempt attempt = attemptRepository.findById(attemptId).orElseThrow();
+                    // 代数/状态不符说明期间又有新的重试或陈旧接管，本次结果作废
                     operationSupport.assertRetryStillCurrent(locked, attempt, retryGeneration[0],
                             InterviewStatus.GENERATING_QUESTION);
                     locked.setCurrentQuestion(question);
@@ -188,7 +210,8 @@ public class InterviewRetryService {
                     attemptRepository.save(attempt);
                 });
             } else {
-                // 回答评估重试
+                // 回答评估重试：答案从 attempt.pendingAnswer 取回 —— 这就是重试「不要求客户端重传」的原因，
+                // 也意味着 pendingAnswer 缺失时无法恢复，只能按 AI_FAILURE 失败
                 InterviewAiAttempt attempt = attemptRepository.findById(attemptId).orElseThrow();
                 String pendingAnswer = attempt.getPendingAnswer();
                 if (pendingAnswer == null) {
@@ -198,6 +221,8 @@ public class InterviewRetryService {
                         promptContextAssembler.buildEvaluationContext(session, pendingAnswer, userId),
                         session.getOutputLanguage(),
                         () -> {
+                            // 契约修复会多发一次模型调用：配额 +1，同时本地代数 +1，二者必须同步，
+                            // 否则最终落地时的 assertRetryStillCurrent 会把合法结果判成过期
                             operationSupport.reserveRepairCall(userId, attemptId);
                             retryGeneration[0] += 1;
                         });
@@ -212,6 +237,7 @@ public class InterviewRetryService {
                             InterviewStatus.EVALUATING_ANSWER);
 
                     int totalScore = evaluation.getDimensionScores().total();
+                    // 沿用 TX1 传下来的轮次号，而不是重新计数：重试不能把同一轮算成新一轮
                     int actualRoundNo = roundNo;
 
                     InterviewRecord record = new InterviewRecord();

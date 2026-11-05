@@ -15,6 +15,14 @@ import org.hibernate.annotations.DynamicUpdate;
  *
  * <p>{@code @DynamicUpdate}：只更新脏字段，避免内容更新把 {@code usage_count}
  * 的并发自增（原子 UPDATE）按加载时的旧值写回、丢掉增量。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@code bodyText} 是含占位符的原文，<b>不保存填充后的结果</b>；填充在预览/使用时现算。</li>
+ *   <li>内置与自定义的唯一区分是 {@code userId IS NULL} 与 {@code isSystem}，两者必须同时成立，改数据时要一起改。</li>
+ *   <li>{@code outputLanguage} 字段默认 ZH_CN，仅为 Java 侧默认值，落库由 service 显式赋值。</li>
+ *   <li>{@code version} 只保护内容字段；使用计数刻意绕开它（见仓储 {@code incrementUsageCount}）。</li>
+ * </ul>
  */
 @Entity
 @Table(name = "communication_template")

@@ -16,6 +16,14 @@ import java.util.Map;
  * 面试回答资产。软删除（V40 起）：{@code extends SoftDeletableEntity} 全局过滤已删行；
  * 清扫作业在恢复期结束后按引用分档：无 section 引用者物理删除，有引用者转最小快照
  * （正文常量化、反馈 JSON 清空），保证 {@code interview_asset_section.asset_id} 外键恒成立。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@code interviewRecordId} 可以为空：资产允许脱离某轮面试独立存在。</li>
+ *   <li>所有查询都必须带 {@code userId}；本实体不是通过会话间接归属的。</li>
+ *   <li>软删除后行仍在表里：物理清理由保留期作业负责，业务代码不要自己 delete。</li>
+ *   <li>章节/素材关联在 {@link InterviewAssetSection}，不在本表。</li>
+ * </ul>
  */
 public class InterviewAnswerAsset extends SoftDeletableEntity {
     @Column(name = "user_id", nullable = false) private Long userId;

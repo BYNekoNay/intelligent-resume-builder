@@ -1,3 +1,8 @@
+<!--
+登录页与注册页共用的双栏外壳：左栏是品牌 + 三阶段说明，右栏用默认插槽放具体表单。
+props.mode 只切换左栏文案（login / register 两套 key），不改变结构与布局。
+语言切换器、返回工作台与隐私政策入口固定在这里，两个页面不必各自实现一遍。
+-->
 <script setup lang="ts">
 import { ArrowLeft, FilePenLine, FolderKanban, Send, Sparkles } from 'lucide-vue-next'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'

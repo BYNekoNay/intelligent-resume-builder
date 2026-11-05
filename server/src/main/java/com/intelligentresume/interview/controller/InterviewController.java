@@ -20,6 +20,19 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * 面试接口入口（统一前缀 {@code /api/interviews}）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>Controller 只做参数校验与透传，业务全部在 {@link InterviewService}；不要在这里加状态判断。</li>
+ *   <li>{@code currentUserId} 由鉴权过滤器写入 request attribute，缺失即视为未登录（401），
+ *       不要从请求参数取用户 id。</li>
+ *   <li>会创建 attempt 的写操作（start / answer 含规则模式 / follow-up）要求 {@code Idempotency-Key}
+ *       （≤64 字符），服务端用「键 + 请求指纹」保证重放安全；retry / continue-with-rules / finish 不要求。</li>
+ *   <li>{@code /answer} 需要先读一次状态来决定走 AI 还是规则分支（见方法内注释）。</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/interviews")
 @Validated
@@ -41,6 +54,7 @@ public class InterviewController {
         return ApiResponse.success(service.start(request, currentUserId(httpRequest), idempotencyKey.trim()), traceId(httpRequest));
     }
 
+    /** 追问练习是异步任务：立即返回 202 + taskId，前端轮询 {@code /api/ai/tasks/{id}} 取结果。 */
     @PostMapping("/{id}/follow-up")
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> createFollowUp(
             @PathVariable Long id,
@@ -72,6 +86,13 @@ public class InterviewController {
         return ApiResponse.success(service.getState(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    /**
+     * 提交回答。这里必须先读一次状态：规则降级后作答要写规则分（同步），AI 模式则要提交后台评估（异步），
+     * 两者返回结构相同但行为完全不同。
+     *
+     * <p>注意这次 {@code getState} 不是纯读：处于 AI 进行中时它会做陈旧接管，因此本请求可能顺带把
+     * 一个超时的 attempt 判死。这是有意复用的兜底路径，不要改成更轻的查询。
+     */
     @PostMapping("/{id}/answer")
     public ApiResponse<InterviewStateResponse> answer(@PathVariable Long id,
                                                        @Valid @RequestBody AnswerInterviewRequest request,
@@ -83,6 +104,7 @@ public class InterviewController {
         return ApiResponse.success(service.answer(id, request.getAnswer().trim(), currentUserId(httpRequest), idempotencyKey.trim()), traceId(httpRequest));
     }
 
+    /** 重试最近一次失败的 AI 操作；立即返回进行中状态，结果靠轮询。 */
     @PostMapping("/{id}/ai/retry")
     public ApiResponse<InterviewStateResponse> retry(@PathVariable Long id, HttpServletRequest httpRequest) {
         return ApiResponse.success(service.retryAi(id, currentUserId(httpRequest)), traceId(httpRequest));
@@ -98,11 +120,13 @@ public class InterviewController {
         return ApiResponse.success(service.finish(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    /** 复盘报告：只读聚合，不触发 AI 调用；会话未完成时返回 409。 */
     @GetMapping("/{id}/report")
     public ApiResponse<InterviewReportResponse> report(@PathVariable Long id, HttpServletRequest httpRequest) {
         return ApiResponse.success(service.report(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    /** 当前登录用户由过滤器注入 request attribute；取不到时按未登录处理，绝不回退到请求参数。 */
     private Long currentUserId(HttpServletRequest request) {
         Object attr = request.getAttribute("currentUserId");
         if (attr == null) {

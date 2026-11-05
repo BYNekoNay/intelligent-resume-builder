@@ -3,6 +3,19 @@ package com.intelligentresume.interview.domain;
 import com.intelligentresume.common.persistence.BaseEntity;
 import jakarta.persistence.*;
 
+/**
+ * 一场模拟面试的会话（一对一，无子集合映射）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>「已完成轮数」不在本表，而是 {@code interview_record} 的行数；这里只有题数区间。</li>
+ *   <li>{@code min/maxQuestionCount} 由 {@code targetQuestionCount} 派生（分别约 50% / 150%），
+ *       开场时统一写入；只改 target 不重算 min/max 会让完成判定失真。</li>
+ *   <li>{@code currentQuestion} 为空通常意味着「正在生成」或「已结束」，不能单独用来判断状态。</li>
+ *   <li>{@code sourceType} 决定 {@code resumeVersionId} 与 {@code externalResumeText} 哪个有值，二者互斥。</li>
+ *   <li>凡是「读 → 判断 → 写」的流程都必须通过 {@code findByIdAndUserIdForUpdate} 加行锁。</li>
+ * </ul>
+ */
 @Entity
 @Table(name = "interview_session")
 public class InterviewSession extends BaseEntity {

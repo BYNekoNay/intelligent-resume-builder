@@ -20,6 +20,17 @@ import java.util.List;
  *
  * <p>幂等策略（MVP）：同 task 的 confirm 重放走"已 CONFIRMED"分支返回原版本，
  * 不新建幂等表。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>本类**不开事务**:真正需要原子性的写库全在 {@link DraftCommitService#commit} 里,
+ *       这里只做无锁快读 + 幂等判定。</li>
+ *   <li>重放分支返回的 {@code rejectedPaths} / {@code newMaterialIds} 是空列表:这两个值只在
+ *       首次提交时算出、不落库,所以重放响应与首次响应内容并不完全一致。</li>
+ *   <li>reject 用悲观锁 + 乐观锁双保险:先 {@code SELECT FOR UPDATE} 防并发,
+ *       再比对客户端回传的 {@code taskUpdatedAt} 防"基于旧页面提交"。</li>
+ *   <li>跨用户一律报 NOT_FOUND(而不是 FORBIDDEN),不泄露任务是否存在。</li>
+ * </ul>
  */
 @Service
 public class ConfirmationService {
@@ -38,6 +49,12 @@ public class ConfirmationService {
 
     /**
      * 确认草稿。
+     *
+     * <p>顺序:幂等键必填 → 无锁快读任务 → 已确认则直接回放 → 否则交给 DraftCommitService。
+     * 前三步都不加锁,真正的并发安全由 commit 里的 {@code SELECT FOR UPDATE} 保证。
+     *
+     * <p>{@code idempotencyKey} 目前只做非空与长度校验,不参与"同一键返回同一结果"的判定;
+     * 真正的幂等来自"任务已是 CONFIRMED 就返回其版本号"。
      *
      * @param taskId         任务 ID
      * @param req            确认请求（含 taskUpdatedAt 乐观锁 + 逐条决策 + 可选简历标题/目标简历）

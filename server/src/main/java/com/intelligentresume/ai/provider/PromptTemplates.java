@@ -12,6 +12,18 @@ import java.util.Map;
  *
  * <p>JOB_GENERATION 使用 JobGenerationPromptBuilder 构建的三段式 prompt,
  * 不经过此类。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>两处 switch 都是穷尽的(没有 default),新增 {@link AiTaskType} 会编译不过 —— 这是刻意留下的
+ *       提醒,不要为了编译通过补 default。</li>
+ *   <li>所有模板都要求模型"只输出 JSON"并写明期望的 key 集合;下游按这些 key 取数,
+ *       改模板里的 key 名等于改与解析器的契约。</li>
+ *   <li>{@code MATERIAL_IMPORT} 有三种输入形态,由 {@code generationMode} 区分:
+ *       联想扩写、联想结构化草稿、普通生成。三者的免责/待核实措辞不同,不能合并。</li>
+ *   <li>以 {@code _} 开头的 input 键是内部开关,**不会**进入 prompt 正文
+ *       ({@code appendInputContent} 会过滤),避免把系统级参数当成用户数据喂给模型。</li>
+ * </ul>
  */
 public final class PromptTemplates {
 
@@ -22,6 +34,10 @@ public final class PromptTemplates {
         return systemFor(type, Map.of());
     }
 
+    /**
+     * 构造 system prompt。{@code input} 只用于判断 MATERIAL_IMPORT 的生成模式,
+     * 其余类型忽略它。
+     */
     public static String systemFor(AiTaskType type, Map<String, Object> input) {
         AiTaskCapabilityRegistry.requireRegistered(type);
         return switch (type) {
@@ -120,6 +136,8 @@ public final class PromptTemplates {
                 sb.append("\n\nOutput JSON with a candidates array. Return only candidates that are meaningfully different from the original.");
             }
             case MATERIAL_IMPORT -> {
+                // 分支顺序有意义:先判"纯联想扩写",再判"联想 + 结构化草稿",最后才是普通生成。
+                // 前两者会要求模型把推断内容标成"待核实",不能按普通生成处理。
                 if (isAssociativeExpansion(input)) {
                     sb.append("Expand the following sparse material into a reference-only career and resume learning outline. ")
                             .append("It may explore adjacent responsibilities, projects, skills, and learning paths, but label all inferences as hypotheses or items to verify. ")
@@ -191,6 +209,13 @@ public final class PromptTemplates {
         }
     }
 
+    /**
+     * 把 input 渲染成 prompt 正文。
+     *
+     * <p>优先级:先过滤内部键 → 若只剩空则写占位提示 → 若存在 {@code content}/{@code text}
+     * 字符串则直接原样输出(不再列字段名) → 否则逐字段拼 {@code key: value}。
+     * 这个取舍让"单段文本"类任务拿到干净正文,而不是被 JSON 结构包裹。
+     */
     @SuppressWarnings("unchecked")
     private static void appendInputContent(StringBuilder sb, Map<String, Object> input) {
         // 过滤内部字段(以 _ 开头)

@@ -14,6 +14,21 @@ import org.springframework.stereotype.Service;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * AI 沟通文案的 worker 侧执行：重建 prompt → 调 provider → 校验/修复 → 组装结果。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>prompt 不用任务里存的快照再拼一次</b>，而是由 {@code promptBuilder.build(input)} 现场生成，
+ *       因此本类与 {@code CommunicationService#prepareInput} 必须保持同一份 input 结构。</li>
+ *   <li><b>校验失败只重试一次</b>：用 {@code buildRepair} 带上首次错误原因重问；再失败直接抛出，
+ *       不做「清洗后放行」。</li>
+ *   <li><b>草稿不在此落库</b>：只返回 {@link PendingDraft}，由 worker 在租约校验通过后同一事务内
+ *       调 {@link #persistDraft}，避免租约被接管时留下孤儿草稿。</li>
+ *   <li><b>输入只认 {@code inputSnapshotJson.input}</b>：缺失或类型转换失败均抛不可重试异常，
+ *       重试不会让坏输入变好。</li>
+ * </ul>
+ */
 @Service
 public class CommunicationAiService {
     private final AiProviderRegistry providerRegistry;
@@ -29,6 +44,12 @@ public class CommunicationAiService {
         this.draftRepository = draftRepository;
     }
 
+    /**
+     * 执行一次生成任务，返回「任务结果」与「待落库草稿」两段。
+     *
+     * <p>顺序要求：先跑完 provider 与校验，再解析 id —— 前面的异常要按 AI 失败处理，
+     * 不能被 id 解析错误盖掉成另一种失败原因。
+     */
     public ExecutionResult executeTask(AiTask task) {
         Map<String, Object> input = taskInput(task);
         CommunicationType type = parseType(input.get("type"));
@@ -116,6 +137,12 @@ public class CommunicationAiService {
         }
     }
 
+    /**
+     * EMAIL 才把 subject 前缀拼进正文，其余类型只有 body。
+     *
+     * <p>拼装格式必须与「模板生成」路径一致（{@code 主题：xxx\n\n正文} / {@code Subject: xxx\n\n正文}），
+     * 否则同一份邮件在两条生成路径下形态不同，前端复制行为会出现差异。
+     */
     private String composeDraft(CommunicationAiResultValidator.ValidatedResult result,
                                 CommunicationType type, String language) {
         if (type != CommunicationType.EMAIL) return result.body();

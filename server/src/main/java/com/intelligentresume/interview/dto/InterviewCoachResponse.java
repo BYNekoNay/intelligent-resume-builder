@@ -9,6 +9,16 @@ import java.util.List;
 /**
  * AI 面试教练响应 DTO。
  * 服务端按五维重新求和，不接受模型单独提供的总分。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>首题与评估是同一个响应的两个可空分支，按调用场景只有一个非空。</li>
+ *   <li>字段上的 {@code @NotBlank/@Size/@Min/@Max} 就是与模型的契约；反序列化时还开启了
+ *       FAIL_ON_UNKNOWN_PROPERTIES，多字段也会失败。</li>
+ *   <li>五维区间 0-25 / 0-25 / 0-20 / 0-20 / 0-10，合计上限 100；改区间要同改提示词。</li>
+ *   <li>{@code informationComplete} 与 {@code completionReason/nextQuestion} 的互斥关系
+ *       由服务层额外校验，注解表达不了。</li>
+ * </ul>
  */
 public class InterviewCoachResponse {
 

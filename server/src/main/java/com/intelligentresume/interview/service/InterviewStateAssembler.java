@@ -22,6 +22,14 @@ import java.util.Optional;
  *
  * <p>负责 buildStateResponse、LastEvaluation、AiFailureInfo、
  * 失败 attempt 查询与反馈去重等纯组装逻辑。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>本类不写库、不开事务；调用方需保证传入的 session 处于已加锁/已加载的上下文。</li>
+ *   <li>状态组装只读最新一轮记录，不做全量加载 —— buildStateResponse 是前端轮询热路径。</li>
+ *   <li>「已完成轮数」的唯一口径是 {@code interview_record} 计数，不是会话字段。</li>
+ *   <li>{@code AiFailureInfo.messageCode} 用错误码而非错误文案：文案含 provider 信息，不下发。</li>
+ * </ul>
  */
 @Component
 public class InterviewStateAssembler {
@@ -38,6 +46,13 @@ public class InterviewStateAssembler {
         this.attemptRepository = attemptRepository;
     }
 
+    /**
+     * 组装统一状态响应。
+     *
+     * <p>{@code currentQuestionNo} 目前只在「已有完成轮次」时才给值（= 已完成数 + 1），
+     * 首题阶段为 null，前端按 null 处理。
+     * {@code lastEval} 传 null 时自动从最新一轮记录回填，因此调用方一般无需自己查。
+     */
     public InterviewStateResponse buildStateResponse(InterviewSession session,
                                                      InterviewStateResponse.LastEvaluation lastEval,
                                                      InterviewStateResponse.AiFailureInfo aiFailure) {
@@ -67,6 +82,7 @@ public class InterviewStateAssembler {
         );
     }
 
+    /** 把一条记录转成「最近一次评估」视图；feedbackJson 里缺字段时对应 DTO 字段保持默认值。 */
     @SuppressWarnings("unchecked")
     public InterviewStateResponse.LastEvaluation buildLastEvaluation(InterviewRecord record) {
         InterviewStateResponse.LastEvaluation eval = new InterviewStateResponse.LastEvaluation();
@@ -105,6 +121,12 @@ public class InterviewStateAssembler {
         return eval;
     }
 
+    /**
+     * 由 attempt 组装失败信息。
+     *
+     * <p>{@code reauthorizationRequired} 只认 {@code FORBIDDEN}：这类失败重试也没用，
+     * 必须先补授权；其他错误码一律按「可能重试」处理，具体看 attempt 上的 retryable。
+     */
     public InterviewStateResponse.AiFailureInfo buildAiFailure(InterviewAiAttempt attempt) {
         InterviewStateResponse.AiFailureInfo info = new InterviewStateResponse.AiFailureInfo();
         info.setOperationId(attempt.getId());
@@ -115,6 +137,12 @@ public class InterviewStateAssembler {
         return info;
     }
 
+    /**
+     * 由异常现场组装失败信息（尚未落库时使用）。
+     *
+     * <p>与 {@link #buildAiFailure(InterviewAiAttempt)} 的区别：可重试性取「不是 FORBIDDEN」，
+     * 因为此时还没有 attempt 上人工判定的 retryable。
+     */
     public InterviewStateResponse.AiFailureInfo buildAiFailure(Long operationId, String stage, BusinessException e) {
         InterviewStateResponse.AiFailureInfo info = new InterviewStateResponse.AiFailureInfo();
         info.setOperationId(operationId);
@@ -125,11 +153,18 @@ public class InterviewStateAssembler {
         return info;
     }
 
+    /** 最近一条失败 attempt（按 updatedAt + id 双键降序，避免同秒并列时取错）。 */
     public Optional<InterviewAiAttempt> latestFailedAttempt(Long sessionId) {
         return attemptRepository.findFirstBySessionIdAndStatusOrderByUpdatedAtDescIdDesc(
                 sessionId, com.intelligentresume.interview.domain.AiAttemptStatus.FAILED);
     }
 
+    /**
+     * 跨轮次去重收集某类反馈（strengths / improvements / resumeSuggestions / expressionSuggestions）。
+     *
+     * <p>用 LinkedHashSet 保序去重（先出现的优先），最终只取前 5 条：报告页要的是「高频共性问题」，
+     * 全量罗列反而看不出重点。key 不存在或值不是集合时静默跳过。
+     */
     @SuppressWarnings("unchecked")
     public List<String> distinctFeedback(List<InterviewRecord> records, String key) {
         LinkedHashSet<String> values = new LinkedHashSet<>();
@@ -142,11 +177,21 @@ public class InterviewStateAssembler {
         return values.stream().limit(5).toList();
     }
 
+    /**
+     * 宽松数值读取：非 Number（含 null、字符串）一律当 0。
+     *
+     * <p>用于读历史 feedbackJson —— 早期数据的形状不完全一致，宁可显示 0 也不要因为一条脏数据
+     * 让整个状态接口 500。
+     */
     public int num(Object val) {
         if (val instanceof Number n) return n.intValue();
         return 0;
     }
 
+    /**
+     * 读取属于该用户的会话（<b>不加锁</b>）。只读场景用这个；
+     * 需要写或需要状态不被并发修改时必须换成 {@code findByIdAndUserIdForUpdate}。
+     */
     public InterviewSession owned(Long id, Long userId) {
         return sessionRepository.findByIdAndUserId(id, userId).orElseThrow(() -> notFound("面试会话不存在"));
     }

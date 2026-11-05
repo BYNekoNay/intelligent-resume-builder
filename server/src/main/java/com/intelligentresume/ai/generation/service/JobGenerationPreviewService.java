@@ -25,6 +25,19 @@ import java.util.Map;
  * </ol>
  *
  * <p>预览**不做**的事：不落库、不调 provider、不消耗配额、不改 selection 的确认状态。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>只看 {@code selectionTaskId} 指向的选材任务，且必须是当前用户的 JOB_MATERIAL_SELECTION；
+ *       不属于自己或类型不符时同样返回 404（不区分"不存在"与"不是你的"）。</li>
+ *   <li>选材任务尚未 SUCCESS 时返回 409 —— 此时没有推荐结果，组装不出候选边界。</li>
+ *   <li>{@code buildGenerationInput} 在预览阶段也能跑，但它会校验素材归属与 1..30 条边界；
+ *       只要请求里的素材越界，预览同样返回 400/404，与 confirm 行为一致。</li>
+ *   <li>第三个构造参数 {@code false} 是 {@code includeContact}：联系方式不参与本次发送，
+ *       与"生成时联系方式由服务端补写"的约定一致。</li>
+ *   <li>{@code previewToken} 是 (任务类型 + messages) 的哈希，同一份内容必然同值；
+ *       confirm 时缺令牌返回 400（VALIDATION），内容已变返回 409（CONFLICT）。</li>
+ * </ul>
  */
 @Service
 public class JobGenerationPreviewService {
@@ -44,6 +57,10 @@ public class JobGenerationPreviewService {
         this.previewService = previewService;
     }
 
+    /**
+     * 三步按固定顺序：校验选材任务归属与状态 → 组装子任务快照 → 由快照得到 provider input。
+     * 任一前置不满足都在组装前抛错，不会走到 provider。
+     */
     public AiPreviewService.PreviewResponse preview(Long selectionTaskId, ConfirmMaterialsRequest request, Long userId) {
         AiTask selection = taskRepository.findById(selectionTaskId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Selection task not found"));

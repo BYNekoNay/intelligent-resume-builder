@@ -6,6 +6,13 @@ import com.intelligentresume.common.error.ErrorCode;
 /**
  * {@code resume_material_reference.selection_reason} 的取值域（封闭两值，D5 决策）。
  *
+ * <p>要点：
+ * <ul>
+ *     <li>取值域封闭：只有 {@code AI_REFERENCED} / {@code USER_EDITED}，未知值一律抛 400，不做兜底。</li>
+ *     <li>{@code null}/空白输入返回 {@code null}——该列可空，表示"这条引用没有原因可记"。</li>
+ *     <li>没有数据库 CHECK 约束，正确性靠本枚举 + {@code SelectionReasonContractTest} 保证。</li>
+ * </ul>
+ *
  * <p>为什么需要它：该字段在 {@code DraftCommitService} 里曾是
  * {@code sel.get("selectedReason").toString()} 直接透传 —— 等于把溯源字段的取值域
  * 交给了上游字符串。实测全仓只有两个写入点（AI 引用 {@code AI_REFERENCED}、

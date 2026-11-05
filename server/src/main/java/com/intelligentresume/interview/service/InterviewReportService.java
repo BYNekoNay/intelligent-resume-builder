@@ -21,6 +21,14 @@ import java.util.Map;
  * 面试结束与报告聚合（单事务）。
  *
  * <p>finish / report 使用方法级 @Transactional（原样迁移），不混用 TransactionTemplate。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>finish 是「用户主动收尾」：至少完成 1 题，且不能在有 AI 操作进行中时结束。</li>
+ *   <li>report 只读且只接受已完成会话；报告完全由已有 {@code interview_record} 聚合，不触发新的 AI 调用。</li>
+ *   <li>总分为各轮 roundScore 的算术平均（四舍五入），不是求和；五维也同样取平均。</li>
+ *   <li>来源标记按「AI 轮数 / 规则轮数」推成 AI / RULE / MIXED，前端据此提示评估可信度。</li>
+ * </ul>
  */
 @Service
 public class InterviewReportService {
@@ -37,6 +45,7 @@ public class InterviewReportService {
         this.stateAssembler = stateAssembler;
     }
 
+    /** 用户主动结束面试：已结束则幂等返回；AI 进行中拒绝；至少完成 1 题。 */
     @Transactional
     public InterviewStateResponse finish(Long id, Long userId) {
         InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(id, userId)
@@ -62,6 +71,12 @@ public class InterviewReportService {
         return stateAssembler.buildStateResponse(session, null, null);
     }
 
+    /**
+     * 生成复盘报告。只允许对已完成的会话调用。
+     *
+     * <p>没有任何记录时返回一份「空报告」而不是抛错：会话可能在完成前被异常推进，
+     * 前端仍需要一个可渲染的结构。
+     */
     @Transactional(readOnly = true)
     public InterviewReportResponse report(Long id, Long userId) {
         InterviewSession session = stateAssembler.owned(id, userId);
@@ -81,7 +96,8 @@ public class InterviewReportService {
 
         int total = (int) Math.round(records.stream().mapToInt(InterviewRecord::getRoundScore).average().orElse(0));
 
-        // 五维聚合
+        // 五维聚合：逐条累加后再除以「记录总数 n」（而不是有维度数据的条数），
+        // 因此缺 dimensionScores 的记录会以 0 参与平均，拉低均值
         double sumRel = 0, sumEvid = 0, sumStruct = 0, sumRole = 0, sumAuth = 0;
         int aiCount = 0, ruleCount = 0;
         for (InterviewRecord r : records) {
@@ -106,7 +122,7 @@ public class InterviewReportService {
         InterviewReportResponse.DimensionScores dimensionScores =
                 new InterviewReportResponse.DimensionScores(dRel, dEvid, dStruct, dRole, dAuth);
 
-        // 报告来源类型
+        // 报告来源类型：任意一轮来自规则即标 MIXED，否则按是否有 AI 轮次决定
         EvaluationSource reportSource;
         if (aiCount > 0 && ruleCount > 0) reportSource = EvaluationSource.MIXED;
         else if (aiCount > 0) reportSource = EvaluationSource.AI;

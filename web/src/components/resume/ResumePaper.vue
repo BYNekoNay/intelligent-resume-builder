@@ -1,3 +1,10 @@
+<!--
+简历纸张渲染：编辑区与预览共用同一份呈现，templateCode 套模板类，layoutStyle 应用版式变量。
+document 的各章节先经 items() 归一成数组再渲染；字段缺失时整段不渲染，不用占位符撑高度。
+章节顺序来自 layout.sectionOrder，sectionStyle 用 CSS order 排序，个人概要固定 order:10 置顶。
+日期优先 startDate/endDate，只有两者都为空才回退 period（与 pdf-service 的 classic 模板一致）。
+paperElement 通过 defineExpose 暴露，供父组件做分页测量。
+-->
 <script setup lang="ts">
 import { computed, ref, type CSSProperties } from 'vue'
 import { useLocale } from '@/i18n'

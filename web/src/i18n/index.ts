@@ -1,3 +1,14 @@
+/**
+ * i18n 运行时：文案目录、语言切换与 t() 插值。
+ *
+ * 结构：zh-CN 内联在本文件的 messages 常量中；en-US 拆到 locales/en-US.ts，按需懒加载。
+ * 新增文案的规则：
+ * 1. 先加 zh-CN 键，再到 en-US.ts 加同名同层级的键 —— 两侧键集合必须完全一致，
+ *    scripts/check-i18n.mjs 会用 AST 对账，缺键或多键都会失败；
+ * 2. 插值只用 `{name}` 占位，由 t(key, params) 做字符串替换，没有复数或日期格式化；
+ * 3. 后端业务错误码不要临时拼 key，统一走 utils/errorCodes.ts 的登记表；
+ * 4. 不允许只加中文：en-US 缺键时 t() 会回退 zh-CN，界面会中英混排。
+ */
 import { ref } from 'vue'
 import type { Locale, MessageTree } from './types'
 

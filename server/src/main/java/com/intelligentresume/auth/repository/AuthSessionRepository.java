@@ -10,8 +10,19 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 刷新会话表的数据访问。
+ *
+ * <p>三条查询口径不同，别混用：
+ * <ul>
+ *   <li>{@code findByRefreshTokenHash} 是刷新入口，按摘要精确定位一行；</li>
+ *   <li>{@code findByTokenFamilyId} 用于重放检测后的整族撤销，包含已撤销的行；</li>
+ *   <li>{@code findByUserIdAndRevokedAtIsNull} 只取仍有效的会话，供 logout-all / 改密后全撤。</li>
+ * </ul>
+ */
 public interface AuthSessionRepository extends JpaRepository<AuthSession, Long> {
 
+    /** 按 refresh token 摘要查会话（原文不落库，只能按摘要查）。 */
     Optional<AuthSession> findByRefreshTokenHash(String refreshTokenHash);
 
     /**
@@ -25,7 +36,9 @@ public interface AuthSessionRepository extends JpaRepository<AuthSession, Long> 
             + "WHERE session.id = :id AND session.revokedAt IS NULL")
     int revokeIfActive(@Param("id") Long id, @Param("now") LocalDateTime now, @Param("reason") String reason);
 
+    /** 取整族会话（含已撤销行）：重放检测要撤销的是「整条链」，不是当前这一行。 */
     List<AuthSession> findByTokenFamilyId(String tokenFamilyId);
 
+    /** 该用户全部仍有效的会话；改密/改邮箱/删号后据此批量撤销。 */
     List<AuthSession> findByUserIdAndRevokedAtIsNull(Long userId);
 }

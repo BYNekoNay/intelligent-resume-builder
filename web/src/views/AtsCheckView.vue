@@ -1,3 +1,10 @@
+<!--
+  ATS 兼容性检查页（/ats）：选简历版本 + 目标 JD，跑「规则检查」或「AI 深度分析」，展示分数、问题列表、解析器视角与改写建议。
+  依赖 @/api/ats（runAtsCheck / getAtsCheck 轮询、getAtsParserView、retryAtsAi）与 useResumeJobOptions（简历/版本/岗位下拉）。
+  状态分支：loading 为首次检查、analyzing 表示 AI 仍在后台分析（此时只显示等待态）、pollingTimedOut 表示轮询窗口耗尽（保留规则报告并提示后台继续）、
+  error 覆盖参数缺失/发起失败/轮询失败；结果 id 会写回 query.result，刷新可复原。
+  易错点：降级原因只按原因码映射本地文案，不透传服务端 message；「查看建议」跳编辑器时通过 query 携带 section/atsResultId/sourceVersionId/atsItem 交接。
+-->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

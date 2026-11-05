@@ -1,3 +1,10 @@
+<!--
+个人档案编辑器：基础联系信息 + 求职目标两组字段，另有「从已有简历读取建议」入口。
+profile 与 importResumeId 用 defineModel 双向绑定，父组件持有原对象，这里就地修改字段。
+三个多值字段用 computed 的 get / set 在「逗号、顿号、换行分隔的文本」与数组之间转换，
+因此输入框里看到的是拼接串，失焦后才回写成数组。
+保存 / 导入 / 关闭只抛事件；loading 或 saving 期间整个 fieldset 被禁用，避免改到正在提交的内容。
+-->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ArrowLeft, Download, Save, Target, UserRound } from 'lucide-vue-next'

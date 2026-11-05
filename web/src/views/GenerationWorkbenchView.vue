@@ -1,3 +1,10 @@
+<!--
+  简历生成工作台（/generate）：三步向导 =① 选已有 JD 或粘贴 JD ② 勾选素材范围（必须 / 排除 / 默认）③ 提交 AI 选材任务。
+  依赖 @/api/ai 的 getConsent / hasJobGenerationConsent / previewMaterialSelection / selectMaterialsForJob，素材与 JD 列表来自对应 store。
+  关键时序：提交前必须先通过 useAiTaskPreview 拿到预览令牌（发出去的 prompt 可见），用户取消则完全不调创建端点；
+  未授予 AI 同意时，把 payload + 幂等键写 sessionStorage（pending-job-generation）再跳 /ai-consent?redirect=/generate?resumePending=1，回来自动续跑。
+  状态分支：generating 控制按钮禁用、error 承载同意缺失或生成失败；任务创建成功后记住 id 并跳 /generate/materials?taskId=…
+-->
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

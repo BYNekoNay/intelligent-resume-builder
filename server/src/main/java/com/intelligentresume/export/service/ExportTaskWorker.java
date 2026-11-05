@@ -21,7 +21,22 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Polls and renders PDF export tasks after atomically claiming a short lease. */
+/**
+ * Polls and renders PDF export tasks after atomically claiming a short lease.
+ *
+ * <p>导出任务执行器：定时领取一批任务，校验用户/版本/内容后渲染 PDF 并落盘。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>领取靠 {@link ExportTaskLeaseService#claimBatch} 的原子租约，多实例下同一行只会被一个实例渲染。</li>
+ *     <li>{@code poll()} 只负责"领一批 + 逐条处理"：领取本身的异常被吞掉并记日志，
+ *         单条任务的失败在 {@code processTask} 内部落成 FAILED，不影响同批其它任务。</li>
+ *     <li>渲染路径二选一：桌面模式走纯 Java 渲染器，否则走 pdf-service；两条路径的模板与内容模型必须保持一致。</li>
+ *     <li>成功写入被丢弃（租约已被接管）时必须删掉刚生成的文件，否则它会成为无人引用的孤儿。</li>
+ *     <li>容量拒绝（503）走"重排"而不是"失败"，只有试到 {@code max-attempts} 才终态失败。</li>
+ *     <li>{@code retryCount} 在领取时已经自增，所以容量分支判断的是"已尝试次数"。</li>
+ * </ul>
+ */
 @Component
 public class ExportTaskWorker {
 
@@ -63,6 +78,12 @@ public class ExportTaskWorker {
         this.failureCategoryClassifier = failureCategoryClassifier;
     }
 
+    /**
+     * 定时轮询：每次领一批（默认 1 条），逐条处理。
+     *
+     * <p>单条任务失败在 {@link #processTask} 内部被吃掉并落成 FAILED，不会影响同批其它任务；
+     * 这里再包一层是为了兜住"领取本身"的异常（数据库不可用等）。
+     */
     @Scheduled(fixedDelayString = "${app.pdf.worker.poll-interval-ms:3000}")
     public void poll() {
         try {
@@ -75,6 +96,15 @@ public class ExportTaskWorker {
         }
     }
 
+    /**
+     * 处理单条已领取的任务。
+     *
+     * <p>渲染前的三道闸门都直接判失败、不重试：用户被禁用/注销、版本不存在或已归档、内容为空——
+     * 这些是"重试也不会变好"的确定性失败。只有下游异常才可能值得重排。
+     *
+     * <p>{@code finally} 里记录指标：成功与否取的是任务对象上的最终状态（由租约服务回写），
+     * 因此成功/失败/容量重排三种结局都会被统计到。
+     */
     private void processTask(ExportTask task) {
         long startedAt = System.nanoTime();
         try (WorkerTraceContext ignored = WorkerTraceContext.open(task.getId())) {

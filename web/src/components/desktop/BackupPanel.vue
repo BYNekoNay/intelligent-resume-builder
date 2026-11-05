@@ -1,3 +1,10 @@
+<!--
+桌面版「本地备份」面板：列出快照、立即备份、按快照恢复（恢复前必须二次确认）。
+恢复失败不能只看 HTTP 或信封 code：后端在 409 时 code 仍可能是 0，真实结论在 data.ok，
+所以 restoreFailureText 优先读 data.message，且只在中文界面透出，英文界面走统一文案以免混语言。
+恢复成功后只提示、不自动刷新，需要用户点「重新载入工作区」，避免正在编辑的页面被打断。
+createdAt 是后端的 yyyyMMdd-HHmmss 而不是 ISO，故单独格式化，解析失败时原样返回。
+-->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { DatabaseBackup, RotateCcw } from 'lucide-vue-next'

@@ -1,3 +1,10 @@
+<!--
+  选材确认页（/generate/materials?taskId=…）：承接 AI 选材任务的结果，让用户增删要写进简历的素材后确认生成。
+  依赖 @/api/ai 的 getTask（读取/轮询任务）、previewConfirmMaterials + confirmMaterials（预览令牌后提交）、retryTask（重跑选材）。
+  状态分支：非法 taskId / 任务类型不符 / 任务 FAILED/CANCELLED / 轮询超时（任务仍在后台）各有独立文案；SUCCESS 后渲染推荐、未选、排除三类列表。
+  易错点：轮询超时不等于失败，此时不提供「重新选材」；用户勾选结果按 userId + taskId 存 localStorage，并连带保存确认幂等键，
+  避免刷新后重复生成同一份简历。
+-->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { AlertTriangle, Check, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-vue-next'

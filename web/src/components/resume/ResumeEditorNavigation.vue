@@ -1,3 +1,10 @@
+<!--
+简历编辑器左侧章节导航：顶部是完成度进度条与下一步建议，中间是「设计与高级 / 预览」两个入口，
+下面是章节大纲列表。
+props 全部由父组件计算好后传入：sections 的 complete 决定勾选态，activeSection 决定高亮，
+completionScore 直接作为进度条宽度，本组件不做任何统计。
+select / openDesign / openPreview 三个事件上抛，导航自身不持有状态。
+-->
 <script setup lang="ts">
 export interface ResumeEditorSection {
   key: string

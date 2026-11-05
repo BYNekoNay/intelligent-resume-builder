@@ -25,19 +25,26 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 简历版本管理：保存新版本、列出版本历史、查看版本详情。
+ * 简历版本的生命周期管理：保存快照、列历史、恢复为新版本、归档/取消归档，以及 ATS 溯源上下文的落库。
  *
- * <p>关键约定：
+ * <p>要点（改这个类之前先看）：
  * <ul>
- *     <li>版本号 = MAX(version_no) + 1，由数据库唯一约束 {@code uk_resume_version_no} 保障并发安全。</li>
- *     <li>历史版本不可修改（本卡不提供 update 接口）。</li>
- *     <li>保存版本前校验 JSON Resume 结构。</li>
+ *     <li>版本号 = MAX(version_no) + 1，并发访问由数据库唯一约束 {@code uk_resume_version_no} 兜底；
+ *         冲突统一转成 409（{@code CONFLICT}），调用方可重试。</li>
+ *     <li>历史版本不可修改：本类不提供 update 接口，"内容改错"只能靠 {@link #restore} 复制成新版本。</li>
+ *     <li>所有写路径先 {@code findOwnedForUpdate} 拿行锁再动数据；要改 {@code current_version_id} 的，
+ *         必须在这把锁内改，否则陈旧实体会把并发推进的版本指针覆盖回去。</li>
+ *     <li>{@code templateCode} 是写入时归一化的派生列：新建版本、历史行惰性回填都必须走
+ *         {@link ResumeTemplateCodes#normalize}，否则列表展示的模板口径会分叉。</li>
+ *     <li>「当前版本不能归档」「归档版本不能设为当前」（后者在 ResumeService 中）是互斥的两条红线。</li>
  * </ul>
  */
 @Service
 public class ResumeVersionService {
 
+    /** 客户端提交的 ATS 条目引用，格式固定为 {@code evidence:<下标>} 或 {@code action:<下标>}。 */
     private static final Pattern ATS_ITEM_PATTERN = Pattern.compile("^(evidence|action):(0|[1-9]\\d*)$");
+    /** ATS 建议里的章节名别名 → 平台章节键（大小写与分隔符由 {@link #mapAtsSection} 先归一）。 */
     private static final Map<String, String> ATS_SECTION_ALIASES = Map.ofEntries(
             Map.entry("basics", "basics"), Map.entry("summary", "basics"), Map.entry("profile", "basics"),
             Map.entry("personal summary", "basics"), Map.entry("professional summary", "basics"),
@@ -72,6 +79,12 @@ public class ResumeVersionService {
         this.atsCheckResultRepository = atsCheckResultRepository;
     }
 
+    /**
+     * 保存一次新版本。写库前依次做三件事：校验简历归属（顺带加行锁）、校验 JSON Resume 结构、取下一个版本号。
+     *
+     * <p>副作用：简历的第一个版本会被自动设为 {@code currentVersionId}，之后的一律不动当前指针——
+     * 保存不等于切换当前版本，这是两条独立操作。
+     */
     @Transactional
     public ResumeVersionDetail save(Long resumeId, SaveVersionRequest req, Long userId) {
         // 校验简历归属
@@ -109,6 +122,12 @@ public class ResumeVersionService {
         return toDetail(version);
     }
 
+    /**
+     * 按简历列版本历史。{@code archived=true} 只返回已归档（{@code deleted_at} 非空）的行。
+     *
+     * <p>注意本方法虽然只读业务数据，但**不是** {@code readOnly} 事务：历史行的 {@code template_code}
+     * 可能为 NULL，需要在同一事务里惰性回填，见 {@link #backfillTemplateCodes}。
+     */
     @Transactional
     public List<ResumeVersionSummary> listByResume(Long resumeId, boolean archived, Long userId) {
         // 校验简历归属
@@ -153,6 +172,12 @@ public class ResumeVersionService {
         return derived;
     }
 
+    /**
+     * 查看单个版本详情（含完整 {@code resume_json} 与生成上下文，因此不用于列表）。
+     *
+     * <p>权限校验走"版本 → 简历 → userId"两跳：先按 id 取版本，再用其 {@code resumeId} 校验归属；
+     * 任一环节不存在都返回 404，不区分"没有"和"不是你的"。
+     */
     @Transactional(readOnly = true)
     public ResumeVersionDetail get(Long versionId, Long userId) {
         ResumeVersion version = versionRepository.findById(versionId)
@@ -165,6 +190,13 @@ public class ResumeVersionService {
         return toDetail(version);
     }
 
+    /**
+     * 恢复：把指定历史版本**复制**成一条新的 {@code RESTORED} 版本，并设为当前版本；源版本保持不变。
+     *
+     * <p>{@code request} 可空。非空时表示这次恢复是从某条 ATS 建议发起的，需要校验 ATS 结果归属、
+     * 完成态、条目下标与章节可编辑性，并把溯源信息写进新版本的 {@code generationContext}。
+     * 因此 request 传了但内容不合法会抛 400/404/409，恢复不会发生。
+     */
     @Transactional
     public ResumeVersionDetail restore(Long resumeId, Long versionId,
                                        RestoreResumeVersionRequest request, Long userId) {
@@ -183,6 +215,11 @@ public class ResumeVersionService {
         return toDetail(restored);
     }
 
+    /**
+     * 归档（软删除）：只置 {@code deleted_at}，内容与版本号保留，之后可 {@link #unarchive} 还原。
+     *
+     * <p>幂等：已归档的行不会重复写时间戳。当前版本不允许归档，否则简历会指向一条已隐藏的版本。
+     */
     @Transactional
     public void archive(Long resumeId, Long versionId, Long userId) {
         Resume resume = findOwnedForUpdate(resumeId, userId);
@@ -196,6 +233,11 @@ public class ResumeVersionService {
         }
     }
 
+    /**
+     * 取消归档：清空 {@code deleted_at}，版本重新出现在活跃列表中。幂等，未归档的行不会被写库。
+     *
+     * <p>这里只看归属不加「不能是当前版本」的约束——归档期间当前指针不可能指向它。
+     */
     @Transactional
     public void unarchive(Long resumeId, Long versionId, Long userId) {
         findOwnedForUpdate(resumeId, userId);
@@ -240,6 +282,12 @@ public class ResumeVersionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
     }
 
+    /**
+     * 带行锁的归属查询（{@code SELECT ... FOR UPDATE}）。
+     *
+     * <p>回退到无锁查询是为了兼容不支持的场景（如单元测试里的 repository 替身）：
+     * 查得到就继续，查不到仍按 404 处理，不会因为"锁不存在"而误报。
+     */
     private Resume findOwnedForUpdate(Long resumeId, Long userId) {
         return resumeRepository.findByIdAndUserIdForUpdate(resumeId, userId)
                 .orElseGet(() -> findOwned(resumeId, userId));
@@ -250,6 +298,12 @@ public class ResumeVersionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "版本不存在"));
     }
 
+    /**
+     * 组装并持久化一条版本行（不校验 JSON、不改当前指针，由调用方负责）。
+     *
+     * <p>版本号是"先查 MAX 再 +1"的乐观做法，唯一约束才是并发下的最终裁判；
+     * 冲突时抛 409 让调用方重试，不能吞掉重试（否则会丢版本）。
+     */
     private ResumeVersion createVersion(Long resumeId, ResumeSourceType sourceType,
                                         Map<String, Object> resumeJson, String summary,
                                         Map<String, Object> generationContext, Long userId) {
@@ -271,6 +325,12 @@ public class ResumeVersionService {
         }
     }
 
+    /**
+     * 从 {@code resume_json.template.code} 派生模板代号。
+     *
+     * <p>三种输入都必须安全：{@code resumeJson} 为 null、{@code template} 不是对象、
+     * {@code code} 不是字符串或不在支持列表——一律落到默认模板，绝不抛异常（否则老数据读列表就 500）。
+     */
     private String templateCode(Map<String, Object> resumeJson) {
         Object template = resumeJson == null ? null : resumeJson.get("template");
         Object code = template instanceof Map<?, ?> values ? values.get("code") : null;
@@ -283,6 +343,16 @@ public class ResumeVersionService {
                 v.getCreatedAt(), v.getDeletedAt(), v.getRestoredFromVersionId());
     }
 
+    /**
+     * 把一次 ATS 建议转成可审计的 {@code generationContext}（写入新版本的 {@code atsProvenance}）。
+     *
+     * <p>五道校验顺序不能调换，且缺一不可：结果归属 → 结果必须属于被恢复的源版本 → 分析必须 COMPLETED
+     * → 条目下标必须落在 {@code evidenceFindings}/{@code prioritizedActions} 范围内 → 章节必须能映射到可编辑章节。
+     * 任何一步不过都直接抛异常，不写半成品溯源（宁可失败，也不留一条解释不了的来源记录）。
+     *
+     * <p>ATS 文案里的 {@code section} 用的是自由写法（中英文、连字符、大小写），由 {@link #mapAtsSection}
+     * 归一；映射表没有的章节一律视为不可编辑。
+     */
     private Map<String, Object> atsGenerationContext(RestoreResumeVersionRequest request,
                                                       ResumeVersion source, Long userId) {
         AtsCheckResult result = atsCheckResultRepository.findByIdAndUserId(request.atsResultId(), userId)

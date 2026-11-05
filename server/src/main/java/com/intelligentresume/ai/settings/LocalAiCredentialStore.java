@@ -24,6 +24,16 @@ import java.util.Optional;
  * 避免掉电/崩溃留下半个密文（半份密文比没有更糟 —— 读的时候会解密失败且无法区分原因）。
  *
  * <p>entropy 绑定「应用 + 用户」：同一用户的不同 id 之间也不通用，防止把 A 的密文改名当 B 的用。
+ *
+ * <p>要点 / 易错点:
+ * <ul>
+ *   <li>非 Windows 环境 {@code available()} 为 false,{@link #save}/{@link #load} 会抛
+ *       IllegalStateException —— 刻意不降级成明文。</li>
+ *   <li>{@link #load} 在文件不存在时返回 empty(正常,"还没配过");读文件失败抛
+ *       UncheckedIOException,解密失败则抛保护器自身的异常 —— 都不会静默当成"没配"。</li>
+ *   <li>{@link #delete} 是尽力而为:删除失败只记 warn,不抛出 —— 调用方(如删设置)不应因此回滚。</li>
+ *   <li>文件路径由 dataDir + userId 拼出,改目录结构会让存量密文"消失"(看起来像没配过密钥)。</li>
+ * </ul>
  */
 @Component
 public class LocalAiCredentialStore {

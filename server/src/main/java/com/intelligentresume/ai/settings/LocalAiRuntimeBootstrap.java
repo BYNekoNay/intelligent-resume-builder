@@ -13,6 +13,13 @@ import org.springframework.stereotype.Component;
  *
  * <p>刻意不在 {@code CommandLineRunner} 里做：那时 Flyway/连接池可能还没稳定，
  * 而 {ApplicationReadyEvent} 之后读库是安全的。
+ *
+ * <p>要点:
+ * <ul>
+ *   <li>只在 desktop 模式下运行;在线部署直接返回,运行时覆盖保持为空(行为与未改造前一致)。</li>
+ *   <li>遍历所有设置行而不是取第一条:正常只有一行(表上有唯一约束),遍历是为了容忍历史脏数据。</li>
+ *   <li>多行时后处理的会覆盖先处理的运行时快照,顺序不确定 —— 这也是"不应存在多行"的原因。</li>
+ * </ul>
  */
 @Component
 class LocalAiRuntimeBootstrap {

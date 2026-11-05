@@ -22,6 +22,14 @@ import java.util.Map;
  *
  * <p>{@code source_snapshot_json} 在 commit 时复制 CareerMaterial 全部字段，
  * 即使资料后续被软删，历史快照仍可读。
+ *
+ * <p>要点:
+ * <ul>
+ *   <li>一行 = "某个简历版本的某个段落用了某条资料",是溯源展示与审计的依据。</li>
+ *   <li>{@code selection_status} 目前只会写 {@code SELECTED};被拒的条目根本不写行。</li>
+ *   <li>{@code selection_reason} 是归一化后的枚举值(见 {@code SelectionReason}),由确认流程写入。</li>
+ *   <li>只追加、不更新:某个版本一旦生成,它的引用集合就固定了。</li>
+ * </ul>
  */
 @Entity
 @Table(name = "resume_material_reference")

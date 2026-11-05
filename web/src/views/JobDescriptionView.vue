@@ -1,3 +1,9 @@
+<!--
+  职位描述（JD）库页面：列表 + 新建/编辑表单 + 解析结果预览。
+  依赖接口 @/api/jobDescription 的 createJob / updateJob / deleteJob / getJob / parseJob，列表数据来自 useJobDescriptionStore。
+  表单复用同一份状态：editingId 为 null 表示新建，否则为编辑；点击编辑时先回填列表摘要，再异步拉取详情补全 jdText。
+  易错点：详情请求可能乱序返回，用 editRequestId 做代次校验丢弃过期响应；详情未加载完成时禁止保存，避免用空的 jdText 覆盖原值。
+-->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -43,6 +49,7 @@ function applyJobToForm(job: Pick<JobDescriptionDetail, 'title' | 'companyName' 
 }
 
 async function edit(job: JobDescriptionSummary) {
+  // 列表摘要不含 jdText，先占位回填标题/公司，再把详情请求的结果合并进来
   const requestId = ++editRequestId
   editingId.value = job.id
   editDetailLoaded.value = false
@@ -50,6 +57,7 @@ async function edit(job: JobDescriptionSummary) {
   error.value = ''
   try {
     const fullJob = (await getJob(job.id))
+    // 期间若切换了编辑对象或重置了表单，则丢弃这次过期响应
     if (requestId !== editRequestId || editingId.value !== job.id) return
     applyJobToForm(fullJob)
     editDetailLoaded.value = true
@@ -59,6 +67,7 @@ async function edit(job: JobDescriptionSummary) {
 }
 
 async function save() {
+  // 详情未就绪时 jdText 还是空串，保存会用空内容覆盖原 JD，因此直接拦截
   if (editingId.value !== null && !editDetailLoaded.value) return
   const saveEditRequestId = editRequestId
   const saveEditingId = editingId.value

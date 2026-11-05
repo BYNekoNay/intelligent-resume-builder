@@ -38,6 +38,21 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.Map;
 
+/**
+ * 认证 HTTP 入口：注册、登录、刷新、登出、当前用户、凭证变更、删号与数据导出。
+ *
+ * <p>要点（改动前先读）：
+ * <ul>
+ *   <li>access token 放响应体，refresh token 只经 HttpOnly Cookie 下发；请求侧优先读
+ *       {@code X-Refresh-Token} 头（便于调试），其次读 Cookie。</li>
+ *   <li>改密/改邮箱/删号成功后既要服务端撤销会话（AuthService），也要在这里下发过期
+ *       Cookie——只做一边会让客户端继续持有失效令牌。</li>
+ *   <li>{@code currentUserId} 属性由 {@link com.intelligentresume.auth.jwt.JwtAuthenticationFilter}
+ *       写入；取不到即 401，控制器不自行解析令牌。</li>
+ *   <li>桌面本地模式没有 refresh cookie：{@code /refresh} 直接签发本地用户令牌，
+ *       {@code DELETE /me} 显式返回 409（详见方法内注释）。</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -103,6 +118,7 @@ public class AuthController {
         return withRefreshCookie(authService.refresh(refresh, ua, ip), httpRequest);
     }
 
+    /** 登出：只撤销当前 refresh 会话；令牌缺失或已撤销也返回成功（幂等，前端无需区分）。 */
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest httpRequest) {
         authService.logout(extractRefreshToken(httpRequest));
@@ -111,6 +127,7 @@ public class AuthController {
                 .body(ApiResponse.success(null, traceId(httpRequest)));
     }
 
+    /** 撤销该用户全部未失效会话（改密/改邮箱内部也走同一条路径），随后清掉浏览器 Cookie。 */
     @PostMapping("/logout-all")
     public ResponseEntity<ApiResponse<Void>> logoutAll(HttpServletRequest httpRequest) {
         Long userId = currentUserId(httpRequest);
@@ -130,6 +147,7 @@ public class AuthController {
         return ApiResponse.success(authService.updateProfile(currentUserId(httpRequest), request), traceId(httpRequest));
     }
 
+    /** 改邮箱：校验当前密码，成功后撤销全部会话并清 Cookie（新邮箱 + 旧口令不再能免登录）。 */
     @PostMapping("/me/email")
     public ResponseEntity<ApiResponse<Void>> changeEmail(@Valid @RequestBody ChangeEmailRequest request, HttpServletRequest httpRequest) {
         authService.changeEmail(currentUserId(httpRequest), request);
@@ -137,6 +155,7 @@ public class AuthController {
                 .body(ApiResponse.success(null, traceId(httpRequest)));
     }
 
+    /** 改密码：校验当前密码，成功后撤销全部会话并清 Cookie——所有设备都必须重新登录。 */
     @PostMapping("/me/password")
     public ResponseEntity<ApiResponse<Void>> changePassword(@Valid @RequestBody ChangePasswordRequest request, HttpServletRequest httpRequest) {
         authService.changePassword(currentUserId(httpRequest), request);
@@ -203,6 +222,10 @@ public class AuthController {
         return null;
     }
 
+    /**
+     * 取当前用户 id：只认过滤器写入的 request 属性，不解析令牌。
+     * 属性为空说明请求未通过认证链——宁可 401，也不能退化成匿名访问。
+     */
     private Long currentUserId(HttpServletRequest request) {
         Object attr = request.getAttribute("currentUserId");
         if (attr == null) {
@@ -219,12 +242,20 @@ public class AuthController {
         return withRefreshCookie(tokens, request, HttpStatus.OK);
     }
 
+    /**
+     * 签发令牌的统一出口：refresh token 只写 Set-Cookie，响应体里的 {@code TokenResponse.refreshToken}
+     * 因 {@code @JsonIgnore} 不会出现在 JSON 中。新增签发入口必须走这里，否则 refresh token 会漏进响应体。
+     */
     private ResponseEntity<ApiResponse<TokenResponse>> withRefreshCookie(TokenResponse tokens, HttpServletRequest request, HttpStatus status) {
         return ResponseEntity.status(status)
                 .header(HttpHeaders.SET_COOKIE, refreshCookie(tokens.refreshToken()).toString())
                 .body(ApiResponse.success(tokens, traceId(request)));
     }
 
+    /**
+     * 构造 refresh Cookie：{@code path=/} 使所有 API 都能带上它，HttpOnly 防 XSS 读取，
+     * SameSite=Lax 兼容跳转式导航；{@code secure} 由配置决定——本地 http 环境必须为 false，否则浏览器不会回传。
+     */
     private ResponseCookie refreshCookie(String refreshToken) {
         return ResponseCookie.from(refreshCookieName, refreshToken)
                 .path("/")

@@ -44,6 +44,16 @@ import java.util.Set;
  *
  * <p>同意校验：复用 INTERVIEW_COACH consent scope（数据类别 RESUME/INTERVIEW_ANSWER/JD），
  * 不新增授权 scope，避免存量用户重新授权。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>创建是「202 + taskId」，真正的模型调用发生在 worker 的 {@link #executeTask}，不在本请求内。</li>
+ *   <li>任务只存 {@code sessionId + weakness}，worker 凭 sessionId 重新加载简历/JD —— 简历更新后
+ *       执行结果会反映新内容，也因此预览与执行必须共用同一份组装逻辑。</li>
+ *   <li>发送前预览令牌绑定的是「服务端组装的 providerInput 摘要」，所以创建时也必须用
+ *       同一份组装结果去校验，不能拿请求里的原始字段拼。</li>
+ *   <li>只允许已完成会话：未完成的会话没有完整问答，无法定位「薄弱项」的上下文。</li>
+ * </ul>
  */
 @Service
 public class InterviewFollowUpAiService {
@@ -85,6 +95,12 @@ public class InterviewFollowUpAiService {
 
     // ==================== 创建任务（领域端点） ====================
 
+    /**
+     * 创建练习任务（异步）。
+     *
+     * <p>输入快照只写 {@code operation/sessionId/weakness/promptVersion}，<b>不含</b>简历与 JD：
+     * 那些内容由 worker 在执行时按 sessionId 重新读取，减少快照里的 PII。
+     */
     @Transactional
     public AiTaskStatusResponse createFollowUpTask(Long sessionId, String weakness, Long userId,
                                                    String idempotencyKey, String previewToken) {
@@ -120,6 +136,9 @@ public class InterviewFollowUpAiService {
      *
      * <p>只读：不落库、不调 provider、不消耗配额、不校验 consent —— 预览只是让本人看清
      * 自己数据将被如何发送，授权是创建期的检查。
+     *
+     * <p>与 {@link #createFollowUpTask} 必须使用同一份 {@code buildProviderInput}：
+     * 任何一侧单独改模板，都会导致「看到的」与「实际发出的」不一致，令牌校验也会失败。
      */
     public AiPreviewService.PreviewResponse preview(Long sessionId, String weakness, Long userId) {
         InterviewSession session = ownedCompletedSession(sessionId, userId);
@@ -148,6 +167,12 @@ public class InterviewFollowUpAiService {
 
     // ==================== worker 执行 ====================
 
+    /**
+     * worker 入口：读快照 → 重新加载同源简历/JD → 调模型 → 校验 3~5 条候选 → 返回结果结构。
+     *
+     * <p>候选数量或单条内容不合规一律抛 AI_FAILURE（不可重试语义由上层任务框架决定），
+     * 不要在这里「截断到 5 条」将就返回：数量本身是提示词契约的一部分。
+     */
     public Map<String, Object> executeTask(AiTask task) {
         Map<String, Object> input = providerInput(task);
         Long sessionId = toLong(input.get("sessionId"));
@@ -223,6 +248,13 @@ public class InterviewFollowUpAiService {
         }
     }
 
+    /**
+     * 从任务快照中取出 provider input。
+     *
+     * <p>兼容两种形状：输入包在 {@code snapshot.input} 下，或快照本身就是输入（此时快照里的
+     * {@code operation}/{@code sessionId} 等键会被直接当作 input 使用）。
+     * 取不到时返回空 Map，由调用方在缺 sessionId/weakness 时报 VALIDATION。
+     */
     @SuppressWarnings("unchecked")
     private Map<String, Object> providerInput(AiTask task) {
         Map<String, Object> snapshot = task.getInputSnapshotJson();
@@ -245,6 +277,8 @@ public class InterviewFollowUpAiService {
     }
 
     // ---- 响应 DTO ----
+    // 这些类只用于把模型 JSON 反序列化后做 Bean Validation；字段注解即契约，
+    // 与 InterviewFollowUpPromptAssembler 的 schema 描述必须一致（长度/条数）。
 
     public static class FollowUpResponse {
         private List<Candidate> candidates;

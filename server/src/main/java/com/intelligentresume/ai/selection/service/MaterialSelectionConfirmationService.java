@@ -22,6 +22,24 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * 「选材确认」：把一次选材任务的推荐结果固化成 JOB_GENERATION 子任务的不可变快照。
+ *
+ * <p>要点（顺序即红线，改任何一步之前先读完整段 {@link #confirm}）：
+ * <ul>
+ *   <li>幂等重放（同一 userId + Idempotency-Key 且 fingerprint 相同）在**任何写库和令牌校验之前**
+ *       返回既有子任务；重试不能因为"这次没带预览令牌"而失败，也不能产生第二条子任务。</li>
+ *   <li>令牌校验用服务端自己组装的 providerInput 重算，位置刻意在"幂等之后、配额与写库之前"：
+ *       被拒时 ai_task 零新增。</li>
+ *   <li>配额检查必须在创建子任务**和**把 selection 置为 CONFIRMED **之前**：否则配额不足会留下
+ *       "选材已确认但永远生成不了"的死锁。</li>
+ *   <li>并发保护靠 {@code findByIdForUpdate} 悲观锁 + {@code taskUpdatedAt} 乐观比对，
+ *       两者缺一都会被并发确认穿透。</li>
+ *   <li>{@link #MAX_FINAL_MATERIALS} 是硬编码 30，而 {@code MaterialSelector} 的上限来自配置
+ *       {@code app.ai.generation.max-selected-materials}；改配置而不改这里会出现"选材放过、
+ *       生成阶段裁剪"的不一致。</li>
+ * </ul>
+ */
 @Service
 public class MaterialSelectionConfirmationService {
 
@@ -56,6 +74,16 @@ public class MaterialSelectionConfirmationService {
         this.previewGuard = previewGuard;
     }
 
+    /**
+     * 确认选材 → 创建 JOB_GENERATION 子任务（状态 PENDING），并返回该子任务。
+     *
+     * <p>校验链：任务存在/归属/类型 → 用户同意书 → 幂等重放 → 任务状态与版本戳 → 预览令牌
+     * → 配额 → 落库。任一步失败都保持 selection 的 confirmationStatus = PENDING。
+     *
+     * @param idempotencyKey 为空时退化成本地确定性键 {@code selection-confirm:<selectionId>}，
+     *                       因此**同一个 selection 不带 key 重复确认只会得到同一个子任务**
+     * @return 已落库的 JOB_GENERATION 子任务（幂等重放时是既有那条）
+     */
     @Transactional
     public AiTask confirm(Long taskId, ConfirmMaterialsRequest request, String idempotencyKey,
                           String previewToken, Long userId) {
@@ -185,6 +213,13 @@ public class MaterialSelectionConfirmationService {
         return selectedIds;
     }
 
+    /**
+     * 两道边界：常规勾选必须来自本轮推荐/未选候选（防越权引用别人的资料），
+     * 强制加入只允许"全局排除"的资料（用户主动排除的不许反向强制，否则排除操作形同虚设）。
+     *
+     * <p>候选集来自选材任务的 {@code result_json}（recommended ∪ unselected），
+     * 不是实时查库 —— 所以推荐结果产生之后新建的资料无法被确认。
+     */
     private void validateSelectionBoundary(AiTask selection, Set<Long> requestedIds, Set<Long> forcedIds) {
         Map<String, Object> result = selection.getResultJson() == null ? Map.of() : selection.getResultJson();
         Set<Long> candidateIds = new LinkedHashSet<>();

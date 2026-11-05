@@ -20,6 +20,15 @@ import java.util.List;
  *
  * <p>事件溯源模型:仅追加(append-only),不修改、不软删。
  * 不继承 BaseEntity(无 updated_at)。
+ *
+ * <p>要点:
+ * <ul>
+ *   <li>一行 = 一次"授权"或"撤回"事件,不是"当前状态";当前状态由最新一行决定。</li>
+ *   <li>{@code task_scopes_json}/{@code data_categories_json} 以 JSON 数组存储,
+ *       校验时按列表包含关系使用(见 {@code AiConsentService})。</li>
+ *   <li>{@code notice_hash} 是用户当时确认的隐私提示文本摘要,用于举证;不要回填成空值。</li>
+ *   <li>无更新路径:实体没有 setter 之外的时间戳维护逻辑,{@code created_at} 只在插入时写一次。</li>
+ * </ul>
  */
 @Entity
 @Table(name = "ai_consent")

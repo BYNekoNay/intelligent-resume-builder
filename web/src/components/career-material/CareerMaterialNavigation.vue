@@ -1,3 +1,9 @@
+<!--
+资料库左侧索引：顶部是个人档案入口（带完整度百分比），分隔线下是「全部 + 按资料类型」筛选。
+profileActive 为 true 时所有类型项一律不显示选中态，两个入口共用同一块视觉区域、互斥生效。
+完整度按 11 个非空字段的占比取整，字段清单硬编码在 profileFields，改档案字段必须同步。
+typeCounts / total 由父组件统计后传入，本组件不发请求；移动端索引条改为横向滚动。
+-->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Database, UserRound } from 'lucide-vue-next'

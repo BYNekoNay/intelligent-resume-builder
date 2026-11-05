@@ -18,6 +18,15 @@ import static com.intelligentresume.resume.service.JsonResumeText.maps;
 /**
  * 把平台内部的 {@code resumeJson} 导出成 **JSON Resume v1.0.0** 文档。
  *
+ * <p>职责一句话：把"平台自己的简历结构"翻译成官方互操作格式，保证用户数据能带得走。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>导出必须是纯映射：同样的输入永远得到同样的输出，不能读时钟、不能补默认值。</li>
+ *     <li>平台不认识的顶层键必须进 {@code meta.platform.unknownSections}，红线是"绝不静默丢弃"。</li>
+ *     <li>文件名固定 ASCII，避免把用户输入拼进 {@code Content-Disposition}。</li>
+ * </ul>
+ *
  * <p>为什么值得做：JSON Resume 是简历领域唯一被广泛实现的开源互操作格式
  * （jsonresume.org、resume-cli、Reactive Resume 等都认它）。能导出它，意味着用户的简历
  * 不被锁在本平台里——这是「数据可携带」的实质，而不是隐私声明里的一句话。

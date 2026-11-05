@@ -8,6 +8,8 @@ import type { MessageTree } from '../types'
  *
  * 结构契约：必须是**对象字面量的 default export** —— `scripts/check-i18n.mjs`
  * 用 TS AST 直接读这个文件做 key 对账（缺 key / 多 key 都会让它红）。
+ * 新增文案：先在 index.ts 的 zh-CN 加键，再来这里补同名同层级键；插值占位符必须与中文侧
+ * 完全一致（同一个 `{name}`），否则运行时会原样显示花括号。
  */
 const enUS: MessageTree = {
     brand: 'ZhiLi',

@@ -1,3 +1,8 @@
+<!--
+「该岗位已有简历」选择弹窗：列出同岗位已有简历供更新，或选择新建一份。
+显隐与简历列表来自 useDraftReview 的 showJdDialog / existingResumes，本组件不发请求。
+confirm 事件的参数就是目标简历 id：数字表示更新该条，null 表示新建，父组件据此分支。
+-->
 <script setup lang="ts">
 import { useLocale } from '@/i18n'
 import { useDraftReview } from '@/composables/useDraftReview'

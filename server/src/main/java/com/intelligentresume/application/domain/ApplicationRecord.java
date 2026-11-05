@@ -16,6 +16,15 @@ import java.time.LocalDateTime;
  * 投递记录。软删除（V40 起）：{@code extends SoftDeletableEntity} 全局过滤已删行；
  * 清扫作业 {@code RetentionPurgeService} 在恢复期结束后物理删除（唯一引用者
  * {@code application_status_history} 是 ON DELETE CASCADE 的从属内容，随行一起消亡）。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>{@code @SQLRestriction} 必须在实体类上直接再标一次——标在父类上不会被继承。</li>
+ *     <li>{@code status} 只能通过状态迁移接口改；普通编辑接口收到不同的 status 会拒绝（保证历史表完整）。</li>
+ *     <li>{@code appliedAt} 只在首次进入 APPLIED 时写入，之后不再变动，是"投了多久"的起点。</li>
+ *     <li>{@code stageEnteredAt} 只随状态变化刷新；任何其它字段的更新都不得碰它，否则停留时长被静默重置。</li>
+ *     <li>{@code @Version} 是乐观锁：并发编辑同一投递会抛冲突，而不是后写覆盖先写。</li>
+ * </ul>
  */
 public class ApplicationRecord extends SoftDeletableEntity {
     @Column(name = "user_id", nullable = false)
@@ -37,6 +46,7 @@ public class ApplicationRecord extends SoftDeletableEntity {
     private String feedbackText;
     @Column(name = "applied_at")
     private LocalDateTime appliedAt;
+    /** 下次跟进提醒时间；为空表示不提醒。列表的 TODAY/OVERDUE 过滤依赖该列。 */
     @Column(name = "next_follow_up_at")
     private LocalDateTime nextFollowUpAt;
     /**

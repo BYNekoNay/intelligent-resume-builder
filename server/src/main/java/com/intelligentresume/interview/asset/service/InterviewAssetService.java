@@ -22,6 +22,19 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * 面试回答资产：把某一轮问答与建议答案沉淀成可复用的素材，并挂到简历章节/职业素材上。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>章节 key 是白名单（{@link #SECTION_KEYS}），必须与前端 {@code sectionRegistry.ts} 的
+ *       SECTION_KEYS 保持一致；前端加章节而这里没加，保存会被判 400。</li>
+ *   <li>资产按 {@code (userId, interviewRecordId)} 幂等：<b>仅当传了 interviewRecordId</b> 时，
+ *       同一条记录重复创建返回已有资产；不带记录 id 的资产每次都会新建。</li>
+ *   <li>章节/素材关联是「替换式」写入：每次保存先删后插，因此请求必须带全量，不能只传增量。</li>
+ *   <li>删除是软删除（置 {@code deleted_at}）并立即删除关联行，便于素材清扫。</li>
+ * </ul>
+ */
 @Service
 public class InterviewAssetService {
     /** 与前端 web/src/resume/sectionRegistry.ts 的 SECTION_KEYS 保持一致。 */
@@ -48,6 +61,12 @@ public class InterviewAssetService {
         this.materialRepository = materialRepository;
     }
 
+    /**
+     * 列表查询。四个筛选条件都可空，组合后交给一次 JPQL 完成（不做多次查询再内存过滤）。
+     *
+     * <p>先校验 JD 归属与 sectionKey 合法性：非法 key 若直接进 SQL 只会得到空列表，
+     * 调用方会误以为「该章节没有资产」。
+     */
     @Transactional(readOnly = true)
     public List<InterviewAssetResponse> list(Long userId, Long jobId, String keyword, String sectionKey,
                                              Long interviewRecordId) {
@@ -61,6 +80,11 @@ public class InterviewAssetService {
         return attachSections(assets, userId);
     }
 
+    /**
+     * 创建资产。整体顺序：锁记录（串行化）→ 校验 → 幂等查 → 写资产 → 重建关联。
+     *
+     * <p>锁必须在幂等查之前，否则两个并发请求会同时查不到再各自插入，把问题推给唯一索引报 409。
+     */
     @Transactional
     public InterviewAssetResponse create(InterviewAssetRequest request, Long userId) {
         Long recordId = request.interviewRecordId();
@@ -92,6 +116,11 @@ public class InterviewAssetService {
         return response(asset, userId);
     }
 
+    /**
+     * 更新资产。{@code interviewRecordId} 为 null 表示「不改归属」，非 null 才校验并改写。
+     *
+     * <p>章节/素材关联始终按请求全量替换：不传（null）等价于清空，而不是保持原样。
+     */
     @Transactional
     public InterviewAssetResponse update(Long id, InterviewAssetRequest request, Long userId) {
         InterviewAnswerAsset asset = owned(id, userId);
@@ -144,6 +173,13 @@ public class InterviewAssetService {
         }
     }
 
+    /**
+     * 重建「资产 → 章节/素材」关联：先全删再按请求插入。
+     *
+     * <p>关联是笛卡尔积（每个章节 × 每个素材）；没有章节但有素材时 {@code sectionKey} 写 null，
+     * 不伪造章节 —— 素材可以独立于简历章节存在。
+     * 无章节也无素材时直接返回，等于清空关联。
+     */
     private void replaceSections(Long assetId, Long userId, List<String> sectionKeys, List<Long> materialIds) {
         sectionRepository.deleteByAssetId(assetId);
         List<String> keys = sectionKeys == null ? List.of() : sectionKeys.stream().distinct().toList();
@@ -176,6 +212,10 @@ public class InterviewAssetService {
         sectionRepository.save(section);
     }
 
+    /**
+     * 把请求内容写进实体。题面与原始答案必填（注解已保证非空），
+     * 建议答案允许为空 —— 空串统一转 null，避免库里出现「有值但为空白」的两义状态。
+     */
     private void applyContent(InterviewAnswerAsset asset, InterviewAssetRequest request) {
         asset.setQuestionText(request.questionText().trim());
         asset.setOriginalAnswerText(request.originalAnswerText().trim());

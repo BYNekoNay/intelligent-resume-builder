@@ -15,7 +15,22 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * AI 任务配额服务。按用户 + 任务类型 + 自然日限流。
+ * AI 任务配额服务 —— 按「用户 + 任务类型 + 自然日」限制可发起的任务数。
+ *
+ * <p>这是成本闸门,不是业务校验:超限时抛 RATE_LIMITED,调用方(创建任务/重试)必须让它冒泡到网关。
+ *
+ * <p>要点 / 红线:
+ * <ul>
+ *   <li>计数口径是"尝试数"而不是"任务行数":SQL 里 {@code retry_count < 1 ? 1 : retry_count},
+ *       也就是说一个被重试过 N 次的任务算 N 次消耗。改这条 SQL 会同时改变配额语义,
+ *       而监控 gauge({@code sumAttemptsGroupedByTaskType})用的是同一口径,必须同步改。</li>
+ *   <li>窗口是"服务器本地时区的今天 0 点起",不是滚动 24 小时。跨时区部署会得到不同的切日点。</li>
+ *   <li>{@code JOB_MATERIAL_SELECTION} 与 {@code JOB_GENERATION} 共用同一个 {@code jobGeneration}
+ *       配额值,两者不独立计数。</li>
+ *   <li>没有登记配额的任务类型直接抛 VALIDATION 而不是放行 —— 新增任务类型时必须同时加配置键。</li>
+ *   <li>本类只做"读+判定",不写任何计数行;真正占用配额靠调用方随后插入的 ai_task 行。因此
+ *       同一瞬间的并发请求可能同时通过检查(检查与写入之间没有加锁)。</li>
+ * </ul>
  */
 @Service
 public class AiQuotaService {
@@ -53,6 +68,9 @@ public class AiQuotaService {
 
     /**
      * 检查用户今日配额。超限时抛出 RATE_LIMITED。
+     *
+     * <p>顺序:先确认任务类型已注册(拼错类型会得到 VALIDATION 而不是"配额为 0"),
+     * 再读限额(缺配置也是 VALIDATION),最后才查库计数。
      */
     @Transactional(readOnly = true)
     public void check(Long userId, AiTaskType type) {

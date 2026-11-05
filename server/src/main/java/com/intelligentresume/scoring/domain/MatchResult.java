@@ -14,6 +14,15 @@ import java.util.Map;
  * <p>不继承 BaseEntity：DDL 中无 {@code updated_at} 列，
  * 使用 {@code @PrePersist} 管理 {@code created_at}。
  * 无 {@code user_id} 列——跨用户校验通过 resume_version → resume → user_id 间接完成。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>只追加不更新</b>：没有 setter 之外的更新入口，结果复用靠"读旧行"而不是"改旧行"。</li>
+ *   <li>{@code explanation_json} 是 json 列（Hibernate {@code @JdbcTypeCode(JSON)}），
+ *       直接手写 SQL 时必须用 {@code ? FORMAT JSON}，否则会写成字符串标量。</li>
+ *   <li>三个分项 + 总分都是 {@code numeric(5,2)}，落库前必须 setScale(2)，否则比较/展示会出现长尾小数。</li>
+ *   <li>{@code created_at} 由本类兜底赋值，直接 JDBC 插入时不会自动填，需要显式给值。</li>
+ * </ul>
  */
 @Entity
 @Table(name = "match_result")

@@ -23,6 +23,15 @@ import java.util.List;
 
 /**
  * 沟通模板服务：模板库列表、真实资料预览、自定义模板 CRUD（归属校验）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>两级归属</b>：读写用 {@link #visible}（内置 + 本人），改/删用 {@link #ownedCustom}
+ *       （内置 → 403，他人 → 404），不要混用，否则会泄露他人模板是否存在。</li>
+ *   <li><b>保存/更新前必须过占位符白名单</b>，否则非法占位符会一路存活到预览。</li>
+ *   <li><b>{@code outputLanguage} 缺省补 ZH_CN</b>，与 {@code GenerateCommunicationRequest#normalizedLanguage} 同口径。</li>
+ *   <li>预览依赖简历版本未归档：归档版本即使归属正确也会 409，模板文本本身不做缓存。</li>
+ * </ul>
  */
 @Service
 public class CommunicationTemplateService {
@@ -42,6 +51,7 @@ public class CommunicationTemplateService {
         this.placeholderService = placeholderService;
     }
 
+    /** 列表：一次查出「内置 + 本人」，排序内置在前、再按使用次数降序（排序在 SQL 里，别在内存重排）。 */
     @Transactional(readOnly = true)
     public List<TemplateSummaryResponse> list(Long userId, TemplateScene scene, CommunicationType type,
                                               CommunicationOutputLanguage language) {
@@ -57,6 +67,11 @@ public class CommunicationTemplateService {
                 template.isSystem(), template.getUsageCount());
     }
 
+    /**
+     * 预览：用调用方自己的简历版本与 JD 填充占位符，不落库。
+     *
+     * <p>缺失占位符不报错而是回传，前端据 {@code missingPlaceholders} 标红让用户手补。
+     */
     @Transactional(readOnly = true)
     public TemplatePreviewResponse preview(Long id, Long resumeVersionId, Long jobDescriptionId, Long userId) {
         CommunicationTemplate template = visible(id, userId);
@@ -68,6 +83,11 @@ public class CommunicationTemplateService {
                 template.getTemplateType(), fill.filledBody(), fill.missingPlaceholders());
     }
 
+    /**
+     * 新建自定义模板：强制 {@code isSystem=false}、{@code usageCount=0}，归属当前用户。
+     *
+     * <p>{@code description} 空白转 null（而非空串），便于「有无描述」用 IS NULL 判断。
+     */
     @Transactional
     public TemplateSummaryResponse saveCustom(SaveTemplateRequest request, Long userId) {
         placeholderService.validate(request.bodyText());
@@ -84,6 +104,11 @@ public class CommunicationTemplateService {
         return summary(templateRepository.saveAndFlush(template));
     }
 
+    /**
+     * 更新自定义模板：全字段覆盖（与创建同构），靠 {@code @Version} 乐观锁拦并发覆盖。
+     *
+     * <p>注意这里**不碰 usageCount**：计数只走仓储的原子自增，否则会把并发增量写回旧值。
+     */
     @Transactional
     public TemplateSummaryResponse update(Long id, UpdateTemplateRequest request, Long userId) {
         CommunicationTemplate template = ownedCustom(id, userId);

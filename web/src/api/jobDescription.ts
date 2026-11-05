@@ -1,3 +1,8 @@
+/**
+ * 职位描述（JD）接口层：/api/jobs 的增删改查 + 关键词解析。
+ * 边界：只做请求封装与类型定义。摘要（JobDescriptionSummary）只带 jdTextPreview，不含全文，所以编辑/展示全文必须再调 getJob。
+ * parseJob 是 POST 触发的服务端解析，返回更新后的详情，调用方需自行刷新列表以更新 parsedAt 状态。
+ */
 import { http } from './client'
 
 interface JobDescriptionBase {

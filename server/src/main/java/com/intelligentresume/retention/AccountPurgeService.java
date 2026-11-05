@@ -70,6 +70,9 @@ public class AccountPurgeService {
         int succeeded = 0;
         int failed = 0;
         for (AccountDeletionJob job : due) {
+            // 只改内存状态，不落库：数据库里看不到 RUNNING。真正的状态迁移由下面的事务写
+            // SUCCESS / 异常分支写 PARTIAL_FAILED 完成；因此多实例并发时同一任务可能被同时领取，
+            // 这里成立的前提是 PURGE_STATEMENTS 全部幂等。
             job.setStatus(AccountDeletionJob.Status.RUNNING);
             try {
                 // 回调返回 Boolean.TRUE 作为结果（TransactionTemplate 允许返回 null，

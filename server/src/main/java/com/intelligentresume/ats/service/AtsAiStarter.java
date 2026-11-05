@@ -30,6 +30,20 @@ import org.springframework.stereotype.Component;
  * <p>两段式启动是 ATS 独有，见计划文档 §7.8 —— prompt 正文含
  * {@code atsCheckResultId}（worker 靠它写回结论），导致「预览必须先有 check」，
  * 于是把「检查」与「启动 AI」拆成两个端点。
+ *
+ * <p>要点（两个入口的语义差别是刻意的）：
+ * <ul>
+ *   <li>{@link #startOrFallback}：首次检查时调用，<b>任何问题都不抛给客户端</b>，一律落兜底
+ *       （AI_DISABLED / PREVIEW_REQUIRED / CONSENT_REQUIRED / QUOTA_EXCEEDED / UNKNOWN）。
+ *       规则结果已经在库里，客户端总能拿到分数。</li>
+ *   <li>{@link #retryOrThrow}：用户主动重试时调用，<b>令牌校验在 try 之外</b>，缺令牌/令牌不符直接抛
+ *       400/409；只有创建任务阶段的预期错误才转兜底。放进去就会被吞成"静默不跑 AI 还返回 200"。</li>
+ *   <li>可用性检查必须排在令牌之前：无密钥环境要落 AI_DISABLED，抢在令牌前报错会把"服务没配"
+ *       误报成"你没预览"。</li>
+ *   <li>创建任务用固定幂等键 {@code ats:<checkId>:v1}：同一个 check 只会对应一条 ATS 分析任务。</li>
+ *   <li>重试时如果已有任务处于 PENDING/RUNNING/SUCCESS，只同步状态、不新建任务；
+ *       只有 FAILED 才调用 {@code taskService.retry}。</li>
+ * </ul>
  */
 @Component
 public class AtsAiStarter {
@@ -90,6 +104,10 @@ public class AtsAiStarter {
      * <p>本端点的语义就是"我现在要发 AI"，缺令牌或令牌与载荷不符是协议错误，
      * 必须 40001/40901 抛给客户端；若在这里也兜底，就成了"静默不跑 AI 但报 200"，
      * 客户端永远发现不了自己漏了确认这一步。
+     *
+     * <p>另外：这里只捕获 {@link BusinessException}，其余 {@code RuntimeException} 会直接冒泡
+     * （{@code startOrFallback} 则会兜住并落 UNKNOWN）—— 两个入口对"意外异常"的处理不一样，
+     * 改动时注意客户端拿到的结果会不同。
      */
     public void retryOrThrow(AtsCheckResult result, ResumeVersion version, JobDescription job,
                              Long userId, String previewToken) {

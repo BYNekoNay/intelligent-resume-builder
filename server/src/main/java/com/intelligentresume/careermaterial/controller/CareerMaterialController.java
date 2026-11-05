@@ -24,6 +24,16 @@ import java.util.List;
  *     <li>GET /api/career-materials?type=SKILL — 列表(可选类型过滤,参数名 type)</li>
  *     <li>PATCH /api/career-materials/{id} — 更新(前端使用 PATCH)</li>
  * </ul>
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>本层只做协议适配（取 userId、包 ApiResponse、补 traceId），所有归属校验与业务
+ *         校验都在 Service；不要在 Controller 里补用户判断，否则会与 Service 的
+ *         NOT_FOUND 语义分叉；</li>
+ *     <li>userId 取自过滤器写入的 request attribute，缺失即 401；不存在"匿名访问"分支；</li>
+ *     <li>列表与搜索都不返回原文全文，前端要正文必须再调 GET /{id}；</li>
+ *     <li>路由路径、参数名（type / usagePreference / sort）是前端硬依赖，改名属破坏性变更。</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/career-materials")
@@ -49,6 +59,7 @@ public class CareerMaterialController {
         return ApiResponse.success(service.list(currentUserId(httpRequest), type), traceId(httpRequest));
     }
 
+    /** 分页参数的默认值（page=0 / size=25 / sort=updatedAt,desc）是前端不传参时的隐式契约。 */
     @GetMapping("/search")
     public ApiResponse<CareerMaterialSearchPage> search(
             @RequestParam(required = false) String q,
@@ -80,6 +91,7 @@ public class CareerMaterialController {
         return ApiResponse.success(null, traceId(httpRequest));
     }
 
+    /** 当前登录用户由鉴权链路写入 request attribute；拿不到说明鉴权未执行，按未登录处理。 */
     private Long currentUserId(HttpServletRequest request) {
         Object attr = request.getAttribute("currentUserId");
         if (attr == null) {

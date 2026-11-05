@@ -1,3 +1,11 @@
+<!--
+  模拟面试页（/interviews）：设置（简历来源 / 面试模式 / 题量 / 目标岗位）→ 会话（AI 出题、作答、评测、追问）→ 报告（分数、逐轮回顾、薄弱项专项练习）。
+  依赖 @/api/interview（startInterview / getInterviewState / answerInterview / continueWithRules / retryAi / finishInterview / getInterviewReport / previewFollowUp 等）、
+  @/api/ai 的 getTask 轮询、@/api/interviewAsset（把好答案存成问答资产）、useAiTaskPreview（发送前预览令牌）。
+  状态分支：按 sessionState.status 驱动 —— GENERATING_QUESTION / EVALUATING_ANSWER 为 AI 处理中，AI_ACTION_REQUIRED 需重试或规则降级，AWAITING_ANSWER 可作答，COMPLETED 看报告。
+  易错点：会话 id 存 sessionStorage（interview-session-id）用于刷新后恢复；发起请求前把 payload + 幂等键挂起（pendingStart/pendingAnswer），超时或重试时复用同一键；
+  状态轮询有次数上限（STATE_POLL_MAX_ATTEMPTS），避免后台标签被节流后无限轮询。
+-->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

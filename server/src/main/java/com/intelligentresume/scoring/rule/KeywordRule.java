@@ -18,6 +18,16 @@ import java.util.*;
  *
  * <p>分数 = (matched + partialMatched) / total * 100；无关键词时满分 100。
  * 关键词堆砌（重复出现多次）不影响分数（使用 Set 去重）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>三类互斥且并集 = 全部有效关键词</b>：归一化后为空的关键词被跳过，<b>不计入分母</b>
+ *       （否则一个纯符号关键词就能白白拉低分数）。</li>
+ *   <li><b>direct 与 synonym 的区分只影响明细</b>：{@code resumeRawTokens} 是未做同义词归一的集合，
+ *       用它判断"是否逐字命中"；分数上两者等权。</li>
+ *   <li><b>无关键词给 100 分</b>：JD 解析不出关键词时 keyword 维度不惩罚；改这个默认值会让所有空 JD 的分数突变。</li>
+ *   <li>本规则被 {@link SkillRule} 复用（传入 skills 子集 token），改算法会同时改两个维度。</li>
+ * </ul>
  */
 @Component
 public class KeywordRule {

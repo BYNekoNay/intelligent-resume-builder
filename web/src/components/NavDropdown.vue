@@ -1,3 +1,9 @@
+<!--
+顶部导航的下拉分组：label 是触发器文案，active 由父组件根据当前路由是否命中传入，用于高亮。
+菜单项通过默认插槽传入（一般是 RouterLink），点击菜单容器后统一关闭，省去每项各自 close。
+展开期间在 document 上挂两处监听：ESC 关闭、捕获阶段点击外部关闭；都在 onBeforeUnmount 解绑，
+否则路由切换后监听会残留并对新页面生效。
+-->
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, useId } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'

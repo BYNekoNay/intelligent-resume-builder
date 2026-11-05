@@ -1,3 +1,9 @@
+<!--
+资料库右侧详情面板：标题、类型 / 使用偏好标签、来源原文与 contentJson 结构化内容。
+三态渲染：loading 优先，其次 material 为空时显示「请选择」，其余才渲染正文。
+contentJson 先过滤 null / 空串 / 空数组再逐键展示；未在 fieldLabels 登记的键退回驼峰拆词。
+edit / delete / close 只抛事件，删除二次确认由父组件负责。
+-->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { FileText, Pencil, Trash2, X } from 'lucide-vue-next'

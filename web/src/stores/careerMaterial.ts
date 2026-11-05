@@ -1,3 +1,8 @@
+/**
+ * 职业素材摘要列表的共享状态（列表页、生成工作台等复用）。
+ * 边界：只缓存 listMaterials 的摘要结果，正文需要调用方自行 getMaterial；
+ * load(type) 是「按类型覆盖式加载」，每次都会整体替换 items，不做多类型合并缓存。
+ */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {

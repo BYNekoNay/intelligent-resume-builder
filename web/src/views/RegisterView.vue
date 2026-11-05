@@ -1,3 +1,8 @@
+<!--
+  注册页（/register，未登录可访问）：表单校验交给原生约束（用户名 3-64 位 [a-zA-Z0-9_.-]、密码至少 8 位、email 类型）。
+  提交走 useAuthStore().signUp，成功后 store 已持有会话，直接跳 career-materials 作为首次使用引导；失败统一提示注册错误。
+  该页在路由守卫里对已登录用户做了反向重定向，所以这里不处理「已登录进入」的情况。
+-->
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'

@@ -1,3 +1,9 @@
+<!--
+  首页 / 工作台：未登录时是落地页（含证明面板），登录后变成「下一步做什么」的行动面板。
+  上面板依赖 @/api/system 的健康检查（仅影响底部状态展示，失败不阻塞页面）；工作台数据来自 listResumes / listApplications / listTaskContinuations。
+  workspaceActions 按固定优先级拼装卡片：面试中的投递 > 草稿投递 > 未完成的 AI 任务 > 最近编辑的简历，第一项作为主 CTA，其余作为次要入口。
+  状态分支：三个工作台请求用 Promise.allSettled 并行，任一失败只置 workspaceError 并保留其余成功数据；全部为空且加载完成时展示空态引导。
+-->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
@@ -145,6 +151,7 @@ async function loadWorkspace() {
   ])
 
   if (resumeResult.status === 'fulfilled') resumes.value = resumeResult.value
+  // 单个请求失败不阻断其余卡片渲染，只把整块标记为「部分数据不可用」
   else workspaceError.value = true
   if (applicationResult.status === 'fulfilled') applications.value = applicationResult.value
   else workspaceError.value = true

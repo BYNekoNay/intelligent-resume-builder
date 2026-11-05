@@ -26,6 +26,25 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * ATS 体检门面：规则评分（本地、必出结果）+ 可选 AI 深度分析（异步、由 {@link AtsAiStarter} 负责）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li><b>规则结果永远先算先落库</b>：结构分由本类 {@code structureScore} 的四段固定规则给出（每段 25 分），
+ *       关键词/技能/经验覆盖来自 {@code ScoringService}；AI 是否可用、是否成功都不影响这条记录存在，
+ *       AI 失败只把状态改成 {@code RULES_FALLBACK}（见 {@code AtsResultStateService}）。</li>
+ *   <li>幂等三元组是 (userId, Idempotency-Key, requestFingerprint)：同键同指纹返回既有记录，
+ *       同键不同指纹 409；并发下靠数据库唯一键兜底，捕获 {@code DataIntegrityViolationException}
+ *       后重新查赢家 —— 别把这段当成"多余的 try/catch"删掉。</li>
+ *   <li>带 {@code useAi} 但不带预览令牌时<b>不启动 AI</b>，落 {@code PREVIEW_REQUIRED} 兜底；
+ *       若 provider 不可用则优先落 {@code AI_DISABLED}（可用性检查在令牌之前）。</li>
+ *   <li>归档版本（{@code deletedAt != null}）返回 409、他人的版本返回 404 —— 两者刻意区分：
+ *       归档可恢复，404 会让用户以为数据丢了。</li>
+ *   <li>{@link #toResponse} 在状态为 {@code ANALYZING} 时直接把 {@code resumeId} 置 null（跳过查询），
+ *       其余状态才回查简历版本；版本缺失会让整个查询抛 404。</li>
+ * </ul>
+ */
 @Service
 public class AtsService {
     private static final String DISCLAIMER = "规则分数与 AI 建议均用于简历改进参考，不代表真实企业 ATS 结果、录用概率或招聘决定。";
@@ -58,6 +77,14 @@ public class AtsService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 发起一次 ATS 检查。顺序不能换：幂等预检 → 归属校验 → 评分 → 组装 result_json → 落库
+     * → （可选）启动 AI → 回读。
+     *
+     * <p>{@code persisted} 里先写入一份"规则态"的完整结构（aiTaskId / aiInsights / fallback 全为 null），
+     * 之后 AI 的每一步都用 {@code AtsResultStateService} 在这个 JSON 上原地改字段 ——
+     * 所以新增字段必须在这里给出默认值，否则 {@code toResponse} 读到 null 只能走 fallback 分支。
+     */
     public AtsCheckResponse check(AtsCheckRequest request, String idempotencyKey, Long userId,
                             String previewToken) {
         String fingerprint = idempotencyService.fingerprint(Map.of(
@@ -80,6 +107,7 @@ public class AtsService {
         checks.put("skillCoverage", match.skillScore());
         checks.put("experienceCoverage", match.experienceScore());
 
+        // 结构分 = 四段 × 25，最高 100：姓名 / work / skills / (education 或 projects)
         int structure = (int) checks.get("structure");
         List<String> passed = new ArrayList<>();
         if (structure >= 75) passed.add("简历核心结构完整");
@@ -196,6 +224,13 @@ public class AtsService {
         return version;
     }
 
+    /**
+     * 结果 JSON → 响应。对旧记录是**宽容**的：缺字段（早期版本没有 keywordGap / fallback）
+     * 一律走默认值，不会抛错，因此前端可能拿到 {@code keywordGap == null}。
+     *
+     * <p>唯一会抛错的地方是 ANALYZING 之外的状态回查简历版本失败 —— 那说明版本被物理删除，
+     * 属于数据异常。
+     */
     private AtsCheckResponse toResponse(AtsCheckResult entity) {
         Map<String, Object> json = entity.getResultJson();
         AtsAnalysisStatus analysisStatus = enumValue(AtsAnalysisStatus.class, json.get("analysisStatus"), AtsAnalysisStatus.RULES_FALLBACK);

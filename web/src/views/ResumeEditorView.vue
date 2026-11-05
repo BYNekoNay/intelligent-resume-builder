@@ -1,3 +1,11 @@
+<!--
+  简历编辑器主页面（/resumes/:id/edit）。唯一数据源是 JSON 原文 content，各分节表单只是对它的受控编辑：
+  updateResume 深拷贝 resume 后按字段改写，再整体序列化回 content，因此 JSON 非法时所有表单编辑都会被拦住并要求先修源码。
+  保存 = 新建一个版本（createManualVersion），成功后跳 resume-detail；dirty（内容变化或填写了版本说明）会触发离开路由与 beforeunload 的二次确认。
+  依赖：@/api/resume（版本读取/创建/恢复）、@/api/ats（ATS 交接校验）、@/api/ai（单段优化 + 任务轮询）、@/api/careerMaterial（素材库插入）。
+  易错点：页面有多个异步源（加载、素材、保存、AI），统一用 editorContextEpoch / editorLoadSequence / relatedAssetsEpoch 做代次校验丢弃过期响应；
+  ATS 交接进入历史版本时页面为只读（historicalSourceReadOnly），必须先创建「可编辑后继版本」才能继续编辑。
+-->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
@@ -552,6 +560,7 @@ onBeforeRouteUpdate((to, from) => {
 })
 
 function updateResume(mutator: (draft: Record<string, any>) => void) {
+  // JSON 原文写坏时表单无法解析出结构，改为提示并打开源码面板，而不是静默覆盖用户输入
   if (!sourceValid.value) { showSource.value = true; error.value = t('resumeEditor.sourceInvalidEdit'); return }
   const draft = JSON.parse(JSON.stringify(resume.value || {})) as Record<string, any>
   mutator(draft)
@@ -688,6 +697,7 @@ function moveCustomEntry(sectionIndex: number, entryIndex: number, direction: -1
 function defaultResumeJson() { return { basics: { name: '' }, objective: { targetRole: '', targetIndustry: '', location: '', summary: '' }, links: [], work: [], volunteering: [], education: [], skills: [], projects: [], courses: [], certificates: [], publications: [], awards: [], languages: [], customSections: [], template: { code: 'classic' }, layout: defaultLayout } }
 
 async function loadEditor() {
+  // 先自增两个代次：之后所有 await 回来的分支都要再核对，否则旧上下文的响应会污染新页面
   const loadSequence = ++editorLoadSequence
   editorContextEpoch += 1
   const requestedResumeId = Number(props.id)
@@ -828,6 +838,7 @@ onMounted(() => {
 onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeUnload); window.removeEventListener('keydown', handleKeydown); previewResizeObserver?.disconnect(); if (undoTimer) clearTimeout(undoTimer) })
 
 async function save() {
+  // 只读的历史版本不允许写新版本；JSON 非法时不提交，避免把坏数据写入版本
   if (historicalSourceReadOnly.value) return
   let resumeJson: Record<string, unknown>
   try { resumeJson = JSON.parse(content.value) as Record<string, unknown> } catch { error.value = t('resumeEditor.resumeJsonInvalid'); return }

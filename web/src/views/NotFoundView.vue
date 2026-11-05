@@ -1,3 +1,7 @@
+<!--
+  404 兜底页：匹配未定义路径（/:pathMatch(.*)*），静态引入、不依赖任何接口，保证路由解析失败时也能渲染。
+  只有「回首页」一个出口，不放在 AppLayout 内，因此没有导航栏。
+-->
 <script setup lang="ts">
 import { useLocale } from '@/i18n'
 import { ArrowLeft, MapPinOff } from 'lucide-vue-next'

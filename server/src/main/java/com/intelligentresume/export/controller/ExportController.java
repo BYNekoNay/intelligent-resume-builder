@@ -26,6 +26,13 @@ import org.springframework.web.bind.annotation.*;
  *   <li>GET /api/exports/files/{id} — 下载 PDF</li>
  *   <li>POST /api/exports/tasks/{id}/retry — 重试失败任务</li>
  * </ul>
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>创建返回 202：渲染是异步的，返回时只有任务 id 和 PENDING 状态。</li>
+ *     <li>下载按 taskId 间接定位文件，响应头里不出现 storageKey；文件名固定 {@code resume.pdf}。</li>
+ *     <li>用户身份取自 {@code request.currentUserId}（JwtAuthenticationFilter 写入），缺失即 401。</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api/exports")

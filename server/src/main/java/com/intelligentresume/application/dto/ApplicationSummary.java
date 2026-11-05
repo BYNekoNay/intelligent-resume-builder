@@ -7,6 +7,13 @@ import java.time.LocalDateTime;
 /**
  * 投递记录列表摘要（ideation #50）。
  *
+ * <p>要点：
+ * <ul>
+ *     <li>不含 {@code statusHistory}：时间线只在详情接口返回。</li>
+ *     <li>不含 {@code stageEnteredAt}：它是统计口径的中间字段，不对外暴露。</li>
+ *     <li>{@code version} 是乐观锁版本号，客户端更新时要原样回传。</li>
+ * </ul>
+ *
  * <p>不返回草稿长文本（{@code coverLetterText} / {@code emailBodyText} /
  * {@code openingMessageText}）——它们只在展开卡片或打开编辑面板时按需从详情接口
  * （{@code GET /api/applications/{id}}）拉取；卡片上的「n/3」标记由 {@code draftCount} 支撑。

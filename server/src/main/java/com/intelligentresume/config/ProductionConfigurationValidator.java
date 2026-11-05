@@ -7,7 +7,19 @@ import org.springframework.stereotype.Component;
 import jakarta.annotation.PostConstruct;
 import java.util.List;
 
-/** Rejects known development credentials before a production instance accepts traffic. */
+/**
+ * 生产环境启动前的配置体检：命中开发默认值/弱配置就**拒绝启动**（而不是等到请求时才暴露）。
+ *
+ * <p>只在 {@code prod} profile 生效，{@code @PostConstruct} 阶段抛异常，因此错误会在部署时立刻可见。
+ *
+ * <p>边界：
+ * <ul>
+ *   <li>只做「长度 + 已知占位符子串」检查，**不评估熵**；真正的密钥管理在部署侧（Vault/环境变量）。</li>
+ *   <li>{@link #UNSAFE_VALUES} 是 contains 匹配：新增示例/默认密钥时要同步加进列表，否则会被当作合法值放过。</li>
+ *   <li>强制 {@code COOKIE_SECURE=true}：prod 走 HTTPS，secure=false 会让 refresh Cookie 明文传输。</li>
+ *   <li>强制信任转发头：prod 流量经两层代理，不信任会让所有客户端共用一个代理 IP 的限流桶。</li>
+ * </ul>
+ */
 @Component
 @Profile("prod")
 public class ProductionConfigurationValidator {
@@ -43,6 +55,7 @@ public class ProductionConfigurationValidator {
         this.trustForwardedHeaders = trustForwardedHeaders;
     }
 
+    /** 生产 profile 下的启动校验入口：任一项不合规都抛 IllegalStateException，容器不进入可用状态。 */
     @PostConstruct
     void validate() {
         requireStrong("JWT_SECRET", jwtSecret, 32);

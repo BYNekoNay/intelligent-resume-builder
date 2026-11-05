@@ -19,6 +19,15 @@ import java.util.regex.Pattern;
  *   <li>JD 无经验要求 → 满分 100</li>
  *   <li>score = min(resumeYears / requiredYears, 1.0) * 100</li>
  * </ul>
+ *
+ * <p>实现口径（与上面第 2 条的措辞不完全一致，改前请先看代码）：
+ * <ul>
+ *   <li>当前<b>不解析任何起止日期</b>，简历年限 = {@code work} 条目数 × 2；兼职/实习/时间重叠都会被按 2 年计。</li>
+ *   <li>年限要求取 requirements 中<b>命中的最大值</b>（正则 {@code (\d+)\s*年}）：
+ *       "3年以上"取 3，"3-5年"只会命中 "5年" 而取 5 —— 区间用右端、多条目取最大，属已知宽口径。</li>
+ *   <li>无 requirements 或无年限要求 → 直接 100 分；简历无 work 数组 → 0 年，即该维度 0 分。</li>
+ *   <li>规则名 {@code "experience"} 是权重表的键，不能改。</li>
+ * </ul>
  */
 @Component
 public class ExperienceRule {

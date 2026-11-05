@@ -19,12 +19,13 @@ import java.util.List;
 /**
  * 面试服务门面（原上帝类拆分后）。
  *
- * <p>仅保留 {@code getState} 与 8 个 public 签名的纯委托，不含业务实现；
+ * <p>除 {@code getState} 外，其余 public 方法都是纯委托，不含业务实现；
  * 不允许在门面私有方法内调用 @Transactional 方法（避免绕过代理）。
  *
  * <p>流程委托关系：start→{@link InterviewStartService}；answer→{@link InterviewAnswerService}；
  * retryAi→{@link InterviewRetryService}；continueWithRules/ruleAnswer→{@link InterviewRuleService}；
- * finish/report→{@link InterviewReportService}。
+ * finish/report→{@link InterviewReportService}；listHistory→{@link InterviewHistoryService}；
+ * createFollowUp/previewFollowUp→{@link InterviewFollowUpAiService}。
  */
 @Service
 public class InterviewService {
@@ -69,6 +70,7 @@ public class InterviewService {
     }
 
     // ==================== 流程委托 ====================
+    // 这里的每个方法都必须是「一行转发」：加逻辑就绕过了被委托类的短事务边界与锁顺序。
 
     public InterviewStateResponse start(StartInterviewRequest request, Long userId, String idempotencyKey) {
         return startService.start(request, userId, idempotencyKey);
@@ -115,6 +117,16 @@ public class InterviewService {
 
     // ==================== 会话状态（留在门面，Controller answer() 依赖其路由） ====================
 
+    /**
+     * 读取会话状态；顺带做一次「陈旧 PROCESSING 接管」。
+     *
+     * <p>为什么读取也要写：前端在 {@code GENERATING_QUESTION}/{@code EVALUATING_ANSWER} 下会持续轮询本接口，
+     * 若后台线程已死（进程重启、线程池异常），没有任何请求会推进状态，会话就永久卡住。
+     * 这里发现 attempt 超过阈值仍未完成就把它判死，会话随之进入 {@code AI_ACTION_REQUIRED}。
+     *
+     * <p>注意行锁：本方法用 {@code findByIdAndUserIdForUpdate}，因为可能写入。
+     * 只有 {@code AI_ACTION_REQUIRED} 才查最近一次失败 attempt —— 其他状态下的失败信息对前端无意义。
+     */
     public InterviewStateResponse getState(Long id, Long userId) {
         return tx.execute(status -> {
             InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(id, userId)

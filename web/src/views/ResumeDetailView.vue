@@ -1,3 +1,10 @@
+<!--
+  简历详情页（/resumes/:id）：版本历史（活动/归档切换）、改标题、设当前版本、归档/取消归档、恢复版本、导出 PDF、去打分/对比/编辑。
+  依赖 @/api/resume（getResume / listVersions / setCurrentVersion / archiveResumeVersion / restoreResumeVersion / updateResumeTitle / downloadJsonResume）、
+  @/api/jobDescription（关联岗位）、@/api/export（创建导出任务）、@/api/scoring（发起匹配打分）、@/api/interviewAsset 与 @/api/careerMaterial（关联素材展示）。
+  状态分支：versionsLoading 区分「版本列表还没回来」与「真的没有版本」；runningAction 按操作所在行禁用按钮，避免并发重复操作。
+  易错点：关联岗位可能已被删除，取不到时只清空展示，不阻断页面其他内容。
+-->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'

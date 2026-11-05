@@ -26,6 +26,21 @@ import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 
+/**
+ * 全局异常出口：把各类异常翻译成「HTTP 状态 + {@link ApiResponse} 信封」。
+ *
+ * <p>几条不能破的约定：
+ * <ul>
+ *   <li>**调用方错误不能落兜底**：缺参/缺头/方法不允许/媒体类型不支持/上传超限都必须显式处理，
+ *       否则会被报成 500 并输出 ERROR 全栈，污染 5xx 告警、也让调用方误判成服务故障。</li>
+ *   <li>406 等场景必须显式 {@code contentType(APPLICATION_JSON)}：否则响应体写不出去，
+ *       触发 ERROR 派发后被安全链当匿名请求拒绝成 401，状态语义彻底丢失。</li>
+ *   <li>业务码 → 状态的映射集中在 {@code statusFor} 的穷尽 switch：新增 {@link ErrorCode}
+ *       忘记登记会编译失败，这是刻意的。</li>
+ *   <li>日志只带 traceId；可能含用户数据/重复键值的异常（完整性冲突）不打印 message。</li>
+ *   <li>兜底分支统一 50001，不把异常 message 透给客户端。</li>
+ * </ul>
+ */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 

@@ -1,3 +1,11 @@
+<!--
+职业资料的新建 / 编辑表单，一个组件覆盖普通资料与三类专项资料（成果 / 管理经历 / 技能证据）。
+material 为 null 是新建，否则是编辑；编辑时资料类型 select 被禁用，因为切换类型会丢失已有结构化内容。
+专项类型走 specialized 表单并序列化成 contentJson，其余类型直接编辑 sourceText 与高级 JSON 文本，
+提交时统一由 buildSpecializedContent / JSON.parse 汇成 payload。
+dirty-change 由 snapshot 快照比对得出：reset 后用 nextTick 记录基线，避免初始化本身被判成有改动。
+save 只抛 payload，真正写库与关闭由父组件处理。
+-->
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ArrowLeft, BarChart3, BriefcaseBusiness, FileText, Save, Settings2, X } from 'lucide-vue-next'

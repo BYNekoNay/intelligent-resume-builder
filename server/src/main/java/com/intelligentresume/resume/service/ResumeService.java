@@ -14,12 +14,15 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 简历 CRUD + 当前版本切换。
+ * 简历主档的 CRUD 与"当前版本"指针切换；版本内容本身由 {@link ResumeVersionService} 管理。
  *
- * <p>关键约定：
+ * <p>要点：
  * <ul>
- *     <li>所有查询带 userId 条件，杜绝跨用户访问。</li>
- *     <li>软删设置 deleted_at，版本不删除以保留历史快照。</li>
+ *     <li>所有查询都带 {@code userId} 条件——跨用户一律 404，不泄露"存在但不属于你"。</li>
+ *     <li>删除是软删（写 {@code deleted_at}）；版本不跟着删，历史快照必须保留。</li>
+ *     <li>{@code create} 若同时传了 {@code resumeJson}，会顺带落一条 v1 并直接设为当前版本；
+ *         不传则简历处于"无当前版本"状态，等前端首次保存版本。</li>
+ *     <li>切换当前版本前要校验"版本属于该简历"且"未归档"，否则会指向不可见的内容。</li>
  * </ul>
  */
 import com.intelligentresume.resume.domain.ResumeSourceType;
@@ -40,6 +43,12 @@ public class ResumeService {
         this.jsonResumeValidator = jsonResumeValidator;
     }
 
+    /**
+     * 创建简历主档；{@code resumeJson} 非空时同时落一条 {@code MANUAL} 的 v1 版本并设为当前版本。
+     *
+     * <p>两个写入在同一事务里：版本校验失败（JSON 结构不合法或超限）会连主档一起回滚，
+     * 不会留下一条没有内容的空简历。
+     */
     @Transactional
     public ResumeDetail create(CreateResumeRequest req, Long userId) {
         Resume resume = new Resume();
@@ -99,6 +108,11 @@ public class ResumeService {
         return toDetail(resume);
     }
 
+    /**
+     * 软删除简历：只写 {@code deleted_at}，{@code @SQLRestriction} 会让它从所有查询里消失。
+     *
+     * <p>版本行不动——物理删除由留存清扫按引用判定处理，这里删掉就无法恢复。
+     */
     @Transactional
     public void softDelete(Long id, Long userId) {
         Resume resume = findOwned(id, userId);
@@ -106,6 +120,13 @@ public class ResumeService {
         resumeRepository.save(resume);
     }
 
+    /**
+     * 切换简历的当前版本指针。
+     *
+     * <p>三道校验缺一不可：简历归属（行锁）；版本必须存在且 {@code resumeId} 与路径一致
+     * （防"拿别人的版本 id 挂到自己的简历上"）；版本不能已归档。
+     * 校验顺序是先归属后状态，避免通过错误码差异探测他人简历。
+     */
     @Transactional
     public void setCurrentVersion(Long resumeId, Long versionId, Long userId) {
         Resume resume = findOwnedForUpdate(resumeId, userId);

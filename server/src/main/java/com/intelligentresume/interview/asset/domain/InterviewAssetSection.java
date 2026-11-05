@@ -8,6 +8,15 @@ import jakarta.persistence.Table;
 /**
  * 面试答案资产 <-> 简历章节/素材关联。
  * 每个资产可关联多个章节，同一章节下可关联多个素材条目。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>一行代表一个「章节 × 素材」组合；{@code sectionKey} 与 {@code materialId} 都允许为空
+ *       （仅挂素材、或仅挂章节），但不会两者同时为空。</li>
+ *   <li>{@code sectionKey} 必须是资产服务里的章节白名单之一，否则前端渲染不出来。</li>
+ *   <li>没有软删除：资产删除时随删，因此清扫作业可以据「无引用」判定资产是否可物理删除。</li>
+ *   <li>按章节反查资产时用 {@code userId + sectionKey}，不要只按 sectionKey（跨用户）。</li>
+ * </ul>
  */
 @Entity
 @Table(name = "interview_asset_section")

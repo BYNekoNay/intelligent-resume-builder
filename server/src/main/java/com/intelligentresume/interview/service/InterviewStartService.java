@@ -28,6 +28,17 @@ import java.util.Optional;
  * 面试开始流程：两阶段短事务 + 事务外首题 AI。
  *
  * <p>TX1 创建会话并校验同意/配额/幂等 → 事务外调用首题 AI → TX2 落库。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>AI 调用绝不能放进事务：单次模型调用可达百秒级，会长时间占用连接与行锁。</li>
+ *   <li>TX2 必须重新加锁并校验状态仍是 {@code GENERATING_QUESTION}，否则说明期间被别的操作
+ *       （陈旧接管、用户降级规则模式）改过，此时只能抛 CONFLICT 丢弃本次结果。</li>
+ *   <li>题数被夹在 [{@value #MIN_TARGET}, {@value #MAX_TARGET}]；min/max 由 target 派生，
+ *       三者的含义见 {@link InterviewSession}。改派生公式会同时影响完成判定。</li>
+ *   <li>幂等：同一 Idempotency-Key + 同一请求指纹 → 直接回放已有会话；键相同但指纹不同 → 409。</li>
+ *   <li>调用方显式传入 {@code initialQuestion} 时不调 AI，直接把它当作首题（练习/重放场景）。</li>
+ * </ul>
  */
 @Service
 public class InterviewStartService {
@@ -60,7 +71,8 @@ public class InterviewStartService {
     private record StartPreparation(Long sessionId, boolean replayed, Long attemptId) {}
 
     public InterviewStateResponse start(StartInterviewRequest request, Long userId, String idempotencyKey) {
-        // 计算题数
+        // 计算题数：先夹逼用户输入，再由 target 派生出「至少 / 至多」轮数
+        // （min = target×50% 向上取整，max = target×150% 向下取整）。
         int target = request.targetQuestionCount() != null
                 ? Math.max(MIN_TARGET, Math.min(MAX_TARGET, request.targetQuestionCount()))
                 : DEFAULT_TARGET;
@@ -68,15 +80,16 @@ public class InterviewStartService {
         int maxQ = (int) Math.floor(target * 1.5);
         InterviewOutputLanguage outputLanguage = request.outputLanguage() != null
                 ? request.outputLanguage() : InterviewOutputLanguage.ZH_CN;
+        // 首题允许调用方指定；全空白视为未指定（否则会生成一个空字符串题目）
         String initialQuestion = request.initialQuestion() == null ? null : request.initialQuestion().trim();
         if (initialQuestion != null && initialQuestion.isBlank()) {
             initialQuestion = null;
         }
 
-        // 验证来源
+        // 验证来源：平台简历必须属于本人且未归档；外部简历必须有正文；JD 必须属于本人
         promptContextAssembler.validateSource(request, userId);
 
-        // 构建请求指纹
+        // 构建请求指纹：幂等键相同但入参不同时必须能识别出来（否则会把 A 请求的结果返回给 B）
         String fingerprint = operationSupport.buildStartFingerprint(userId, request);
 
         // TX1: 创建会话 + 校验同意/配额/幂等
@@ -93,15 +106,18 @@ public class InterviewStartService {
                         .findByIdAndUserIdForUpdate(prev.getSessionId(), userId).orElseThrow();
                 if (prev.getStatus() == AiAttemptStatus.PROCESSING
                         && operationSupport.isStale(prev, LocalDateTime.now())) {
+                    // 上次请求的进程已死：把旧 attempt 判死并继续返回旧会话状态，让用户点重试
                     operationSupport.markAttemptFailed(previousSession, prev, "PROCESSING_TIMEOUT",
                             "AI 请求处理超时，请重试", true, null);
                 }
                 return new StartPreparation(previousSession.getId(), true, prev.getId());
             }
 
+            // 先落库拿到 sessionId，attempt 才能引用它；状态直接置为「生成中」，避免中间态被读取
             InterviewSession session = new InterviewSession();
             session.setUserId(userId);
             session.setSourceType(request.sourceType());
+            // 两种来源只保留各自相关字段，另一侧写 null，避免同一会话出现两套简历数据
             session.setResumeVersionId(request.sourceType() == InterviewSourceType.PLATFORM_RESUME ? request.resumeVersionId() : null);
             session.setExternalResumeText(request.sourceType() == InterviewSourceType.EXTERNAL_RESUME ? request.externalResumeText().trim() : null);
             session.setJobDescriptionId(request.jobDescriptionId());
@@ -115,7 +131,8 @@ public class InterviewStartService {
             session.setMaxQuestionCount(maxQ);
             sessionRepository.saveAndFlush(session);
 
-            // 校验同意
+            // 校验同意：缺同意也落一条 FAILED attempt（errorCode=FORBIDDEN、retryable=false），
+            // 这样前端拿到的是结构化的 aiFailure，而不是一个无名错误；授权后续可在 /ai/retry 里恢复
             if (!operationSupport.hasInterviewConsent(userId, session)) {
                 session.setStatus(InterviewStatus.AI_ACTION_REQUIRED);
                 sessionRepository.save(session);
@@ -130,7 +147,7 @@ public class InterviewStartService {
                 return new StartPreparation(session.getId(), false, attempt.getId());
             }
 
-            // 校验配额
+            // 校验配额：与同意不同，配额属于「稍后可能恢复」，所以 retryable=true
             try {
                 operationSupport.checkInterviewQuota(userId);
             } catch (BusinessException e) {
@@ -154,6 +171,7 @@ public class InterviewStartService {
         });
 
         Long sessionId = preparation.sessionId();
+        // 幂等回放：不重复建会话、不调 AI，只把上次的终态（含失败信息）再返回一次
         if (preparation.replayed()) {
             InterviewSession session = sessionRepository.findById(sessionId).orElseThrow();
             InterviewAiAttempt attempt = attemptRepository.findById(preparation.attemptId()).orElseThrow();
@@ -161,7 +179,8 @@ public class InterviewStartService {
                     attempt.getStatus() == AiAttemptStatus.FAILED ? stateAssembler.buildAiFailure(attempt) : null);
         }
 
-        // TX1 后检查：如果已进入 AI_ACTION_REQUIRED
+        // TX1 后检查：TX1 内已因同意/配额失败时，会话已是 AI_ACTION_REQUIRED，不能再调 AI。
+        // 这里用最近一条 FAILED（id 降序）而不是最新更新，保证拿到的是本次刚写的那条。
         InterviewSession afterTx1 = sessionRepository.findById(sessionId).orElseThrow();
         if (afterTx1.getStatus() == InterviewStatus.AI_ACTION_REQUIRED) {
             InterviewAiAttempt failedAttempt = attemptRepository
@@ -174,6 +193,7 @@ public class InterviewStartService {
         }
 
         // 提供 initialQuestion 时跳过 AI 首题生成，会话直接进入 AWAITING_ANSWER
+        // attempt 仍记为 SUCCESS 并写入题目，使该会话同样具备一条可追溯的首题记录（幂等回放依赖它）
         if (initialQuestion != null) {
             String practiceQuestion = initialQuestion;
             tx.executeWithoutResult(s -> {
@@ -195,12 +215,13 @@ public class InterviewStartService {
             return stateAssembler.buildStateResponse(session, null, null);
         }
 
-        // Phase 2: 事务外调用 AI
+        // Phase 2: 事务外调用 AI（此处无事务，失败后由下面的 tx 回写状态）
         InterviewAiService.AiInvocation<InterviewCoachResponse.InitialQuestion> initialCall;
         try {
             initialCall = operationSupport.callAiForFirstQuestion(afterTx1, userId);
         } catch (BusinessException e) {
-            // AI 失败 → TX-error
+            // AI 失败 → TX-error：把失败原因完整落到 attempt（含 retryable 与 providerRequestId），
+            // 前端据此显示「重试」还是「重新授权」
             tx.executeWithoutResult(s -> {
                 InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId).orElseThrow();
                 session.setStatus(InterviewStatus.AI_ACTION_REQUIRED);
@@ -217,6 +238,8 @@ public class InterviewStartService {
         }
 
         // TX2: 保存 AI 结果
+        // 状态守卫不可省略：AI 调用的几十秒里，会话可能已被 getState 的陈旧接管或用户降级改成别的状态；
+        // 此时写回题目会覆盖更新的状态，所以必须抛 CONFLICT 让本次结果作废。
         tx.executeWithoutResult(s -> {
             InterviewSession session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId).orElseThrow();
             if (session.getStatus() != InterviewStatus.GENERATING_QUESTION) {

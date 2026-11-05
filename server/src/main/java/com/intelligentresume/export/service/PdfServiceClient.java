@@ -28,6 +28,18 @@ import java.util.UUID;
  *
  * <p>使用 RestClient(Spring 6.1+)同步调用,无需引入 webflux。
  * 超时、认证失败、渲染错误均抛 BusinessException(PDF_FAILURE)。
+ *
+ * <p>要点：
+ * <ul>
+ *     <li>输入大小在发请求前**估算**（{@code toString().length()*2}），是粗估不是精确字节数；
+ *         超限直接拒绝，不浪费一次下游渲染。</li>
+ *     <li>输出大小在拿到响应后、落盘前校验：超限的文件不允许进入私有存储。</li>
+ *     <li>503 必须抛 {@link PdfCapacityException} 而不是普通 PDF_FAILURE —— 否则调用方无法区分
+ *         "现在没名额"与"这次渲染坏了"，任务会被永久判死。</li>
+ *     <li>其它失败细分为输入过大/输出过大/传输/响应/未知类别，仅用于指标，对外文案统一。</li>
+ *     <li>{@code render} 与 {@code checkHealth} 用两个不同的 RestClient：健康探测超时固定 1s，
+ *         不能占用渲染的长超时。</li>
+ * </ul>
  */
 @Component
 public class PdfServiceClient {

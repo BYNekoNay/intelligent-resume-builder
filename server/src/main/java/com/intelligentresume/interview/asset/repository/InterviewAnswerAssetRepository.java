@@ -8,6 +8,18 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 答案资产查询。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>实体带 {@code @SQLRestriction("deleted_at IS NULL")}，因此这里的查询天然不含已删行。</li>
+ *   <li>{@code search} 的每个条件都用 {@code :param IS NULL OR ...} 写法实现「可空筛选」，
+ *       调用方需要先判空再传，不要传空串（空串不等于 null，会真的去匹配）。</li>
+ *   <li>按 JD 筛选是经 {@code interview_record → interview_session} 子查询完成，且子查询内再带
+ *       userId，双重限定避免越权。</li>
+ * </ul>
+ */
 public interface InterviewAnswerAssetRepository extends JpaRepository<InterviewAnswerAsset, Long> {
     Optional<InterviewAnswerAsset> findByIdAndUserId(Long id, Long userId);
 

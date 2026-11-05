@@ -24,6 +24,14 @@ import java.util.Set;
  * </ul>
  * 现在两者都只消费同一份计划，且子记录是**独立条目**（有自己的 stableId 与决策），
  * 所以"父的分支决定子是否写"这条隐式规则在结构上不存在了。
+ *
+ * <p>改这里的约束：
+ * <ul>
+ *   <li><b>顺序即写入顺序</b>：父永远排在子前面，子紧跟其父；改动遍历顺序会直接破坏外键播种。</li>
+ *   <li><b>stableId 必须存在且全局唯一</b>（跨集合也唯一）：缺失或重复直接抛异常，拒绝整份导入。</li>
+ *   <li><b>分类只有三种结论</b>：ADD / SKIP / CONFLICT，没有"部分更新"这种中间态。</li>
+ *   <li>plan 只读库（{@code loadLocal} / {@code localIdOf}），不写任何数据。</li>
+ * </ul>
  */
 final class DesktopImportPlanner {
 

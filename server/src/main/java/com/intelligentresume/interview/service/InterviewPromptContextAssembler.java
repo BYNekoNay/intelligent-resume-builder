@@ -22,6 +22,16 @@ import java.util.Map;
  * AI 面试上下文构建与来源校验（无事务边界）。
  *
  * <p>负责首题/评估上下文的组装、简历与 JD 脱敏、来源归属校验。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>只读：不写库、不开事务。因此也能被「发送前预览」复用（预览要求零副作用）。</li>
+ *   <li>上下文里所有用户内容都经 {@link InterviewContextSanitizer}；评估上下文末尾必须带上
+ *       不可信数据标记，首题上下文则把数据包在模板的 {@code [UNTRUSTED_USER_DATA]} 块里。</li>
+ *   <li>找 JD / 简历时一律带 userId 过滤，越权与不存在返回同一种 404 语义（不区分）。</li>
+ *   <li>评估上下文包含进度与历史：{@code completedQuestionCount} 是模型判断「能不能收尾」的主要依据，
+ *       必须与库里记录数一致。</li>
+ * </ul>
  */
 @Component
 public class InterviewPromptContextAssembler {
@@ -44,6 +54,13 @@ public class InterviewPromptContextAssembler {
         this.recordRepository = recordRepository;
     }
 
+    /**
+     * 首题上下文：JD + 简历 + 面试模式。
+     *
+     * <p>与评估上下文不同，这里<b>没有</b>历史问答和不可信标记 —— 历史为空，标记由模型模板
+     * （{@code FIRST_QUESTION_TEMPLATE}）统一包裹，重复添加只会浪费 token。
+     * JD 取不到时显式写 {@code None (general interview)}，让模型按通用岗位标准出题而不是凭空假设。
+     */
     public String buildFirstQuestionContext(InterviewSession session, Long userId) {
         StringBuilder ctx = new StringBuilder();
 
@@ -64,6 +81,16 @@ public class InterviewPromptContextAssembler {
         return ctx.toString();
     }
 
+    /**
+     * 评估上下文：JD + 简历 + 进度 + 历史问答 + 当前题目 + 当前回答。
+     *
+     * <p>进度（completed / min / target / max）必须和 {@code InterviewSession} 上的值一致，
+     * 这是模型决定「给不给下一题、能不能收尾」的唯一依据；本地还会用 {@code validateEvaluationProgress}
+     * 再兜一层，两侧口径对不上就会频繁触发重试。
+     *
+     * <p>本方法会读全量历史记录（构建上下文需要），与状态接口的「只读末条」是两种取舍：
+     * 这里每轮只调用一次，状态接口每秒可能被轮询多次。
+     */
     public String buildEvaluationContext(InterviewSession session, String answer, Long userId) {
         StringBuilder ctx = new StringBuilder();
 
@@ -104,6 +131,10 @@ public class InterviewPromptContextAssembler {
         return ctx.toString();
     }
 
+    /**
+     * 按来源类型写入简历段落。三个分支各自写入内容或一段明确占位，
+     * 避免模型对着空的 "Resume:" 自行编造经历（外部简历的非空由 {@link #validateSource} 保证）。
+     */
     public void appendResumeContext(StringBuilder ctx, InterviewSession session, Long userId) {
         ctx.append("Resume:\n");
         if (session.getSourceType() == InterviewSourceType.PLATFORM_RESUME) {
@@ -127,6 +158,12 @@ public class InterviewPromptContextAssembler {
         }
     }
 
+    /**
+     * 开场前的来源校验：决定「请求里哪些字段是必填的」。
+     *
+     * <p>平台简历必须有版本且属于本人（可能已归档，归档由 {@link #findOwnedResumeVersion} 拦）；
+     * 外部简历必须有正文；其他来源类型直接拒绝。JD 可选，但给了就必须属于本人。
+     */
     public void validateSource(StartInterviewRequest request, Long userId) {
         if (request.sourceType() == InterviewSourceType.PLATFORM_RESUME) {
             if (request.resumeVersionId() == null) throw validation("平台简历来源必须选择简历版本");
@@ -144,6 +181,14 @@ public class InterviewPromptContextAssembler {
         }
     }
 
+    /**
+     * 读取属于本人的简历版本。三步判定的<b>顺序是安全要求</b>：
+     * 归属校验必须早于归档判定，否则「版本不存在（他人）」与「版本已归档（本人）」会给出
+     * 不同响应码，等于把别人的版本号是否存在探测出来。
+     *
+     * <p>归档是可逆状态，因此用 {@code VERSION_ARCHIVED}(40902) + 「请先恢复」文案，
+     * 而不是 NOT_FOUND —— 后者给出的建议（重新上传）在这里是错的。
+     */
     public ResumeVersion findOwnedResumeVersion(Long versionId, Long userId) {
         ResumeVersion version = resumeVersionRepository.findById(versionId)
                 .orElseThrow(() -> notFound("简历版本不存在"));

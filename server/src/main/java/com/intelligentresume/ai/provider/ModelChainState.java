@@ -29,6 +29,17 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>冷却状态只存在于进程内存，重启后清空。这是刻意取舍：持久化会引入数据库依赖，
  * 而重启后重新探测一轮的代价有限。
+ *
+ * <p>不变量 / 易错点:
+ * <ul>
+ *   <li>{@code models} 列表顺序就是尝试优先级,构造时已 {@code List.copyOf} 固定 ——
+ *       改 {@code model-chain} 配置必须重启才生效。</li>
+ *   <li>冷却表的 key 是模型名字符串:把某个模型改名等于换了一个新模型,旧冷却不会被继承。</li>
+ *   <li>{@link #candidates()} 返回空列表表示"全部在冷却期",这是调用方快速失败的信号,
+ *       本类不会代为兜底。</li>
+ *   <li>短冷却不会缩短已有的长冷却({@link #markTransientFailure} 取两者较晚者),
+ *       这条规则保证"额度耗尽"不会被一次瞬时失败意外提前解除。</li>
+ * </ul>
  */
 final class ModelChainState {
 

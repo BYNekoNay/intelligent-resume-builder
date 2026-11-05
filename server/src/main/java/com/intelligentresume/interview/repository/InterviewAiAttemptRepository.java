@@ -11,6 +11,17 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * AI attempt 的读取入口。查询方法被幂等判定、配额统计、失败信息回显三处共用。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>{@code findByUserIdAndIdempotencyKey} 是幂等入口，依赖 {@code (user_id, idempotency_key)} 唯一约束。</li>
+ *   <li>{@code findBySessionIdAndOperationTypeAndRoundNo} 依赖另一条唯一约束，用于规则模式复用本轮 attempt。</li>
+ *   <li>配额统计按 {@code sum(attemptCount)} 而非行数：重试与契约修复都体现在代数上。</li>
+ *   <li>本接口没有加锁版本：状态推进的并发安全靠会话行锁 + 状态复核，而不是锁 attempt。</li>
+ * </ul>
+ */
 public interface InterviewAiAttemptRepository extends JpaRepository<InterviewAiAttempt, Long> {
     Optional<InterviewAiAttempt> findByUserIdAndIdempotencyKey(Long userId, String idempotencyKey);
     Optional<InterviewAiAttempt> findBySessionIdAndOperationTypeAndRoundNo(

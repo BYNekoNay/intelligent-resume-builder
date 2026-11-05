@@ -13,6 +13,18 @@ import java.util.Map;
  * <p>为什么单独成类：这些映射决定 worker 重建实体后拿到的字段，也就决定了 prompt 的实际内容 ——
  * 预览（{@code buildGenerationInput} 干跑）与 confirm（落库）必须产出**完全相同**的映射结果，
  * 因此只留一份实现，且只做纯字段搬运（不含业务判断）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>类与构造函数都是包私有：只允许同包 service 使用，别为了复用改成 public。</li>
+ *   <li><b>加字段就要两端一起加</b>：这里写的键必须能在
+ *       {@code JobGenerationInputAssembler} 的还原逻辑里读到，否则该字段会被静默丢掉，
+ *       表现为"提示词里少了内容"而不是报错。</li>
+ *   <li>{@code CareerMaterial} 映射里 {@code materialType} / {@code usagePreference} 存的是枚举
+ *       {@code name()}；还原时用 {@code Enum.valueOf}，改名会直接让历史快照解析失败。</li>
+ *   <li>{@code PersonalProfile} 映射**包含**联系方式；是否发给模型由 prompt 组装时挑选字段决定，
+ *       不在这一层过滤 —— 别在这里删字段，会让预览与 worker 的过滤口径分裂。</li>
+ * </ul>
  */
 final class MaterialSelectionSnapshotMapper {
 

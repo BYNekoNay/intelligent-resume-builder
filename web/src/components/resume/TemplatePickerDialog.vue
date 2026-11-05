@@ -1,3 +1,9 @@
+<!--
+简历模板选择弹窗：templateOptions 由父组件提供，name / description 是函数而不是字符串，
+这样模板名与说明能跟随当前语言，切换语言后无需重建选项数组。
+select 事件带模板 code；选中态用 templateCode 比对，并同步 aria-pressed。
+点击遮罩自身或关闭按钮都只抛 close，选模板与否由父组件决定。
+-->
 <script setup lang="ts">
 import { useLocale } from '@/i18n'
 

@@ -1,3 +1,10 @@
+<!--
+  素材转简历页（/material-generation）：把一段原始素材文本变成简历草稿，再跳编辑器继续加工。
+  三条路径：本地生成（不调 AI，直接把文本塞进 basics.summary 作为兜底）、AI 直接生成、AI 联想扩写后再生成结构化草稿。
+  依赖 @/api/materialGeneration（generateResumeFromMaterial / generateMaterialAssociation / generateResumeFromAssociation）、@/api/resume 的 createResume。
+  状态分支：loading / associating / saving 分别控制三处按钮；缺少 AI 同意时置 consentRequired 并给出授权入口；AI 超时提示任务仍在跑。
+  易错点：每次 AI 调用前必须走 useAiTaskPreview 拿令牌（用户取消则不发送）；幂等键按「动作 + payload 指纹」复用，成功后清除。
+-->
 <script setup lang="ts">
 import { isAxiosError } from 'axios'
 import { onMounted, ref } from 'vue'

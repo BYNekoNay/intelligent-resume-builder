@@ -26,6 +26,15 @@ import java.util.UUID;
  *     <li>refresh token 为 32 字节随机十六进制字符串,不落库原文,仅保存 SHA-256 摘要。</li>
  *     <li>{@link #hashToken(String)} 对任何 token 字符串统一返回 64 字符十六进制摘要。</li>
  * </ul>
+ *
+ * <p>红线:
+ * <ul>
+ *     <li>密钥按 UTF-8 **字节**计算长度,少于 32 字节在构造期直接抛异常(HS256 的硬要求);
+ *         prod profile 另外由 {@code ProductionConfigurationValidator} 拒绝默认值。</li>
+ *     <li>refresh token 只能经 {@link #issueRefreshToken()} 生成,且调用方必须先 {@link #hashToken}
+ *         再落库——库里出现原文即视为凭据泄露。</li>
+ *     <li>改 claim 结构(如 subject 语义)会让所有在线 access token 失效,需按发布窗口安排。</li>
+ * </ul>
  */
 @Service
 public class TokenService {
@@ -93,6 +102,9 @@ public class TokenService {
 
     /**
      * 从 access token 解析 userId。token 无效 / 过期 / 签名错误时返回 null。
+     *
+     * <p>只验证签名与 issuer，**不查库**：账号是否仍为 ACTIVE、会话是否被撤销由
+     * {@code JwtAuthenticationFilter} + {@code ActiveUserCache} 负责，两段合起来才是完整的鉴权。
      */
     public Long parseUserId(String token) {
         if (token == null || token.isBlank()) {
@@ -125,6 +137,9 @@ public class TokenService {
             return HexFormat.of().formatHex(hash);
         } catch (NoSuchAlgorithmException ex) {
             // SHA-256 永远可用,失败即降级到 Base64
+            // 注意:该分支产出的是 Base64 而非 64 位十六进制,与正常路径的摘要不可互比;
+            // 一旦触发,"签发时入库的摘要" 与 "刷新时计算的摘要" 会走同一降级路径,仍能匹配,
+            // 但长度与字符集变化会让外部按固定格式解析的代码(测试/运维脚本)失配。
             return Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8));
         }
     }

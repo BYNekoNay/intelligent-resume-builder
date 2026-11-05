@@ -4,6 +4,14 @@ import com.intelligentresume.ai.task.domain.AiTaskType;
 
 /**
  * AI 提供者接口。不同实现(mock、百炼等)通过 {@link #code()} 区分。
+ *
+ * <p>要点:
+ * <ul>
+ *   <li>{@link #supports} 决定路由命中哪个实现;当前百炼实现对所有任务类型返回 true。</li>
+ *   <li>未配置密钥时 {@link #call} 应返回失败结果而不是抛异常,这样调用方能把失败写进任务状态。</li>
+ *   <li>{@link #availableModelCount()} 的两个默认实现只在单模型提供者上成立:
+ *       多模型实现必须覆写,否则"全部模型冷却"会被健康检查误判为可用。</li>
+ * </ul>
  */
 public interface AiProvider {
 

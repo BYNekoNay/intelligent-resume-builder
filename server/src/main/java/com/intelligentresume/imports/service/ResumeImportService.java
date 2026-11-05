@@ -26,14 +26,42 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * 简历导入解析：把上传的 TXT / PDF / DOCX 抽成纯文本，再粗略归一化成基础字段。
+ *
+ * <p>职责边界：只做"文件 → 文本 → 建议字段"，不落库、不落盘、不合并进资料库；
+ * 结果要经用户确认后才写库（见包注释）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>四道闸门按顺序生效：非空 → 字节上限（{@code max-bytes}）→ 扩展名与
+ *       Content-Type 白名单 → 抽取后字符上限（{@code max-text-characters}）。
+ *       前两道拦"传太大"，第三道拦"改扩展名"，第四道拦"小文件炸出大文本"；</li>
+ *   <li>抽取在<b>单线程池 + 超时</b>里执行：畸形 PDF/DOCX 可能长时间占住线程，
+ *       multipart 的字节上限管不到解析耗时；超时按业务错误返回，不暴露解析器栈信息；</li>
+ *   <li>{@code normalize} 只是启发式：姓名取第一行非空、邮箱/手机用正则首个命中、
+ *       summary 塞全文。抽错字段很常见，所以 {@code normalizedResumeInput} 只能当建议；</li>
+ *   <li>返回的 {@code originalFileStored} 恒为 false —— 原文件从不保存，不要改成 true
+ *       除非同时补齐落盘加密与清理策略；</li>
+ *   <li>线程池是 daemon 且 {@code @PreDestroy} 关闭，禁用它会让应用无法优雅停机。</li>
+ * </ul>
+ */
 @Service
 public class ResumeImportService {
     private static final String OCTET_STREAM = "application/octet-stream";
+    /**
+     * 扩展名 → 允许的 Content-Type 白名单。
+     * octet-stream 是浏览器/命令行不识别类型时的通用兜底；docx 放行 application/zip
+     * 是因为部分客户端把 OOXML（本质是 zip 包）报成 zip。放宽任何一项都等于放宽
+     * "扩展名与内容不符"的防线。
+     */
     private static final Map<String, Set<String>> MEDIA_TYPES = Map.of(
             "txt", Set.of("text/plain", OCTET_STREAM),
             "pdf", Set.of("application/pdf", OCTET_STREAM),
             "docx", Set.of("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/zip", OCTET_STREAM));
+    /** 只取<b>第一个</b>命中，正文里出现多个邮箱/电话时不区分主次。 */
     private static final Pattern EMAIL = Pattern.compile("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", Pattern.CASE_INSENSITIVE);
+    /** 国内手机号（可带 +86/空格），用前后负向断言避免从更长数字串中截出 11 位。 */
     private static final Pattern PHONE = Pattern.compile("(?<!\\d)(?:\\+?86[- ]?)?1[3-9]\\d{9}(?!\\d)");
     private final long maxBytes;
     private final int maxPdfPages;
@@ -63,12 +91,22 @@ public class ResumeImportService {
         extractExecutor.shutdownNow();
     }
 
+    /**
+     * 解析入口：四道闸门（非空 / 字节 / 类型 / 字符数）+ 文本归一化。
+     *
+     * <p>异常处理只有两种归宿：业务异常原样透传（消息面向用户），其他一律压成
+     * "文件内容无法解析"，避免把 PDFBox/POI 的内部异常与路径信息漏给客户端。
+     * 注意文件名字段仅用于回显，不参与落盘路径拼接。
+     */
     public ResumeImportResponse parse(MultipartFile file) {
         if (file == null || file.isEmpty()) throw new BusinessException(ErrorCode.VALIDATION, "文件不能为空");
+        // 字节上限：只约束上传体积，不约束解析后的文本量（见下方字符上限）。
         if (file.getSize() > maxBytes) throw new BusinessException(ErrorCode.VALIDATION, "文件不能超过 5 MB");
         String name = Optional.ofNullable(file.getOriginalFilename()).orElse("resume");
         String extension = Optional.ofNullable(StringUtils.getFilenameExtension(name)).orElse("").toLowerCase(Locale.ROOT);
         if (!MEDIA_TYPES.containsKey(extension)) throw new BusinessException(ErrorCode.VALIDATION, "仅支持 TXT、PDF 或 DOCX 文件");
+        // Content-Type 缺失时按 octet-stream 处理；扩展名与类型必须同时命中白名单，
+        // 防止"改扩展名"绕过格式约束。该判断只看声明值，真正的格式校验由解析器抛错兜底。
         String mediaType = Optional.ofNullable(file.getContentType()).filter(value -> !value.isBlank()).orElse(OCTET_STREAM);
         if (!MEDIA_TYPES.get(extension).contains(mediaType.toLowerCase(Locale.ROOT))) {
             throw new BusinessException(ErrorCode.VALIDATION, "文件扩展名与内容类型不匹配");
@@ -130,11 +168,23 @@ public class ResumeImportService {
             return new PDFTextStripper().getText(document);
         }
     }
+    /**
+     * DOCX 抽取：只拼接正文段落，空段落丢弃。
+     * 表格、页眉页脚、文本框、图片里的文字都取不到 —— 版式化的简历会明显丢内容，
+     * 这是"导入结果只是建议"的原因之一，不是可以为空就报错的场景。
+     */
     private String extractDocx(MultipartFile file) throws IOException {
         try (XWPFDocument document = new XWPFDocument(file.getInputStream())) {
             return document.getParagraphs().stream().map(p -> p.getText()).filter(s -> !s.isBlank()).collect(Collectors.joining("\n"));
         }
     }
+    /**
+     * 启发式归一化，输出结构固定为 {@code {"basics": {...}}}：
+     * 姓名取第一行非空（PDF 常见排版，TXT 可能取到"个人简历"这类标题）、
+     * 邮箱/手机各取首个正则命中、summary 直接塞全文。
+     * 只放"抽到的字段"：没抽到 name 时给空串，email/phone 缺键而非空值，
+     * 前端需要按缺键判空。不要在这里补 AI 生成，导入流程不调用模型。
+     */
     private Map<String, Object> normalize(String text) {
         Map<String, Object> basics = new LinkedHashMap<>();
         basics.put("name", Arrays.stream(text.split("\\R")).map(String::trim).filter(s -> !s.isBlank()).findFirst().orElse(""));

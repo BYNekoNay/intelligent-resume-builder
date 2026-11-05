@@ -15,6 +15,16 @@ import java.util.regex.Pattern;
  *
  * <p>提取顺序（保持原实现不变，避免行为漂移）：markdown 代码块 → 整体就是 JSON →
  * 嵌入的 JSON 对象 → 嵌入的 JSON 数组 → 原文（交给上层 fallback）。
+ *
+ * <p>要点 / 易错点:
+ * <ul>
+ *   <li>空输入返回 {@code "{}"} 而不是 null,保证调用方的 Jackson 解析不会因 NPE 提前失败。</li>
+ *   <li>{@code OBJECT}/{@code ARRAY} 两个正则是贪婪的:正文里出现多段 JSON 时会从第一个左花括号
+ *       一直取到最后一个右花括号,把中间的非 JSON 文本一起带进来。改这里前先想清楚
+ *       "多段 JSON" 的场景怎么处理,不要只是把量词改成懒惰。</li>
+ *   <li>抽不出来时返回原文,是刻意的兜底:上层会把原文放进 {@code rawContent} 给用户看,
+ *       而不是返回一片空白。</li>
+ * </ul>
  */
 final class AiResponseJson {
 

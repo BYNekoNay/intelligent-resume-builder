@@ -14,6 +14,16 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
+/**
+ * 面试答案资产接口（前缀 {@code /api/interview-answer-assets}）。
+ *
+ * <p>要点：
+ * <ul>
+ *   <li>列表的四个筛选参数均可选，直接透传给服务层组合查询。</li>
+ *   <li>创建返回 201；删除是软删除，仍返回成功空体。</li>
+ *   <li>用户身份取自过滤器写入的 request attribute，缺失即 401。</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/interview-answer-assets")
 public class InterviewAssetController {

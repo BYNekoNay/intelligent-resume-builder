@@ -1,3 +1,9 @@
+<!--
+  导出任务状态页（/exports/:exportTaskId）：展示 PDF 导出的进度、失败原因、文件大小与过期时间，并在成功后提供下载。
+  依赖 @/api/export 的 getExportTask / downloadExport / retryExport；页面用 setTimeout 自轮询，只有 PENDING/RUNNING 才排下一次。
+  状态分支：SUCCESS 可下载；FAILED 可重试任务；EXPIRED / UNKNOWN 只能重查状态；首次加载失败或无任务时显示整块错误态。
+  易错点：服务端状态可能是未知字符串，normalizeStatus 统一降级为 UNKNOWN，避免 v-if 分支全部落空；离开页面必须清掉定时器。
+-->
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -60,6 +66,7 @@ async function load() {
     const res = await getExportTask(Number(props.exportTaskId))
     task.value = { ...res, status: normalizeStatus(res.status) }
     if (isProcessingStatus(task.value.status)) {
+      // 轮询退避 1s/2s/4s/5s，attempt 由 retryLoad / 重试任务重置
       const delay = [1000, 2000, 4000, 5000][Math.min(attempt, 3)]
       attempt += 1
       timer = window.setTimeout(load, delay)
