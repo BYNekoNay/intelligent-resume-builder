@@ -14,6 +14,32 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * 简历主记录的 HTTP 入口（{@code /api/resumes}）。
+ *
+ * <h2>只管「简历」，不管「版本」</h2>
+ * 本类操作的是 {@code resume} 这一层：标题、绑定的 JD、当前版本指针、软删。
+ * 版本的保存 / 归档 / 恢复 / 设为当前在 {@link ResumeVersionController}，
+ * 两处职责分开，避免「一次编辑同时改两层」的隐式耦合。
+ *
+ * <h2>端点</h2>
+ * <ul>
+ *   <li>{@code POST ""} —— 新建，返回 <b>201</b>；</li>
+ *   <li>{@code GET ""} / {@code GET /{id}} —— 列表与详情；</li>
+ *   <li>{@code GET /by-jd/{jdId}} —— 某 JD 关联的岗位简历，只用于「同 JD 再次生成」时判断新建还是更新，
+ *       <b>不是</b>「选一份已有简历作为生成目标」的入口（那个旧入口已被产品移除，不要重新引入）；</li>
+ *   <li>{@code PUT /{id}} —— 改标题等元信息；</li>
+ *   <li>{@code PATCH /{id}/current-version} —— 切换当前版本指针；目标版本必须属于该简历且未归档；</li>
+ *   <li>{@code DELETE /{id}} —— <b>软删</b>，不是物理删除。</li>
+ * </ul>
+ *
+ * <h2>两条贯穿约定</h2>
+ * <ol>
+ *   <li><b>归属过滤在服务端</b>：每个方法都用 {@code currentUserId}，拿不到即 {@code UNAUTHENTICATED}；
+ *       不要新增「按 id 直查」的旁路。</li>
+ *   <li><b>当前版本不能归档、归档版本不能设为当前</b> —— 这两条互斥约束由服务层强制，控制器不重复判断。</li>
+ * </ol>
+ */
 @RestController
 @RequestMapping("/api/resumes")
 public class ResumeController {
