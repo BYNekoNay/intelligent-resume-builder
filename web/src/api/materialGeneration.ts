@@ -1,3 +1,9 @@
+/**
+ * 素材导入生成简历的编排层：对应后端 AiTaskController（POST /api/ai/tasks、GET /api/ai/tasks/{id}）。
+ * 边界：不是单纯的 api 封装——createMaterialTask 建任务后在 waitForTask 里轮询到终态，
+ * 把 resultJson 脱壳并 normalizeResumeJson（按 sectionRegistry 白名单过滤章节）后再交给调用方。
+ * Idempotency-Key 与预览令牌都由调用方传入：令牌经 input._previewToken 提交（见 createMaterialTask 注释）。
+ */
 import { http } from './client'
 import { AI_TASK_POLL_ATTEMPTS, AiTaskTimeoutError } from './ai'
 import { AI_CONTEXT_SECTION_KEYS } from '@/resume/sectionRegistry'

@@ -83,7 +83,7 @@ final class ImportColumnBinder {
         return columnsOf(table).contains(column);
     }
 
-    /** 该表该列是否是 JSON 列（写入侧要把 {@code Map} 先转成 JSON 文本，见 {@code DesktopImportService#prepareValues}）。 */
+    /** 该表该列是否是 JSON 列（写入侧要把 {@code Map} 先转成 JSON 文本，见 {@link #valueFor}）。 */
     boolean isJsonColumn(String table, String column) {
         return jsonColumnsOf(table).contains(column);
     }
@@ -100,8 +100,8 @@ final class ImportColumnBinder {
      *   <li>{@code ? FORMAT JSON} → JSON <b>对象</b>（{@code byte[29]={"a":1}}），与 Hibernate
      *       自己写入的形态逐字节一致。</li>
      * </ul>
-     * 只对「JSON 列 + 字符串值」生效。包里是 {@code Map} 的情况由
-     * {@code DesktopImportService#jsonTextOf} 先转成 JSON 文本，再走到这里 ——
+ * 只对「JSON 列 + 字符串值」生效。包里是 {@code Map} 的情况由
+ * {@link #valueFor} 先序列化成 JSON 文本，再走到这里 ——
      * 直接把 {@code Map} 交给 {@code ?} 会被 H2 当成 {@code JAVA_OBJECT} 走 Java 序列化并报
      * {@code Data conversion error}（2026-10-23 实测）。
      * 本服务只在 desktop profile 激活、只跑 H2，用 H2 的 {@code FORMAT JSON} 不构成跨库分叉。

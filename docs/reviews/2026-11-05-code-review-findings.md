@@ -63,7 +63,56 @@
 
 ---
 
-## 已确认不是问题的（避免复查时重查）
+---
+
+## 第二批：收尾轮发现（2026-11-05 晚，5 路并发复查全仓后追加）
+
+> 复查覆盖 auth/common/config/system、careermaterial/jobdescription/imports、communication/scoring/desktop、
+> web views/router/stores/api/types 全部文件。大部分文件已被首批覆盖，本轮新发现如下。
+
+## 🔴 建议尽快确认
+
+| # | 位置 | 问题 |
+| --- | --- | --- |
+| 41 | `InterviewAssetsView.vue:155-161` | `onMounted` 的 `Promise.all` 只有 `listMaterials` 带 `.catch`；`listJobs()` 失败会使整个 Promise reject（unhandled rejection），岗位下拉为空且无任何错误提示 |
+| 42 | `InterviewAssetsView.vue:219` | 模板 `asset.materialIds.length` 直接访问；script 侧（:97）用了 `?? []`，说明该字段可空，列表渲染存在空值风险 |
+| 43 | `ResumeListView.vue:44-48` | `remove()` 的 `deleteResume`/`store.load()` 无 try/catch，删除失败无用户提示且 unhandled rejection，与同文件 `create()` 的错误处理不一致 |
+| 44 | `AuthController.java:230` | 用字面量 `request.getAttribute("currentUserId")` 取用户 id，而 `JwtAuthenticationFilter` 的常量注释声称它是唯一入口——两处靠字符串约定同步，存在漂移风险 |
+| 45 | `ResumeImportService.parse`（imports/service:104） | 报错文案硬编码 `"文件不能超过 5 MB"`，但上限来自可配置项 `app.resume-import.max-bytes`，改配置后文案失真 |
+| 46 | `ResumeImportService.extractPdf`（同文件 :163） | 页数上限检查发生在 `PDDocument.load(file.getBytes())` **之后**，超页 PDF 会先被完整载入内存才被拒，页数上限起不到省内存作用 |
+
+## 🟡 择期处理
+
+| # | 位置 | 问题 |
+| --- | --- | --- |
+| 47 | `api/export.ts:10` | `ExportTaskStatus` 含 `'UNKNOWN'` 值，未在后端导出状态枚举中确认其来源 |
+| 48 | `stores/auth.ts:37-38` | `initialize()` 先置 `initialized=true` 再发请求，靠 `initialized && error==='NETWORK'` 组合表达可重试，逻辑成立但较绕 |
+| 49 | `JobDescriptionController.list` | 按 `updatedAt` 单键倒序、无 id 兜底，同毫秒更新时次序不保证稳定（不分页暂无翻页问题） |
+| 50 | `CommunicationController` / `ScoringController` | 各有一份逐字相同的 `currentUserId`/`traceId` 私有 helper，可下沉公共层（重构建议） |
+| 51 | `DesktopImportPlanner.REASON_VERSION_NO_OCCUPIED` | 命名应为 `NOT_OCCUPIED`（常量名语法瑕疵，无行为影响） |
+
+## ⚪ 死代码 / 噪音 / 风格
+
+| # | 位置 | 问题 |
+| --- | --- | --- |
+| 52 | `WebStaticConfig.java:8-9` | 未使用 import（`Ordered`/`Order`） |
+| 53 | `scoring/rule/SkillRule.java:6,9-10` | 未使用 import（`RoundingMode`/`Matcher`/`Pattern`，疑为从 KeywordRule 复制残留） |
+| 54 | `SpaFallbackFilter:17` / `WebStaticConfig:24` | 注释硬编码"22 个懒加载路由"，前端路由数变化后会静默过时 |
+| 55 | `SystemController.java:63` | 版本号 `"0.5.0"` 硬编码（DTO 已声明"不要用它做版本判断"，属已知取舍） |
+| 56 | `CareerMaterialService.validateAchievement:278-283` | `RANGE` 与 `QUALITATIVE` 两个 case 代码完全相同，内层 switch `default` 实际不可达（冗余无害） |
+| 57 | `JobDescriptionService.parse:158` | `entityManager != null` 判空是为纯单测准备的防御分支，生产上不会为 null（可接受） |
+| 58 | `api/materialGeneration.ts:73` / `api/resumeImport.ts:7` | 纯格式问题（headers 缩进不对齐、接口挤成单行） |
+
+## 第二批已当场修复的（注释自身问题，属注释工程职责）
+
+- `ImportColumnBinder.java:86,104` 注释引用已不存在的 `DesktopImportService#prepareValues`/`#jsonTextOf`
+  （逻辑已迁至 `ImportColumnBinder#valueFor`，经 `ImportValueMapper.valuesFor` 调入）→ 已改为 `@link #valueFor`；
+- `RuleRegistry.weightedTotal` 全仓唯一英文方法 Javadoc → 已译中文（语义不变）。
+
+## 已确认不是问题的（两批汇总，避免复查时重查）
+
+- `JobDescriptionService.parse` 的"不持锁解析、写回前取 PESSIMISTIC_WRITE 行锁"与 `update` 的
+  "title 空白跳过 vs sourceText 空串清空"不对称均为刻意设计，注释已如实记录；
 
 - `CareerMaterialAiSnapshotSanitizer` 副本带 `userId`，但 `snapshot()` 只取 6 字段，**不进 prompt**；
 - `30 - forced.size()` 不会越界：上游强制 `forced ≤ 30`；

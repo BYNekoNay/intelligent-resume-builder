@@ -202,7 +202,10 @@ public class AccountExportService {
     }
 
     /**
-     * Export applications with their immutable status timeline. The timeline is
+     * 导出投递记录及其不可变的状态时间线。时间线是工作区数据（而非临时任务），
+     * 必须随 Web→桌面迁移一起搬走。
+     *
+     * <p>Export applications with their immutable status timeline. The timeline is
      * workspace data, not a transient task, and must survive web-to-desktop transfer.
      */
     private List<ObjectNode> applicationNodes(Long userId) {

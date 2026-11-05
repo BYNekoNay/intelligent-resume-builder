@@ -81,6 +81,7 @@ public class JobDescriptionController {
         return ApiResponse.success(service.parse(id, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    /** 当前登录用户由鉴权链路写入 request attribute；缺失即 401，不存在匿名访问分支。 */
     private Long currentUserId(HttpServletRequest request) {
         Object attr = request.getAttribute("currentUserId");
         if (attr == null) {

@@ -1,3 +1,11 @@
+/**
+ * 简历与版本接口层：对应后端 ResumeController（/api/resumes）与 ResumeVersionController
+ * （/api/resumes/{resumeId}/versions/*、/api/resume-versions/*）。
+ * 边界：简历与版本的列表接口都只返回摘要（不含 resumeJson），全文需走 getResumeVersion；
+ * downloadJsonResume 返回 Blob 附件而非 ApiResponse 信封（request() 对非信封响应原样放行）。
+ * 错误码语义：40901 表示版本状态冲突（版本不属于该简历、归档版本不能设为当前版本、当前版本不能归档、
+ * 版本号冲突）；40902（版本已归档）由引用版本的其他域（评分/导出/面试等）抛出，本模块不产生。
+ */
 import { http } from './client'
 import type { ResumeTemplateCode } from './export'
 

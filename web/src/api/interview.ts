@@ -1,3 +1,11 @@
+/**
+ * 模拟面试接口层：对应后端 InterviewController（/api/interviews）。
+ * 边界：startInterview 与 answerInterview 是同步长请求（服务端现场生成题目/评估回答），
+ * 显式放宽到 60s，且都注入 Idempotency-Key 防重复提交；轮次推进状态由服务端机管理，
+ * 前端只读 InterviewStateResponse。AI 失败不走业务码，而是看 aiFailure 字段决定 retryAi 或降级 continueWithRules。
+ * 错误码语义：40901 覆盖幂等键冲突、非法状态迁移（如当前状态不允许重试/降级、面试未完成不能出报告）；
+ * 50002（AI_FAILURE）表示 AI 调用失败（可重试）。
+ */
 import { http } from './client'
 import type { AiTask, AiTaskPreview } from './ai'
 

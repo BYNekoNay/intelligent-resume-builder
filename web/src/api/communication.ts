@@ -1,3 +1,10 @@
+/**
+ * 求职沟通文案接口层：对应后端 CommunicationController（/api/communications）。
+ * 三块能力：AI 生成（generate / ai-generate，后者带发送前预览与 X-AI-Preview-Token）、
+ * 模板库 CRUD 与填槽预览、草稿保存（只存草稿，绝不自动发送）。
+ * 错误码语义：40901 主要来自预览令牌校验失败（预览与创建的请求体漂移）；40902 表示
+ * 关联的简历版本已归档，不能发起生成。
+ */
 import { http } from './client'
 import type { AiTask, AiTaskPreview } from './ai'
 export type CommunicationType='COVER_LETTER'|'EMAIL'|'OPENING_MESSAGE'

@@ -50,9 +50,14 @@ public class AuthSession extends BaseEntity {
     @Column(name = "revoke_reason", length = 64)
     private String revokeReason;
 
+    /**
+     * 双语义字段：注册/登录/删除恢复时存的是**签发原因**（register/login/deletion_restored），
+     * refresh 轮换时才存浏览器 UA——改动该列语义需同步排查审计与桌面端读取方。
+     */
     @Column(name = "user_agent", length = 255)
     private String userAgent;
 
+    /** 客户端 IP（由 ClientIpResolver 解析）；仅在 refresh 轮换时写入，首次签发不填。 */
     @Column(name = "ip_address", length = 64)
     private String ipAddress;
 

@@ -35,6 +35,7 @@ public class DesktopImportController {
         this.properties = properties;
     }
 
+    /** 预览分类（不写数据）。包结构不合法时把 {@code IllegalStateException} 转 400，语义是「包有问题」而非服务器错误。 */
     @PostMapping("/preview")
     public ApiResponse<DesktopImportService.ImportPreview> preview(
             @RequestBody Map<String, Object> workspacePackage,
@@ -49,6 +50,10 @@ public class DesktopImportController {
         }
     }
 
+    /**
+     * 原子应用导入。请求体需自行拆出 {@code package}（工作区包）与可选的 {@code resolutions}
+     * （stableId → 解决方式）；包内含不支持集合或映射缺失时整份拒绝并转 400。
+     */
     @PostMapping("/apply")
     public ApiResponse<DesktopImportService.ImportResult> apply(
             @RequestBody Map<String, Object> body,

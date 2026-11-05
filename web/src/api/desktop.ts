@@ -1,3 +1,9 @@
+/**
+ * 桌面版工作区备份/恢复/导入接口层：对应后端 DesktopBackupController（/api/desktop/backups）
+ * 与 DesktopImportController（/api/desktop/import）。
+ * 边界：在线版没有这些端点，listDesktopBackups 用短超时做能力探测（404/401 即视为桌面版能力不可用）。
+ * 恢复失败时 HTTP 409 但信封 code 仍为 0，结果要读 DesktopRestoreResult.ok（详见其注释）。
+ */
 import { http } from './client'
 
 /** 一条本地工作区快照（ADR-012 阶段三）。 */

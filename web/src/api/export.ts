@@ -1,3 +1,10 @@
+/**
+ * PDF 导出接口层：对应后端 ExportController（/api/exports）。
+ * 流程是异步任务制：createExport 建任务 → getExportTask 轮询 → downloadExport 拿文件（Blob 附件，
+ * 非 ApiResponse 信封）；与同步返回的 JSON 导出（api/resume.ts 的 downloadJsonResume）不同。
+ * 错误码语义：50003（PDF_FAILURE）表示 pdf-service 渲染/连接/容量类失败；40902（版本已归档）表示
+ * 该版本不能发起导出；40901（CONFLICT）表示重试非法（只有失败的任务可以重试）。
+ */
 import { http } from './client'
 
 export type ExportTaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'EXPIRED' | 'UNKNOWN'

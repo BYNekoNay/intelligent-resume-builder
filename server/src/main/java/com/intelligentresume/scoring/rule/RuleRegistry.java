@@ -57,9 +57,8 @@ public class RuleRegistry {
     public Map<String, BigDecimal> weights() { return weights; }
 
     /**
-     * Aggregate scores only when every registered rule has produced a score.
-     * A new rule therefore cannot silently disappear from the total by being
-     * omitted from the service's result map.
+     * 只有当注册表里的每条规则都在结果映射中给出了分值时才聚合总分。
+     * 这样新增一条规则后，如果服务层的结果映射漏掉它，不会静默地从总分里消失，而是直接报错。
      */
     public BigDecimal weightedTotal(Map<String, BigDecimal> scores) {
         if (!weights.keySet().equals(scores.keySet())) {

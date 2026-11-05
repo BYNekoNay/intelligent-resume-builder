@@ -1,3 +1,11 @@
+/**
+ * ATS 检查接口层：对应后端 AtsController（/api/ats）。
+ * 边界：runAtsCheck 内部注入 Idempotency-Key（默认每次调用 newIdempotencyKey() 生成新键，
+ * 幂等键由调用方在动作发起时生成并复用）；
+ * AI 增强失败不直接让请求失败，而是折叠进响应的 fallback 字段（AtsFallbackInfo，含 code/retryable），
+ * 前端据此决定是否调 retryAtsAi。
+ * 错误码语义：40901 表示相同幂等键但请求内容不一致；40902 表示该简历版本已归档不能发起检查。
+ */
 import { http } from './client'
 import { newIdempotencyKey } from '@/utils/idempotency'
 

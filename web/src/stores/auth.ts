@@ -1,8 +1,15 @@
+/**
+ * 会话状态（Pinia）：持有 accessToken 与当前用户，负责启动会话恢复（initialize）、
+ * 登录/注册/删号恢复/登出、改 displayName。
+ * 边界：accessToken 只存内存，持久化依赖后端 HttpOnly refresh cookie（client.ts 的 401 拦截器
+ * 刷新成功后经 setAccessToken 回填）；api/client.ts 的请求拦截器读取本 store 注入 Authorization 头。
+ */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { fetchCurrentUser, login, logout, refresh, register, restoreAccountDeletion, updateProfile, type CurrentUser, type LoginPayload, type RegisterPayload } from '@/api/auth'
 import { clearUserLocalData } from '@/utils/localUserData'
 
+// 旧版把 accessToken 存 sessionStorage；现方案改为仅内存 + refresh cookie，模块加载时清掉历史遗留键。
 const LEGACY_ACCESS_TOKEN_KEY = 'intelligent-resume.access-token'
 sessionStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY)
 

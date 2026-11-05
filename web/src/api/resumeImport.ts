@@ -1,3 +1,8 @@
+/**
+ * 简历文件解析接口层：对应后端 ResumeImportController（/api/resume-imports）。
+ * 边界：单一同步端点 parseResumeFile，multipart 上传后由服务端抽取文本并归一化为简历结构
+ * （normalizedResumeInput）；originalFileStored 表示服务端是否留存了原始文件。
+ */
 import { http } from './client'
 export interface ResumeImportResponse { fileName:string;mediaType:string;extractedText:string;normalizedResumeInput:Record<string,unknown>;originalFileStored:boolean }
 /**
