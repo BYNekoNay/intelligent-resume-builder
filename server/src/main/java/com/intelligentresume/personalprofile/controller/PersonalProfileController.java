@@ -16,6 +16,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 个人档案的三个端点：读取、整份保存、从简历导入候选值。
+ *
+ * <p>一人一份（{@code user_id} 唯一），三个端点都把「当前登录用户」作为唯一的数据范围；
+ * {@code import-suggestion} 只读不写，返回的候选值必须经用户确认，详见
+ * {@link PersonalProfileService} 头部的隐私边界说明。</p>
+ */
 @RestController
 @RequestMapping("/api/personal-profile")
 public class PersonalProfileController {
@@ -44,6 +51,7 @@ public class PersonalProfileController {
                 service.importSuggestion(resumeId, currentUserId(httpRequest)), traceId(httpRequest));
     }
 
+    /** 与其他控制器相同的取用户 id 约定：过滤器没放进请求属性就按未登录处理（40301）。 */
     private Long currentUserId(HttpServletRequest request) {
         Object attr = request.getAttribute("currentUserId");
         if (attr == null) {

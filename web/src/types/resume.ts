@@ -1,9 +1,9 @@
 /**
- * Typed contract for the resume JSON document shared across
- * ResumeEditorView, ResumePaper, and the PDF rendering service.
+ * 简历 JSON 文档的类型契约：ResumeEditorView、ResumePaper（纸张渲染）与
+ * pdf-service 的 classic.js 模板三方共用。
  *
- * The shape mirrors the persisted JSON stored in resume_version.content_json
- * and consumed by pdf-service/src/templates/classic.js.
+ * 形状镜像 resume_version.content_json 的持久化内容——改这里的任何结构，
+ * 必须同步 pdf-service 模板与后端写入侧，否则导出 PDF 会丢章节。
  */
 
 export interface ResumeBasics {
