@@ -154,6 +154,16 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <!--
+                      测试 JVM 必须与生产同区：deploy/systemd/intelligent-resume-api.service 用
+                      -Duser.timezone=Asia/Shanghai 启动，而 application.yml 的
+                      hibernate.jdbc.time_zone 也写死 Asia/Shanghai。
+                      两者不一致时，Java 侧写入的 LocalDateTime 会按上海时区落库，而原生 SQL 里的
+                      NOW() 用的是 JVM 时区 —— 相差 8 小时会让「已到期的任务可领取」这类断言假红
+                      （ExportTaskRequeueIT 在 UTC runner 上恒红，2026-10-30 起 CI 就是这个原因）。
+                      不要删这行；要改时区请连同生产 systemd 单元一起改。
+                    -->
+                    <argLine>-Duser.timezone=Asia/Shanghai</argLine>
                     <includes>
                         <include>**/*Test.java</include>
                         <include>**/*IT.java</include>
