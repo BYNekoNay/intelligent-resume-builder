@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.confirmation.controller;
 
 import com.intelligentresume.ai.confirmation.dto.ConfirmRequest;
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.ai.confirmation.dto.ConfirmResponse;
 import com.intelligentresume.ai.confirmation.dto.RejectRequest;
 import com.intelligentresume.ai.confirmation.service.ConfirmationService;
@@ -71,7 +72,7 @@ public class ConfirmationController {
     }
 
     private Long currentUserId(HttpServletRequest request) {
-        Object attr = request.getAttribute("currentUserId");
+        Object attr = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (attr == null) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         }

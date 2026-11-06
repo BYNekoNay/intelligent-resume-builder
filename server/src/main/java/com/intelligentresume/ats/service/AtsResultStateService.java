@@ -138,11 +138,13 @@ public class AtsResultStateService {
     /**
      * 判断记录当前指向的是不是这次任务。
      *
-     * <p>注意 {@code number.longValue() == taskId} 会触发 {@code Long} 自动拆箱：
-     * {@code taskId} 为 null 时这里抛 NPE。{@code markFallback} 已在调用前挡掉 null，
-     * {@code markCompleted} 没有挡 —— 调用方必须保证 taskId 非空。
+     * <p>taskId 为 null 视为"没有这次任务"，一律不匹配（返回 false），不做比对——
+     * 否则 {@code number.longValue() == taskId} 的自动拆箱在 null 时抛 NPE。
+     * {@code markFallback} 在调用前挡掉了 null，这里再做一层兜底，保证
+     * {@code markCompleted} 等调用方即使漏挡也不会 500。
      */
     private boolean isCurrentTask(Map<String, Object> json, Long taskId) {
+        if (taskId == null) return false;
         Object current = json.get("aiTaskId");
         return current instanceof Number number && number.longValue() == taskId;
     }

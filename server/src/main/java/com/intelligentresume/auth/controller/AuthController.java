@@ -1,6 +1,7 @@
 package com.intelligentresume.auth.controller;
 
 import com.intelligentresume.auth.dto.CurrentUserResponse;
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.config.DesktopLocalUserService;
 import com.intelligentresume.auth.dto.ChangeEmailRequest;
 import com.intelligentresume.auth.dto.ChangePasswordRequest;
@@ -235,7 +236,7 @@ public class AuthController {
      * 属性为空说明请求未通过认证链——宁可 401，也不能退化成匿名访问。
      */
     private Long currentUserId(HttpServletRequest request) {
-        Object attr = request.getAttribute("currentUserId");
+        Object attr = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (attr == null) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         }

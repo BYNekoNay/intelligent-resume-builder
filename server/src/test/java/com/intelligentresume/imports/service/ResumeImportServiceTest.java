@@ -100,6 +100,21 @@ class ResumeImportServiceTest {
         assertEquals("文件不能超过 5 MB", ex.getMessage());
     }
 
+    @Test
+    @DisplayName("字节上限文案跟随配置值而非硬编码 5MB")
+    void rejectsOversizedFile_messageReflectsConfiguredLimit() {
+        // 用非默认配置值（2MB）构造服务，文件超过 2MB 但未超过默认 5MB，
+        // 证明拒绝文案引用的是实际配置上限而非硬编码的"5 MB"。
+        ResumeImportService limited = new ResumeImportService(2 * 1024 * 1024, 60, 200_000, 15_000);
+        MockMultipartFile file = new MockMultipartFile("file", "large.txt", "text/plain",
+                new byte[3 * 1024 * 1024]);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> limited.parse(file));
+
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertEquals("文件不能超过 2 MB", ex.getMessage());
+    }
+
     // ---- 类型校验 ----
 
     @Test

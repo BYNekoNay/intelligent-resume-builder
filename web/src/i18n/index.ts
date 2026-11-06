@@ -122,6 +122,7 @@ const messages: Partial<Record<Locale, MessageTree>> = {
       create: '新建答案资产', edit: '编辑答案资产', question: '问题', original: '原始回答', suggested: 'AI 建议',
       saving: '正在保存...', save: '保存资产', saveChanges: '保存修改', cancel: '取消', editAction: '编辑', delete: '删除', assetCount: '条已保存答案',
       loading: '正在加载答案资产...', empty: '还没有答案资产。', loadError: '无法加载答案资产，请稍后重试。',
+      jobsLoadError: '岗位列表加载失败，筛选下拉不可用，请稍后重试。',
       saveError: '无法保存答案资产。请检查必填项后重试。', deleteError: '无法删除答案资产，请稍后重试。', confirmDelete: '删除这条答案资产？',
       sectionFilter: '章节筛选', allSections: '全部章节', relatedSections: '关联章节', relatedMaterials: '关联素材', noMaterials: '资料库暂无素材。',
     },
@@ -219,7 +220,7 @@ const messages: Partial<Record<Locale, MessageTree>> = {
       nameField: '姓名', nameFieldPlaceholder: '例如：张明远',
       creating: '正在创建…', create: '新建简历', loading: '加载中...',
       collectionEyebrow: '已有资产', collectionTitle: '我的简历', emptyTitle: '还没有简历', empty: '在上方创建空白简历，或导入已有文件开始整理。',
-      createError: '简历创建失败，请检查名称后重试。', deleteConfirm: '删除后将不再出现在列表中，确定继续吗？', deleteAction: '删除',
+      createError: '简历创建失败，请检查名称后重试。', deleteError: '简历删除失败，请稍后重试。', deleteConfirm: '删除后将不再出现在列表中，确定继续吗？', deleteAction: '删除',
       lastUpdate: '最后更新',
     },
     resumeDetail: {

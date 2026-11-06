@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.selection.controller;
 
 import com.intelligentresume.ai.generation.service.JobGenerationPreviewService;
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.ai.generation.service.JobGenerationService;
 import com.intelligentresume.ai.selection.dto.ConfirmMaterialsRequest;
 import com.intelligentresume.ai.selection.dto.SelectMaterialsRequest;
@@ -255,7 +256,7 @@ public class JobMaterialSelectionController {
 
     private String blankToDefault(String value) { return value == null || value.isBlank() ? "Temporary job" : value; }
     private Long currentUserId(HttpServletRequest request) {
-        Object id = request.getAttribute("currentUserId");
+        Object id = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (id == null) throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         return (Long) id;
     }

@@ -44,8 +44,14 @@ async function create() {
 
 async function remove(id: number) {
   if (!window.confirm(t('resumeList.deleteConfirm'))) return
-  await deleteResume(id)
-  await store.load()
+  error.value = ''
+  try {
+    await deleteResume(id)
+    await store.load()
+  } catch {
+    // 删除失败：仅提示错误，不动 store 列表——列表仍是上次成功加载的状态。
+    error.value = t('resumeList.deleteError')
+  }
 }
 </script>
 

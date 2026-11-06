@@ -128,6 +128,23 @@ class ExportServiceRetryTest {
     }
 
     @Test
+    @DisplayName("防御口径: retryCount 为 null 时视为 0，重试成功且计为 1（不抛 NPE）")
+    void retry_nullRetryCount_treatedAsZero() {
+        ExportTask task = new ExportTask();
+        task.setId(1L);
+        task.setUserId(100L);
+        task.setStatus(ExportStatus.FAILED);
+        task.setRetryCount(null);
+        when(exportTaskRepository.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(task));
+
+        ExportTaskStatusResponse resp = service.retry(1L, 100L);
+
+        assertEquals("PENDING", resp.status());
+        assertEquals(1, task.getRetryCount()); // null 视为 0 → +1
+        verify(exportTaskRepository).save(task);
+    }
+
+    @Test
     @DisplayName("失败路径: 跨用户 retry 返回 NOT_FOUND")
     void retry_crossUser_notFound() {
         when(exportTaskRepository.findByIdAndUserId(1L, 200L)).thenReturn(Optional.empty());

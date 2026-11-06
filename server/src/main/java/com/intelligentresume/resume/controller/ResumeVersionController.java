@@ -1,5 +1,6 @@
 package com.intelligentresume.resume.controller;
 
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
@@ -34,7 +35,7 @@ import java.util.Map;
  * <p>要点：
  * <ul>
  *     <li>控制器只做参数取用与响应包装，业务规则（归属、状态、版本号）全在 {@link ResumeVersionService}。</li>
- *     <li>用户身份从 {@code request.getAttribute("currentUserId")} 取（由鉴权过滤器写入），
+ *     <li>用户身份从 {@code JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE} 对应的请求属性取（由鉴权过滤器写入），
  *         取不到直接 401，不做匿名兜底。</li>
  *     <li>保存与恢复都返回 201：两者都会**新增**一行版本，不是幂等更新。</li>
  *     <li>归档/取消归档返回空体的统一信封，失败由全局异常处理映射状态码。</li>
@@ -121,7 +122,7 @@ public class ResumeVersionController {
     }
 
     private Long currentUserId(HttpServletRequest request) {
-        Object attr = request.getAttribute("currentUserId");
+        Object attr = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (attr == null) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         }

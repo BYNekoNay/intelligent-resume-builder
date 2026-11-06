@@ -183,13 +183,16 @@ public class ExportService {
         // 手动重试此前无次数上限：同一行可以被无限次推回 PENDING，每次都真跑一遍渲染。
         // 与 AI 任务（AiTaskService.retry 的 maxRetries）对齐，超限时让用户重新发起导出——
         // 重新发起会生成新行，也顺带把「这一行本身有问题」和「下游临时故障」区分开。
-        if (task.getRetryCount() != null && task.getRetryCount() >= maxManualRetries) {
+        // retryCount 的 null 口径统一：DB 列 NOT NULL DEFAULT 0（V1），null 仅在异常数据/防御场景出现，
+        // 视为 0 —— 上面的限次检查和这里的自增必须同一口径，否则检查挡住 null、自增却抛 NPE。
+        int currentRetryCount = task.getRetryCount() != null ? task.getRetryCount() : 0;
+        if (currentRetryCount >= maxManualRetries) {
             throw new BusinessException(ErrorCode.CONFLICT,
-                    "该导出任务已重试 " + task.getRetryCount() + " 次，请重新发起导出");
+                    "该导出任务已重试 " + currentRetryCount + " 次，请重新发起导出");
         }
         task.setStatus(ExportStatus.PENDING);
         task.setErrorMessage(null);
-        task.setRetryCount(task.getRetryCount() + 1);
+        task.setRetryCount(currentRetryCount + 1);
         // 手动重试是「用户现在就要」，不受容量拒绝留下的延迟约束。
         task.setNextAttemptAt(null);
         task.setExpiresAt(LocalDateTime.now().plusHours(fileTtlHours));

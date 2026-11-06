@@ -1,10 +1,12 @@
-# 代码疑点清单（注释工程副产品，2026-11-05）
+# 代码疑点清单（注释工程副产品，2026-11-05 / 11-06 持续更新）
 
-> **时效性声明**：本清单是 2026-11-05 全仓注释工程（`29527d0`，374 个文件）的副产品。
-> 由 5 个并行审查体在**读代码写注释**时记录，**一律未修改**，仅汇总待人工裁决。
-> 引用前必须逐条核实当前状态——缺口清单会随修复而失效（docs/README 维护原则第 9 条）。
+> **时效性声明**：本清单是 2026-11-05 全仓注释工程（`29527d0`，374 个文件）与 2026-11-06
+> 小白可读升级（`e28faaf`，295 个文件）的副产品。由并行审查体在**读代码写注释**时记录，
+> **一律未修改**，仅汇总待人工裁决。引用前必须逐条核实当前状态——缺口清单会随修复而失效
+> （docs/README 维护原则第 9 条）。当前累计 86 条（编号至 #87，#78 跳号）：🔴16 / 🟡45 / ⚪25。
 >
 > 分级：🔴 建议尽快确认（可能影响正确性/安全）；🟡 择期处理；⚪ 死代码/噪音。
+> **修复进度**：见文末「修复批次记录」。
 
 ## 🔴 建议尽快确认
 
@@ -117,3 +119,76 @@
 - `CareerMaterialAiSnapshotSanitizer` 副本带 `userId`，但 `snapshot()` 只取 6 字段，**不进 prompt**；
 - `30 - forced.size()` 不会越界：上游强制 `forced ≤ 30`；
 - `MaterialPromptTextBudget.clip()` 逐条 1:1 映射、绝不丢条目 —— `buildDataSection` 的 `subList` 三段切分因此安全（但改 clip 必须同改那里）。
+
+---
+
+## 第三批：小白可读升级轮新报（2026-11-06，11 路并发注释升级 `e28faaf` 的副产品）
+
+> 与前两批重复的已去重（#2/#15/#18/#32/#35/#55/#57/#58 等不再重列）。
+> 两处已当场顺手修的见文末「修复批次记录」。
+
+## 🔴 新增
+
+| # | 位置 | 问题 |
+| --- | --- | --- |
+| 59 | `MaterialSelectionConfirmationService.MAX_FINAL_MATERIALS=30` vs `app.ai.generation.max-selected-materials:30` | 两处独立来源，配置改动会造成「选材放行、确认拒绝」；与 #78（RuleVersion 双源）同族 |
+| 60 | `ExportService.retry:171` | 限次检查处做了 retryCount null 判断，`+1` 处没做，防御口径不一致（修复批 R1-2026-11-06） |
+| 61 | `GenerationConfirmView:163` | 幂等键 `confirm-${id}-${Date.now()}` 每次点击新键，刷新后无法去重；应对齐 MaterialSelectionConfirmView 的 localStorage 复用模式（修复批 R1） |
+
+## 🟡 新增
+
+| # | 位置 | 问题 |
+| --- | --- | --- |
+| 62 | `InterviewRetryService` TX1 | 用 `long[]` 传 5 个标量（-1 占位、opType 0/1 编码），下标顺序强耦合，建议改小结构 |
+| 63 | `InterviewRuleService.ruleAnswer` | 复用 AI 失败的 attempt 时保留原 attemptCount，其代数会继续计入每日配额统计（sum(attemptCount)），是否合意待产品确认 |
+| 64 | `LocalAiSettingService.delete/publishToRuntime` | 操作全局单份 AiRuntimeOverlay 快照：桌面单用户正确，未来多本地用户会互相覆盖 |
+| 65 | `AiQuotaService` | JOB_MATERIAL_SELECTION 与 JOB_GENERATION 共用 jobGeneration 配额键，配置项名易被误解为未配额 |
+| 66 | `JobGenerationPromptBuilder` | 「最多 12 条推荐」同时硬编码在 task prompt 文本与 `MAX_RECOMMENDED`，两处需人工同步 |
+| 67 | `AtsAiAnalysisService.call:85` | 超时判定靠错误文案字符串匹配（timeout/超时），provider 改文案会退化为 PROVIDER_ERROR |
+| 68 | `PdfServiceClient.estimateJsonSize` | `toString().length()*2` 粗估，中文密集时可能高估误拒（已知取舍） |
+| 69 | `AuthService.issueNewFamily` | 「签发原因」存进 user_agent 列（双语义），按 UA 解析的桌面/审计会拿到 "register"/"login"，建议拆列 |
+| 70 | `TokenService.hashToken` | 降级分支（SHA-256 不可用回 Base64）产出与主路径格式不可互比，外部按 64 位 hex 解析的脚本会失配 |
+| 71 | `AuthController.refresh` 桌面分支 | 本地 /refresh 直接签发不经限流预算，与在线版口径不一致，且无契约测试覆盖 |
+| 72 | `JdKeywordParser` | 教育关键词大小写敏感 contains，而关键词匹配大小写不敏感——同一解析器两套口径（历史取舍） |
+| 73 | `ParsedKeywordsResponse` @param | 写「保持首次出现顺序」与实际「词典声明顺序」矛盾，@param 未同步 |
+| 74 | `AccountPurgeService` | 多实例并发会同时领取同一任务（RUNNING 不落库），依赖语句幂等兜底；单实例无问题，扩多实例前需加分布式锁 |
+| 75 | `ScoringService.score` | 结果复用判定用 created_at 与 JD updatedAt 毫秒级比较，同毫秒「评分后改 JD」会误复用旧分（精度边界） |
+| 76 | `CommunicationService.saveDraft` | 手写重复模板可见性校验，与 `CommunicationTemplateService.visible` 同一事实两份副本 |
+| 77 | `DesktopImportService.apply` | 重新 plan 后预览时 CONFLICT、apply 时变 SKIP 的记录，用户 resolutions 被 SKIP 静默忽略，无提示 |
+| 79 | `GenerationWorkbenchView:234` | 幂等键 `Date.now()+Math.random()` 本地生成，未用 `newIdempotencyKey()`，风格不一致（功能等价） |
+| 80 | AI 任务轮询三套实现 | stores/aiTask.ts（1s/2s/4s/5s）、api/ai.ts waitForAiTaskResult（恒 2s）、api/materialGeneration.ts waitForTask（1s/2s/4s 后恒 2s），节奏不一致未复用 useTaskPolling |
+| 81 | `stores/aiTask.ts needsRecovery()` | 命名反直觉：非终态任务也返回 true（语义是「需要继续跟进」） |
+| 82 | `InterviewController.answer` | 为路由 AI/规则分支先调一次带写副作用的 getState（陈旧接管），双保险但每次作答多一次加锁读 |
+
+## ⚪ 新增
+
+| # | 位置 | 问题 |
+| --- | --- | --- |
+| 83 | `InterviewAiService.generateFirstQuestion(String)` | 单参重载（默认 EN）已无调用方，仅兼容保留 |
+| 84 | `InterviewAssetsView` | 新增/编辑后只改本地数组不重拉列表，新条目可能不符当前筛选却仍显示（已知取舍） |
+| 85 | `InterviewHistoryView:27` | `filteredSessions` 是恒等 computed，无实际过滤（修复批 R1 清理） |
+| 86 | `DraftSectionReview.vue` | scoped style 两套（写死旧配色 + CSS 变量版整体覆盖），前一套死代码 |
+| 87 | `AiPreviewDialog.vue` | 顶部 HTML 注释与 defineProps 上方 JSDoc 内容重复 |
+
+---
+
+## 修复批次记录
+
+### R1（2026-11-06，已完成，提交含本清单更新）
+
+| 项 | 结果 |
+| --- | --- |
+| #2 templateCode 500 | ✅ `@NotNull` 补上，`ExportControllerIT` 先红（500≠400）后绿 12/12 |
+| #5 isCurrentTask NPE | ✅ null → return false 双层兜底，新增 `AtsResultStateServiceTest` 3/3（先红：NPE） |
+| #60 retry_count 防御口径 | ✅ 归一为 currentRetryCount；DB 列 NOT NULL DEFAULT 0（V1），null 生产不可达，纯防御；`ExportServiceRetryTest` 5/5（先红：NPE at :192） |
+| #44 currentUserId 字面量 | ✅ 19 处控制器替换为 `CURRENT_USER_ID_ATTRIBUTE` 常量，等价替换，全仓字面量清零 |
+| #45 5MB 文案脱钩 | ✅ 动态引用实际配置值（新增 formatBytes 辅助），`ResumeImportServiceTest` 15/15（先红：文案不随配置变） |
+| #46 PDF 页数检查时机 | ⚠️ **评估后不做流式，留技术债注释**：PDFBox 2.0.32 无 3.x 延迟加载 API；getNumberOfPages 本身要解析 page tree；file.getBytes() 已物化。补页数超限测试覆盖 |
+| #41/#42 InterviewAssetsView | ✅ Promise 各自兜底 + 用户可见错误提示；materialIds 渲染空值安全 |
+| #43 ResumeListView remove | ✅ 对齐 create() 的错误处理模式 |
+| #61 GenerationConfirmView 幂等键 | ✅ 按任务 id 存 localStorage 复用，对齐 MaterialSelectionConfirmView |
+| #85 filteredSessions + 乱码字符 | ✅ 恒等 computed 已清理；**乱码字符核查为误报**（合法 UTF-8，`·` 为正当间隔符）——纠正此前队友的误报 |
+
+- 回归：mvn test **1223 项 0 失败**（+6 个新门禁测试）；前端 build + i18n/draft-fields/bundle-budget 门禁全过。
+- 当场顺手修（注释升级轮，`e28faaf`）：#35 SecretProtector 悬空链接改为 LocalAiCredentialStore、
+  AiTaskService create() 步骤注释与代码顺序矛盾已统一、RemoteImage eager prop 反义注释已改正。

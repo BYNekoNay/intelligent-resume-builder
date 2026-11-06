@@ -1,5 +1,6 @@
 package com.intelligentresume.jobdescription.controller;
 
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
@@ -87,7 +88,7 @@ public class JobDescriptionController {
 
     /** 当前登录用户由鉴权链路写入 request attribute；缺失即 401，不存在匿名访问分支。 */
     private Long currentUserId(HttpServletRequest request) {
-        Object attr = request.getAttribute("currentUserId");
+        Object attr = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (attr == null) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         }

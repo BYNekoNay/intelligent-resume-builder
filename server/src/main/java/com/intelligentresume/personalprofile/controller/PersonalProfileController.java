@@ -1,5 +1,6 @@
 package com.intelligentresume.personalprofile.controller;
 
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
 import com.intelligentresume.common.error.BusinessException;
@@ -56,7 +57,7 @@ public class PersonalProfileController {
 
     /** 与其他控制器相同的取用户 id 约定：过滤器没放进请求属性就按未登录处理（40301）。 */
     private Long currentUserId(HttpServletRequest request) {
-        Object attr = request.getAttribute("currentUserId");
+        Object attr = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (attr == null) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         }

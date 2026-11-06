@@ -1,6 +1,7 @@
 package com.intelligentresume.ats.controller;
 
 import com.intelligentresume.ai.preview.AiPreviewGuard;
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.ai.preview.AiPreviewService;
 import com.intelligentresume.common.api.ApiResponse;
 import com.intelligentresume.common.api.TraceIdFilter;
@@ -100,7 +101,7 @@ public class AtsController {
     }
 
     private Long currentUserId(HttpServletRequest request) {
-        Object attr = request.getAttribute("currentUserId");
+        Object attr = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (attr == null) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         }

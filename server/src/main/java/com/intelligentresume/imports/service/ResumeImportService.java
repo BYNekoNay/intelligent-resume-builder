@@ -104,7 +104,7 @@ public class ResumeImportService {
     }
 
     /**
-     * 解析入口。步骤：①非空校验；②字节上限（5MB）；③扩展名+Content-Type 白名单
+     * 解析入口。步骤：①非空校验；②字节上限（{@code max-bytes} 配置，默认 5MB）；③扩展名+Content-Type 白名单
      * （两道必须同时命中，防改扩展名骗过校验）；④在带超时的独立线程里抽文本
      * （畸形文件可能让解析库卡死，超时 15 秒强制放弃）；⑤字符上限+清洗空字符；
      * ⑥启发式归一化出建议字段。四道闸门的顺序就是执行顺序：先便宜的（看大小/名字）
@@ -117,7 +117,8 @@ public class ResumeImportService {
     public ResumeImportResponse parse(MultipartFile file) {
         if (file == null || file.isEmpty()) throw new BusinessException(ErrorCode.VALIDATION, "文件不能为空");
         // 字节上限：只约束上传体积，不约束解析后的文本量（见下方字符上限）。
-        if (file.getSize() > maxBytes) throw new BusinessException(ErrorCode.VALIDATION, "文件不能超过 5 MB");
+        // 文案引用实际配置值（非硬编码），配置改动后提示不失真。
+        if (file.getSize() > maxBytes) throw new BusinessException(ErrorCode.VALIDATION, "文件不能超过 " + formatBytes(maxBytes));
         String name = Optional.ofNullable(file.getOriginalFilename()).orElse("resume");
         String extension = Optional.ofNullable(StringUtils.getFilenameExtension(name)).orElse("").toLowerCase(Locale.ROOT);
         if (!MEDIA_TYPES.containsKey(extension)) throw new BusinessException(ErrorCode.VALIDATION, "仅支持 TXT、PDF 或 DOCX 文件");
@@ -163,6 +164,18 @@ public class ResumeImportService {
     }
 
     /**
+     * 把字节上限换算成用户可读的 MB/KB 文案：能整除 MB 用 MB（如 5242880 → "5 MB"），
+     * 否则换算成 KB 保留一位小数（如 300000 → "292.97 KB" 四舍五入为 "293.0 KB"）。
+     * 仅用于报错文案展示，不参与任何校验计算。
+     */
+    private static String formatBytes(long bytes) {
+        final long oneMb = 1024L * 1024L;
+        if (bytes % oneMb == 0) return (bytes / oneMb) + " MB";
+        double kb = Math.round(bytes / 1024.0 * 10.0) / 10.0;
+        return String.format(Locale.ROOT, "%.1f KB", kb);
+    }
+
+    /**
      * 实际抽取实现。独立成 protected 方法是为了让超时用例能确定性触发
      * （真实文件在快机器上可能在毫秒级完成，靠耗时碰运气的测试会不稳定）。
      */
@@ -176,6 +189,12 @@ public class ResumeImportService {
     }
 
     private String extractPdf(MultipartFile file) throws IOException {
+        // 技术债（内存取舍）：页数上限检查发生在全量解析之后，超页 PDF 会先完整载入内存再被拒。
+        // 评估结论：现状保留。①PDFBox 2.0.32 没有 3.x 的 Loader.loadPDF(RandomAccessRead) 延迟加载 API；
+        // ②getNumberOfPages() 本身就要解析 page tree，"先探测页数"无法跳过解析；
+        // ③file.getBytes() 已把 multipart 字节完整物化到内存，改流式入口不减少这份占用，
+        // 只能靠 MemoryUsageSetting.setupTempFileOnly() 把解析暂存挪到临时文件，
+        // 收益有限且引入 IO 与临时文件清理复杂度。若未来升级 PDFBox 3.x 再重新评估。
         try (PDDocument document = PDDocument.load(file.getBytes())) {
             // #17：页数上限——超长 PDF 的文本抽取是 CPU 与内存的主要放大项
             if (document.getNumberOfPages() > maxPdfPages) {

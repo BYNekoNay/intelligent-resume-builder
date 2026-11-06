@@ -19,10 +19,12 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAiTaskStore } from '@/stores/aiTask'
+import { useAuthStore } from '@/stores/auth'
 import { getTask, confirmTask, rejectTask, retryTask, type AiTask } from '@/api/ai'
 import { useTaskPolling } from '@/composables/useTaskPolling'
 import { getResumeVersion, listResumesByJd } from '@/api/resume'
 import { useDraftReview } from '@/composables/useDraftReview'
+import { newIdempotencyKey } from '@/utils/idempotency'
 import { Check, ClipboardCheck, Sparkles } from 'lucide-vue-next'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
@@ -36,6 +38,7 @@ const { t } = useLocale()
 const route = useRoute()
 const router = useRouter()
 const taskStore = useAiTaskStore()
+const auth = useAuthStore()
 
 const loading = ref(true)
 const error = ref('')
@@ -160,6 +163,26 @@ function extractJdId(): number | null {
   return typeof jdId === 'number' && jdId > 0 ? jdId : null
 }
 
+// 幂等键按「用户 + 任务 id」存 localStorage：刷新后对同一任务再次确认复用同一把键，
+// 后端才能去重（原实现 Date.now() 每次点击都换新键，刷新重试会产生重复版本）。
+// 键名带任务标识，避免跨任务串号；对齐 MaterialSelectionConfirmView 的做法。
+function confirmStorageKey(taskId: number): string {
+  return `intelligent-resume.generation-confirm.${auth.currentUser?.id ?? 'anonymous'}.${taskId}`
+}
+
+function ensureConfirmIdempotencyKey(taskId: number): string {
+  const storageKey = confirmStorageKey(taskId)
+  try {
+    const saved = localStorage.getItem(storageKey)
+    if (saved) return saved
+  } catch { /* Storage may be unavailable; the key is still usable within this page. */ }
+  const key = newIdempotencyKey(`confirm-${taskId}`)
+  try {
+    localStorage.setItem(storageKey, key)
+  } catch { /* ignore */ }
+  return key
+}
+
 async function doConfirm(targetResumeId: number | null) {
   // 提交复核结果：①把每一节的路径/决定（ACCEPT 或 EDIT+编辑后的值）打包；
   // ②带幂等键 + taskUpdatedAt（乐观锁）调 confirmTask；③清空任务缓存、跳到新简历详情页。
@@ -174,7 +197,7 @@ async function doConfirm(targetResumeId: number | null) {
       ...(item.decision === 'EDIT' && item.editedValue ? { editedValue: item.editedValue } : {}),
     }))
 
-    const idempotencyKey = `confirm-${task.value.id}-${Date.now()}`
+    const idempotencyKey = ensureConfirmIdempotencyKey(task.value.id)
     const res = await confirmTask(task.value.id, {
       taskUpdatedAt: task.value.updatedAt,
       items,

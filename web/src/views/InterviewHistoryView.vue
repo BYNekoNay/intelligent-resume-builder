@@ -8,7 +8,7 @@
   【易错点】JD 列表加载失败不阻塞历史列表——标题退化为「岗位 #id」而不是整页报错。
 -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ArrowLeft, BarChart3, CalendarDays, FileClock, Search } from 'lucide-vue-next'
 import { getInterviewReport, listInterviewHistory, type InterviewReportResponse, type InterviewSessionSummary } from '@/api/interview'
 import { listJobs, type JobDescriptionSummary } from '@/api/jobDescription'
@@ -26,8 +26,6 @@ const error = ref('')
 const selectedReport = ref<InterviewReportResponse | null>(null)
 const selectedSession = ref<InterviewSessionSummary | null>(null)
 const reportLoading = ref(false)
-
-const filteredSessions = computed(() => sessions.value)
 
 function formatDate(value: string) {
   const date = new Date(value)
@@ -164,9 +162,9 @@ onMounted(async () => {
       </form>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>
       <p v-if="loading" class="empty-state">{{ t('history.loading') }}</p>
-      <p v-else-if="!filteredSessions.length" class="empty-state">{{ t('history.empty') }}</p>
+      <p v-else-if="!sessions.length" class="empty-state">{{ t('history.empty') }}</p>
       <div v-else class="workspace-list">
-        <article v-for="session in filteredSessions" :key="session.id" class="workspace-card session-row" @click="openReport(session)">
+        <article v-for="session in sessions" :key="session.id" class="workspace-card session-row" @click="openReport(session)">
           <div class="session-main">
             <h2>{{ jobTitle(session.jobDescriptionId) }}</h2>
             <div class="session-meta">

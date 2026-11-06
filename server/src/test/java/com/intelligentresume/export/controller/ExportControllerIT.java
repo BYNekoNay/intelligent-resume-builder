@@ -261,4 +261,18 @@ class ExportControllerIT {
         Assertions.assertEquals(2L, tupleRows,
                 "过期任务保留在库中，但重复提交不得再新增行（EXPIRED + 复用中的 PENDING）");
     }
+
+    @Test
+    @Order(12)
+    @DisplayName("POST 缺 templateCode 返回 40001（Bean Validation 拒绝），而非 500")
+    void create_missingTemplateCode_40001() throws Exception {
+        mockMvc.perform(post("/api/exports/pdf")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"resumeVersionId": %d}
+                                """.formatted(versionId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001));
+    }
 }

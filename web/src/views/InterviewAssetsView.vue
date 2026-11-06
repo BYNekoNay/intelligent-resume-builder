@@ -160,7 +160,12 @@ async function remove(id: number) {
 onMounted(async () => {
   await Promise.all([
     load(),
-    listJobs().then((response) => { jobs.value = response }),
+    // listJobs 单独兜底：失败不能让 Promise.all 整体 unhandled rejection，
+    // 也不应阻塞列表加载——岗位下拉为空但其余功能可用，并给出可见错误提示。
+    listJobs().then((response) => { jobs.value = response }).catch(() => {
+      jobs.value = []
+      error.value = t('assets.jobsLoadError')
+    }),
     listMaterials().then((response) => { materials.value = response }).catch(() => { materials.value = [] }),
   ])
 })
@@ -221,8 +226,8 @@ onMounted(async () => {
         <div v-if="asset.sectionKeys.length" class="asset-tags">
           <span v-for="key in asset.sectionKeys" :key="key" class="asset-tag">{{ sectionLabel(key) }}</span>
         </div>
-        <div v-if="asset.materialIds.length" class="asset-tags">
-          <span v-for="id in asset.materialIds" :key="id" class="asset-tag material-tag">{{ materialTitle(id) }}</span>
+        <div v-if="asset.materialIds?.length" class="asset-tags">
+          <span v-for="id in asset.materialIds ?? []" :key="id" class="asset-tag material-tag">{{ materialTitle(id) }}</span>
         </div>
         <h3>{{ t('assets.original') }}</h3>
         <p>{{ asset.originalAnswerText }}</p>

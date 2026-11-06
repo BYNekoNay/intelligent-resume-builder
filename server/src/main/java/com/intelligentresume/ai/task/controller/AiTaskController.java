@@ -3,6 +3,7 @@ package com.intelligentresume.ai.task.controller;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.ai.task.domain.AiTaskType;
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.ai.task.dto.AiTaskContinuationResponse;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
@@ -163,7 +164,7 @@ public class AiTaskController {
     }
 
     private Long currentUserId(HttpServletRequest request) {
-        Object id = request.getAttribute("currentUserId");
+        Object id = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (id == null) throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         return (Long) id;
     }

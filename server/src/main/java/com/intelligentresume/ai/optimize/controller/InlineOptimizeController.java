@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.optimize.controller;
 
 import com.intelligentresume.ai.optimize.dto.InlineOptimizeRequest;
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.ai.task.dto.CreateAiTaskRequest;
@@ -136,7 +137,7 @@ public class InlineOptimizeController {
     }
 
     private Long currentUserId(HttpServletRequest request) {
-        Object attr = request.getAttribute("currentUserId");
+        Object attr = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (attr == null) throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         return (Long) attr;
     }

@@ -1,5 +1,6 @@
 package com.intelligentresume.careermaterial.controller;
 
+import com.intelligentresume.auth.jwt.JwtAuthenticationFilter;
 import com.intelligentresume.careermaterial.domain.MaterialType;
 import com.intelligentresume.careermaterial.domain.UsagePreference;
 import com.intelligentresume.careermaterial.dto.*;
@@ -97,7 +98,7 @@ public class CareerMaterialController {
 
     /** 当前登录用户由鉴权链路写入 request attribute；拿不到说明鉴权未执行，按未登录处理。 */
     private Long currentUserId(HttpServletRequest request) {
-        Object attr = request.getAttribute("currentUserId");
+        Object attr = request.getAttribute(JwtAuthenticationFilter.CURRENT_USER_ID_ATTRIBUTE);
         if (attr == null) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED);
         }

@@ -106,6 +106,7 @@ const enUS: MessageTree = {
       create: 'New answer asset', edit: 'Edit answer asset', question: 'Question', original: 'Original answer', suggested: 'AI suggestion',
       saving: 'Saving...', save: 'Save asset', saveChanges: 'Save changes', cancel: 'Cancel', editAction: 'Edit', delete: 'Delete', assetCount: 'saved answers',
       loading: 'Loading answer assets...', empty: 'No answer assets yet.', loadError: 'Unable to load answer assets. Please try again.',
+      jobsLoadError: 'Unable to load the job list. The filter dropdown is unavailable. Please try again.',
       saveError: 'Unable to save this answer asset. Check the required fields and try again.', deleteError: 'Unable to delete this answer asset. Please try again.', confirmDelete: 'Delete this answer asset?',
       sectionFilter: 'Section filter', allSections: 'All sections', relatedSections: 'Related sections', relatedMaterials: 'Related materials', noMaterials: 'No materials in the library yet.',
     },
@@ -203,7 +204,7 @@ const enUS: MessageTree = {
       nameField: 'Name', nameFieldPlaceholder: 'e.g., Mingyuan Zhang',
       creating: 'Creating…', create: 'New resume', loading: 'Loading...',
       collectionEyebrow: 'Saved assets', collectionTitle: 'My resumes', emptyTitle: 'No resumes yet', empty: 'Create a blank resume above or import an existing file to begin.',
-      createError: 'Failed to create resume. Check the name and try again.', deleteConfirm: 'This resume will no longer appear in the list. Continue?', deleteAction: 'Delete',
+      createError: 'Failed to create resume. Check the name and try again.', deleteError: 'Failed to delete the resume. Please try again.', deleteConfirm: 'This resume will no longer appear in the list. Continue?', deleteAction: 'Delete',
       lastUpdate: 'Last updated',
     },
     resumeDetail: {
