@@ -61,6 +61,25 @@ class MaterialSelectionPromptBuilderTest {
         assertEquals(List.of(1), data.get("forcedMaterialIds"));
     }
 
+    @Test
+    @DisplayName("task prompt 的推荐条数上限动态引用 MAX_RECOMMENDED，两处不会漂移")
+    void taskPromptLimitMatchesMaxRecommendedConstant() {
+        MaterialSelectionPromptBuilder builder = new MaterialSelectionPromptBuilder(
+                objectMapper, new CareerMaterialAiSnapshotSanitizer(), new MaterialPromptTextBudget());
+
+        JobDescription jobDescription = new JobDescription();
+        jobDescription.setId(1L);
+        jobDescription.setTitle("Java后端工程师");
+        jobDescription.setJdText("负责 Spring Boot 微服务开发");
+
+        MaterialSelectionPromptBuilder.Prompt prompt =
+                builder.build(jobDescription, List.of(), List.of(), Map.of());
+
+        assertTrue(prompt.task().startsWith("Recommend at most "
+                        + JobMaterialSelectionService.MAX_RECOMMENDED + " career materials."),
+                "task prompt 的条数上限必须与 JobMaterialSelectionService.MAX_RECOMMENDED 同源");
+    }
+
     private CareerMaterial material(Long id, String sourceText) {
         CareerMaterial material = new CareerMaterial();
         material.setId(id);

@@ -7,8 +7,6 @@ import com.intelligentresume.common.error.ErrorCode;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 草稿 JSON 标准化器。
@@ -47,7 +45,6 @@ import java.util.regex.Pattern;
 @Component
 public class ResumeJsonNormalizer {
 
-    private static final Pattern INDEX_PATTERN = Pattern.compile("(.+?)\\[(\\d+)]");
     private static final Object REMOVED = new Object();
 
     /**

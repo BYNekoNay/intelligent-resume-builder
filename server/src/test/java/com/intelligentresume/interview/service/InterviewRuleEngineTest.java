@@ -43,10 +43,11 @@ class InterviewRuleEngineTest {
     }
 
     @Test
-    @DisplayName("规则评分：超长回答不会超过 100 上限")
-    void ruleScore_neverExceeds100() {
+    @DisplayName("规则评分：四项之和上限 80（35+15+10+20），不可能触及 100 分 AI 契约上限")
+    void ruleScore_upperBound80() {
         String huge = "situation task action result 背景 任务 行动 结果 ".repeat(50);
-        assertTrue(engine.ruleScore(huge) <= 100);
+        assertEquals(80, engine.ruleScore(huge));
+        assertTrue(engine.ruleScore(huge) <= 80);
     }
 
     @Test

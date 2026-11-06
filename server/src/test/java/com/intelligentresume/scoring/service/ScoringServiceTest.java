@@ -197,6 +197,27 @@ class ScoringServiceTest {
     }
 
     @Test
+    @DisplayName("#75: 同一毫秒「评分后改 JD」也不复用旧分（保守重算）")
+    void score_sameMillisecondAsJdUpdate_recomputes() {
+        ResumeVersion version = buildVersion(Map.of("skills", List.of(Map.of("name", "Java"))));
+        JobDescription jd = buildJd("Java", Map.of("keywords", List.of("Java"), "requirements", List.of()));
+        // createdAt == updatedAt（同毫秒）：毫秒级时间戳无法区分先后，保守方向是不复用
+        LocalDateTime sameMillisecond = LocalDateTime.now();
+        ReflectionTestUtils.setField(jd, "updatedAt", sameMillisecond);
+        setupHappyPath(version, jd);
+        MatchResult existing = new MatchResult();
+        existing.setId(7L);
+        existing.setRuleVersion("v1.0.0");
+        ReflectionTestUtils.setField(existing, "createdAt", sameMillisecond);
+        when(matchResultRepository.findFirstByResumeVersionIdAndJobDescriptionIdAndRuleVersionOrderByIdDesc(
+                VERSION_ID, JD_ID, "v1.0.0")).thenReturn(Optional.of(existing));
+
+        service.score(new MatchRequest(VERSION_ID, JD_ID), USER_ID);
+
+        verify(matchResultRepository).save(any());
+    }
+
+    @Test
     @DisplayName("正常路径: explanation.disclaimer 与配置一致")
     void score_disclaimerMatchesConfig() {
         ResumeVersion version = buildVersion(Map.of("skills", List.of()));

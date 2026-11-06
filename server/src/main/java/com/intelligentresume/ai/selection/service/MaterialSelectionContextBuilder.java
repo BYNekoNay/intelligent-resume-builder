@@ -10,6 +10,7 @@ import com.intelligentresume.jobdescription.domain.JobDescription;
 import com.intelligentresume.careermaterial.repository.CareerMaterialRepository;
 import com.intelligentresume.personalprofile.domain.PersonalProfile;
 import com.intelligentresume.personalprofile.repository.PersonalProfileRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -57,7 +58,8 @@ import java.util.stream.Collectors;
  *       → 截断到 {@link #MAX_CANDIDATES}（60 条）。打分不改变"能不能用"，但决定截断时谁能留下。</li>
  *   <li>强制加入（included）既参与打分（直接 100000 分顶到最前）也必须留在候选里：截断后
  *       若 included 有遗漏直接 400，而不是静默丢弃 —— 用户明确说过"必须用"。</li>
- *   <li>强制加入超过 30 条直接 400；手工排除的 ID 会先被从 included/preferred 里剔除，
+ *   <li>强制加入超过 {@code app.ai.generation.max-selected-materials}（默认 30）条直接 400；
+ *       手工排除的 ID 会先被从 included/preferred 里剔除，
  *       所以"排除"永远赢。</li>
  *   <li>候选为空时不生成 providerInput（三段 prompt 一个都不放）—— 调用方必须自己判断
  *       {@link Context#hasCandidates()}，否则会把空 prompt 发出去。</li>
@@ -76,13 +78,17 @@ public class MaterialSelectionContextBuilder {
     private final CareerMaterialRepository materialRepository;
     private final PersonalProfileRepository profileRepository;
     private final MaterialSelectionPromptBuilder promptBuilder;
+    /** 强制加入（included）条数上限，与确认侧 {@code MaterialSelectionConfirmationService} 同一配置键。 */
+    private final int maxRequiredMaterials;
 
     public MaterialSelectionContextBuilder(CareerMaterialRepository materialRepository,
                                            PersonalProfileRepository profileRepository,
-                                           MaterialSelectionPromptBuilder promptBuilder) {
+                                           MaterialSelectionPromptBuilder promptBuilder,
+                                           @Value("${app.ai.generation.max-selected-materials:30}") int maxRequiredMaterials) {
         this.materialRepository = materialRepository;
         this.profileRepository = profileRepository;
         this.promptBuilder = promptBuilder;
+        this.maxRequiredMaterials = maxRequiredMaterials;
     }
 
     /** 一次筛选的全部产物；worker 用它算推荐，预览只用 providerInput。 */
@@ -121,8 +127,9 @@ public class MaterialSelectionContextBuilder {
         Set<Long> manuallyExcluded = longSet(safeInput.get("excludedMaterialIds"));
         Set<Long> forced = longSet(safeInput.get("includedMaterialIds"));
         forced.removeAll(manuallyExcluded);
-        if (forced.size() > 30) {
-            throw new BusinessException(ErrorCode.VALIDATION, "At most 30 materials can be required");
+        if (forced.size() > maxRequiredMaterials) {
+            throw new BusinessException(ErrorCode.VALIDATION,
+                    "At most " + maxRequiredMaterials + " materials can be required");
         }
         Set<Long> preferred = longSet(safeInput.get("preferredMaterialIds"));
         preferred.removeAll(manuallyExcluded);

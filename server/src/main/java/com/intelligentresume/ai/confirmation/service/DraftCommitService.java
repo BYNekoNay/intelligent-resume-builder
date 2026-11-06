@@ -195,6 +195,7 @@ public class DraftCommitService {
                 ? targetResumeIdOverride
                 : toLong(snapshot.get("targetResumeId"));
 
+        Resume target = null;
         if (resumeId == null) {
             // 自动创建岗位简历
             Resume resume = new Resume();
@@ -207,14 +208,12 @@ public class DraftCommitService {
             resume = resumeRepository.save(resume);
             resumeId = resume.getId();
         } else {
-            // 校验目标简历归属
-            Resume target = resumeRepository.findByIdAndUserId(resumeId, userId)
+            // 校验目标简历归属；targetResumeIdOverride 场景下 target 还用于下方岗位比对（避免重复查询）
+            target = resumeRepository.findByIdAndUserId(resumeId, userId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "简历不存在"));
         }
 
         if (targetResumeIdOverride != null) {
-            Resume target = resumeRepository.findByIdAndUserId(resumeId, userId)
-                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Resume not found"));
             Long jobDescriptionId = toLong(snapshot.get("jobDescriptionId"));
             if (jobDescriptionId == null || !jobDescriptionId.equals(target.getJobDescriptionId())) {
                 throw new BusinessException(ErrorCode.VALIDATION,

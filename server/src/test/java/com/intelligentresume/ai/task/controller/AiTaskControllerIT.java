@@ -296,6 +296,31 @@ class AiTaskControllerIT {
 
     @Test
     @Order(13)
+    @DisplayName("#4: 超大顶层 jdText 被拒绝 40001 且不落库")
+    void createTask_oversizedJdTextRejected() throws Exception {
+        Long userId = userRepository.findByUsername("ai_user_a").orElseThrow().getId();
+        String oversized = "x".repeat(300_000);
+        String key = "oversized-jdtext-1";
+        // 先走真实预览拿有效令牌、input 保持合规 —— 确保差异只来自顶层 jdText 的校验
+        String body = previewed(tokenA, "RESUME_OPTIMIZE", "{\"prompt\": \"内联 JD\"}");
+        com.fasterxml.jackson.databind.node.ObjectNode node =
+                (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.readTree(body);
+        node.put("jdText", oversized);
+
+        mockMvc.perform(post("/api/ai/tasks")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(node)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001));
+        assertTrue(taskRepository.findByUserIdAndTaskTypeAndIdempotencyKey(
+                userId, AiTaskType.RESUME_OPTIMIZE, key).isEmpty(),
+                "超大 jdText 的请求不得落库");
+    }
+
+    @Test
+    @Order(14)
     @DisplayName("#26：清空任务历史只删本人终态任务（进行中/待确认/他人任务保留）")
     void clearHistory_deletesOnlyOwnTerminalTasks() throws Exception {
         String tokenC = registerAndGetToken("ai_user_c", "ai_user_c@example.com", "correcthorse");

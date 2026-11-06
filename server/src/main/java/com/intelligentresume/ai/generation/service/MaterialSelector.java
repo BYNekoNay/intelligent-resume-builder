@@ -63,13 +63,21 @@ public class MaterialSelector {
      * ④最后才截断 normal 到配额（fixed + preferred 先占名额）——先截断再校验会让被截掉的资料
      *   逃过可用性/归属检查。
      *
-     * <p>{@code userId} 在方法体内**没有被使用**：越权安全完全依赖调用方传入的
-     * {@code allMaterials} 已按用户过滤（{@code findByUserId...}）。改签名前先记住这一点。
+     * <p>{@code userId} 用于方法开头的归属兜底过滤（#12）：即使调用方漏按用户过滤，
+     * 他人素材也会被剔除，included/preferred 引用他人素材抛 NOT_FOUND。
+     * 生产调用方仍必须按 {@code findByUserId...} 传入。
      */
     public SelectionResult select(Long userId,
                                   List<CareerMaterial> allMaterials,
                                   JobGenerationRequest req) {
-        Map<Long, CareerMaterial> materialMap = allMaterials.stream()
+        // #12 归属兜底：越权防护此前完全依赖调用方传入已按用户过滤的 allMaterials。
+        // 这里再按 userId 过滤一次（最小实现）：他人素材会被静默剔除，included/preferred
+        // 引用他人素材时在下方 materialMap.get(id) == null 处抛 NOT_FOUND（不泄露存在性）。
+        List<CareerMaterial> ownedMaterials = allMaterials == null ? List.of()
+                : allMaterials.stream()
+                        .filter(m -> userId != null && userId.equals(m.getUserId()))
+                        .toList();
+        Map<Long, CareerMaterial> materialMap = ownedMaterials.stream()
                 .collect(Collectors.toMap(CareerMaterial::getId, Function.identity()));
 
         Set<Long> excludedIds = safeSet(req.excludedMaterialIds());
@@ -80,7 +88,7 @@ public class MaterialSelector {
         preferredIds.removeAll(excludedIds);
         preferredIds.removeAll(includedIds);
 
-        Set<Long> unusableIds = allMaterials.stream()
+        Set<Long> unusableIds = ownedMaterials.stream()
                 .filter(material -> !CareerMaterialEvidence.isReady(material))
                 .map(CareerMaterial::getId)
                 .collect(Collectors.toSet());
@@ -120,7 +128,7 @@ public class MaterialSelector {
                 unselectedReasons.put(id, "USER_EXCLUDED");
             }
         }
-        for (CareerMaterial m : allMaterials) {
+        for (CareerMaterial m : ownedMaterials) {
             if (unusableIds.contains(m.getId()) && excluded.stream().noneMatch(item -> item.getId().equals(m.getId()))) {
                 excluded.add(m);
                 unselectedReasons.put(m.getId(), "INVALID_EVIDENCE");
@@ -133,7 +141,7 @@ public class MaterialSelector {
         specialIds.addAll(preferredIds);
         specialIds.addAll(excludedIds);
 
-        List<CareerMaterial> normal = allMaterials.stream()
+        List<CareerMaterial> normal = ownedMaterials.stream()
                 .filter(m -> !specialIds.contains(m.getId()))
                 .filter(m -> !unusableIds.contains(m.getId()))
                 .collect(Collectors.toList());

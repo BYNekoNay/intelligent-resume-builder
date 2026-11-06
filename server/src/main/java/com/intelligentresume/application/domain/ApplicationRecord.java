@@ -6,12 +6,6 @@ import org.hibernate.annotations.SQLRestriction;
 
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "application_record")
-// ⚠ 必须在实体类上重复声明：@SQLRestriction 标在 @MappedSuperclass（SoftDeletableEntity）
-// 上**不会被实体继承**（Hibernate 只认直接标注），与 Resume / JobDescription 同款。
-// 漏声明的后果：软删行依然出现在列表里（ApplicationControllerIT 实测抓住）。
-@SQLRestriction("deleted_at IS NULL")
 /**
  * 投递记录（一张投递"跟踪卡"在数据库里的样子：投了哪家 JD、用的哪个简历版本、当前状态、
  * 三段草稿文案、各时间戳）。
@@ -31,6 +25,12 @@ import java.time.LocalDateTime;
  *     <li>{@code @Version} 是乐观锁：并发编辑同一投递会抛冲突，而不是后写覆盖先写。</li>
  * </ul>
  */
+@Entity
+@Table(name = "application_record")
+// ⚠ 必须在实体类上重复声明：@SQLRestriction 标在 @MappedSuperclass（SoftDeletableEntity）
+// 上**不会被实体继承**（Hibernate 只认直接标注），与 Resume / JobDescription 同款。
+// 漏声明的后果：软删行依然出现在列表里（ApplicationControllerIT 实测抓住）。
+@SQLRestriction("deleted_at IS NULL")
 public class ApplicationRecord extends SoftDeletableEntity {
     @Column(name = "user_id", nullable = false)
     private Long userId;

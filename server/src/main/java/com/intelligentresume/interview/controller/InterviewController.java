@@ -38,7 +38,8 @@ import java.util.List;
  *       不要从请求参数取用户 id。</li>
  *   <li>会创建 attempt 的写操作（start / answer 含规则模式 / follow-up）要求 {@code Idempotency-Key}
  *       （≤64 字符），服务端用「键 + 请求指纹」保证重放安全；retry / continue-with-rules / finish 不要求。</li>
- *   <li>{@code /answer} 需要先读一次状态来决定走 AI 还是规则分支（见方法内注释）。</li>
+ *   <li>{@code /answer} 用一次无锁只读查询（{@link InterviewService#routingMode}）读执行模式来
+ *       决定走 AI 还是规则分支（见方法内注释）；写前的权威校验全部在 service 事务内。</li>
  * </ul>
  */
 @RestController
@@ -95,18 +96,20 @@ public class InterviewController {
     }
 
     /**
-     * 提交回答。这里必须先读一次状态：规则降级后作答要写规则分（同步），AI 模式则要提交后台评估（异步），
+     * 提交回答。这里只需读一次执行模式来路由：规则模式走同步规则打分，AI 模式走异步后台评估，
      * 两者返回结构相同但行为完全不同。
      *
-     * <p>注意这次 {@code getState} 不是纯读：处于 AI 进行中时它会做陈旧接管，因此本请求可能顺带把
-     * 一个超时的 attempt 判死。这是有意复用的兜底路径，不要改成更轻的查询。
+     * <p>路由用无锁只读查询 {@link InterviewService#routingMode}，而不是带写副作用的
+     * {@code getState}（行锁 + 陈旧接管）—— 每次作答因此省掉一次加锁读。路由读到的快照即使
+     * 过期也不会写错：写前的权威校验全部下沉到 service 事务内（{@code ruleAnswer} 校验模式，
+     * {@code answer} 校验状态与模式）；陈旧 attempt 的接管由前端轮询 {@code GET /interviews/{id}} 兜底。
      */
     @PostMapping("/{id}/answer")
     public ApiResponse<InterviewStateResponse> answer(@PathVariable Long id,
                                                        @Valid @RequestBody AnswerInterviewRequest request,
                                                        @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 64) String idempotencyKey,
                                                        HttpServletRequest httpRequest) {
-        if (service.getState(id, currentUserId(httpRequest)).getExecutionMode() == com.intelligentresume.interview.domain.ExecutionMode.RULE) {
+        if (service.routingMode(id, currentUserId(httpRequest)) == com.intelligentresume.interview.domain.ExecutionMode.RULE) {
             return ApiResponse.success(service.ruleAnswer(id, request.getAnswer().trim(), currentUserId(httpRequest), idempotencyKey.trim()), traceId(httpRequest));
         }
         return ApiResponse.success(service.answer(id, request.getAnswer().trim(), currentUserId(httpRequest), idempotencyKey.trim()), traceId(httpRequest));

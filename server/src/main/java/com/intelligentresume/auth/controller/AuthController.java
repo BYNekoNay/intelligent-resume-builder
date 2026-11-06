@@ -117,6 +117,11 @@ public class AuthController {
     public ResponseEntity<ApiResponse<TokenResponse>> refresh(HttpServletRequest httpRequest) {
         // 桌面本地工作区（ADR-012 D3）：无需 refresh cookie，直接为本地用户签发令牌。
         // 前端沿用在线版启动流程（先 refresh 再拉当前用户），这条分支就是「免登录」的协议落点。
+        //
+        // #71 刻意取舍（行为固化，勿"修复"）：本分支跳过 refresh token 校验与会话轮换，
+        // 不写 auth_session。前提是桌面服务只绑定 localhost、无公网暴露，攻击面不存在；
+        // HTTP 层的 refresh 限流规则（RateLimitRegistry "refresh"）不分部署模式，
+        // 桌面模式同样消耗同一份预算，突发刷接口仍会被 429 —— 因此无需在分支内再做限流。
         if (desktopLocalUserService.isEnabled()) {
             return ResponseEntity.ok()
                     .body(ApiResponse.success(desktopLocalUserService.issueToken(), traceId(httpRequest)));

@@ -48,7 +48,8 @@ import java.util.stream.Collectors;
 @Service
 public class JobMaterialSelectionService {
 
-    private static final int MAX_RECOMMENDED = 12;
+    /** AI 推荐条数的单一上限：task prompt 文本（{@code MaterialSelectionPromptBuilder}）动态引用本值。 */
+    public static final int MAX_RECOMMENDED = 12;
 
     private final JobDescriptionRepository jobRepository;
     private final MaterialSelectionContextBuilder contextBuilder;

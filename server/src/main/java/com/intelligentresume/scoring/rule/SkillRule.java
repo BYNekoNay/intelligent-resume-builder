@@ -3,11 +3,8 @@ package com.intelligentresume.scoring.rule;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 技能规则：与 KeywordRule 逻辑相同，但仅针对简历 skills 子集 token。

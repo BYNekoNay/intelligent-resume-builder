@@ -1,5 +1,6 @@
 <!--
-AI 任务「发送前预览」的纯展示弹窗：消息、脱敏计数、是否包含联系方式全部由父组件传入。
+AI 任务「发送前预览」的纯展示弹窗（R32）：消息、脱敏计数、是否包含联系方式、
+loading / errorMessage / preview 状态全部由父组件 useAiTaskPreview 持有并传入。
 刻意不在这里发请求：预览→确认→才发任务的顺序由 useAiTaskPreview 的 Promise 保证，
 视图绕不过去，本组件只把 confirm / cancel / toggle-contact 回抛给调用方。
 loading / errorMessage / preview 三态互斥；无预览或加载中时确认按钮禁用。
@@ -8,12 +9,6 @@ loading / errorMessage / preview 三态互斥；无预览或加载中时确认�
 import { useLocale } from '@/i18n'
 import type { AiTaskPreview } from '@/api/ai'
 
-/**
- * 发送前预览弹窗（R32）—— 纯展示：状态由 `useAiTaskPreview` 持有。
- *
- * <p>刻意不在这里发请求：这样"预览 → 确认 → 才发任务"的顺序只能由组合式函数保证，
- * 不会被某个视图绕过去。
- */
 defineProps<{
   visible: boolean
   loading: boolean

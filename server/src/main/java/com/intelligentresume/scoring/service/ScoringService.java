@@ -46,8 +46,8 @@ import java.util.*;
  * <ul>
  *   <li><b>确定性</b>：同一份简历 + 同一份 JD + 同一规则版本必须得到同一分数；任何模型/随机/时间因素都不能进来。</li>
  *   <li><b>先归属后归档</b>：先按 {@code resumeId → userId} 校验，再看 {@code deletedAt}，否则会用归档状态泄露他人版本是否存在。</li>
- *   <li><b>结果可复用但不可串号</b>：复用条件是「同版本 + 同 JD + 同规则版本 + JD 未晚于结果更新」，
- *       放宽任一条都会把过期分数当新结果返回。</li>
+ *   <li><b>结果可复用但不可串号</b>：复用条件是「同版本 + 同 JD + 同规则版本 + JD 更新严格早于结果创建」，
+ *       同毫秒也不复用（#75，保守方向）；放宽任一条都会把过期分数当新结果返回。</li>
  *   <li><b>GET 与 POST 共用 {@link #toResponse}</b>：两处字段口径必须一致，持久化字段名不得直接外泄。</li>
  *   <li>{@code ruleVersion} 取配置，默认值编译期拼接 {@link RuleVersion#CURRENT}（#78）：
  *       常量是唯一真源，改规则逻辑就必须同时改常量，否则新旧结果无法区分。</li>
@@ -116,10 +116,13 @@ public class ScoringService {
         // 3. 结果复用（#78）：同一（版本, JD, 规则版本）且 JD 在此前评分之后未被修改时，
         //    直接返回既有结果——重复点击/重放请求不再无限追加等价行。
         //    JD 修改（含重新解析）会刷新 updatedAt，晚于结果创建时间的 JD 一律重新计算。
+        //    #75 边界：比较是**严格大于**——同毫秒（createdAt == updatedAt）也不复用。
+        //    理由：毫秒级时间戳无法区分「先评分后改 JD」与「先改 JD 后评分」谁先谁后，
+        //    保守方向是宁可重算一次，也不把可能过期的旧分当新结果返回。
         Optional<MatchResult> reusable = matchResultRepository
                 .findFirstByResumeVersionIdAndJobDescriptionIdAndRuleVersionOrderByIdDesc(
                         req.resumeVersionId(), req.jobDescriptionId(), ruleVersion);
-        if (reusable.isPresent() && !reusable.get().getCreatedAt().isBefore(jd.getUpdatedAt())) {
+        if (reusable.isPresent() && reusable.get().getCreatedAt().isAfter(jd.getUpdatedAt())) {
             return toResponse(reusable.get());
         }
 

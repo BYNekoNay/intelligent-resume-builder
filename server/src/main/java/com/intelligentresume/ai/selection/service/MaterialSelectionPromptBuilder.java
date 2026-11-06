@@ -33,8 +33,8 @@ import java.util.Map;
  *
  * <h2>改这里要同步</h2>
  * 预览端点用的是同一个 builder，所以提示词改一处两边都变（这是刻意的，见 R32）。
- * 但「最多 12 条」同时写在 task prompt 与 {@code JobMaterialSelectionService#MAX_RECOMMENDED} 里，
- * 改数字必须两边一起改，否则模型被要求 12 条、代码却按另一个数收。
+ * 「最多 N 条」的数字来自 {@code JobMaterialSelectionService#MAX_RECOMMENDED}（单一事实来源），
+ * task prompt 动态引用该常量生成，代码侧收敛与提示词要求天然一致，不再需要人工同步。
  */
 @Component
 public class MaterialSelectionPromptBuilder {
@@ -71,13 +71,15 @@ public class MaterialSelectionPromptBuilder {
                 Prefer evidence that directly covers the job requirements and avoid redundant evidence.
                 Return valid JSON only.
                 """;
+        // 推荐条数上限引用 JobMaterialSelectionService#MAX_RECOMMENDED 单一常量生成，
+        // 避免 prompt 文本与代码侧收敛上限两处魔法数字漂移（#66）。
         String task = """
-                Recommend at most 12 career materials. Every forced material must be recommended.
+                Recommend at most %d career materials. Every forced material must be recommended.
                 Output exactly these top-level keys:
                 recommended: [{materialId, relevanceScore (0-100), reason, matchedRequirements: string[]}]
                 unselected: [{materialId, reason}]
                 missingRequirements: string[]
-                """;
+                """.formatted(JobMaterialSelectionService.MAX_RECOMMENDED);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("job", Map.of(
                 "title", jd.getTitle(),

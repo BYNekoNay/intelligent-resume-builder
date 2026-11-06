@@ -198,4 +198,25 @@ class JobGenerationSchemaValidatorTest {
                 () -> validator.validate(draft, "v1.0.0", Set.of(1L)));
         assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
     }
+
+    @Test
+    @DisplayName("#7: 配置切换 schema 版本时校验器同步生效（常量真源只作缺省兜底）")
+    void configuredVersionSwitchIsHonored() {
+        // 模拟配置 app.ai.generation.schema-version=v1.1.0：
+        // 修复前校验器硬编码 v1.0.0，这里会误判 400（所有生成任务失败）。
+        JobGenerationSchemaValidator upgraded =
+                new JobGenerationSchemaValidator("v1.1.0", 65536, new ObjectMapper());
+        Map<String, Object> draft = Map.of(
+                "basics", Map.of("_source", Map.of("materialId", 1), "name", "测试用户"));
+
+        assertDoesNotThrow(() -> upgraded.validate(draft, "v1.1.0"),
+                "配置切换版本后，同版本的草稿必须通过校验");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> upgraded.validate(draft, "v1.0.0"));
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+
+        // 未显式给定期望版本时回落到常量真源 v1.0.0
+        assertDoesNotThrow(() -> validator.validate(draft, "v1.0.0"));
+        assertThrows(BusinessException.class, () -> validator.validate(draft, "v1.1.0"));
+    }
 }

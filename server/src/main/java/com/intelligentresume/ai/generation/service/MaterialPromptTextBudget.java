@@ -35,25 +35,26 @@ import java.util.Map;
  *     unselectedReasons 原因码（见 {@code DraftSectionReview.vue} 的未使用资料列表）。</li>
  *     <li>单条额度 = {@code min(max-material-bytes, max-materials-total-bytes / 条数)}，
  *     因此 n 条资料的原始文本总量 ≤ 总量上限（n 为正整数时恒成立）。</li>
- *     <li>contentJson 超限时按顶层条目整条保留/省略（保持 JSON 合法），并写入
- *     {@code "_truncated": true}；sourceText 按 UTF-8 字符边界截断并追加
- *     {@code [truncated]} 标记，让模型明确知道文本不完整、不要据此补全或编造。</li>
- *     <li>预算按原始 UTF-8 字节计（不含渲染时的 JSON 转义开销）；默认值相对模型上下文
- *     留有余量——本预算用于封顶，不追求与上下文精确对齐。</li>
- * </ul>
- *
- * <p>调用方必须遵守的约定：
- * <ul>
- *   <li><b>一次传入完整批次</b>：单条额度按传入条数均分（总量 / n）。分批调用会把名额重复发一遍，
- *       总量上限随之失效。</li>
- *   <li><b>结果条数与入参严格一一对应、顺序不变</b>：{@code JobGenerationPromptBuilder} 依赖这一点
- *       用 subList 把结果切回 fixed / preferred / candidate 三段；若将来让 clip 丢弃条目，那边会错位。</li>
- *   <li>返回的是副本，但 <b>contentJson 未超限时与入参共享同一个 Map 引用</b> —— 因此不要去改
- *       clip 结果里的 contentJson，会污染原实体。</li>
- *   <li>额度可以小到只剩 1 字节：此时 contentJson 会被替换成只含 {@code _truncated} 的对象
- *       （体积仍可能超过额度），sourceText 直接清空（不是截断），这是有意的"别给无意义前缀"。</li>
- *   <li>{@link #TRUNCATION_MARKER} 的字节数参与额度预留，改标记文本会改变实际可用字符数。</li>
- * </ul>
+     *     <li>contentJson 超限时按顶层条目整条保留/省略（保持 JSON 合法），并写入
+     *     {@code "_truncated": true}；sourceText 按 UTF-8 字符边界截断并追加
+     *     {@code [truncated]} 标记，让模型明确知道文本不完整、不要据此补全或编造。</li>
+     *     <li>预算按原始 UTF-8 字节计（不含渲染时的 JSON 转义开销）；默认值相对模型上下文
+     *     留有余量——本预算用于封顶，不追求与上下文精确对齐。</li>
+     * </ul>
+     *
+     * <p>调用方必须遵守的约定：
+     * <ul>
+     *   <li><b>一次传入完整批次</b>：单条额度按传入条数均分（总量 / n）。分批调用会把名额重复发一遍，
+     *       总量上限随之失效。</li>
+     *   <li><b>结果条数与入参严格一一对应、顺序不变</b>：{@code JobGenerationPromptBuilder} 依赖这一点
+     *       用 subList 把结果切回 fixed / preferred / candidate 三段；若将来让 clip 丢弃条目，那边会错位。</li>
+     *   <li>返回的是副本，但 <b>contentJson 未超限时与入参共享同一个 Map 引用</b> —— 因此不要去改
+     *       clip 结果里的 contentJson，会污染原实体。</li>
+     *   <li>额度可以小到只剩 1 字节：此时 contentJson 会被替换成只含 {@code _truncated} 的对象
+     *       （体积仍可能超过额度），sourceText 只剩 {@code [truncated]} 标记（不是完整截断前缀），
+     *       且只有「原本有文本」的资料才有标记——为空/缺失的 sourceText 保持原样，两种状态可区分（#25）。</li>
+     *   <li>{@link #TRUNCATION_MARKER} 的字节数参与额度预留，改标记文本会改变实际可用字符数。</li>
+     * </ul>
  */
 @Component
 public class MaterialPromptTextBudget {
@@ -124,8 +125,9 @@ public class MaterialPromptTextBudget {
         String sourceText = material.getSourceText();
         if (sourceText != null && !sourceText.isEmpty()) {
             if (remaining <= MARKER_BYTES) {
-                // 额度已被 contentJson 占满：宁可给空文本，也不留一个无意义的超短前缀。
-                sourceText = "";
+                // 额度已被 contentJson 占满：宁可不给无意义的超短前缀，但不能静默清空——
+                // 置为仅含标记的文本，让模型区分「本来没有原文」与「原文被裁掉」（#25）。
+                sourceText = TRUNCATION_MARKER.strip();
             } else if (byteSize(sourceText) > remaining) {
                 sourceText = clipToUtf8Bytes(sourceText, (int) (remaining - MARKER_BYTES)) + TRUNCATION_MARKER;
             }

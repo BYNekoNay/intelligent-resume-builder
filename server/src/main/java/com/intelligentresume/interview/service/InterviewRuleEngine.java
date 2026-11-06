@@ -47,10 +47,10 @@ public class InterviewRuleEngine {
     public static final String RULE_NEXT_TEMPLATE = "请分享一个关于「%s」的具体经历或思考。";
 
     /**
-     * 规则评分：基础 35 分；回答长度达到 80/160 字各加分；命中 STAR 关键词额外加分，封顶 100。
+     * 规则评分：基础 35 分；回答长度达到 80/160 字各加分；命中 STAR 关键词额外加分。
      *
      * <p>实际计分口径：35 + 15(≥80 字) + 10(≥160 字) + min(20, 命中数×5)，
-     * 按当前权重理论上限为 80，因此末尾的 {@code Math.min(100, ...)} 只是防御性封顶。
+     * 四项之和上限为 35+15+10+20=80，不可能触及 AI 契约的 100 分上限。
      * 具体分值（35/15/10/5/80/160）未找到明确依据，改前先全仓搜确认没有报告口径依赖。
      */
     public int ruleScore(String answer) {
@@ -62,7 +62,7 @@ public class InterviewRuleEngine {
         long star = List.of("situation", "task", "action", "result", "背景", "任务", "行动", "结果")
                 .stream().filter(lower::contains).count();
         score += (int) Math.min(20, star * 5);
-        return Math.min(100, score);
+        return score;
     }
 
     /**

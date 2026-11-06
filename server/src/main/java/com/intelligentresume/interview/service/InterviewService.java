@@ -2,6 +2,7 @@ package com.intelligentresume.interview.service;
 
 import com.intelligentresume.ai.task.dto.AiTaskStatusResponse;
 import com.intelligentresume.interview.domain.AiAttemptStatus;
+import com.intelligentresume.interview.domain.ExecutionMode;
 import com.intelligentresume.interview.domain.InterviewSession;
 import com.intelligentresume.interview.domain.InterviewStatus;
 import com.intelligentresume.interview.dto.InterviewReportResponse;
@@ -31,8 +32,8 @@ import java.util.List;
  *    {@link InterviewStateResponse}（会话当前状态快照）。
  * ③ 改坏它：所有面试接口一起挂——用户点「开始面试」就报错，整个模拟面试功能不可用。
  *
- * <p>除 {@code getState} 外，其余 public 方法都是纯委托，不含业务实现；
- * 不允许在门面私有方法内调用 @Transactional 方法（避免绕过代理）。
+ * <p>除 {@code getState} 与路由只读查询 {@link #routingMode} 外，其余 public 方法都是纯委托，
+ * 不含业务实现；不允许在门面私有方法内调用 @Transactional 方法（避免绕过代理）。
  *
  * <p>流程委托关系：start→{@link InterviewStartService}；answer→{@link InterviewAnswerService}；
  * retryAi→{@link InterviewRetryService}；continueWithRules/ruleAnswer→{@link InterviewRuleService}；
@@ -127,7 +128,27 @@ public class InterviewService {
         return followUpService.preview(id, weakness, userId);
     }
 
-    // ==================== 会话状态（留在门面，Controller answer() 依赖其路由） ====================
+    // ==================== 会话状态（留在门面，Controller answer() 依赖路由只读方法） ====================
+
+    /**
+     * /answer 路由用的只读查询：仅返回执行模式，不加行锁、不做陈旧接管。
+     *
+     * <p>【小白导读】Controller 需要知道会话是 AI 模式还是规则模式来决定调哪个写方法。
+     * 原先这里复用带写副作用的 {@link #getState}（行锁 + 陈旧接管），导致每次作答都多一次
+     * 加锁读。改为无锁读后，写前的权威校验全部留在目标 service 的事务内：
+     * {@code ruleAnswer} 在行锁下校验 {@code executionMode == RULE}；
+     * {@code answer} 在行锁下校验 {@code status == AWAITING_ANSWER} 且 {@code executionMode == AI}。
+     * 因此路由读到的快照即使过期（TOCTOU），也不会把写操作引到错误的分支上。
+     *
+     * <p>失去的副作用：原先顺带做一次陈旧 attempt 接管。那本来就是兜底路径，
+     * 前端在 {@code EVALUATING_ANSWER} 下会持续轮询 {@code GET /interviews/{id}}（即 {@link #getState}），
+     * 接管仍会被触发，只是从「作答请求顺带做」退回到「下一次轮询做」。
+     */
+    public ExecutionMode routingMode(Long id, Long userId) {
+        return sessionRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> stateAssembler.notFound("面试会话不存在"))
+                .getExecutionMode();
+    }
 
     /**
      * 读取会话状态；顺带做一次「陈旧 PROCESSING 接管」。

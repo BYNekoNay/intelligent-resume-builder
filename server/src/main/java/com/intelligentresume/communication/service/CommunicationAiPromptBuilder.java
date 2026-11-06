@@ -2,6 +2,7 @@ package com.intelligentresume.communication.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.intelligentresume.common.text.PromptRedactor;
 import com.intelligentresume.communication.dto.GenerateCommunicationRequest;
 import com.intelligentresume.jobdescription.domain.JobDescription;
 import com.intelligentresume.resume.domain.ResumeSections;
@@ -12,7 +13,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * 沟通文案的提示词组装：把简历与 JD 变成「模型能看、但不能当真」的输入。
@@ -23,15 +23,15 @@ import java.util.regex.Pattern;
  *
  * <h2>脱敏在这里做了什么</h2>
  * 章节白名单（{@code ResumeSections.AI_CONTEXT_SECTIONS}）→ 键名黑名单 → 递归限深 6 层、
- * 单层最多 60 个键、列表最多 20 项、单串最多 2000 字 → 邮箱/手机/URL 打码。
+ * 单层最多 60 个键、列表最多 20 项、单串最多 2000 字 → 值级打码
+ * （委托公共工具类 {@code PromptRedactor}：邮箱/手机/URL/身份证 → 占位符）。
  * 限流的意义是防止单条资料把模型上下文撑爆，不是"美化输入"。
  *
  * <h2>已知缺口（不要以为它和素材脱敏一样严）</h2>
  * 键名是**精确匹配**（只有 {@code phone} / {@code email} 这类原样键名），
  * 遇到 {@code phoneNumber} / {@code emailAddress} 不会整字段丢弃；
- * 电话正则只认中国大陆手机号，座机与海外号码会原样带出。
- * 素材侧的 {@code CareerMaterialAiSnapshotSanitizer} 用的是「正则匹配键名 + 国际号码规则」，
- * 两边口径**尚未统一**；要动手统一，请先补测试再改，不要只改一边。
+ * 电话正则只认中国大陆手机号，座机与海外号码会原样带出（素材侧有国际号码规则，本侧没有）。
+ * 值级正则与替换顺序已收敛到 {@code PromptRedactor}；键名清理策略两边刻意不同，各自保留。
  */
 @Component
 public class CommunicationAiPromptBuilder {
@@ -39,9 +39,6 @@ public class CommunicationAiPromptBuilder {
     /** 精确匹配的键名黑名单 —— 已知缺口见类注释（派生键名不会命中）。 */
     private static final Set<String> SENSITIVE_KEYS = Set.of(
             "email", "phone", "telephone", "address", "location", "url", "website", "profiles", "idNumber");
-    private static final Pattern EMAIL = Pattern.compile("[\\w.%+-]+@[\\w.-]+\\.[A-Za-z]{2,}");
-    private static final Pattern PHONE = Pattern.compile("(?<!\\d)(?:\\+?86[- ]?)?1[3-9]\\d{9}(?!\\d)");
-    private static final Pattern URL = Pattern.compile("https?://\\S+", Pattern.CASE_INSENSITIVE);
     private final ObjectMapper objectMapper;
     private final String promptVersion;
     private final String schemaVersion;
@@ -152,9 +149,8 @@ public class CommunicationAiPromptBuilder {
     }
 
     private String redact(String text) {
-        if (text == null) return null;
-        return URL.matcher(PHONE.matcher(EMAIL.matcher(text).replaceAll("[EMAIL]")).replaceAll("[PHONE]"))
-                .replaceAll("[URL]");
+        // 值级打码统一委托 PromptRedactor（EMAIL → PHONE → URL → ID）。
+        return PromptRedactor.mask(text);
     }
 
     private String safeText(String text, int maxLength) {

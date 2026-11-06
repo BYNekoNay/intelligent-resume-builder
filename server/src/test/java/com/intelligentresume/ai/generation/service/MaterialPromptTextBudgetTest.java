@@ -111,13 +111,25 @@ class MaterialPromptTextBudgetTest {
     }
 
     @Test
-    @DisplayName("contentJson 占满额度时来源文本让位为空，不留无意义前缀")
+    @DisplayName("#25 contentJson 占满额度且原有文本被裁掉：sourceText 置为 [truncated] 标记")
     void contentJsonConsumesAllowance() {
         List<CareerMaterial> result = budget(36, 36)
                 .clip(List.of(material(1L, "D".repeat(100), Map.of("company", "星河科技"))));
 
         assertEquals(Map.of("company", "星河科技"), result.get(0).getContentJson());
-        assertEquals("", result.get(0).getSourceText());
+        assertEquals("[truncated]", result.get(0).getSourceText());
+    }
+
+    @Test
+    @DisplayName("#25 两种状态可区分：本来没有原文 → 保持为空，被裁掉 → 带 [truncated] 标记")
+    void missingSourceTextStaysEmptyWhenBudgetExhausted() {
+        List<CareerMaterial> result = budget(36, 36)
+                .clip(List.of(
+                        material(1L, null, Map.of("company", "星河科技")),
+                        material(2L, "E".repeat(100), Map.of("company", "星河科技"))));
+
+        assertNull(result.get(0).getSourceText(), "本来没有原文的资料不应出现截断标记");
+        assertEquals("[truncated]", result.get(1).getSourceText(), "被裁掉的资料必须带标记");
     }
 
     @Test

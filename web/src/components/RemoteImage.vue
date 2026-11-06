@@ -23,8 +23,6 @@ const props = withDefaults(
     alt?: string
     /** 'card' | 'hero' | 'flow' | 'cta' 决定预设的宽高比与圆角 */
     preset?: 'card' | 'hero' | 'flow' | 'cta' | 'tile'
-    /** 强制 aspect-ratio(优先 preset) */
-    aspectRatio?: string
     /** 占位渐变 */
     fallback?: string
     /** 跳过懒加载拦截立即请求（默认 false 即默认拦截；首屏关键图可设 true） */

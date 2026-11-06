@@ -1,7 +1,5 @@
 package com.intelligentresume.ai.selection.dto;
 
-import jakarta.validation.constraints.NotNull;
-
 import java.util.List;
 
 /**
@@ -15,7 +13,7 @@ import java.util.List;
  *   <li>岗位二选一：给 {@code jobDescriptionId} 用已保存的岗位；否则用 {@code jdText} 现建一条
  *       临时岗位（{@code positionTitle} 为空时标题固定写 {@code Temporary job}）。
  *       <b>两个都给时以 {@code jobDescriptionId} 为准</b>，{@code jdText} 被忽略。</li>
- *   <li>两个都不给 → 400。注意本 record **没有任何字段级约束**（虽然 import 了 {@code NotNull}），
+ *   <li>两个都不给 → 400。注意本 record **没有任何字段级约束**，
  *       "二选一"完全靠服务端手写校验，控制器上的 {@code @Valid} 对这里不起作用。</li>
  *   <li>三个素材 ID 列表都允许为 null；服务端把 null 归一成空列表后写入任务快照，
  *       后续 {@code MaterialSelectionContextBuilder} 只认快照里的这三个键。</li>

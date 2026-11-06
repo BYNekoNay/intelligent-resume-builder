@@ -111,6 +111,7 @@ public class AiTaskController {
                     "This AI task must start from its domain endpoint");
         }
         requireInputWithinSizeLimit(request.input());
+        requireJdTextWithinSizeLimit(request.jdText());
         requirePreviewConfirmed(request.taskType(), request.input());
         String provided = idempotencyKey == null ? null : idempotencyKey.trim();
         if (provided != null && !provided.isEmpty() && provided.length() > 128) {
@@ -183,6 +184,19 @@ public class AiTaskController {
         }
         if (bytes > maxInputJsonBytes) {
             throw new BusinessException(ErrorCode.VALIDATION, "输入内容超过大小上限");
+        }
+    }
+
+    /**
+     * #4：{@code CreateAiTaskRequest} 顶层大文本字段 {@code jdText} 与 {@code input} 共用
+     * {@code app.ai.max-input-json-bytes} 上限。此前只有 input 受约束，超大内联 JD 会绕过
+     * 校验直接进入任务快照与提示词。DTO 顶层其余字符串字段（companyName/positionTitle/
+     * resumeTitle）是短标题，不是大文本载体，不在此约束。
+     */
+    private void requireJdTextWithinSizeLimit(String jdText) {
+        if (jdText == null) return;
+        if (jdText.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > maxInputJsonBytes) {
+            throw new BusinessException(ErrorCode.VALIDATION, "jdText 超过大小上限");
         }
     }
 }

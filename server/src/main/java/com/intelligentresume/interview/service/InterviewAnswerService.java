@@ -6,6 +6,7 @@ import com.intelligentresume.common.persistence.AsyncFailureMessages;
 import com.intelligentresume.interview.domain.AiAttemptOperationType;
 import com.intelligentresume.interview.domain.AiAttemptStatus;
 import com.intelligentresume.interview.domain.EvaluationSource;
+import com.intelligentresume.interview.domain.ExecutionMode;
 import com.intelligentresume.interview.domain.InterviewAiAttempt;
 import com.intelligentresume.interview.domain.InterviewRecord;
 import com.intelligentresume.interview.domain.InterviewSession;
@@ -161,6 +162,12 @@ public class InterviewAnswerService {
             }
             if (session.getStatus() != InterviewStatus.AWAITING_ANSWER) {
                 throw new BusinessException(ErrorCode.CONFLICT, "当前不在等待回答状态");
+            }
+            // 模式双保险：/answer 的路由只读一次执行模式，快照可能过期（TOCTOU）；降级是单向的，
+            // 但并发的 continue-with-rules 理论上可在「路由读之后、本事务加锁之前」提交。
+            // 这里以行锁内的权威校验兜底，确保降级为 RULE 的会话绝不会再触发模型调用。
+            if (session.getExecutionMode() != ExecutionMode.AI) {
+                throw new BusinessException(ErrorCode.CONFLICT, "当前不是 AI 模式");
             }
             if (session.getCurrentQuestion() == null) {
                 throw new BusinessException(ErrorCode.CONFLICT, "当前无待回答的问题");

@@ -187,6 +187,28 @@ class RateLimitCoverageTest {
         assertEquals(threads - 5, rejected.get(), "其余请求必须 429");
     }
 
+    @Test
+    @DisplayName("refresh 规则不分部署模式：桌面分支直接签发同样消耗限流预算（#71 行为固化）")
+    void refresh_directIssueStillConsumesRateLimitBudget() throws Exception {
+        // #71：桌面本地模式（app.desktop.enabled=true）下 AuthController /refresh 走
+        // 「免 cookie 直接签发」分支，但该分支在控制器层，而限流是更早的 Servlet 过滤器
+        // 且不分部署模式 —— 桌面模式与在线版共享同一份 refresh 预算。本用例固化该现状：
+        // 桌面分支不绕过 HTTP 层限流（若未来有人把桌面分支挪到过滤器之前，这里会先红）。
+        RateLimitFilter filter = filter(props -> props.setRefreshPerMinute(2));
+        FilterChain chain = mock(FilterChain.class);
+
+        for (int i = 1; i <= 2; i++) {
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            filter.doFilter(post("10.0.0.1", "/api/auth/refresh"), resp, chain);
+            assertEquals(200, resp.getStatus(), "第 " + i + " 次 refresh 应放行");
+        }
+
+        MockHttpServletResponse blocked = new MockHttpServletResponse();
+        filter.doFilter(post("10.0.0.1", "/api/auth/refresh"), blocked, chain);
+        assertEquals(429, blocked.getStatus(), "第 3 次 refresh 必须 429（桌面直接签发不豁免）");
+        assertEquals("refresh", blocked.getHeader(RateLimitFilter.RATE_LIMIT_RULE_HEADER));
+    }
+
     private MockHttpServletResponse post(RateLimitFilter target, FilterChain chain, String path) throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         target.doFilter(post("10.0.0.1", path), response, chain);

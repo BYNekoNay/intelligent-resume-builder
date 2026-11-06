@@ -36,9 +36,10 @@ import java.util.HashSet;
  * <ul>
  *   <li>第 2 条的互斥只对**要求溯源**的节点生效；{@code basics}/{@code objective} 来自已确认的
  *       个人档案，本来就没有 materialId 可引，对它们强制互斥会让整份草稿作废（线上踩过）。</li>
- *   <li>{@link #CURRENT_VERSION} 是硬编码常量，而调用方传进来的 {@code schemaVersion} 来自配置
- *       {@code app.ai.generation.schema-version}。两处必须同步改 —— 只改配置不改常量，
- *       所有生成任务都会在这里被判 400。</li>
+ *   <li>{@code CURRENT_VERSION} 是常量真源（#7）：本类与调用方 {@code JobGenerationService}
+ *       的 {@code schemaVersion} 都来自配置 {@code app.ai.generation.schema-version}，
+ *       兜底值用编译期常量拼接（同 #78 的 {@code RuleVersion} 写法）。只改配置会让
+ *       「传入版本 ≠ 常量」判 400 的问题已消除 —— 两侧读同一个键，天然同步。</li>
  *   <li>传入 {@code allowedMaterialIds} 时，草稿引用的每个 materialId 都必须在确认快照内，
  *       用于挡住模型幻觉出来的 ID；传 null 则跳过这道检查（两参重载目前只有测试在用）。</li>
  *   <li>本类只校验结构与引用，不校验文案质量；生产调用方（{@code JobGenerationService} 两条路径）
@@ -53,14 +54,23 @@ public class JobGenerationSchemaValidator {
             Set.of("basics", "work", "education", "skills", "projects", "certificates",
                     "objective", "volunteering", "courses", "publications", "customSections");
 
+    private final String expectedVersion;
     private final int maxOutputBytes;
     private final ObjectMapper objectMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public JobGenerationSchemaValidator(
+            @Value("${app.ai.generation.schema-version:" + CURRENT_VERSION + "}") String schemaVersion,
             @Value("${app.ai.generation.max-output-bytes:65536}") int maxOutputBytes,
             ObjectMapper objectMapper) {
+        this.expectedVersion = schemaVersion;
         this.maxOutputBytes = maxOutputBytes;
         this.objectMapper = objectMapper;
+    }
+
+    /** 测试便捷入口：未显式给定期望版本时按常量真源 {@link #CURRENT_VERSION} 校验。 */
+    public JobGenerationSchemaValidator(int maxOutputBytes, ObjectMapper objectMapper) {
+        this(CURRENT_VERSION, maxOutputBytes, objectMapper);
     }
 
     @SuppressWarnings("unchecked")
@@ -75,9 +85,9 @@ public class JobGenerationSchemaValidator {
      * 已确认的个人档案派生，没有 materialId 可引。
      */
     public void validate(Map<String, Object> draft, String schemaVersion, Set<Long> allowedMaterialIds) {
-        if (!CURRENT_VERSION.equals(schemaVersion)) {
+        if (!expectedVersion.equals(schemaVersion)) {
             throw new BusinessException(ErrorCode.VALIDATION,
-                    "Schema 版本不匹配, 当前: " + CURRENT_VERSION + ", 传入: " + schemaVersion);
+                    "Schema 版本不匹配, 当前: " + expectedVersion + ", 传入: " + schemaVersion);
         }
         if (draft == null || draft.isEmpty()) {
             throw new BusinessException(ErrorCode.VALIDATION, "草稿为空");

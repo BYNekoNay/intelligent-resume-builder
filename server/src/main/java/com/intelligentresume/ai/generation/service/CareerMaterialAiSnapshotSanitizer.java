@@ -1,6 +1,7 @@
 package com.intelligentresume.ai.generation.service;
 
 import com.intelligentresume.careermaterial.domain.CareerMaterial;
+import com.intelligentresume.common.text.PromptRedactor;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -43,14 +44,10 @@ import java.util.regex.Pattern;
 @Component
 public class CareerMaterialAiSnapshotSanitizer {
 
-    private static final Pattern EMAIL_PATTERN = Pattern.compile(
-            "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
-    private static final Pattern CHINESE_PHONE_PATTERN = Pattern.compile(
-            "(?<!\\d)(?:\\+?86[- ]?)?1[3-9]\\d{9}(?!\\d)");
+    // 值级四正则（邮箱/大陆手机/URL/身份证）与替换顺序已收敛到 common 层 PromptRedactor；
+    // 本类只保留素材侧场景特有的「地址标签」与「国际号码」两条规则（见 sanitizeText）。
     private static final Pattern INTERNATIONAL_PHONE_PATTERN = Pattern.compile(
             "(?<!\\d)(?:\\+\\d{1,3}[ -]?)?\\(?\\d{2,4}\\)?(?:[ -]\\d{3,4}){2,3}(?!\\d)");
-    private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s,;)]+", Pattern.CASE_INSENSITIVE);
-    private static final Pattern ID_PATTERN = Pattern.compile("(?<!\\d)\\d{17}[\\dXx](?!\\d)");
     private static final Pattern LABELED_ADDRESS_PATTERN = Pattern.compile(
             "(?i)(?:home\\s+address|mailing\\s+address|address|地址)\\s*[:：]\\s*[^\\n;]+\\s*");
     /**
@@ -121,12 +118,11 @@ public class CareerMaterialAiSnapshotSanitizer {
         if (text == null || text.isBlank()) return text;
         String result = text.replaceAll("\\r\\n?", "\\n");
         result = LABELED_ADDRESS_PATTERN.matcher(result).replaceAll("[ADDRESS]");
-        result = EMAIL_PATTERN.matcher(result).replaceAll("[EMAIL]");
-        result = CHINESE_PHONE_PATTERN.matcher(result).replaceAll("[PHONE]");
-        result = INTERNATIONAL_PHONE_PATTERN.matcher(result).replaceAll("[PHONE]");
-        result = URL_PATTERN.matcher(result).replaceAll("[URL]");
-        result = ID_PATTERN.matcher(result).replaceAll("[ID]");
-        return result;
+        result = PromptRedactor.mask(result);
+        // 素材侧特有的「国际号码」规则在公共四步之后补跑：国际号码正则会误伤 "2023 2024" 这类
+        // 数字串，且其匹配只含数字与分隔符，公共四步（EMAIL/PHONE/URL/ID）先跑不改变它的命中
+        // 结果（URL 整段吞掉的号码最终同样输出 [URL]，两头等价）。
+        return INTERNATIONAL_PHONE_PATTERN.matcher(result).replaceAll(PromptRedactor.PHONE_PLACEHOLDER);
     }
 
     private String renderAchievementSourceText(String title, Map<String, Object> content) {

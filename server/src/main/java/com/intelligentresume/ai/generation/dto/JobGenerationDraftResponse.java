@@ -18,6 +18,9 @@ import java.util.Map;
  *       的最终草稿；模型原始输出不会落在这里。</li>
  *   <li>{@code selected} 只记录真实引用到的资料（幻觉 materialId 在收集阶段就被过滤掉），
  *       资料留存清扫依赖这份记录判断"还有人用"。</li>
+ *   <li>{@code result_json} 里还有 {@code unselected} 键（旧任务路径存 {@code CareerMaterial} 列表、
+ *       快照路径存空列表），实际形状不稳定，故本 record 不声明对应字段；原因码见
+ *       {@code MaterialSelector} 的 {@code unselectedReasons}。</li>
  *   <li>{@code missing} 由草稿里缺哪些板块推导而来，不是模型自报。</li>
  *   <li>{@code qualitySummary} 也在同一个 result_json 里，但不在本 record 字段中。</li>
  * </ul>
@@ -27,7 +30,6 @@ public record JobGenerationDraftResponse(
         String status,
         Map<String, Object> draftResumeJson,
         List<SelectedMaterialEntry> selected,
-        List<UnselectedMaterialEntry> unselected,
         List<MissingItem> missing,
         String promptVersion,
         String schemaVersion,

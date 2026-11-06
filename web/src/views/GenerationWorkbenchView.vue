@@ -27,6 +27,7 @@ import { getConsent, hasJobGenerationConsent, previewMaterialSelection, selectMa
 import type { CareerMaterialSummary, MaterialType } from '@/api/careerMaterial'
 import { useLocale } from '@/i18n'
 import { resolveApiError } from '@/utils/errorMessage'
+import { newIdempotencyKey } from '@/utils/idempotency'
 import { useAiTaskPreview } from '@/composables/useAiTaskPreview'
 import AiPreviewDialog from '@/components/ai/AiPreviewDialog.vue'
 
@@ -253,7 +254,7 @@ async function startGeneration() {
 
   try {
     const payload = buildGenerationPayload()
-    const idempotencyKey = `gen-workbench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const idempotencyKey = newIdempotencyKey('gen-workbench')
     const consent = (await getConsent())
     if (!hasJobGenerationConsent(consent)) {
       storePendingGeneration({ payload, idempotencyKey })

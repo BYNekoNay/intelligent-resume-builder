@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import com.intelligentresume.resume.domain.ResumeSourceType;
+import java.util.Map;
 
 /**
  * 简历主档的 CRUD 与"当前版本"指针切换；版本内容本身由 {@link ResumeVersionService} 管理。
@@ -38,9 +40,6 @@ import java.util.List;
  *     <li>切换当前版本前要校验"版本属于该简历"且"未归档"，否则会指向不可见的内容。</li>
  * </ul>
  */
-import com.intelligentresume.resume.domain.ResumeSourceType;
-import java.util.Map;
-
 @Service
 public class ResumeService {
 

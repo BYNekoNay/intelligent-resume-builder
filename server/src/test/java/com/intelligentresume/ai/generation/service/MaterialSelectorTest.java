@@ -85,6 +85,40 @@ class MaterialSelectorTest {
     }
 
     @Test
+    @DisplayName("#12: included 引用他人素材 → NOT_FOUND（userId 归属兜底，不泄露存在性）")
+    void includedOthersMaterial_notFound() {
+        CareerMaterial mine = material(1L, MaterialType.WORK_EXPERIENCE);
+        CareerMaterial others = material(2L, MaterialType.SKILL);
+        others.setUserId(200L);
+
+        JobGenerationRequest req = new JobGenerationRequest(
+                1L, 1L, List.of(2L), List.of(), List.of());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> selector.select(100L, List.of(mine, others), req));
+        assertEquals(ErrorCode.NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("#12: 调用方漏按用户过滤时，他人素材不进入任何选中段")
+    void othersMaterialNeverSelectedEvenIfCallerLeaksIt() {
+        CareerMaterial mine = material(1L, MaterialType.WORK_EXPERIENCE);
+        CareerMaterial others = material(2L, MaterialType.SKILL);
+        others.setUserId(200L);
+
+        JobGenerationRequest req = new JobGenerationRequest(
+                1L, 1L, List.of(), List.of(), List.of());
+
+        MaterialSelector.SelectionResult result = selector.select(100L, List.of(mine, others), req);
+
+        assertEquals(1, result.normal().size(), "normal 段只应包含本人素材");
+        assertEquals(1L, result.normal().get(0).getId());
+        assertTrue(result.fixed().isEmpty());
+        assertTrue(result.preferred().isEmpty());
+        assertTrue(result.excluded().stream().noneMatch(m -> m.getId() == 2L));
+    }
+
+    @Test
     @DisplayName("正常路径: PREFERRED 排在 normal 之前")
     void preferredOrderFirst() {
         CareerMaterial m1 = material(1L, MaterialType.WORK_EXPERIENCE);

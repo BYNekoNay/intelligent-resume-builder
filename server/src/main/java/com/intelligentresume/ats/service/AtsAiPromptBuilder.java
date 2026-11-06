@@ -3,6 +3,7 @@ package com.intelligentresume.ats.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.intelligentresume.ats.dto.AtsFallbackCode;
+import com.intelligentresume.common.text.PromptRedactor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -11,7 +12,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * ATS 分析的提示词工厂：把简历、JD 与本地规则结果打包成一次模型调用。
@@ -37,8 +37,8 @@ import java.util.regex.Pattern;
  * <h2>脱敏两道闸：丢键 + 值级打码</h2>
  * {@link #SENSITIVE_KEYS} 按小写精确匹配丢掉 email/phone/address 等**字段**；
  * {@link #sanitize} 对字符串先打码（邮箱/手机/URL/身份证 → {@code [EMAIL]/[PHONE]/[URL]/[ID]}，
- * 正则与 {@code CareerMaterialAiSnapshotSanitizer} 对齐）再截断，
- * 覆盖简历正文里手写的「手机 138xxxx」。三处口径收敛成单一工具类尚未做，收敛设计见评审记录。
+ * 委托给公共工具类 {@code PromptRedactor}）再截断，
+ * 覆盖简历正文里手写的「手机 138xxxx」。
  *
  * <h2>版本号取自配置，不取任务快照（#85）</h2>
  * {@link #promptVersion()} 返回的是**本次实际构建请求**用的版本，结果记录必须用它；
@@ -148,22 +148,11 @@ public class AtsAiPromptBuilder {
     private static final Set<String> SENSITIVE_KEYS = Set.of(
             "email", "phone", "mobile", "telephone", "address", "idnumber", "idcard", "identitynumber", "links", "website", "url");
 
-    // 值级打码正则：与 CareerMaterialAiSnapshotSanitizer 逐字一致（收敛成公共工具类前先保证口径相同）。
+    // 值级打码正则与替换顺序已收敛到 common 层 PromptRedactor（EMAIL → PHONE → URL → ID）。
     // 未引入素材侧的「国际号码」与「地址标签」规则：国际号码正则会误伤 "2023 2024" 这类数字串，
     // 地址标签规则只适配联系块场景；ATS 简历正文以中文手机号为主，口径与 Communication 侧一致。
-    private static final Pattern EMAIL_PATTERN = Pattern.compile(
-            "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
-    private static final Pattern CHINESE_PHONE_PATTERN = Pattern.compile(
-            "(?<!\\d)(?:\\+?86[- ]?)?1[3-9]\\d{9}(?!\\d)");
-    private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s,;)]+", Pattern.CASE_INSENSITIVE);
-    private static final Pattern ID_PATTERN = Pattern.compile("(?<!\\d)\\d{17}[\\dXx](?!\\d)");
-
-    /** 替换顺序固定：EMAIL → PHONE → URL → ID（与素材侧一致，改动会改变输出）。 */
     private String maskContactDetails(String text) {
-        String result = EMAIL_PATTERN.matcher(text).replaceAll("[EMAIL]");
-        result = CHINESE_PHONE_PATTERN.matcher(result).replaceAll("[PHONE]");
-        result = URL_PATTERN.matcher(result).replaceAll("[URL]");
-        return ID_PATTERN.matcher(result).replaceAll("[ID]");
+        return PromptRedactor.mask(text);
     }
 
     private Object sanitize(Object value, int depth) {
