@@ -4,7 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * 账户清扫作业配置（决策 D2 阶段 3）。
+ * 账户清扫作业配置（决策 D2 阶段 3）：开关、单轮批量、调度间隔都在这里调。
  *
  * <p>两条默认安全护栏与 {@link RetentionPurgeProperties} 同风格：
  * {@code enabled} 默认 <b>false</b>（部署不即删）；语句幂等使 {@code PARTIAL_FAILED} 可重入。

@@ -1,7 +1,8 @@
 package com.intelligentresume.careermaterial.domain;
 
 /**
- * 资料使用偏好:NORMAL(默认) / PREFERRED(优先) / EXCLUDED(排除)。
+ * 资料使用偏好：用户给素材贴的"AI 选材时怎么对待它"的标记——
+ * NORMAL(默认，正常参与) / PREFERRED(优先) / EXCLUDED(排除)。
  *
  * <p>要点：
  * <ul>

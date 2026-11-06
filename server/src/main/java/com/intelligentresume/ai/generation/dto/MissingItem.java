@@ -3,6 +3,8 @@ package com.intelligentresume.ai.generation.dto;
 /**
  * 缺失项:草稿中缺少某板块及原因。
  *
+ * <p>一句人话：告诉用户"这份草稿还缺哪一块（如工作经历空着）"，提醒补资料或人工填写。
+ *
  * <p>要点：
  * <ul>
  *   <li>{@code section} 用的是草稿顶层键（{@code work} / {@code education} …），不是界面标题。</li>

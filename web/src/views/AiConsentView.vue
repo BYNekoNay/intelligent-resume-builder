@@ -1,8 +1,16 @@
 <!--
-  AI 数据处理同意页（/ai-consent）：展示政策版本与授权范围，支持授予 / 撤回，撤回后 AI 相关调用会被服务端以 40302 拒绝。
-  依赖 @/api/ai 的 getConsent / grantConsent / withdrawConsent / hasFullAiConsent，policyVersion 与 noticeHash 是固定常量，随政策文本升级。
-  状态分支：loading 覆盖首屏加载与两个按钮；granted 由 hasFullAiConsent 判定，决定文案是「已授权 / 已撤回 / 待授权」。
-  授予成功后若带合法的 redirect（必须是单个 / 开头的站内路径），直接跳回原页面；否则留在本页展示成功提示。
+  AI 数据处理同意页（/ai-consent）。调用任何 AI 功能前，用户必须在这里授权「把自己的简历/JD 等数据交给 AI 服务商处理」；
+  页面展示政策版本与授权范围，支持授予 / 撤回。撤回后所有 AI 调用都会被服务端以 40302 拒绝——
+  各业务页遇到 40302 都会引导用户跳到本页授权，授权成功后通过 redirect 参数跳回原页面继续。
+
+  【依赖】@/api/ai 的 getConsent / grantConsent / withdrawConsent / hasFullAiConsent；
+  policyVersion 与 noticeHash 是固定常量，随政策文本升级而更新。
+
+  【状态分支】loading 覆盖首屏加载与两个按钮；granted 由 hasFullAiConsent 判定，
+  决定文案是「已授权 / 已撤回 / 待授权」三态。
+
+  【安全细节】redirect 必须是单个 / 开头的站内路径（拒绝 // 开头，防开放重定向）；
+  授予成功后带合法 redirect 就直接跳回原页面，否则留在本页展示成功提示。
 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'

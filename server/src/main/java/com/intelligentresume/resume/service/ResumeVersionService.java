@@ -27,10 +27,24 @@ import java.util.regex.Pattern;
 /**
  * 简历版本的生命周期管理：保存快照、列历史、恢复为新版本、归档/取消归档，以及 ATS 溯源上下文的落库。
  *
+ * <p><b>① 解决什么业务问题</b>：用户改简历时最怕"改崩了回不去"。解决办法：每次保存不覆盖旧内容，
+ * 而是追加一条新版本（整份简历内容存成 JSON 快照），用户可以随时翻历史、把某个旧版本"恢复"出来，
+ * 也可以归档不想要的版本。本类就是这套"版本时间机器"的引擎。
+ *
+ * <p><b>② 在链路哪里</b>：上游是 {@code ResumeVersionController}（版本页面的请求）和
+ * {@code DraftCommitService}（AI 生成定稿后跨模块调用 {@link #createInTransaction}）；
+ * 本类读写 {@link ResumeVersionRepository}（版本表）与 {@link ResumeRepository}（主档表，
+ * 只为改"当前版本"指针）；恢复时还会读 ATS 模块的 {@code AtsCheckResultRepository} 做溯源校验；
+ * 与 {@code ResumeService} 分工：那边管主档容器，这边管版本内容。
+ *
+ * <p><b>③ 改坏它用户会看到什么</b>：版本号生成去掉唯一约束兜底 → 两人同时保存出现重号版本；
+ * 恢复时改了源版本而不是复制 → 历史被篡改、回滚失效；归档校验漏掉"当前版本不能归档" →
+ * 用户打开简历是空的；ATS 溯源校验顺序错乱 → 用户能把别人的分析结果挂到自己的版本上。
+ *
  * <p>要点（改这个类之前先看）：
  * <ul>
- *     <li>版本号 = MAX(version_no) + 1，并发访问由数据库唯一约束 {@code uk_resume_version_no} 兜底；
- *         冲突统一转成 409（{@code CONFLICT}），调用方可重试。</li>
+ *     <li>版本号（version_no 字段，一条简历内的递增序号）= MAX(version_no) + 1，并发访问由数据库唯一约束
+ *         {@code uk_resume_version_no} 兜底；冲突统一转成 409（{@code CONFLICT}），调用方可重试。</li>
  *     <li>历史版本不可修改：本类不提供 update 接口，"内容改错"只能靠 {@link #restore} 复制成新版本。</li>
  *     <li>所有写路径先 {@code findOwnedForUpdate} 拿行锁再动数据；要改 {@code current_version_id} 的，
  *         必须在这把锁内改，否则陈旧实体会把并发推进的版本指针覆盖回去。</li>
@@ -80,10 +94,17 @@ public class ResumeVersionService {
     }
 
     /**
-     * 保存一次新版本。写库前依次做三件事：校验简历归属（顺带加行锁）、校验 JSON Resume 结构、取下一个版本号。
+     * 保存一次新版本（用户在编辑器里点"保存"就走这里）。
      *
-     * <p>副作用：简历的第一个版本会被自动设为 {@code currentVersionId}，之后的一律不动当前指针——
-     * 保存不等于切换当前版本，这是两条独立操作。
+     * <p>步骤：① 校验简历归属并加行锁（行锁保证"取版本号 → 插版本行"期间没人插队）；
+     * ② 校验 JSON Resume 结构合法（坏内容不落库）；
+     * ③ 取下一个版本号 = 当前最大号 + 1；
+     * ④ 组装版本行并保存——若并发冲突触发唯一约束，转成 409 让前端重试（重新走一遍拿的就是新号）；
+     * ⑤ 若这是该简历的第一个版本，自动设为当前版本；之后的一律不动当前指针——
+     *    保存不等于切换当前版本，这是两条独立操作。
+     * 步骤①的行锁必须在③④之前：先锁再取号，否则两个并发保存可能拿到同一个版本号。
+     *
+     * <p>副作用：简历的第一个版本会被自动设为 {@code currentVersionId}。
      */
     @Transactional
     public ResumeVersionDetail save(Long resumeId, SaveVersionRequest req, Long userId) {
@@ -192,6 +213,15 @@ public class ResumeVersionService {
 
     /**
      * 恢复：把指定历史版本**复制**成一条新的 {@code RESTORED} 版本，并设为当前版本；源版本保持不变。
+     *
+     * <p>步骤：① 行锁读主档并校验归属，再确认目标版本确实属于这条简历；
+     * ② 对源版本的 JSON 再校验一遍结构（防止历史脏数据被恢复成当前版本）；
+     * ③ 若请求带了 ATS 建议引用，先通过 {@link #atsGenerationContext} 五道校验并组装溯源信息；
+     * ④ 复制源内容创建新版本（来源标记 RESTORED，摘要写"恢复自 vN"，并记 restoredFromVersionId）；
+     * ⑤ 把主档的当前版本指针指向新版本——这就是"回滚"的效果：不是把时间倒回去，而是往前追加一条
+     *    内容等于旧版本的新版本。
+     * 必须"复制"而不是"改指针回旧版本"：指针可以随时被再切换，且旧版本可能已归档；
+     * 只有复制才能保证恢复这件事本身也留在版本历史里，可审计。
      *
      * <p>{@code request} 可空。非空时表示这次恢复是从某条 ATS 建议发起的，需要校验 ATS 结果归属、
      * 完成态、条目下标与章节可编辑性，并把溯源信息写进新版本的 {@code generationContext}。

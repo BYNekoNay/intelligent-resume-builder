@@ -1,7 +1,10 @@
 /**
- * 职业素材库（career materials）接口层。
- * 边界：只定义素材的数据形状与 /api/career-materials 系列 HTTP 调用，不做缓存和状态管理（分页/筛选状态属于调用方）。
- * listMaterials 只返回摘要（不含 contentJson），需要正文时用 getMaterial 单独取；searchMaterials 提供分页 + 关键词 + 类型统计。
+ * 职业素材库（career materials）接口层：对应后端 CareerMaterialController（/api/career-materials）。
+ * 业务：用户拆解自己经历存下的证据条目（工作/项目/技能/证书等 13 种类型，见 MaterialType），
+ * 是简历生成与 AI 选材的原料库，本模块负责它的增删改查。
+ * 边界：只定义素材的数据形状与 HTTP 调用，不做缓存和状态管理（分页/筛选状态属于调用方）。
+ * listMaterials 只返回摘要（不含 contentJson），需要正文时用 getMaterial 单独取；
+ * searchMaterials 提供分页 + 关键词 + 类型统计。
  */
 import { http } from './client'
 

@@ -34,7 +34,16 @@ import java.util.UUID;
 /**
  * AI 任务的通用 HTTP 入口:预览、创建、查询、续办列表、清空历史。
  *
- * <p>要点 / 红线:
+ * <p>【业务问题】前端要发起一次 AI 操作时，HTTP 层需要做四件事：先让用户看到"将要发送什么"
+ * （预览）、再收下提交并立刻返回 taskId（创建）、之后反复来问结果（查询）、最后能清理历史。</p>
+ *
+ * <p>【链路位置】前端 ↔ 本控制器 ↔ {@code AiTaskService}(创建/查询/重试相关) 与
+ * {@code AiPreviewService}(预览与令牌校验)。它只做入口校验与编排，不含业务规则。</p>
+ *
+ * <p>【改坏它会怎样】预览令牌校验被绕过等于"发送前确认"形同虚设；userId 改从请求参数取
+ * 会造成越权；input 大小限制去掉会让超大 JSON 直接进提示词与任务快照。</p>
+ *
+ * <p>要点 / 红线:</p>
  * <ul>
  *   <li>创建走"两步确认":先 {@code POST /tasks/preview} 拿到 previewToken,再带 token 提交;
  *       缺少或载荷已变都会被拒,且拒绝发生在 service 之前,不会留下 ai_task 行(R32)。</li>
@@ -82,12 +91,13 @@ public class AiTaskController {
     }
 
     /**
-     * 创建任务并立即返回 202。
+     * 创建任务并立即返回 202（Accepted = 已受理，不代表有结果）。
      *
      * <p>校验顺序:任务类型已登记 → 允许走通用端点 → input 大小 → 预览令牌 → 幂等键长度。
-     * 幂等键缺省时生成随机 UUID(等于"每次都是新请求"),不会因此报错。
+     * 幂等键缺省时生成随机 UUID(等于"每次都是新请求"),不会因此报错。</p>
      *
-     * <p>返回的是 PENDING 状态,不是最终结果;客户端需要轮询 {@code GET /tasks/{id}}。
+     * <p>返回的是 PENDING 状态,不是最终结果;客户端需要轮询（每隔一两秒调一次
+     * {@code GET /tasks/{id}}，直到状态变成 SUCCESS 或 FAILED）。</p>
      */
     @PostMapping("/tasks")
     public ResponseEntity<ApiResponse<AiTaskStatusResponse>> createTask(

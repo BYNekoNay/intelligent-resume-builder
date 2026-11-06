@@ -41,6 +41,14 @@ import java.util.Map;
 /**
  * 认证 HTTP 入口：注册、登录、刷新、登出、当前用户、凭证变更、删号与数据导出。
  *
+ * <p>【小白导览】①解决什么业务问题：前端与认证服务之间唯一的 HTTP 窗口——前端打的
+ * 所有 {@code /api/auth/**} 请求都进这里，它做三件事：参数校验、调用 {@link AuthService}、
+ * 以及管理 refresh token 的 Cookie（一种浏览器自动保存/回传的小数据，这里存刷新令牌）。
+ * ②在链路哪里：上游是前端，下游是 AuthService（业务）与 Cookie（令牌投递）；
+ * 令牌本身由 TokenService 造、AuthService 编排，控制器只管投递与回收。
+ * ③改坏它用户会看到什么：Cookie 属性写错，登录成功但下一步刷新永远失败（浏览器不回传 Cookie）；
+ * 忘了在改密后清 Cookie，旧设备看起来还「在线」；导出的编码错了，中文全是问号。
+ *
  * <p>要点（改动前先读）：
  * <ul>
  *   <li>access token 放响应体，refresh token 只经 HttpOnly Cookie 下发；请求侧优先读

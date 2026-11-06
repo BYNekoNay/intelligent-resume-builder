@@ -22,6 +22,9 @@ import java.util.Map;
 /**
  * 桌面本地工作区的**纯 Java** 简历 PDF 渲染器（ADR-012 D4）。
  *
+ * <p>一句话定位：离线版的"打印机"——拿模板代号 + 简历 JSON，用 PDFBox 一个矩形一个矩形画出一页页 A4；
+ * 被 {@code ExportTaskWorker} 在桌面模式下调用，是在线版 pdf-service 的替代品。
+ *
  * <p>为什么不用 Node + Puppeteer：那条链路要随安装包带 Chromium（约 292MB）与 Node 运行时，
  * 而桌面端的首要诉求是「一个安装包、离线可用、体积可控」。模板实况是 7 套样式共用同一套
  * 单栏结构（`.entry` 是 grid 1fr auto、`.chips` 是 flex wrap），足以用 PDFBox 直接绘制，

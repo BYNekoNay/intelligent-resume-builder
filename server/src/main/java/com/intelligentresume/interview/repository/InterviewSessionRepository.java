@@ -19,6 +19,10 @@ import java.util.Optional;
 /**
  * 面试会话的查询入口。
  *
+ * <p>【小白导读】一句话：会话表 interview_session 的读入口。普通读用 {@code findByIdAndUserId}，
+ * 「读了还要写」的流程一律走 {@code findByIdAndUserIdForUpdate}（悲观行锁，数据库层面排队），
+ * 历史列表走投影只取元数据、不搬大字段。
+ *
  * <p>要点：
  * <ul>
  *   <li>所有按 id 的查询都带 {@code userId}：越权与不存在统一返回空，由调用方转 404。</li>

@@ -25,6 +25,21 @@ import java.util.Set;
  * AI 面试教练服务。职责仅限于构造上下文、调用 Provider、校验 Schema、返回类型化结果。
  * 不修改会话状态。
  *
+ * <p>【小白导读】
+ * ① 业务问题：面试官的「大脑」。它把用户的简历、JD、历史问答拼成一封信寄给大模型，
+ *    收回严格格式的 JSON（首题，或「本轮点评 + 下一题」），并在回信上验货——
+ *    格式不对、分数越界、语言不符都算拒收。
+ * ② 链路位置：上游被 {@link InterviewOperationSupport}（首题）和
+ *    {@link InterviewAnswerService}/{@link InterviewRetryService}（评估）调用；
+ *    下游通过 {@code AiProviderRegistry} 触达真正的模型。它返回的结果再由
+ *    {@link InterviewOperationSupport#applyEvaluationOutcome} 推进会话状态。
+ * ③ 改坏它：模型输出不校验直接入库，用户会看到乱码评分、负分、英文点评混进中文面试；
+ *    prompt 版本忘升号，出问题后无法追溯当时的提示词。
+ *
+ * <p>术语速查：契约（服务端与模型事先约定的 JSON 结构与取值范围）；契约修复
+ * （把被拒的输出回灌给模型要求整体重写的一次额外调用，最多一次）；降级
+ * （AI 不可用时转成不调模型的规则评分，见 {@link InterviewRuleService}）。
+ *
  * <p>要点：
  * <ul>
  *   <li>本类无任何写库动作；attempt 的生命周期、陈旧接管、状态推进都在
@@ -212,6 +227,12 @@ public class InterviewAiService {
 
     /**
      * 评估回答,包含下一题生成。
+     *
+     * <p>【小白导读】用户每交一份答案就走这里：①把「简历 + JD + 历史 + 本轮问答」拼成
+     * prompt 发给模型 → ②解析并校验模型 JSON（字段、分数区间、互斥关系、输出语言）
+     * → ③任一校验不过，追加「契约修复后缀」再发一次（先回调扣配额，修复只此一次）
+     * → ④返回点评 + 下一题。顺序不能换：必须先校验再修复，修复前必须先扣配额，
+     * 否则模型坏输出会被当真入库，或修复调用变成免费白嫖。
      */
     public AiInvocation<InterviewCoachResponse.AnswerEvaluation> evaluateAnswer(String contextData) {
         return evaluateAnswer(contextData, InterviewOutputLanguage.EN, () -> {});
@@ -446,7 +467,8 @@ public class InterviewAiService {
      *
      * <p>约定：目标英文时只要出现中日韩字符即判不符（技术名词允许原样保留，但不允许整句中文）；
      * 目标中文时出现 CJK 即认为合格；若一个 CJK 都没有，则只有「拉丁字母数 >= 12」才算不符
-     * —— 阈值用来放过 "Kafka"、"OpenTelemetry" 这类纯英文短语，同时拦住整句英文。
+     * —— 阈值 12 用来放过 "Kafka"、"OpenTelemetry" 这类纯英文短语，同时拦住整句英文
+     * （未找到明确依据，改前先全仓搜其他语言判定逻辑保持一致）。
      */
     private boolean languageMismatch(String text, InterviewOutputLanguage language) {
         boolean containsCjk = text.codePoints().anyMatch(this::isCjk);

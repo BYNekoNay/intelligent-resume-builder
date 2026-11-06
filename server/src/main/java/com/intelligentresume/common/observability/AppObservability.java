@@ -25,6 +25,14 @@ import java.util.function.IntSupplier;
  * finite set of technical values. No business payload or user identifier is
  * accepted by this class.
  *
+ * <p>【小白导览】①解决什么业务问题：运维要看「系统现在健康吗、哪里在失败」——本类是
+ * 全站指标的统一登记处（计数器=事件发生次数；gauge=当前瞬时读数，如队列长度），
+ * Prometheus（时序监控数据库）定期来抓取这些数字画图、配告警。
+ * ②在链路哪里：AI worker、PDF worker、限流、CSP 报告、配额检查等都调它记一笔；
+ * 它自己不产生数据，只负责「怎么记、记什么标签」。
+ * ③改坏它用户看不到直接变化（纯运维侧），但指标缺失/基数爆炸会让故障发现不了、
+ * 监控系统本身被打爆。
+ *
  * <p>中文补充（改指标前必读）：
  * <ul>
  *   <li>所有标签必须是**有限封闭集**（任务类型、模型名、模板码、失败类别）；用户 id、JD 文本、

@@ -8,6 +8,9 @@ import jakarta.validation.constraints.Size;
 /**
  * 单段文本润色请求（/api/ai/inline-optimize）：用户在编辑器里选中一段内容，要求就地改写。
  *
+ * <p>一句人话："优化这段话"请求的载荷——哪份简历、哪一节、选中的原文、
+ * 可选的 JD 背景上下文。
+ *
  * <p>要点：
  * <ul>
  *   <li>{@code resumeVersionId} / {@code section} / {@code content} 必填；{@code content} 与

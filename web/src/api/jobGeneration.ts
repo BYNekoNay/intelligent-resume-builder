@@ -4,6 +4,7 @@ import type { AiTask, AiTaskPreview } from './ai'
 
 /**
  * 生成确认页（JOB_GENERATION）的请求体与两个端点（R32）。
+ * 对应后端 ConfirmationController（/api/ai/tasks/{id}/confirm-materials*）。
  *
  * <p>单独成文件的原因：`api/ai.ts` 已到 300 行上限。
  * 通过 `@/api/ai` 原样转出，调用方写法不变。

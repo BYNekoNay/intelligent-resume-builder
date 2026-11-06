@@ -12,6 +12,12 @@ import org.springframework.web.multipart.MultipartFile;
 /**
  * 简历导入控制器：multipart 上传 → 解析 → 返回建议字段。
  *
+ * <p>链路位置：前端上传表单 → 本类 → {@code ResumeImportService}；
+ * 返回值给前端确认表单，不落库。
+ *
+ * <p>改坏它用户会看到什么：这里没有用户校验是有意的（解析不落库、与身份无关），
+ * 但一旦补了落库逻辑就必须同时补归属校验，否则任何人都能替别人写数据。
+ *
  * <p>要点：
  * <ul>
  *   <li>唯一入口 {@code POST /api/resume-imports/parse}，{@code consumes} 限定

@@ -17,6 +17,10 @@ import java.util.Map;
  * 简历版本与职业资料的引用关系。字段与 V1 DDL {@code resume_material_reference}
  * 及 V8 新增的 {@code selection_reason} 列完全一致。
  *
+ * <p>一句人话：一行记录 = "某个简历版本的某一段，用了用户的某条资料"。
+ * 简历详情页的"这段话来自你的 XX 资料"以及资料留存清扫（没人用的资料可以归档清理）
+ * 都靠这张表回答。
+ *
  * <p>不继承 BaseEntity：DDL 中无 {@code updated_at} 列，
  * 使用 {@code @PrePersist} 管理 {@code created_at}。
  *

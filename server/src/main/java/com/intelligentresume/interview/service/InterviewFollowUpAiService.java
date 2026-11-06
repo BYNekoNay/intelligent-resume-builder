@@ -37,6 +37,17 @@ import java.util.Set;
 /**
  * 面试薄弱项练习（follow-up）。
  *
+ * <p>【小白导读】
+ * ① 业务问题：面试报告指出了薄弱项（比如「缺少量化结果」），用户想针对它练几道题。
+ *    这里按用户选的薄弱项，让 AI 出 3~5 道针对性练习题。
+ * ② 链路位置：上游是 {@code InterviewService} 的 createFollowUp / previewFollowUp
+ *    （Controller 的 /follow-up 与 /follow-up/preview）。创建是异步任务：
+ *    本类只登记任务（202 + taskId），真正调模型发生在 worker 的 {@link #executeTask}，
+ *    前端轮询 {@code GET /api/ai/tasks/{id}} 取结果。prompt 组装复用
+ *    {@link InterviewPromptContextAssembler}（脱敏）与 {@link InterviewFollowUpPromptAssembler}（模板）。
+ * ③ 改坏它：用户没授权也能发起练习（consent 校验被绕过）、看到的预览和实际发出的
+ *    内容不一致（两处组装逻辑漂移）、或练习题数量/格式失控。
+ *
  * <p>创建：复用 {@code INTERVIEW_COACH} AiTaskType（input.operation=FOLLOW_UP_PRACTICE），
  * 202 + taskId，前端轮询 {@code GET /api/ai/tasks/{id}}。
  * 执行：worker 中加载同源简历/JD（复用 {@link InterviewPromptContextAssembler} 脱敏），
@@ -60,6 +71,8 @@ public class InterviewFollowUpAiService {
 
     private static final Logger log = LoggerFactory.getLogger(InterviewFollowUpAiService.class);
     private static final String PROMPT_VERSION = "interview-follow-up-v1";
+    // 3~5 来自 FOLLOW_UP_TEMPLATE 提示词里的 "Generate 3 to 5 targeted practice questions"，
+    // 数量本身是提示词契约的一部分（与下方 MIN/MAX 及校验一致，三处同改）。
     private static final int MIN_CANDIDATES = 3;
     private static final int MAX_CANDIDATES = 5;
 

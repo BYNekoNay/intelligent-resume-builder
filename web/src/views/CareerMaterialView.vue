@@ -1,9 +1,21 @@
 <!--
-  职业素材库工作台：左侧筛选 + 列表，右侧详情/编辑/新建面板，另有「个人档案」编辑视图。
-  依赖 @/api/careerMaterial（搜索分页/详情/增删改）、@/api/personalProfile（档案读写与从简历导入建议）、@/api/resume（导入建议的可选简历）。
-  筛选条件、分页、排序、当前选中素材都写在 URL query 上（q/type/usage/page/sort/selected），因此刷新和前进后退都能还原视图。
-  状态分支：列表有 loading / workspaceError / 空态；详情有 detailLoading / detailError；任何表单有未保存改动时切换或离开都会 confirmDiscard。
-  易错点：搜索、详情、档案、面板各自用请求代次（searchRequest/detailRequest/profileRequest/paneEpoch）丢弃过期响应；分页越界会回写 query 修正。
+  职业素材库工作台。素材（careerMaterial）= 用户沉淀的个人经历片段（工作经历、项目、技能、证书、获奖……），
+  是「AI 生成简历」的原料：AI 从这里挑真实素材拼简历。左侧筛选导航 + 列表，右侧详情/编辑/新建面板，另有「个人档案」编辑视图（从简历一键导入建议）。
+
+  【依赖】@/api/careerMaterial（搜索分页/详情/增删改）、@/api/personalProfile（档案读写与从简历导入建议）、
+  @/api/resume（导入建议的可选简历）。
+
+  【URL 即状态】筛选条件、分页、排序、当前选中素材都写在 URL query 上（q/type/usage/page/sort/selected），
+  因此刷新和前进后退都能还原视图；所有筛选改动只是改 query，由 watch 统一触发请求。
+
+  【状态分支】列表有 loading / workspaceError / 空态；详情有 detailLoading / detailError；
+  任何表单有未保存改动时切换或离开都会 confirmDiscard 弹窗拦截（含浏览器关闭 beforeunload）。
+
+  【易错点】
+  - 搜索、详情、档案、面板各自用「请求代次」（searchRequest/detailRequest/profileRequest/paneEpoch）丢弃过期响应，
+    防止快速切换筛选/素材时旧响应覆盖新视图；
+  - 搜索框做了 300ms 防抖（停顿超过 300ms 才真正发起搜索），避免每敲一个字发一次请求；
+  - 编辑/删除导致总页数变小时，分页越界会自动回写 query 修正到最后一页。
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -297,6 +309,9 @@ function closeProfile() {
 }
 
 async function saveMaterial(payload: CareerMaterialPayload) {
+  // 保存素材（新建或编辑）。记下当时的 paneEpoch：保存期间用户可能关掉面板或切换素材，
+  // epoch 对不上说明上下文已变，此时只刷新列表、不回写详情；epoch 一致才走正常收尾
+  // （更新详情、清脏标记、关面板、把选中态写进 URL）。
   const epoch = paneEpoch
   const editingId = panelMode.value === 'edit' ? detail.value?.id : null
   saving.value = true
@@ -394,6 +409,8 @@ async function importProfileSuggestion() {
 }
 
 function updateSearch(value: string) {
+  // 搜索防抖：用户连续输入时只在停顿 300ms 后才真正更新 query 触发搜索，
+  // 避免每敲一个字符就发一次请求；输入内容没变则跳过。
   searchInput.value = value
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {

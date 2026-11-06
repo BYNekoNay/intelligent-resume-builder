@@ -7,6 +7,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 删号任务的数据访问层：查"某用户当前的任务"、查"窗口已过期的待清理任务"都经这里。
+ */
 public interface AccountDeletionJobRepository extends JpaRepository<AccountDeletionJob, Long> {
 
     /** 该用户当前未完成的删号任务（撤销与幂等判断都用它；一用户最多一行 PENDING）。 */

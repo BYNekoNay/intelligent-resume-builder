@@ -8,12 +8,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 各任务类型的 Prompt 模板。用于 BailianAiProvider 中非 JOB_GENERATION 类型的任务。
+ * 各任务类型的 Prompt 模板 —— 通用分支任务（非 JOB_GENERATION）的"给模型的话术脚本"。
+ * 用于 BailianAiProvider 中非 JOB_GENERATION 类型的任务。
  *
- * <p>JOB_GENERATION 使用 JobGenerationPromptBuilder 构建的三段式 prompt,
- * 不经过此类。
+ * <p>【业务问题】每种任务对模型的要求不同：简历优化不许编造事实、行内润色要给三个候选、
+ * 素材导入要区分"普通生成"和"联想扩写"（后者必须标"待核实"）。这些规则固化在模板里，
+ * 模型才按契约返回固定 key 的 JSON。</p>
  *
- * <p>要点 / 红线:
+ * <p>【链路位置】被 {@code AiMessageAssembler} 调用（input 里没有 {@code _systemPrompt} 时）；
+ * JOB_GENERATION 不走这里（它用 JobGenerationPromptBuilder 构建的三段式 prompt）。</p>
+ *
+ * <p>【改坏它会怎样】模板里要求的 JSON key 名改了等于改与解析器的契约，下游取不到数；
+ * 补上 default 消失了"新增类型必须写模板"的编译期提醒。</p>
+ *
+ * <p>要点 / 红线:</p>
  * <ul>
  *   <li>两处 switch 都是穷尽的(没有 default),新增 {@link AiTaskType} 会编译不过 —— 这是刻意留下的
  *       提醒,不要为了编译通过补 default。</li>

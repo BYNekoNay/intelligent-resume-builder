@@ -11,6 +11,10 @@ import com.intelligentresume.interview.domain.InterviewStatus;
 /**
  * 面试会话状态响应。开始、回答、重试、规则降级统一返回此结构。
  *
+ * <p>【小白导读】一句话：前端面试页的「仪表盘数据包」——面试进行到第几题、当前题目、
+ * 上一轮点评（lastEvaluation）、AI 挂了的话挂在哪（aiFailure），全在这一个结构里；
+ * 前端靠它决定继续等、重试、转规则还是去报告页。
+ *
  * <p>要点：
  * <ul>
  *   <li>前端轮询本结构判断「继续等 / 重试 / 转规则 / 看报告」，因此状态与 aiFailure 必须同时准确。</li>

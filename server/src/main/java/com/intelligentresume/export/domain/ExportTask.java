@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
  * PDF 导出任务实体。字段与 V1 DDL {@code export_task} 完全一致。
  *
  * <p>职责一句话：一行 = 一次导出请求的完整生命周期（排队 → 渲染 → 成功/失败 → 过期清理）。
+ * 被 {@code ExportService} 创建和查询、{@code ExportTaskWorker}/{@code ExportTaskLeaseService}
+ * 领取与推进、{@code ExportExpiryService} 过期清理。
  *
  * <p>要点：
  * <ul>

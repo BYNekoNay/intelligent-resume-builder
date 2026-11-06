@@ -7,18 +7,25 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Windows DPAPI 实现（ADR-012 D8）。
+ * Windows DPAPI 实现（ADR-012 D8）—— {@code SecretProtector} 的唯一真实现。
  *
- * <p>用 {@code CryptProtectData} / {@code CryptUnprotectData}（用户级，默认不传
- * {@code CRYPTPROTECT_LOCAL_MACHINE}）：密文只能由**同一台机器的同一个用户**解开。
- * 这正是我们要的语义 —— 备份文件被拷走、或同机其他账号捡到，都解不出密钥。
+ * <p>【业务问题】密钥要加密到"只有本机这个用户能解"。用 {@code CryptProtectData} /
+ * {@code CryptUnprotectData}（用户级，默认不传 {@code CRYPTPROTECT_LOCAL_MACHINE}）：
+ * 密文只能由**同一台机器的同一个用户**解开。这正是我们要的语义 —— 备份文件被拷走、
+ * 或同机其他账号捡到，都解不出密钥。</p>
+ *
+ * <p>【链路位置】被 {@code LocalAiCredentialStore} 调用；CI（Linux）上永远不可用，
+ * 测试用假实现替代。</p>
+ *
+ * <p>【改坏它会怎样】改成机器级（CRYPTPROTECT_LOCAL_MACHINE）会让同机其他账号也能解开；
+ * 非 Windows 上不抛错而返回垃圾值，密钥会以坏数据形式"成功"落盘。</p>
  *
  * <p>绑定 {@code entropy}：调用方传入「应用 + 用户」派生的值，避免别的程序用同一个 DPAPI
- * 直接解我们的密文（DPAPI 的 entropy 是额外的口令成分）。
+ * 直接解我们的密文（DPAPI 的 entropy 是额外的口令成分）。</p>
  *
  * <p><b>非 Windows 上不可用</b>：{@link #available()} 返回 false，上层据此给出明确错误，
  * 而不是让 {@code UnsatisfiedLinkError} 冒到接口层。CI 跑在 Linux 上，所以这里必须——
- * 而不是"应该"——有一个可判定的分支。
+ * 而不是"应该"——有一个可判定的分支。</p>
  */
 @Component
 class WindowsDpapiProtector implements SecretProtector {

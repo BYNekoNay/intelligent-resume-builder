@@ -10,6 +10,11 @@ import java.util.Arrays;
 /**
  * CORS 配置：仅对 {@code /api/**} 生效，来源列表来自 {@code app.cors.allowed-origins}（逗号分隔）。
  *
+ * <p>【小白导览】CORS（跨源资源共享：浏览器默认禁止 A 网站的页面用 JS 调 B 网站的接口，
+ * B 必须在响应头里明确说「允许 A 来调」，这个「允许清单」就是 CORS 配置）。
+ * 这里决定哪些前端站点可以调用本 API。改坏它 → 前端所有请求被浏览器直接拦下
+ * （控制台报 CORS 错误，接口根本收不到）。
+ *
  * <p>要点：
  * <ul>
  *   <li>因为 {@code allowCredentials(true)}（refresh token 走 Cookie），来源必须是**显式清单**，

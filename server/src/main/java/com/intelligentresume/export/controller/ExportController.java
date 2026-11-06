@@ -19,6 +19,9 @@ import org.springframework.web.bind.annotation.*;
 /**
  * PDF 导出控制器。
  *
+ * <p>一句话定位：导出功能的 HTTP 入口——用户"点导出/看进度/下载文件/重试"四个动作
+ * 各对应一个端点；请求校验和身份提取在这里做，业务全在 {@code ExportService}。
+ *
  * <p>路由:
  * <ul>
  *   <li>POST /api/exports/pdf — 创建导出任务(202)</li>
@@ -29,7 +32,7 @@ import org.springframework.web.bind.annotation.*;
  *
  * <p>要点：
  * <ul>
- *     <li>创建返回 202：渲染是异步的，返回时只有任务 id 和 PENDING 状态。</li>
+ *     <li>创建返回 202：渲染是异步的，返回时只有任务 id 和 PENDING 状态（202 = "已受理，还没做完"）。</li>
  *     <li>下载按 taskId 间接定位文件，响应头里不出现 storageKey；文件名固定 {@code resume.pdf}。</li>
  *     <li>用户身份取自 {@code request.currentUserId}（JwtAuthenticationFilter 写入），缺失即 401。</li>
  * </ul>

@@ -17,6 +17,10 @@ import java.util.stream.Stream;
 /**
  * 导出文件本地存储服务（按 key 直接落本地磁盘，不接对象存储）。
  *
+ * <p>一句话定位：PDF 文件的"仓库管理员"——worker 渲染完把字节交进来（store），
+ * 用户下载时按 key 取出去（read），过期清理时按 key 销毁（delete）。
+ * 被 {@code ExportService}、{@code ExportTaskWorker}、{@code ExportExpiryService} 三方使用。
+ *
  * <p>storageKey = UUID 随机生成,不含 userId/简历标题/时间戳等可猜信息。
  * 文件按 key 前两位字符分子目录存储,避免单目录文件过多。
  *
@@ -26,7 +30,7 @@ import java.util.stream.Stream;
  *     <li>{@code read} 文件不存在返回 {@code null}（由调用方转 404），IO 异常才抛。</li>
  *     <li>{@code delete} 对 {@code null} key 返回 true：没有文件也算"已清理"，便于过期流程幂等。</li>
  *     <li>{@code storageKey} 必须是本服务生成的值，**不能直接来自用户输入**——{@code resolvePath} 只按前两位
- *         拼目录，不做路径规范化。</li>
+ *         拼目录，不做路径规范化（若让用户传 key，可用 ../ 逃出存储根目录读写任意文件）。</li>
  *     <li>本类没有并发控制：唯一性靠 {@code CREATE_NEW}，重复写同一 key 会抛 {@code FileAlreadyExistsException}。</li>
  * </ul>
  */

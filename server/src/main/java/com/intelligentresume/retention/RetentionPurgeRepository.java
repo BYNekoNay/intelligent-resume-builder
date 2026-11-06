@@ -8,6 +8,11 @@ import java.util.List;
 
 /**
  * 分档清扫的取数与处置（决策 D2 阶段 1 A 档 + 阶段 2 B 档）。
+ * 这里是清扫作业的"SQL 弹药库"：查候选行的 SELECT 和动手的 DELETE/UPDATE 全在这。
+ *
+ * <p>改坏它用户会看到什么：引用清单（NOT EXISTS/EXISTS）与真实外键对不上，
+ * 要么该删的删不掉（数据越积越多），要么不该删的删了（历史简历报错）；
+ * 删除语句丢掉 {@code deleted_at IS NOT NULL} 会让二次保护失效。
  *
  * <p><b>引用判定即「候选筛选」</b>：每张受管资源一对 SQL —— {@code NOT EXISTS} 版取「无引用者」
  * （A 档：物理删除），{@code EXISTS} 版取「有引用者」（B 档：转最小快照）。两极必须覆盖**同一份**

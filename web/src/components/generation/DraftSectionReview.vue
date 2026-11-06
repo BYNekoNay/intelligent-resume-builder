@@ -1,9 +1,14 @@
 <!--
-AI 草稿逐项审核工作台：左轨章节导航（含「只看待处理」过滤与未使用资料折叠区），
-右侧是当前章节的条目卡片，底部是简历命名与确认 / 拒绝。
-除 error / confirming / rejecting 三个 props 外，全部状态与动作都来自 useDraftReview，
-本组件只做渲染与触发，保证与质量摘要卡看到的是同一份数据。
-条目三态 ACCEPT / EDIT / REJECT；decision 为 null 表示待处理，故 pendingCount 大于 0 时确认按钮禁用。
+AI 草稿逐项审核工作台：AI 生成整份简历草稿后，用户在这里逐条把关——左轨是章节导航
+（含「只看待处理」过滤与未使用资料折叠区），右侧是当前章节的条目卡片，底部是简历命名
+与确认 / 拒绝。
+
+props/emits 契约：除 error / confirming / rejecting 三个 props 外，全部状态与动作都来自
+useDraftReview（composable 单例：整个页面所有组件读的是同一份数据）；confirm / reject
+两个事件上抛给父组件真正落库。本组件只做渲染与触发，保证与质量摘要卡看到的是同一份数据。
+条目三态 ACCEPT / EDIT / REJECT；decision 为 null 表示待处理，故 pendingCount 大于 0 时
+确认按钮禁用（只要有没处理完的条目就不让建简历）。
+条目内容用 DraftContentFields 只读展示；「编辑」弹出的 DraftEditDialog 里才是可编辑模式。
 移动端左轨变成抽屉，mobileNavigationOpen 同时控制抽屉与遮罩，选章后会自动收起。
 -->
 <script setup lang="ts">

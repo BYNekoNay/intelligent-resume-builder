@@ -16,6 +16,14 @@ import java.util.Map;
 /**
  * JOB_GENERATION 的发送前预览（R32 AC-R32-8 / AC-R32-12）：返回**将要发送的确切 messages** 与令牌。
  *
+ * <p>新人三问：①业务问题：产品要求"用户必须先看到要发给 AI 的内容并确认，才允许真的发送"，
+ * 本类就是生成环节的那个"看"；②链路位置：被 {@code JobMaterialSelectionController#previewConfirmation}
+ * 调用，串起确认服务、组装器、{@code AiPreviewService} 三层，最终把 messages + previewToken 给前端；
+ * ③改坏它用户会看到：预览内容和实际发送不一致（信任崩塌）、预览自己写库或烧配额（副作用泄漏）。
+ *
+ * <p>术语：预览令牌（previewToken）= 服务端对"将发送内容"算的哈希，提交时回传比对，
+ * 内容变过就对不上（409），客户端伪造不了"预览过"。
+ *
  * <p>三步都只读，且每一步都与 confirm / worker 共用实现，因此"预览内容 == 实际发送内容"不是靠约定：
  * <ol>
  *   <li>{@link MaterialSelectionConfirmationService#buildGenerationInput} 组装子任务快照（confirm 也调它，

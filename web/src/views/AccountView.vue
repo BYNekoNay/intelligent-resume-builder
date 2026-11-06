@@ -1,8 +1,15 @@
 <!--
-  账号设置页：资料修改、邮箱/密码变更、AI 同意记录清理、数据导出、删号，全部为本人对自己账号的自助操作。
-  依赖 @/api/auth（changeEmail / changePassword / deleteAccount / exportAccountData）与 @/api/ai（clearAiTaskHistory），当前用户信息来自 useAuthStore。
-  危险操作一律二次确认：改邮箱/密码需当前密码且成功后强制退出重新登录；导出需密码且长度 >= 8（与服务端校验对齐）；删号需输入用户名完全匹配。
-  三个弹层都用 Teleport 挂到 body，打开时聚焦首个输入框、关闭后焦点回到触发按钮，避免键盘/读屏焦点丢失。
+  账号设置页。用户管理自己账号的所有自助操作集中在这：改昵称、改邮箱、改密码、清空 AI 任务历史、导出个人数据、注销账号。
+
+  【依赖】@/api/auth（changeEmail / changePassword / deleteAccount / exportAccountData）与
+  @/api/ai（clearAiTaskHistory），当前用户信息来自 useAuthStore（Pinia 全局登录态）。
+
+  【危险操作一律二次确认】
+  - 改邮箱/密码：需输入当前密码，成功后强制退出重新登录（凭据变了，旧会话不再可信）；
+  - 导出个人数据：需当前密码且长度 >= 8（与服务端校验对齐，避免明摆着的 400）；
+  - 删号：需输入用户名完全匹配才放行，删号后清空浏览器本地数据并跳登录页（账号进入服务端 7 天撤销窗口）。
+
+  【无障碍细节】三个弹层都用 Teleport 挂到 body，打开时聚焦首个输入框、关闭后焦点回到触发按钮，避免键盘/读屏焦点丢失。
 -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
@@ -84,6 +91,8 @@ async function save() {
 }
 
 async function finishCredentialChange(action: () => Promise<unknown>) {
+  // 改邮箱/改密码共用的收尾：动作成功后强制登出并跳登录页——凭据已变，旧令牌不能再信，
+  // 让用户用新凭据重新登录；失败则留在原页展示后端错误。
   changingCredential.value = true
   credentialMessage.value = ''
   try {

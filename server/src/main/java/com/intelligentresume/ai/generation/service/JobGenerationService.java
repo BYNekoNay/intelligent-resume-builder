@@ -28,6 +28,21 @@ import java.util.stream.Collectors;
 /**
  * 岗位简历生成：把「已确认的选材快照」变成一份可审核的简历草稿。
  *
+ * <h2>新人三问</h2>
+ * <ol>
+ *   <li><b>解决什么业务问题</b>：让 AI 替用户把「确认过的那批资料」改写成贴合某个岗位的简历草稿，
+ *       并且草稿里每句话都能追溯到来源资料（溯源 = 每条内容标注它出自用户哪条素材），
+ *       用户不想要"凭空编出来"的内容；</li>
+ *   <li><b>在链路哪里</b>：用户确认选材（{@code MaterialSelectionConfirmationService#confirm}）后，
+ *       后台 worker 领到 JOB_GENERATION 任务就调进本类的 {@code executeTask}；本类调
+ *       {@code JobGenerationInputAssembler}（组装 prompt）、{@code AiProviderRegistry}（真正调模型）、
+ *       {@code JobGenerationSchemaValidator}（校验产出）；产出的 {@code draftResumeJson} 写进任务结果，
+ *       最终由确认页 + {@code DraftCommitService} 落成简历版本；</li>
+ *   <li><b>改坏它用户会看到什么</b>：生成整体失败（AI_FAILURE）、草稿结构非法全被拒、
+ *       联系方式被模型编造冒充用户本人、或"资料明明被用了却显示无人引用"
+ *       （selected 记录错了会让资料留存清扫误判，见 {@code collectSources}）。</li>
+ * </ol>
+ *
  * <h2>两条执行路径，新任务只准走第一条</h2>
  * <ul>
  *   <li><b>快照路径</b>（快照里有 {@code jobSnapshot}）：用不可变快照重建 JD、资料与 prompt，
@@ -120,6 +135,23 @@ public class JobGenerationService {
         }
     }
 
+    /**
+     * 生成一条 JOB_GENERATION 任务的主流程，共七步：
+     * <ol>
+     *   <li>① 读任务快照（快照 = 用户确认那一刻冻结下来的岗位/资料/档案 JSON，之后不再查库改主意）；
+     *       没有 {@code jobSnapshot} 的是升级前的旧任务，走 {@link #executeLegacyTask} 兼容路径；</li>
+     *   <li>② 目标简历必须存在且属于任务本人，防止把草稿写到别人的简历上；</li>
+     *   <li>③ 与「发送前预览」共用 {@link JobGenerationInputAssembler} 重建 JD/资料/档案并拼出
+     *       三段式 prompt —— 预览看到的就是这里实际发出的（共用实现保证，不是口头约定）；</li>
+     *   <li>④ 注入检测：只扫 JD 正文与资料原文（用户自己写的"忽略以上指令"可能是正常业务词汇），
+     *       命中只加警告不阻断，见类注释；</li>
+     *   <li>⑤ 调模型拿草稿：失败直接抛 AI_FAILURE，任务由 worker 的重试机制兜底；</li>
+     *   <li>⑥ 后处理四连，顺序不能换（见类注释）：normalizeAliases → schemaValidator →
+     *       mergePersonalProfile → collectSources；</li>
+     *   <li>⑦ 打包结果：草稿、真实被引用的资料、缺失板块、质量摘要等，写进任务结果给确认页。</li>
+     * </ol>
+     * 为什么 ②③④ 必须在 ⑤ 之前：任何前置不成立都不该烧一次模型调用（费钱且慢）。
+     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> executeTask(AiTask task) {
         Map<String, Object> snapshot = task.getInputSnapshotJson();

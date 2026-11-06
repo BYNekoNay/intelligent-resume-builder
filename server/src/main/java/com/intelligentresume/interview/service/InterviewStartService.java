@@ -27,7 +27,19 @@ import java.util.Optional;
 /**
  * 面试开始流程：两阶段短事务 + 事务外首题 AI。
  *
+ * <p>【小白导读】
+ * ① 业务问题：用户选好一份简历（平台内或粘贴的）、可选挂一份 JD（岗位描述）、选面试类型，
+ *    点「开始面试」。这里负责建会话、定「打算问几题」，并让 AI 出第一道面试题。
+ * ② 链路位置：上游是 {@code InterviewService.start}（/start 接口）；下游调
+ *    {@link InterviewOperationSupport}（首题模型调用 + 授权/配额/幂等），
+ *    产出是新建的 {@code interview_session} + 首题 attempt，返回会话状态给前端。
+ * ③ 改坏它：用户点开始后永远看不到第一题（状态守卫写错把结果丢掉）、
+ *    或者重复点开始建出一堆会话、重复扣配额（幂等失效）。
+ *
  * <p>TX1 创建会话并校验同意/配额/幂等 → 事务外调用首题 AI → TX2 落库。
+ *
+ * <p>术语速查：JD（Job Description，岗位描述/招聘要求）；min/max/target 题数
+ * —— target 是用户想要的题数，min/max 是允许「提前收尾/强制收尾」的边界，由 target 派生。
  *
  * <p>要点：
  * <ul>
@@ -43,6 +55,8 @@ import java.util.Optional;
 @Service
 public class InterviewStartService {
 
+    // 4~12 与 StartInterviewRequest 上的 @Min(4)/@Max(12) 是同一份契约（两侧必须同改）；
+    // 默认 6 与 InterviewSession 字段默认值 target=6/min=3/max=9 口径一致。
     private static final int DEFAULT_TARGET = 6;
     private static final int MIN_TARGET = 4;
     private static final int MAX_TARGET = 12;
@@ -70,6 +84,17 @@ public class InterviewStartService {
 
     private record StartPreparation(Long sessionId, boolean replayed, Long attemptId) {}
 
+    /**
+     * 开始一场面试。
+     *
+     * <p>【小白导读】步骤：①把用户想要的题数夹逼到 4~12 并派生出 min/max 边界
+     * → ②校验简历/JD 来源合法且属于本人 → ③算请求指纹（幂等键相同但内容不同要能识别）
+     * → ④TX1：幂等检查（命中就回放旧会话）、建会话、校验授权与配额、登记首题 attempt
+     * → ⑤缺授权/缺配额则直接返回失败原因，不调 AI → ⑥事务外调模型出首题
+     * → ⑦TX2：把首题写进会话、状态置「等回答」、attempt 记成功。
+     * 顺序不能换：TX2 必须重新加锁并复核状态——模型调用的几十秒里会话可能已被
+     * 陈旧接管或降级改过，不复核就会把旧结果覆盖到新状态上。
+     */
     public InterviewStateResponse start(StartInterviewRequest request, Long userId, String idempotencyKey) {
         // 计算题数：先夹逼用户输入，再由 target 派生出「至少 / 至多」轮数
         // （min = target×50% 向上取整，max = target×150% 向下取整）。

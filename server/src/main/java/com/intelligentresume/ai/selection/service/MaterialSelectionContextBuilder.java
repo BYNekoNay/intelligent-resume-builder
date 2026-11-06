@@ -30,6 +30,16 @@ import java.util.stream.Collectors;
 /**
  * 选材任务的「候选筛选 + prompt 组装」—— worker 与预览**共用同一实现**（R32 AC-R32-8）。
  *
+ * <p>新人三问：①业务问题：用户资料可能上百条，不可能全发给 AI 让它挑；这里按
+ * "用户勾选 + 资料质量 + 与 JD 的文本相关度"筛出最多 60 条候选并拼成 prompt；
+ * ②链路位置：被 {@code JobMaterialSelectionService}（worker 执行）和
+ * {@code JobMaterialSelectionController#preview}（发送前预览）共同调用；
+ * ③改坏它用户会看到：推荐结果里出现用户排除过的资料、每次刷新推荐结果变来变去
+ * （排序不稳定）、或空候选时发了一次没意义的模型调用。
+ *
+ * <p>术语：相关度打分 = 纯字符串匹配算"JD 里出现的词在资料里也出现多少"，不是语义理解，
+ * 同义词匹配不上是预期行为（打分只决定排序，不决定能不能用）。
+ *
  * <p>为什么单独成类：
  * <ol>
  *   <li>{@code JobMaterialSelectionService} 已 298 行，距 300 行棘轮只剩 2 行，装不下预览；
@@ -91,6 +101,15 @@ public class MaterialSelectionContextBuilder {
     }
 
     /**
+     * build 的执行顺序即业务含义，①→⑥：
+     * ①解析用户勾选（强制加入 / 优先用 / 手动排除），排除永远赢——先从 forced/preferred 里剔除；
+     * ②校验归属与可用性（勾的 ID 必须是本人的资料；"必须用"的资料没证据直接 400）；
+     * ③算排除名单（手动排除 + 无有效证据 + 全局偏好排除，但强制加入的除外）；
+     * ④候选打分排序（强制加入 10 万分顶到最前 → 优先用 1 万 → 其余按与 JD 的词元重合度加分）
+     *    并截断到 60 条——排序带 id 兜底保证同分同秒时顺序也稳定，"每次推荐不一样"就是这么防的；
+     * ⑤强制加入若被截掉则 400（用户明确说"必须用"，静默丢弃不可接受）；
+     * ⑥拼 providerInput（候选为空时不拼，调用方必须查 {@link Context#hasCandidates()}）。
+     *
      * @param job   已解析的岗位（预览用**未持久化**的瞬时对象，worker 用库里的那条 —— 字段相同即同源）
      * @param input 任务快照里的 input：includedMaterialIds / preferredMaterialIds / excludedMaterialIds
      *

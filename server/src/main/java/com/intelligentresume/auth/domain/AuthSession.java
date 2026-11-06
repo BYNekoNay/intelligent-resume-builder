@@ -10,6 +10,11 @@ import java.time.LocalDateTime;
 /**
  * 刷新令牌会话。
  *
+ * <p>【小白导览】一次登录 = 这个表里的一行：记录「谁（userId）、哪条令牌链（tokenFamilyId）、
+ * 用什么凭证续期（refresh_token_hash）、有效期到几点、有没有被撤销（revoked_at + 原因）」。
+ * access token 不落库（JWT 自带签名可验），这个表只管 refresh 侧。改坏它：轮换流程找不到
+ * 会话行 → 所有用户刷新失败被踢下线；摘要列存了原文 → 库一泄露等于全部刷新凭证泄露。
+ *
  * <p>字段名与 V1 DDL 完全一致；这里仅作为骨架占位。
  *
  * <p>不可破坏的语义：

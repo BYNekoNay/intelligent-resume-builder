@@ -17,9 +17,22 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * AI 任务仓储 —— 既有一批派生查询,也承载工作器的租约原生 SQL。
+ * AI 任务仓储 —— 任务的全部数据库读写都从这里走:既有常规查询,也承载工作器的租约原生 SQL。
  *
- * <p>要点 / 红线:
+ * <p>【业务问题】除了普通的按用户查任务，多个应用实例同时抢任务时必须有数据库级的互斥手段，
+ * 这组"租约 SQL"（条件 UPDATE 抢占，租约 = worker 领任务后的一段时间使用权，超时未完成会被收回）
+ * 就是那条防线。</p>
+ *
+ * <p>【链路位置】{@code AiTaskService} 用它做创建/查询/删除；
+ * {@code TaskLeaseService} 用 {@code claimableTasksByTypes}/{@code acquireLease}/
+ * {@code renewLease}/{@code abandonExhausted} 实现领取、续租与崩溃收口；
+ * {@code AiQuotaService} 用聚合查询数配额；{@code AiTaskRetentionService} 用它找清理候选。</p>
+ *
+ * <p>【改坏它会怎样】租约 SQL 的条件被削弱会让两个实例同时执行同一任务（重复调用模型、重复计费）；
+ * 配额聚合口径与 {@code AiQuotaService} 不一致会出现"消耗和限额不可比"；
+ * 忘了排除待确认任务会让用户的确认结果被清理或删除。</p>
+ *
+ * <p>要点 / 红线:</p>
  * <ul>
  *   <li>租约相关方法({@code claimableTasksByTypes} / {@code acquireLease} / {@code renewLease} /
  *       {@code abandonExhausted})是跨实例互斥的唯一防线:条件更新返回 0 表示没抢到,

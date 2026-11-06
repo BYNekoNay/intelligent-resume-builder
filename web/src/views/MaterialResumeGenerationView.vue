@@ -1,9 +1,19 @@
 <!--
-  素材转简历页（/material-generation）：把一段原始素材文本变成简历草稿，再跳编辑器继续加工。
-  三条路径：本地生成（不调 AI，直接把文本塞进 basics.summary 作为兜底）、AI 直接生成、AI 联想扩写后再生成结构化草稿。
-  依赖 @/api/materialGeneration（generateResumeFromMaterial / generateMaterialAssociation / generateResumeFromAssociation）、@/api/resume 的 createResume。
-  状态分支：loading / associating / saving 分别控制三处按钮；缺少 AI 同意时置 consentRequired 并给出授权入口；AI 超时提示任务仍在跑。
-  易错点：每次 AI 调用前必须走 useAiTaskPreview 拿令牌（用户取消则不发送）；幂等键按「动作 + payload 指纹」复用，成功后清除。
+  素材转简历页（/material-generation）。用户手里有一段原始经历文字（比如一段自我描述、一段项目叙述），
+  在这里把它变成一份简历草稿，再跳编辑器继续加工。三条生成路径：
+  ①本地生成（不调 AI，直接把文本塞进 basics.summary，作为兜底，离线也能用）；
+  ②AI 直接生成（整段文字直接转结构化草稿）；
+  ③AI 联想扩写（先让 AI 基于原文联想补全细节——AI 可能编造，所以会给出验证问题清单——用户确认扩写文本后再生成结构化草稿）。
+
+  【依赖】@/api/materialGeneration（generateResumeFromMaterial / generateMaterialAssociation / generateResumeFromAssociation）、
+  @/api/resume 的 createResume、useAiTaskPreview（发送前预览）。
+
+  【状态分支】loading / associating / saving 分别控制三处按钮；缺少 AI 同意（错误码 40302）时置
+  consentRequired 并给出授权入口；AI 超时提示任务仍在后台跑（不当作失败）。
+
+  【易错点】每次 AI 调用前必须走 useAiTaskPreview 拿令牌（用户取消则不发送任何请求）；
+  幂等键按「动作 + payload 指纹」复用：同一动作、同样的输入，超时重试沿用同一键，后端据此去重，避免重复计费；成功后清除。
+  从导入页跳转过来时通过 sessionStorage（resume-import-text / resume-import-candidates）带回原文与解析候选，进页面自动生成本地草稿。
 -->
 <script setup lang="ts">
 import { isAxiosError } from 'axios'

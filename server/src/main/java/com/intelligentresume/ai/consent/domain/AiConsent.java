@@ -16,12 +16,19 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * AI 数据处理同意事件。字段与 V1 DDL {@code ai_consent} 完全一致。
+ * AI 数据处理同意事件 —— 一条授权/撤回流水，字段与 V1 DDL {@code ai_consent} 完全一致。
+ *
+ * <p>【业务问题】合规要求能回答"用户何时、对哪个版本的协议、授权了哪些数据类别"，
+ * 所以每次授权/撤回都记一行流水，而不是一个可被覆盖的开关。</p>
+ *
+ * <p>【链路位置】只由 {@code AiConsentService} 写入与读取；判定"当前是否已授权"= 最新一行。</p>
+ *
+ * <p>【改坏它会怎样】这行数据是举证材料，任何修改历史行的行为都会破坏合规性。</p>
  *
  * <p>事件溯源模型:仅追加(append-only),不修改、不软删。
- * 不继承 BaseEntity(无 updated_at)。
+ * 不继承 BaseEntity(无 updated_at)。</p>
  *
- * <p>要点:
+ * <p>要点:</p>
  * <ul>
  *   <li>一行 = 一次"授权"或"撤回"事件,不是"当前状态";当前状态由最新一行决定。</li>
  *   <li>{@code task_scopes_json}/{@code data_categories_json} 以 JSON 数组存储,

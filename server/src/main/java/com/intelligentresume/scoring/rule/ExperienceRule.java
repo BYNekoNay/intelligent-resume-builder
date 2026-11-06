@@ -12,6 +12,17 @@ import java.util.regex.Pattern;
 /**
  * 经验规则：检查简历工作年限是否满足 JD 要求。
  *
+ * <p>小白三问：
+ * <ul>
+ *   <li><b>解决什么业务问题</b>：JD 常写「3 年以上经验」，本规则检查简历的工作经历条目
+ *       折算出的年限够不够，按比例给分——年限够给满分，不够按比例打折。</li>
+ *   <li><b>在链路哪里</b>：与 KeywordRule 同级，由 {@code ScoringService} 经
+ *       {@link RuleRegistry} 调用；输入是 JD requirements 文本 + 简历 JSON 的 work 数组；
+ *       分数乘 0.2 权重进总分。</li>
+ *   <li><b>改坏它用户会看到什么</b>：年限估算口径改动 → 所有人的经验分整体跳变；
+ *       正则放宽 → "3-5年" 取 3 取 5 的行为变化会直接影响分数。</li>
+ * </ul>
+ *
  * <p>规则：
  * <ul>
  *   <li>从 JD requirements 中提取 "X年以上经验" 的年限要求</li>
@@ -33,6 +44,14 @@ import java.util.regex.Pattern;
 public class ExperienceRule {
 
     private static final Pattern YEARS_PATTERN = Pattern.compile("(\\d+)\\s*年");
+    /**
+     * 每条工作经历默认折算的年数。
+     *
+     * <p>当前实现不解析简历里的起止日期（见类注释实现口径），无法精确计算时
+     * 用「每段经历按 2 年估」的粗略折算。该值为实现内约定的估算基数，
+     * 未找到外部明确依据，改前先全仓搜 {@code DEFAULT_YEARS_PER_JOB} 并评估
+     * 对已存评分结果一致性的影响。
+     */
     private static final int DEFAULT_YEARS_PER_JOB = 2;
 
     public String name() {
@@ -41,6 +60,11 @@ public class ExperienceRule {
 
     /**
      * 评估经验覆盖度。
+     *
+     * <p>步骤：① 从 JD requirements 里用正则抽最大年限要求（如 "3年以上" → 3）；
+     * ② 没有年限要求直接给满分——JD 不卡经验就不该惩罚；
+     * ③ 简历年限 = work 条目数 × 2（粗估）；④ 分数 = min(简历年限 ÷ 要求年限, 1) × 100，
+     * 超出要求不加分、只封顶满分。①在③之前——先确定标尺再量简历。
      *
      * @param requirements JD requirements 列表（含 "X年以上经验" 等）
      * @param resumeJson   简历 JSON（用于提取 work 条目）

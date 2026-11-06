@@ -33,6 +33,19 @@ import java.util.Optional;
 /**
  * 认证领域服务:注册 / 登录 / 刷新 / 退出。
  *
+ * <p>【小白导览】①解决什么业务问题：账号的「进门与出门」——注册建号、密码换令牌、令牌续期、
+ * 登出、改密/改邮箱、注销账号，全站只有这里直接决定「这个人是不是本人」。
+ * ②在链路哪里：AuthController（HTTP 入口）把请求转交给它；它向下调 {@link TokenService}（造/验令牌）、
+ * UserRepository 与 AuthSessionRepository（读写账号表和会话表），产出是一对令牌（access + refresh）
+ * 交回前端。③改坏它用户会看到什么：轻则登录不上、刷新一直失败被踢回登录页；重则是安全事故——
+ * 已注销/停用的账号还能操作、改密码后旧设备不掉线、被盗的刷新令牌检测不出来。
+ *
+ * <p>术语（后文反复出现）：access token（访问令牌，有效期短，前端每个请求都带上）；
+ * refresh token（刷新令牌，有效期长，只用来换新的 access token）；令牌轮换（每次刷新换一对新令牌、
+ * 旧的立即作废——被盗用能及时发现）；令牌族（一次登录派生出的整条轮换链，共享一个 familyId，
+ * 族内任一旧令牌被复用就整族撤销）；BCrypt（一种故意很慢的密码散列算法，库里只存散列不存明文）；
+ * 软删除（不物理删行，只打 deleted_at 标记，查询时自动过滤）。
+ *
  * <p>关键约定:
  * <ul>
  *     <li>refresh token 原文不落库,仅保存 SHA-256 摘要。</li>
@@ -179,6 +192,14 @@ public class AuthService {
     /**
      * 用 refresh token 旋转出新的 access + refresh。
      * 任一旧 token 复用都会撤销整族并要求重新登录。
+     *
+     * <p>【小白导览 · 五步看懂刷新】①把前端带来的 refresh token 算出摘要，按摘要去会话表找对应行
+     * （库里不存原文，只能按摘要比对）；②该行已撤销 → 说明这个旧令牌被人用过第二次了（重放），
+     * 撤销整个令牌族并拒绝——这是防被盗的核心机关；③已过期 → 标记后拒绝；
+     * ④用一次原子 UPDATE（CAS，比较并交换：只有行还是「未撤销」状态才翻转成功）把旧会话置为
+     * rotated，翻转失败同样按重放处理——保证并发刷新时绝不会有两个新令牌同时有效；
+     * ⑤签发一对全新令牌，归属同一个令牌族，旧会话保留作审计。
+     * 顺序不能换：必须先判重放/过期再轮换，否则重放者能先偷走新令牌。
      */
     @Transactional
     public TokenResponse refresh(String presentedRefreshToken, String userAgent, String ip) {

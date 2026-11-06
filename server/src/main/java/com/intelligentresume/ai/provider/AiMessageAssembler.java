@@ -9,17 +9,23 @@ import java.util.Map;
 /**
  * 组装「要发给模型的确切消息」—— **预览与实际发送的唯一实现**（R32）。
  *
- * <p>为什么必须只有一份：R32 要求"展示将要发送的确切内容"。如果预览自己拼一遍、provider 再拼一遍，
- * 两份代码一定会漂移，而漂移的结果是**用户看到的和实际发出去的不一样** —— 这比没有预览更糟。
- * 所以 provider 的 {@code buildMessages} 直接委托本类，并由 {@code AiPromptParityTest}
- * 断言"预览路径 == 发送路径"。
+ * <p>【业务问题】R32 要求"用户先看到将要发送什么、再确认发送"。这只有一条路成立：
+ * 预览和真正发送必须用同一段代码拼消息。两份实现一定会漂移，漂移的结果是
+ * **用户看到的和实际发出去的不一样** —— 这比没有预览更糟。</p>
  *
- * <p>脱敏也在这层完成（{@link ContactRedactor}）：预览与发送都经过它，所以"看到的"必然就是"发出去的"。
- * 是否包含联系方式由 input 里的内部键 {@code _includeContact} 决定（默认 false = 排除）。
+ * <p>【链路位置】provider 的 {@code buildMessages} 委托 {@link #assemble}（实际发送）；
+ * {@code AiPreviewService} 调 {@link #preview}（预览展示）。脱敏（{@link ContactRedactor}）
+ * 也在这一层完成，所以"看到的"必然就是"发出去的"。由 {@code AiPromptParityTest}
+ * 断言"预览路径 == 发送路径"。</p>
+ *
+ * <p>【改坏它会怎样】在这里加"预览专用"分支或脱敏逻辑漏掉一类联系方式，
+ * 都会直接破坏 R32 的核心承诺。</p>
+ *
+ * <p>脱敏是否包含联系方式由 input 里的内部键 {@code _includeContact} 决定（默认 false = 排除）。
  * 以 {@code _} 开头的键本来就不会进入 prompt 正文（{@code PromptTemplates} 会过滤），
- * 因此这个开关不会污染内容。
+ * 因此这个开关不会污染内容。</p>
  *
- * <p>要点 / 易错点:
+ * <p>要点 / 易错点:</p>
  * <ul>
  *   <li>两条构造路径:input 里给了 {@code _systemPrompt} 就直接用它(领域流程已拼好的三段式
  *       task/data 分段),否则回落到 {@link PromptTemplates}。判断依据是 {@code _systemPrompt}

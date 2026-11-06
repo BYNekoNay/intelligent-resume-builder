@@ -8,6 +8,13 @@ import org.springframework.stereotype.Component;
 /**
  * 失败消息的**公开文案边界**：面向客户端的文案必须**稳定**，绝不能是 provider / 框架的原文。
  *
+ * <p>【小白导览】①解决什么业务问题：AI/导出失败时，数据库里存的原始错误消息是上游服务
+ * 的英文原文（带模型名、限额数字），直接给用户看既难懂又泄露内部信息——这里把原文
+ * 「归类后换装」成固定的中文话术。②在链路哪里：GlobalExceptionHandler（出错信封）和
+ * AI/导出任务的状态查询接口在装配响应时调它；原文仍留在库和日志里给运维看。
+ * ③改坏它用户会看到什么：界面出现英文报错与内部细节；null 被过度映射 → 「没有错误」
+ * 被显示成「有错误」。
+ *
  * <p>为什么需要它：`ai_task.error_message`、`export_task.error_message` 里落的是
  * provider 与异常的**原始 message**（如 `Resume generation failed: ...`、
  * `Draft schema validation failed: ...`、HTTP 响应体片段、模型名）。这些字段此前被

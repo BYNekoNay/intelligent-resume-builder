@@ -15,7 +15,11 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * JD 管理控制器。
+ * JD 管理控制器：岗位页的 HTTP 入口（增删改查 + 触发解析）。
+ *
+ * <p>链路位置：前端 {@code jobDescription.ts} → 本类 → {@code JobDescriptionService}。
+ * 改坏它用户会看到什么：parse 返回类型改小（不回完整详情）会破坏前端"解析后直接刷新页面"
+ * 的契约；漏 currentUserId 校验会变成匿名可访问。
  *
  * <p>路由与前端 {@code jobDescription.ts} 契约一致:
  * PATCH 更新;POST /{id}/parse 返回完整 JobDescriptionDetail。

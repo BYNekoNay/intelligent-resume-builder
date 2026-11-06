@@ -17,6 +17,21 @@ import java.util.List;
 /**
  * Atomically claims PDF tasks so multiple API instances cannot render one task twice.
  *
+ * <h2>① 解决什么业务问题</h2>
+ * 多个后台实例同时在跑时，怎么保证同一条导出任务只被一个实例渲染？
+ * 答案是"租约"（lease）：谁先抢到谁持有，持有人在期限内是唯一处理者；
+ * 超期没释放就视同放弃，别人可以接管。本类把"抢任务"和"交还结果"都收口在这套机制里。
+ *
+ * <h2>② 在链路哪里</h2>
+ * 被 {@code ExportTaskWorker} 调用：领取用 {@link #claimBatch}，处理完用三种释放
+ * （成功 {@link #releaseSuccess} / 失败 {@link #releaseFailed} / 稍后重试 {@link #releaseForRetry}）回写；
+ * 底层条件更新在 {@code ExportTaskRepository} 的 SQL 里。
+ *
+ * <h2>③ 改坏它用户会看到什么</h2>
+ * 条件更新的胜负判断去掉 → 同一任务被两个实例各渲染一次，结果互相覆盖；
+ * stale（过期）校验去掉 → 慢实例的迟到结果覆盖新实例进度，用户看到状态来回跳；
+ * retryCount 自增挪到失败时 → 容量重排永远算不对"已尝试次数"，可能无限重排。
+ *
  * <p>租约服务：负责"领取"以及三种"释放"（成功 / 失败 / 稍后重试）。
  *
  * <p>要点：

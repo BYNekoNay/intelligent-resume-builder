@@ -29,13 +29,24 @@ import java.util.regex.Pattern;
 /**
  * 阿里云百炼(DashScope)AI 提供者。使用 OpenAI 兼容格式调用。
  *
- * <p>这是应用唯一的 AI 提供者。配置项位于 {@code app.ai.bailian.*}。
+ * <p>【业务问题】所有 AI 请求最终都从这里发出去。它要解决三件事：往哪发（HTTP 客户端与鉴权）、
+ * 发什么（组装 prompt）、发失败了怎么办（模型链降级——哪个模型失败换下一个，含冷却与预算控制）。</p>
+ *
+ * <p>【链路位置】被 {@code AiProviderRegistry} 路由调用（worker 的通用分支与预览链路）；
+ * prompt 组装委托 {@code AiMessageAssembler}，失败分类委托 {@code BailianFailureClassifier}，
+ * 冷却状态记在 {@code ModelChainState}；结果 {@code AiCallResult} 回给 worker 落库。</p>
+ *
+ * <p>【改坏它会怎样】模型链调度出错会让一次任务烧光整条链所有模型的额度；
+ * 响应解析被改成"失败即终止"会让同一个坏 prompt 在链上重复消耗额度；
+ * 日志里混入 prompt 或响应体会直接违反隐私红线（响应体可能回显简历/JD 片段）。</p>
+ *
+ * <p>这是应用唯一的 AI 提供者。配置项位于 {@code app.ai.bailian.*}。</p>
  *
  * <h2>模型链</h2>
  * 百炼的免费额度是<b>按模型</b>计量的。历史上这里硬编码单个模型，
  * 该模型额度一旦耗尽，全部 AI 功能同时失败且无法自愈。
- * 现在改为按 {@code app.ai.bailian.model-chain} 配置的有序模型链调度：
- *
+ * 现在改为按 {@code app.ai.bailian.model-chain} 配置的有序模型链调度（降级链：
+ * 主模型失败后按固定顺序换下一个，失败的模型进入冷却期暂时停用）：
  * <ol>
  *   <li>按链序取当前未处于冷却期的候选；</li>
  *   <li>逐个尝试，首个成功即返回；</li>
@@ -309,23 +320,22 @@ public class BailianAiProvider implements AiProvider {
     }
 
     /**
-     * 链式调度：按候选顺序逐个尝试，首个成功即返回。
+     * 链式调度：按候选顺序逐个尝试，首个成功即返回（降级链的核心）。
      *
-     * <p>包级可见，便于单测注入伪调用而不触碰网络。
+     * <p>步骤：①取当前未冷却的候选列表 ②按链序逐个调用，首个成功即返回；
+     * ③失败按分类决定"顺延下一个模型（并记冷却）"还是"立即终止（换模型也没用，如密钥无效）"；
+     * ④顺延超过链总预算即停止，快速失败交给 worker 既有重试机制后续再跑；
+     * ⑤全部失败时聚合出一个带尝试轨迹的失败结果。</p>
+     *
+     * <p>预算只在 {@code index > 0} 时检查:第一个候选无论耗时多久都会被尝试,
+     * 后续顺延才受总预算约束。成功时把此前失败的尝试轨迹一并带回(R33:换模型可以,但不能静默)。</p>
+     *
+     * <p>包级可见，便于单测注入伪调用而不触碰网络。</p>
      *
      * @param ctx       调用上下文
      * @param requestId 本次调用标识，用于排障关联
      * @param invoker   单模型调用实现
      * @return 成功结果，或全部候选失败后的聚合失败结果
-     */
-    /**
-     * 模型链调度 + 预算/冷却记账。
-     *
-     * <p>候选为空(全部冷却)时直接返回可重试失败,不发任何网络请求。
-     * 成功时把此前失败的尝试轨迹一并带回(R33:换模型可以,但不能静默)。
-     *
-     * <p>预算只在 {@code index > 0} 时检查:第一个候选无论耗时多久都会被尝试,
-     * 后续顺延才受总预算约束。
      */
     AiCallResult callChain(AiCallContext ctx, String requestId, ModelInvoker invoker) {
         List<String> candidates = runtimeOverlay == null ? chain.candidates() : runtimeOverlay.candidatesOr(chain.candidates());

@@ -9,6 +9,10 @@ import java.util.Set;
 
 /**
  * contentJson 最小 schema 的软校验目录（第一阶段：只告警、不拒绝）。
+ * "软校验"= 结构不对不拦着用户保存，只在日志里记一笔，攒够观察数据后再决定是否收紧成硬校验。
+ *
+ * <p>链路位置：只在 {@code CareerMaterialService} 保存非硬校验类型的素材时被调用；
+ * 产出仅是告警日志（warn），对用户完全不可见。
  *
  * <p>背景：13 类资料中仅 ACHIEVEMENT / LEADERSHIP_EXPERIENCE / SKILL_EVIDENCE
  * 有硬校验（{@link CareerMaterialService#validateTypeSpecificContent}），其余类型

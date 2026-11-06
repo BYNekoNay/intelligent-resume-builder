@@ -1,8 +1,16 @@
 <!--
-  成就引导页（/achievement-guidance）：把一段简历经历交给 AI，生成追问（如「量化结果是多少」），用户回答后再存成职业素材。
-  依赖 @/api/ai 的 guideAchievement（创建异步任务）+ waitForAiTaskResult（轮询取结果）、@/api/careerMaterial 的 createMaterial、useResumeJobOptions（简历/版本下拉）。
-  状态分支：加载选项、生成中（loading）、生成失败、保存中、保存成功提示；生成超时 AiTaskTimeoutError 只是「任务仍在跑」，不算失败。
-  时序易错点：相同内容重复点击会复用上次幂等键以命中后端去重，内容变化才换新键；成功后清空指纹，下一次重新发起。
+  成就引导页（/achievement-guidance）。用户的简历经历往往写得太笼统（「负责了 XX 项目」）；
+  本页让 AI 针对这段经历提出追问（如「量化结果是多少」「你的具体角色是什么」），用户逐条回答后，
+  连同问答一起存进职业素材库——之后生成简历时 AI 就有足够的事实细节可用。
+
+  【依赖】@/api/ai 的 guideAchievement（创建异步任务）+ waitForAiTaskResult（轮询取结果）、
+  @/api/careerMaterial 的 createMaterial、useResumeJobOptions（简历/版本下拉）。
+
+  【状态分支】加载选项、生成中（loading）、生成失败、保存中、保存成功提示；
+  生成超时 AiTaskTimeoutError 只是「任务仍在后台跑」，不算失败。
+
+  【幂等键时序】相同内容重复点击复用上次幂等键以命中后端去重（不重复计费），内容变化才换新键；
+  成功后清空指纹，下一次视为新发起。
 -->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'

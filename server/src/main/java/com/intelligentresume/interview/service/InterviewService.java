@@ -19,6 +19,18 @@ import java.util.List;
 /**
  * 面试服务门面（原上帝类拆分后）。
  *
+ * <p>【小白导读】
+ * ① 业务问题：AI 模拟面试的「总前台」。用户从选简历开始一场面试、逐轮作答、AI 点评、
+ *    半途重试/转规则模式、结束、看五维报告、领薄弱项练习题——所有动作都先到这里，
+ *    再由它转发给对应的流程服务。
+ * ② 链路位置：上游只被 {@code InterviewController} 调用；下游把活儿分给
+ *    {@link InterviewStartService}（开始）、{@link InterviewAnswerService}（作答）、
+ *    {@link InterviewRetryService}（重试）、{@link InterviewRuleService}（规则降级）、
+ *    {@link InterviewReportService}（结束/报告）、{@link InterviewHistoryService}（历史列表）、
+ *    {@link InterviewFollowUpAiService}（追问练习）。对外产出统一是
+ *    {@link InterviewStateResponse}（会话当前状态快照）。
+ * ③ 改坏它：所有面试接口一起挂——用户点「开始面试」就报错，整个模拟面试功能不可用。
+ *
  * <p>除 {@code getState} 外，其余 public 方法都是纯委托，不含业务实现；
  * 不允许在门面私有方法内调用 @Transactional 方法（避免绕过代理）。
  *
@@ -119,6 +131,13 @@ public class InterviewService {
 
     /**
      * 读取会话状态；顺带做一次「陈旧 PROCESSING 接管」。
+     *
+     * <p>【小白导读】这是前端轮询的接口：AI 出题/点评期间，前端每隔几秒调一次它来问「好了没」。
+     * 步骤：①加行锁读会话（行锁=数据库层面排队，保证同一会话同时只有一个请求能改它）
+     * → ②若 AI 还在跑，检查有没有「卡死超时」的 attempt（一次 AI 尝试的记录，见
+     * {@link InterviewAiAttempt}），有就判死并让会话进入「需要用户处理」状态
+     * → ③若会话已处于 AI_ACTION_REQUIRED，顺带取出最近一次失败原因给前端展示
+     * → ④组装状态快照返回。
      *
      * <p>为什么读取也要写：前端在 {@code GENERATING_QUESTION}/{@code EVALUATING_ANSWER} 下会持续轮询本接口，
      * 若后台线程已死（进程重启、线程池异常），没有任何请求会推进状态，会话就永久卡住。

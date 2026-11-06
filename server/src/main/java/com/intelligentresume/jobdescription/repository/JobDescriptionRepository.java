@@ -10,7 +10,10 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 岗位描述仓储。
+ * 岗位描述的数据库访问层：Service 的读写都经这里，SQL 在此拼装。
+ *
+ * <p>改坏它用户会看到什么：查询漏 userId 会跨用户泄露 JD；
+ * 投影字段别名与 getter 名对不上会让接口直接绑定失败（启动/调用期报错）。
  *
  * <p>要点：
  * <ul>

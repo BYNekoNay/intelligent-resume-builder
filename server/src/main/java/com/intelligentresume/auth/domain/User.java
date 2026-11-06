@@ -10,6 +10,10 @@ import jakarta.persistence.Table;
 /**
  * 账号实体（表 {@code user}）。
  *
+ * <p>【小白导览】平台里「一个人」的档案：登录名、邮箱、密码散列、展示名、账号状态。
+ * 注册时创建，登录时按用户名或邮箱查它，每个请求的鉴权都要看 status 是不是 ACTIVE。
+ * 改坏它：查重逻辑漏了会出现重名账号；status 判断错了，停用/已删的账号还能登录。
+ *
  * <p>关键约束：
  * <ul>
  *   <li>继承 {@link SoftDeletableEntity}，因此所有 JPA 查询自动带 {@code deleted_at IS NULL}——

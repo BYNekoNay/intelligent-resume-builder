@@ -1,7 +1,22 @@
 /**
  * AI 能力总入口：同意（consent）、任务创建/查询/重试/确认/拒绝、发送前预览、结果轮询。
- * 边界：所有会调模型的创建请求都要带 Idempotency-Key，且多数要先拿 X-AI-Preview-Token（预览与实际请求体必须同源，否则被服务端拒绝）；
- * 任务型接口返回 AiTask，这里不做轮询，只有 waitForAiTaskResult 提供「同步等待」封装（超时抛 AiTaskTimeoutError，表示任务仍在后台而非失败）。
+ *
+ * 给第一天来的你：本平台所有 AI 功能走同一条流水线——
+ * 「发送前预览（看 AI 将收到什么）→ 创建异步任务 → 轮询到终态 → 用户确认/拒绝结果」。
+ * 本文件就是这条流水线的接口层，对应后端 5 个 Controller：
+ * AiConsentController（/api/ai/consent，AI 数据授权）、AiTaskController（/api/ai/tasks*，
+ * 通用任务创建与查询）、JobMaterialSelectionController（/api/ai/select-materials-for-job，选材）、
+ * ConfirmationController（/api/ai/tasks/{id}/confirm*，结果确认）、InlineOptimizeController
+ * （/api/ai/inline-optimize，编辑器内联优化）。
+ *
+ * 两个横切机制（所有 AI 创建请求都涉及）：
+ * - Idempotency-Key：防网络重试造成重复提交。同一个键重复请求，后端返回第一次的结果而不是再跑一遍；
+ *   注意键与请求内容绑定，同键不同内容会被 40901 拒绝。
+ * - AI 预览令牌（X-AI-Preview-Token / input._previewToken）：只有先调过预览接口的用户才拿得到令牌，
+ *   创建时后端用自己的组装结果重算比对，保证「用户确认过的内容 = 实际发送的内容」，防越权夹带。
+ *
+ * 边界：任务型接口返回 AiTask，这里不做轮询，只有 waitForAiTaskResult 提供「同步等待」封装
+ * （超时抛 AiTaskTimeoutError，表示任务仍在后台而非失败）。
  */
 import { http } from './client'
 

@@ -1,8 +1,18 @@
 /**
  * 路由表与全局导航守卫。
- * 除 AppLayout / NotFound / RouteLoadError 外，所有页面都是懒加载路由；requiresAuth 由 beforeEach 统一拦截，
- * 未登录且不是网络错误时重定向到 login 并带 redirect；已登录访问 login/register 直接回首页。
- * 惰性分包失败（发版后旧 chunk 404）走 recoverStaleLazyChunk：同一路径只强刷一次，二次失败落到 route-load-error。
+ *
+ * 【这个文件是干嘛的】整个前端的「路网图」：每个 URL 对应哪个页面组件、进入前要做什么检查。
+ * 除 AppLayout / NotFound / RouteLoadError 外，所有页面都是懒加载路由
+ * （懒加载 = 用户第一次访问该页面时才去下载它的 JS 代码，减小首屏体积）。
+ *
+ * 【守卫规则】requiresAuth 由 beforeEach 统一拦截：
+ * - 未登录且不是网络错误 → 重定向到 login 并带 redirect 参数（登录后跳回原页面）；
+ * - 已登录访问 login/register → 直接回首页（登录页不给已登录用户看）；
+ * - requiresDesktop 的页面先探测桌面端点是否可用，不可用送回首页。
+ *
+ * 【易错点】发版后旧的 JS 分包文件（chunk）可能已从服务器删除，用户浏览器里缓存的旧页面
+ * 引用不到新文件就会加载失败（惰性分包失败）。走 recoverStaleLazyChunk：同一路径只强刷一次，
+ * 二次失败落到 route-load-error 兜底页，避免无限刷新循环。
  */
 import { createRouter, createWebHistory } from 'vue-router'
 
@@ -56,6 +66,9 @@ function isDynamicImportFailure(error: unknown) {
 }
 
 function recoverStaleLazyChunk(error: unknown, fullPath: string) {
+  // 旧页面引用的发版前 chunk 已被服务器删除时，整页刷新一次就能拿到新版本的引用。
+  // 用 sessionStorage 记「这个路径已经刷过一次」：再失败就直接放弃（返回 false 交给兜底页），
+  // 防止刷新本身又触发同一个加载失败、形成无限刷新循环。
   if (!isDynamicImportFailure(error)) return false
   try {
     const key = lazyChunkRetryKey(fullPath)

@@ -11,9 +11,11 @@ import java.util.List;
 
 /**
  * 个人档案实体（表 {@code personal_profile}）：一人一份的「我是谁 + 我想找什么」。
+ * 联系方式 + 求职意向的目标集合，区别于 careermaterial（那边存"做过什么"）。
  *
  * <p><b>隐私红线</b>：{@code fullName/email/phone/location} 属联系方式，生成简历时由服务端合并、
- * <b>绝不进入任何 AI 提示词</b>（见 {@code PersonalProfileService} 头部说明）。</p>
+ * <b>绝不进入任何 AI 提示词</b>（见 {@code PersonalProfileService} 头部说明）——
+ * 改坏这条边界等于把用户电话直接发给外部模型。</p>
  *
  * <p>字段分三组：基础身份（fullName~website）、求职意向（target* 四项 + 两个 summary）、
  * 其中四个 target 集合列是 JSON 列；修改本类字段要同步 {@link PersonalProfileRequest}/

@@ -3,6 +3,10 @@ package com.intelligentresume.jobdescription.service;
 /**
  * JD 解析器规则版本常量。
  *
+ * <p>"规则版本"是什么：解析规则（词典、正则）升级后，旧数据不会重算——
+ * 靠版本号区分哪条解析结果是用哪套规则抽的。历史行的版本号保持原样，
+ * 读方据此知道数据新旧口径。
+ *
  * <p>每次解析结果与版本号一起写入 {@code parsed_keywords_json} 和 {@code parsed_version},
  * 便于 T09 复用与回溯。
  *

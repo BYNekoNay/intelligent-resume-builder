@@ -1,8 +1,18 @@
 <!--
-AI 草稿内容的递归渲染器，只读展示与编辑抽屉共用：editable 为 true 时才渲染输入控件。
-modelValue 可能是标量、对象或数组；对象 / 数组递归到自身，只在最内层渲染 input / textarea / select，
-并通过 update:modelValue 冒泡一份新的整棵值（不改原对象），父组件因此无需感知层级。
-布尔用下拉、长文本用 textarea、数字与字符串用 input，类型由原始值的 typeof 决定，写回时用 coerceValue 还原。
+AI 草稿内容的递归渲染器：草稿的 content 是任意嵌套的 JSON（对象套数组、数组套对象），
+层级事先未知，所以模板里渲染 <DraftContentFields> 自身（递归渲染：遇到对象/数组
+就把每个子值再交给一个自己来画），一层层拆到只剩字符串/数字/布尔才落到输入控件。
+只读展示与编辑抽屉共用：editable 为 true 时才渲染输入控件。
+
+props/emits 契约：
+- modelValue     当前节点的值，可能是标量、对象或数组——不限定类型正是递归的前提
+- editable       是否渲染输入控件（false 只展示）
+- update:modelValue 子节点被改时上抛「一份新的整棵值」：updateObjectField / updateArrayItem
+  用展开拷贝构造新对象（不改原对象，保证 Vue 能侦测到变化），逐层向上冒泡后，
+  最外层父组件拿到的永远是改好后的完整 JSON，无需感知改在第几层。
+
+渲染决策：布尔用下拉、长文本（超 80 字或 summary/description）用 textarea、其余用
+input，类型由原始值的 typeof 决定，写回时用 coerceValue 还原成原始类型。
 未在 FIELD_LABEL_KEYS 登记的键会退回驼峰拆词的英文标签，漏配就会把内部字段名暴露给用户。
 -->
 <script setup lang="ts">

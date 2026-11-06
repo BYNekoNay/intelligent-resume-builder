@@ -1,9 +1,20 @@
 <!--
-  简历生成工作台（/generate）：三步向导 =① 选已有 JD 或粘贴 JD ② 勾选素材范围（必须 / 排除 / 默认）③ 提交 AI 选材任务。
-  依赖 @/api/ai 的 getConsent / hasJobGenerationConsent / previewMaterialSelection / selectMaterialsForJob，素材与 JD 列表来自对应 store。
-  关键时序：提交前必须先通过 useAiTaskPreview 拿到预览令牌（发出去的 prompt 可见），用户取消则完全不调创建端点；
-  未授予 AI 同意时，把 payload + 幂等键写 sessionStorage（pending-job-generation）再跳 /ai-consent?redirect=/generate?resumePending=1，回来自动续跑。
-  状态分支：generating 控制按钮禁用、error 承载同意缺失或生成失败；任务创建成功后记住 id 并跳 /generate/materials?taskId=…
+  简历生成工作台（/generate）。「AI 生成简历」流程的第一站：用户告诉系统要投哪个岗位、用哪些素材，之后由 AI 挑素材 → 用户审核 → 生成简历。
+
+  【三步向导】
+  ①选目标岗位：从已保存的 JD（Job Description，目标岗位的招聘描述）里选一个，或直接粘贴 JD 原文；
+  ②圈定素材范围：把素材库里的每条素材标成「必须用 / 排除 / 交给 AI 决定」（evidenceReady=false 的素材无证据支撑，禁止使用）；
+  ③确认提交：把选材任务交给 AI。
+
+  【依赖】@/api/ai 的 getConsent / hasJobGenerationConsent（AI 使用授权检查）/
+  previewMaterialSelection / selectMaterialsForJob，素材与 JD 列表来自对应 Pinia store。
+
+  【关键时序】
+  - 提交前必须先通过 useAiTaskPreview 拿到预览令牌（让用户看清即将发给 AI 的 prompt 内容），用户取消则完全不调创建端点；
+  - 未授予 AI 同意时，把 payload + 幂等键写 sessionStorage（pending-job-generation）再跳 /ai-consent?redirect=/generate?resumePending=1；
+    用户授权回来后 onMounted 检测 resumePending=1 自动续跑（resumePendingGeneration），且幂等键不变——同一次意图不会重复创建任务。
+
+  【状态分支】generating 控制按钮禁用；error 承载同意缺失或生成失败；任务创建成功后记住任务 id 并跳 /generate/materials?taskId=…（选材结果审核页）。
 -->
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
@@ -192,6 +203,9 @@ const {
 } = useAiTaskPreview()
 
 async function submitGeneration(payload: MaterialSelectionRequest, idempotencyKey: string) {
+  // 实际提交：①先弹预览（用户能看到将要发给 AI 的 prompt 与脱敏摘要）→ 取消 = 一条都不发（不调创建端点）；
+  // ②确认后带预览令牌 + 幂等键创建选材任务；③记住任务 id（供工作台「未完成任务」卡片恢复），
+  // 清掉挂起的 pending，跳到选材结果审核页。
   // 取消 → 一条都不发（不调创建端点）
   const token = await requestPreview('JOB_MATERIAL_SELECTION', {}, false,
     () => previewMaterialSelection(payload))
@@ -205,6 +219,8 @@ async function submitGeneration(payload: MaterialSelectionRequest, idempotencyKe
 }
 
 async function resumePendingGeneration() {
+  // 从授权页回来的续跑逻辑：读回 sessionStorage 里挂起的 payload + 幂等键，
+  // 还原表单到第 3 步（让用户看到刚才的选择），确认授权有效后用原幂等键提交。
   const pending = readPendingGeneration()
   if (!pending) return
 
@@ -226,6 +242,12 @@ async function resumePendingGeneration() {
 }
 
 async function startGeneration() {
+  // 第 3 步「开始生成」入口。流程：
+  // ①把三步向导里的选择组装成 payload（必须/排除素材、JD 来源等）；
+  // ②生成幂等键（同一次提交去重用）；
+  // ③先查 AI 授权：未授权就把 payload + 幂等键存进 sessionStorage 再跳授权页——
+  //   用户授权回来后靠 resumePendingGeneration 用同一个键续跑，不会重复创建任务；
+  // ④已授权则直接走 submitGeneration（预览确认 → 创建任务 → 跳选材结果页）。
   error.value = ''
   generating.value = true
 

@@ -17,7 +17,23 @@ import com.intelligentresume.resume.domain.ResumeVersion;
 import org.springframework.stereotype.Component;
 
 /**
- * ATS 的「AI 侧」：启动、重试、发送前预览，以及失败时的兜底映射（R32 / D-AI-11）。
+ * ATS 的「AI 侧」总管：启动、重试、发送前预览，以及失败时的兜底映射（R32 / D-AI-11）。
+ *
+ * <h2>① 解决什么业务问题</h2>
+ * 规则分只能算"关键词有没有覆盖"，看不懂句子含义。AI 能做语义分析，但 AI 有各种失败方式
+ * （没配密钥、用户没授权、配额用完、模型超时）。本类的工作就是：在正确的时机、按正确的顺序
+ * 检查这些前置条件，能启动就启动 AI 任务；启动不了就给检查记录记一个"降级原因"（降级 =
+ * AI 不可用时自动换成规则引擎出结果），保证用户永远能拿到规则分。
+ *
+ * <h2>② 在链路哪里</h2>
+ * {@link AtsService} 在规则分落库后调 {@link #startOrFallback}；用户点"重试 AI"时走
+ * {@link #retryOrThrow}；它创建的 AI 任务由 ai.task 模块的 worker 异步执行，
+ * worker 调 {@link AtsAiAnalysisService} 干活，结论经 {@link AtsResultStateService} 写回检查记录。
+ *
+ * <h2>③ 改坏它用户会看到什么</h2>
+ * 可用性检查和令牌检查顺序颠倒 → 没配密钥的环境会误报"你没预览"；
+ * startOrFallback 改成抛异常 → 用户发起检查直接 500，连规则分都看不到；
+ * 重试时对 PENDING/SUCCESS 的任务又新建一个 → 同一份简历被模型重复分析、白白消耗配额。
  *
  * <p>为什么单独成类，而不是继续写在 {@link AtsService} 里：R32 给 ATS 加了
  * 「可用性 → 令牌 → 建任务」三段编排，一次性多出五十多行；而 {@code AtsService}
@@ -40,7 +56,8 @@ import org.springframework.stereotype.Component;
  *       400/409；只有创建任务阶段的预期错误才转兜底。放进去就会被吞成"静默不跑 AI 还返回 200"。</li>
  *   <li>可用性检查必须排在令牌之前：无密钥环境要落 AI_DISABLED，抢在令牌前报错会把"服务没配"
  *       误报成"你没预览"。</li>
- *   <li>创建任务用固定幂等键 {@code ats:<checkId>:v1}：同一个 check 只会对应一条 ATS 分析任务。</li>
+ *   <li>创建任务用固定幂等键 {@code ats:<checkId>:v1}（同一个检查永远生成同一个键，
+ *       AI 任务服务靠它去重）：一个 check 只会对应一条 ATS 分析任务。</li>
  *   <li>重试时如果已有任务处于 PENDING/RUNNING/SUCCESS，只同步状态、不新建任务；
  *       只有 FAILED 才调用 {@code taskService.retry}。</li>
  * </ul>

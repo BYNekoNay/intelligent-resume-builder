@@ -26,6 +26,9 @@ import java.util.UUID;
 /**
  * PDF 服务客户端。调用 pdf-service 的 /render 端点,带服务令牌认证。
  *
+ * <p>一句话定位：在线版渲染 PDF 的"外协窗口"——worker 拿着模板代码和简历 JSON 来这里换一份 PDF 字节；
+ * 桌面模式不走这里（用纯 Java 渲染器）。pdf-service 是独立的 Node + Chromium 服务。
+ *
  * <p>使用 RestClient(Spring 6.1+)同步调用,无需引入 webflux。
  * 超时、认证失败、渲染错误均抛 BusinessException(PDF_FAILURE)。
  *

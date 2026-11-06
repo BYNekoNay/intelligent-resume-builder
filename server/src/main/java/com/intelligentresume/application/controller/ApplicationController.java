@@ -17,6 +17,13 @@ import java.util.List;
 /**
  * 投递看板的 HTTP 入口（{@code /api/applications}）。
  *
+ * <p><b>① 解决什么业务问题</b>：前端看板页面需要对投递记录做增删改查、拖拽改状态、看转化统计，
+ * 这些 HTTP 请求都先落到这里。
+ * <p><b>② 在链路哪里</b>：本类只做"接请求 → 取当前用户 → 调 {@code ApplicationService} → 包一层
+ * {@code ApiResponse}（带 traceId）"的转发，不写业务规则——规则全在 Service 里。
+ * <p><b>③ 改坏它用户会看到什么</b>：漏掉 {@code currentUserId} 校验或新增"按 id 直查"旁路 →
+ * 用户能看到/改别人的投递记录（跨用户越权）；返回 201 改成 200 → 前端创建后跳转逻辑可能错乱。
+ *
  * <h2>端点分组</h2>
  * <ul>
  *   <li>{@code GET ""} —— 列表，{@code followUp} 只接受 {@code TODAY} / {@code OVERDUE} / {@code ALL}

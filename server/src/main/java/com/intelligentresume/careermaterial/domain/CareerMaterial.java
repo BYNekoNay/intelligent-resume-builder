@@ -17,7 +17,15 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * 职业资料。字段与 V1 DDL {@code career_material} 完全一致。
+ * 职业资料实体，对应数据库表 {@code career_material}，字段与 V1 DDL 完全一致。
+ * 一行 = 用户素材库里的一条素材（一段工作经历、一个项目、一条成就……）。
+ *
+ * <p>链路位置：由 {@code CareerMaterialService} 读写；AI 选材/生成简历时从这里取数据；
+ * 简历里的 {@code resume_material_reference} 表保存它的快照副本。
+ *
+ * <p>改坏它用户会看到什么：丢了 {@code @SQLRestriction} 用户会"看到已删除的素材复活"；
+ * 丢了 {@code user_id} 隔离会看到别人的素材；{@code version} 乐观锁失效会让两人同时编辑
+ * 时后保存的人悄悄覆盖前一个人（冲突本应报 40901）。
  *
  * <p>软删除:{@code @SQLRestriction("deleted_at IS NULL")} 全局过滤。
  * 被 {@code resume_material_reference.source_snapshot_json} 引用的资料,
@@ -85,8 +93,9 @@ public class CareerMaterial extends BaseEntity {
     private String contentJsonText;
 
     /**
-     * 乐观锁版本（ideation #67）：并发编辑不再「最后写入覆盖」，冲突时抛
-     * OptimisticLockingFailureException → 全局异常处理器返回 40901。
+     * 乐观锁版本号（乐观锁 = 不锁行，提交时对比版本号：数据被别人改过就拒绝本次保存）。
+     * 有了它，两人同时编辑同一条素材时后提交者会收到 40901 冲突错误，而不是"最后写入覆盖"
+     * ——即悄悄把前一个人的修改抹掉（ideation #67）。
      */
     @Version
     @Column(name = "version", nullable = false)

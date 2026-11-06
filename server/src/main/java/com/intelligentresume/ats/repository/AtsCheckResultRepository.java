@@ -10,7 +10,10 @@ import jakarta.persistence.LockModeType;
 import java.util.Optional;
 
 /**
- * {@code ats_check_result} 的访问入口。
+ * {@code ats_check_result} 表的数据库访问入口。
+ *
+ * <p>一句话定位：查检查记录、按幂等键查重、加行锁改状态，三个需求各对应一个方法；
+ * 被 {@code AtsService}（读）和 {@code AtsResultStateService}（写）使用。
  *
  * <p>要点：
  * <ul>

@@ -16,6 +16,13 @@ import java.util.Map;
 /**
  * 资料文本的 prompt 字节预算（ideation #36）。
  *
+ * <p>新人三问：①业务问题：用户一条资料可能粘了整篇项目文档，直接塞给模型既烧钱又可能超出
+ * 模型上下文让任务直接失败；这里给"每条资料能在提示词里占多少字节"统一封顶；
+ * ②链路位置：被两个 prompt 构建器（选材 {@code MaterialSelectionPromptBuilder}、
+ * 生成 {@code JobGenerationPromptBuilder}）在拼 prompt 前调用；
+ * ③改坏它用户会看到：任务莫名失败（超上下文）、配额异常消耗，或「必须使用的资料」
+ * 凭空消失（丢条目的话，见下）。
+ *
  * <p>背景：资料选择（{@code MaterialSelectionPromptBuilder}，最多 60 条候选）与岗位定制
  * 生成（{@code JobGenerationPromptBuilder}）此前只受条数限制——sourceText 无准入长度上限、
  * contentJson 单条准入上限 64KB，提示词体积最坏可达数 MB：既浪费配额，也可能直接超出

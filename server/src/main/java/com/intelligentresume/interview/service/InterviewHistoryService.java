@@ -18,6 +18,13 @@ import java.util.stream.Collectors;
 /**
  * 历史面试会话列表。服务端聚合 actualQuestionCount / totalScore。
  *
+ * <p>【小白导读】
+ * ① 业务问题：「我的面试记录」页——列出该用户已完成的每场面试，带实际题数和平均分，
+ *    可按 JD 筛选。点进去才看逐轮报告。
+ * ② 链路位置：上游是 {@code InterviewService.listHistory}（GET /api/interviews）；
+ *    只读会话与记录两张表的元数据列，产出 {@link InterviewSessionSummaryResponse} 列表。
+ * ③ 改坏它：列表页加载变慢（把简历原文等大字段全读进内存）、平均分口径和报告页对不上。
+ *
  * <p>要点：列表只返回已完成会话；所有计数与均值都由记录聚合得出，
  * 查询走投影（只取元数据列），避免把简历原文、题目、答案等大字段读进内存。
  */

@@ -10,7 +10,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * ATS 的「任务 input 组装 + 待发 prompt」—— 创建与发送前预览**共用同一实现**（R32 AC-R32-8）。
+ * ATS 的「AI 任务输入」组装员：创建任务和"发送前预览"共用同一份实现（R32 AC-R32-8）。
+ *
+ * <h2>① 解决什么业务问题</h2>
+ * 发给模型之前，用户有权先看到"到底会把我的哪些内容送出去"（隐私要求 R32）。
+ * 预览展示的内容和实际发送的内容必须一模一样——本类就是保证"所见即所发"的唯一组装点。
+ *
+ * <h2>② 在链路哪里</h2>
+ * 被 {@code AtsAiStarter} 调用（两个入口都要先 prepare 再动手）；
+ * 它依赖 {@code AtsAiPromptBuilder} 做脱敏和拼 prompt；产物 {@link PreparedInput}
+ * 一份落库（taskInput，worker 以后用它），一份给预览/发送（providerInput）。
+ *
+ * <h2>③ 改坏它用户会看到什么</h2>
+ * 预览和实际发送用不同来源拼 → 用户确认的内容和真实发出的内容不一致（隐私事故）；
+ * 脱敏绕过 → 敏感字段进了模型；localSnapshot 改成塞整份 result_json → 模型看到状态机字段，浪费 token 且可能干扰输出。
  *
  * <p>为什么单独成类：{@code AtsService} 已在行数棘轮登记，不能再往里塞预览逻辑；
  * 更重要的是预览与执行必须同源 —— 两处各拼一遍 input，必然出现

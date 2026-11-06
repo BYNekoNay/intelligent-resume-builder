@@ -13,7 +13,12 @@ import java.time.LocalDateTime;
 // 漏声明的后果：软删行依然出现在列表里（ApplicationControllerIT 实测抓住）。
 @SQLRestriction("deleted_at IS NULL")
 /**
- * 投递记录。软删除（V40 起）：{@code extends SoftDeletableEntity} 全局过滤已删行；
+ * 投递记录（一张投递"跟踪卡"在数据库里的样子：投了哪家 JD、用的哪个简历版本、当前状态、
+ * 三段草稿文案、各时间戳）。
+ *
+ * <p>在链路哪里：{@code ApplicationService} 读写它，前端看板的每张卡片对应这里一行。
+ *
+ * <p>软删除（V40 起，即"不真删，只打标记"）：{@code extends SoftDeletableEntity} 全局过滤已删行；
  * 清扫作业 {@code RetentionPurgeService} 在恢复期结束后物理删除（唯一引用者
  * {@code application_status_history} 是 ON DELETE CASCADE 的从属内容，随行一起消亡）。
  *

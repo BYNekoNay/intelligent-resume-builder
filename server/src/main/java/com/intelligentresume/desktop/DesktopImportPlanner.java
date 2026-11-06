@@ -14,6 +14,19 @@ import java.util.Set;
 /**
  * 把导入包一次性翻译成**执行计划**：扁平、父记录在前、子记录紧随其父，每条带自己的决策。
  *
+ * <p>小白三问：
+ * <ul>
+ *   <li><b>解决什么业务问题</b>：导入前要逐条回答「这条记录本地有没有？内容一样吗？」，
+ *       得出新增/跳过/冲突三种结论。本类只做判断，不写任何数据——判断和写入分开，
+ *       预览才敢保证无副作用。</li>
+ *   <li><b>在链路哪里</b>：被 {@link DesktopImportService} 在 preview 和 apply 时各调一次
+ *       （apply 重新 plan 是故意的，因为预览到写入之间本地库可能变了）；
+ *       判断依赖 {@link ImportContentComparator} 比内容、{@code desktop_import_map} 表查历史导入。</li>
+ *   <li><b>改坏它用户会看到什么</b>：stableId 校验放松 → 同一包导两次产生重复记录；
+ *       父子顺序打乱 → 子记录先写、外键找不到父，导入整体报错；
+ *       版本撞号预检删掉 → INSERT 撞唯一键，整批回滚。</li>
+ * </ul>
+ *
  * <h2>为什么要有计划这一层</h2>
  * 旧实现里「分类」（{@code preview}）与「写入」（{@code apply}）是两套遍历：preview 只走 4 个顶层集合，
  * apply 只在**父记录判 ADD** 时调 {@code insertChildren} 写子记录。后果是：

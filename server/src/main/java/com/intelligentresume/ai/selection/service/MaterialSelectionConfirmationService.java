@@ -25,6 +25,18 @@ import java.util.stream.Collectors;
 /**
  * 「选材确认」：把一次选材任务的推荐结果固化成 JOB_GENERATION 子任务的不可变快照。
  *
+ * <p>新人三问：①业务问题：AI 推荐完资料后，用户要挑一批"就用这些"并点确认；
+ * 本类负责把这次选择连同岗位/档案一起冻结成快照，创建真正的"生成简历"任务；
+ * ②链路位置：被 {@code JobMaterialSelectionController#confirm} 调用；上游是选材任务
+ * （JOB_MATERIAL_SELECTION），下游创建 JOB_GENERATION 子任务，快照交给
+ * {@code JobGenerationInputAssembler} 变成 prompt；③改坏它用户会看到：重复点确认产生多个
+ * 生成任务（配额被烧两次）、没配额却被标记"已确认"卡死、或确认了资料范围之外的资料
+ * （越权把别人的/新加的资料带进生成）。
+ *
+ * <p>术语：幂等（同一请求发两次效果和一次一样——重试不会重复创建子任务）、
+ * 乐观锁（提交时检查数据没被别人改过，改过就失败要求刷新）、
+ * 悲观锁（读数据库时就加锁，别的请求必须等，彻底挡住并发确认）。
+ *
  * <p>要点（顺序即红线，改任何一步之前先读完整段 {@link #confirm}）：
  * <ul>
  *   <li>幂等重放（同一 userId + Idempotency-Key 且 fingerprint 相同）在**任何写库和令牌校验之前**
@@ -77,8 +89,19 @@ public class MaterialSelectionConfirmationService {
     /**
      * 确认选材 → 创建 JOB_GENERATION 子任务（状态 PENDING），并返回该子任务。
      *
-     * <p>校验链：任务存在/归属/类型 → 用户同意书 → 幂等重放 → 任务状态与版本戳 → 预览令牌
-     * → 配额 → 落库。任一步失败都保持 selection 的 confirmationStatus = PENDING。
+     * <p>校验链即方法体的执行顺序，每步的业务含义：
+     * ①锁住并校验任务（存在/归属/类型，跨用户一律 404 不泄露存在性）；
+     * ②查用户同意书（没授权把资料发给 AI 就到此为止）；
+     * ③幂等重放：同 userId + 幂等键（Idempotency-Key 请求头，防止重复提交）且内容指纹相同
+     *   → 直接返回既有子任务，重试不产生第二条；指纹不同 → 409（同一键提交了不同内容）；
+     * ④任务状态与版本戳：选材必须已成功且未确认过，{@code taskUpdatedAt} 是乐观锁戳——
+     *   与库里不一致说明页面停留期间数据变了，要求刷新后再确认；
+     * ⑤组装快照并校验预览令牌（必须先看过预览并确认）；
+     * ⑥配额检查（每日可用次数）；
+     * ⑦落库：创建子任务 + 把 selection 置为 CONFIRMED。
+     *
+     * <p>任一步失败都保持 selection 的 confirmationStatus = PENDING——
+     * 特别是 ⑥ 必须在 ⑦ 之前，否则配额不足会留下"选材已确认但永远生成不了"的死锁。
      *
      * @param idempotencyKey 为空时退化成本地确定性键 {@code selection-confirm:<selectionId>}，
      *                       因此**同一个 selection 不带 key 重复确认只会得到同一个子任务**
@@ -153,6 +176,10 @@ public class MaterialSelectionConfirmationService {
     /**
      * 组装 JOB_GENERATION 子任务的不可变输入快照 —— confirm 与发送前预览**共用同一实现**
      * （R32 AC-R32-8）。只读：不写库、不调 provider。
+     *
+     * <p>业务上这步是"把用户的最终选择打包"：岗位快照 + 用户选中的资料快照 +
+     * 个人档案快照 + JD 未满足的要求，全部冻成一份 JSON——worker 稍后执行时无论
+     * 用户改了什么，任务都按确认那一刻的内容跑。
      *
      * <p>预览时 {@code confirmationStatus} 仍是 PENDING 属正常，故本方法不校验确认状态；
      * 它校验快照能成立的前提：岗位/素材归属、素材来自本轮候选、1..30 条。

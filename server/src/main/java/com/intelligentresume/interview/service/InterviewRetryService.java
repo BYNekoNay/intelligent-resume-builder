@@ -28,8 +28,20 @@ import java.util.concurrent.RejectedExecutionException;
 /**
  * AI 重试流程：两阶段短事务 + 事务外 AI。
  *
+ * <p>【小白导读】
+ * ① 业务问题：AI 出题或点评失败了，用户在页面上点「重试」。这里负责把上次失败的那次
+ *    AI 调用原地重跑一遍——不用用户重新输入任何内容。
+ * ② 链路位置：上游是 {@code InterviewService.retryAi}（/ai/retry 接口）；下游与
+ *    {@link InterviewAnswerService} 同构：调 {@link InterviewAiService}/
+ *    {@link InterviewOperationSupport}，结果写入 {@code interview_record} 与会话。
+ * ③ 改坏它：同一次失败被重试多次、重复扣配额；旧一次的重试结果回来覆盖新状态
+ *    （代数校验失效）；或失败后重试按钮永远点不动。
+ *
  * <p>含 retryGeneration 计数（attemptCount）与 stale 丢弃判定，须整体保留。
  * 日志只记录 id/状态/错误码。
+ *
+ * <p>术语速查：代数（generation / attemptCount）—— 同一条 attempt 第几次执行，
+ * 用来判断「后台刚回来的结果是这次重试的还是上一次的」，过期结果直接丢弃。
  *
  * <p>要点：
  * <ul>
@@ -78,6 +90,15 @@ public class InterviewRetryService {
         this.evaluationExecutor = evaluationExecutor;
     }
 
+    /**
+     * 重试最近一次失败的 AI 操作（出题或点评）。
+     *
+     * <p>【小白导读】步骤：①TX1：确认会话处于「AI 失败待处理」、找到最近一条失败 attempt、
+     * 代数 +1 并回到对应的「进行中」状态（缺配额则只更新错误码、不发调用）
+     * → ②事务外把重试提交到后台执行器，本请求立即返回
+     * → ③后台跑完走 TX2：复核代数与状态没被别人动过，才写结果。
+     * 顺序不能换：代数必须先 +1 再发起调用，否则两次重试的后台结果无法区分先后。
+     */
     public InterviewStateResponse retryAi(Long id, Long userId) {
         // TX1: 校验 + 增加重试计数
         // 返回值用 long[] 传递 5 个标量（sessionId/attemptId/roundNo/opType/generation），

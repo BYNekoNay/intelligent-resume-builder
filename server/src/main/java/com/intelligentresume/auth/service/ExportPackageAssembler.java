@@ -15,6 +15,12 @@ import java.util.Map;
  * 导出包的**稳定 ID 注入与清单装配**（R37），从 {@code AccountExportService} 拆出 ——
  * 那个类已顶到行数棘轮，且这两件事与"读哪些实体"无关，单独放更清楚。
  *
+ * <p>【小白导览】①解决什么业务问题：导出包要能被桌面端「认出每条记录」——给每条数据
+ * 打上稳定 ID（形如 {@code web:resumes:5}，来源:集合:主键，换环境也不变），并生成一份
+ * 清单（manifest：有几条记录、每条的稳定 ID 列表）供导入前校验。
+ * ②在链路哪里：AccountExportService 装好负载后调它两步：注入 stableId → 生成 manifest。
+ * ③改坏它用户会看到什么：stableId 缺失 → 桌面端导入直接整包拒绝（Web→桌面迁移 100% 失败）。
+ *
  * <h2>两个必须写清的坑（2026-10-23 两次实测踩出来的）</h2>
  * <ol>
  *   <li><b>不能用 {@code instanceof Map} 判断记录</b>：Jackson 2.x 的 {@code ObjectNode} 只实现

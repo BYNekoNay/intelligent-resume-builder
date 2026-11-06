@@ -11,6 +11,8 @@ import org.hibernate.annotations.SQLRestriction;
  * 简历主表。字段与 V1 DDL {@code resume} 完全一致。
  *
  * <p>职责一句话：只存"这份简历是谁的、叫什么、当前指向哪个版本"，内容全在 {@link ResumeVersion}。
+ * 在链路哪里：{@code ResumeService} 读写主档，{@code ResumeVersionService} 通过它改当前版本指针；
+ * 改坏后果——查询漏 userId 会越权，{@code current_version_id} 被并发覆盖会让用户打开"旧内容"。
  *
  * <p>要点：
  * <ul>

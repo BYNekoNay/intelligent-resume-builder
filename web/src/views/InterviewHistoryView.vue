@@ -1,8 +1,11 @@
 <!--
-  面试历史页（/interviews/history）：左侧/列表展示历史面试场次，选中后加载并展示该场报告（分数 + 逐题回顾）。
-  依赖 @/api/interview 的 listInterviewHistory / getInterviewReport，@/api/jobDescription 的 listJobs 仅用于把 jobDescriptionId 显示成标题。
-  状态分支：loading 列表加载、reportLoading 报告加载；错误共用 error 文案，按「列表加载 / 报告加载」分别赋值。
-  JD 列表加载失败不阻塞历史列表（标题退化为「岗位 #id」）。
+  面试历史页（/interviews/history）。用户回看过去所有 AI 模拟面试：左侧/列表按场次展示，选中某一场后加载并展示该场的报告（总分 + 逐题回顾）。
+
+  【依赖】@/api/interview 的 listInterviewHistory / getInterviewReport，
+  @/api/jobDescription 的 listJobs 仅用于把 jobDescriptionId 显示成岗位标题。
+
+  【状态分支】loading 列表加载、reportLoading 报告加载；错误共用 error 文案，按「列表加载 / 报告加载」分别赋值。
+  【易错点】JD 列表加载失败不阻塞历史列表——标题退化为「岗位 #id」而不是整页报错。
 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'

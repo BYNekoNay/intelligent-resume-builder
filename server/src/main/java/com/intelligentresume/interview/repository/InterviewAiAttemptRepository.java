@@ -14,6 +14,9 @@ import java.util.Optional;
 /**
  * AI attempt 的读取入口。查询方法被幂等判定、配额统计、失败信息回显三处共用。
  *
+ * <p>【小白导读】一句话：interview_ai_attempt（AI 工单表）的读入口。
+ * 幂等检查、今天用了多少额度、页面上的失败提示，读的都是这里。
+ *
  * <p>要点：
  * <ul>
  *   <li>{@code findByUserIdAndIdempotencyKey} 是幂等入口，依赖 {@code (user_id, idempotency_key)} 唯一约束。</li>

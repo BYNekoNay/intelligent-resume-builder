@@ -21,6 +21,16 @@ import java.util.Objects;
 /**
  * JD CRUD + 确定性关键词解析。
  *
+ * <p>用大白话说：用户管理自己投过的岗位——存一份 JD 原文，点"解析"抽出关键词，
+ * 之后生成"针对这个岗位的简历"并算关键词覆盖度都要用到这份 JD。
+ *
+ * <p>在链路里的位置：前端岗位页 → {@code JobDescriptionController} → 本类 →
+ * {@code JobDescriptionRepository}；解析动作委托给 {@link JdKeywordParser}（纯规则、不碰库）；
+ * 解析结果落库后给 ScoringService（算覆盖度）和选材快照（冻结 JD 内容）消费。
+ *
+ * <p>改坏它用户会看到什么：丢了"正文变了就清空解析结果"的逻辑，用户改完 JD 后
+ * 覆盖度还在拿旧关键词算分，结果全错；丢了行锁检查，解析期间别人的编辑会被静默覆盖。
+ *
  * <p>关键约定:
  * <ul>
  *     <li>{@code jd_text} 原文永不覆盖,即使重复调用 parse。</li>
@@ -131,7 +141,10 @@ public class JobDescriptionService {
     }
 
     /**
-     * 解析关键词:调 JdKeywordParser,写回 parsed_keywords_json(覆盖),jd_text 不动。
+     * 解析关键词。步骤：①取出 JD 原文；②调 {@link JdKeywordParser} 纯内存解析（不持锁，
+     * 持锁会拖长事务）；③写回前重新加行锁（悲观锁 = 直接把这行数据库行锁住，别人动不了）
+     * 复查原文——若解析期间被人编辑过则抛 CONFLICT，丢弃本次结果；④把结果连同规则版本
+     * 一起写回 {@code parsed_keywords_json}（覆盖旧值），{@code jd_text} 原文不动。
      * 返回完整 JobDescriptionDetail(前端契约:parseJob 返回 JobDescription)。
      *
      * <p>并发与结构说明：

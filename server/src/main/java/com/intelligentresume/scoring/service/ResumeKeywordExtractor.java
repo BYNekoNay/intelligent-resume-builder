@@ -9,6 +9,17 @@ import java.util.*;
 /**
  * 简历关键词抽取器。从 ResumeVersion.resumeJson 中抽取归一化 token。
  *
+ * <p>小白三问：
+ * <ul>
+ *   <li><b>解决什么业务问题</b>：评分前得先把简历 JSON 里「能代表求职者的词」捞出来。
+ *       本类决定捞哪些字段、怎么切成词，是评分的「原料车间」。</li>
+ *   <li><b>在链路哪里</b>：只被 {@code ScoringService} 调用；内部依赖 {@link Normalizer}
+ *       做清洗与词组切分；产出 raw/normalized 两套 token 集合分别供三类规则使用。</li>
+ *   <li><b>改坏它用户会看到什么</b>：漏抽某段字段 → 对应维度的覆盖度无故偏低；
+ *       混入姓名/邮箱 → 联系方式出现在关键词明细里；抽不到 skills.items →
+ *       技能分恒低并给出与简历矛盾的"建议补充"提示。</li>
+ * </ul>
+ *
  * <p>抽取来源（只取一级数组的可见字段）：
  * <ul>
  *   <li>basics.label, basics.summary</li>

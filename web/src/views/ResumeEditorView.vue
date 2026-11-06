@@ -1,10 +1,25 @@
 <!--
-  简历编辑器主页面（/resumes/:id/edit）。唯一数据源是 JSON 原文 content，各分节表单只是对它的受控编辑：
+  简历编辑器主页面（/resumes/:id/edit）。
+
+  【这个页面是干嘛的】用户在这里逐节填写/修改简历：左侧是章节导航（基本信息、工作经历、技能……），
+  中间是表单，右侧可打开「设计面板」调字体字号、换模板、拖动章节顺序。用户视角的三个入口：
+  ①直接编辑现有简历；②从「素材库」里挑一条素材（如一段工作经历）一键插进对应章节；
+  ③从 ATS 检测报告（ATS = 简历解析系统，会按招聘方关键词给简历打分）点某个问题「去修改」跳到这里定向修复。
+
+  【数据模型】唯一数据源是 JSON 原文 content（简历整体就是一段 JSON 文本），各分节表单只是对它的受控编辑：
   updateResume 深拷贝 resume 后按字段改写，再整体序列化回 content，因此 JSON 非法时所有表单编辑都会被拦住并要求先修源码。
-  保存 = 新建一个版本（createManualVersion），成功后跳 resume-detail；dirty（内容变化或填写了版本说明）会触发离开路由与 beforeunload 的二次确认。
-  依赖：@/api/resume（版本读取/创建/恢复）、@/api/ats（ATS 交接校验）、@/api/ai（单段优化 + 任务轮询）、@/api/careerMaterial（素材库插入）。
-  易错点：页面有多个异步源（加载、素材、保存、AI），统一用 editorContextEpoch / editorLoadSequence / relatedAssetsEpoch 做代次校验丢弃过期响应；
-  ATS 交接进入历史版本时页面为只读（historicalSourceReadOnly），必须先创建「可编辑后继版本」才能继续编辑。
+  「保存」= 新建一个版本（createManualVersion，后端每次保存都存快照，方便对比/回滚历史版本），成功后跳 resume-detail。
+
+  【依赖】@/api/resume（版本读取/创建/恢复）、@/api/ats（ATS 交接校验）、@/api/ai（单段优化 + 任务轮询）、
+  @/api/careerMaterial（素材库插入）、@/api/interviewAsset（章节关联的面试素材）。
+
+  【状态分支与易错点】
+  - loading → 正常编辑 / loadFailed → 显示重试页。
+  - dirty（内容变化或填写了版本说明）会触发离开路由与 beforeunload 的二次确认，防止误关页面丢稿。
+  - 页面有多个异步源（加载、素材、保存、AI），统一用 editorContextEpoch / editorLoadSequence / relatedAssetsEpoch
+    做「代次校验」（每次页面上下文切换就自增一个编号，晚到的旧响应编号对不上就丢弃，防止旧数据覆盖新状态）。
+  - ATS 交接进入历史版本时页面为只读（historicalSourceReadOnly），必须先创建「可编辑后继版本」才能继续编辑。
+  - 草稿恢复：编辑中内容会存 localStorage，下次进来若检测到未保存草稿会弹 DraftRestoreBanner 询问是否恢复。
 -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -129,12 +144,11 @@ const materialInsertLoading = ref(false)
 const selectedMaterialId = ref<number | null>(null)
 let editorLoadSequence = 0
 /**
- * Route-scoped editor context epoch (KTD-4/KTD-5). Advanced synchronously
- * before every resume-ID or ATS handoff-query reload inside loadEditor().
- * Async editor actions capture the epoch when they start and must prove it is
- * still active before mutating content, drafts, errors, controls, loading
- * state, or navigation. This prevents a stale same-resume ATS handoff
- * completion from polluting the newer editor context.
+ * 路由级「代次」编号（KTD-4/KTD-5）。loadEditor() 每次因简历 ID 变化或 ATS 交接参数
+ * 变化而重载前都会把它 +1。之后每个异步操作（保存、插素材、AI 优化等）在发起时记下
+ * 当时的编号，等响应回来时先核对编号是否还是当前值——不是就说明用户已经切到了
+ * 另一个页面上下文，这次响应必须全部丢弃。作用：防止一个慢的旧请求把结果写进
+ * 已经换了一份简历的新页面（内容、草稿、报错、加载态都不许污染）。
  */
 let editorContextEpoch = 0
 
@@ -323,6 +337,8 @@ function sectionLabel(section: SectionKey) {
 }
 
 function handoffItem(result: AtsCheckResponse, rawItem: unknown, section: SectionKey): AtsHandoffContext | null {
+  // 校验 URL 上的 atsItem（格式如 "evidence:0" / "action:2"，即 ATS 报告里的第 N 条证据/建议）
+  // 确实属于目标章节，防止用伪造参数让页面定位到不存在的条目。
   const value = Array.isArray(rawItem) ? rawItem[0] : rawItem
   if (typeof value !== 'string') return null
   const match = /^(evidence|action):(0|[1-9]\d*)$/.exec(value)
@@ -339,6 +355,9 @@ function handoffItem(result: AtsCheckResponse, rawItem: unknown, section: Sectio
 }
 
 async function resolveAtsHandoff(requestedResumeId: number) {
+  // 解析「从 ATS 检测报告跳过来编辑」的 URL 参数（section / atsResultId / sourceVersionId / atsItem）。
+  // 缺参直接返回 null（普通编辑入口）；有参则拉取 ATS 报告并核对它确实属于当前简历和源版本，
+  // 属实才返回交接上下文，供 loadEditor 决定加载哪个版本、跳到哪个章节。
   const section = mapAtsSection(Array.isArray(route.query.section) ? route.query.section[0] : route.query.section)
   const resultId = positiveQueryInteger(route.query.atsResultId)
   const sourceVersionId = positiveQueryInteger(route.query.sourceVersionId)
@@ -401,9 +420,9 @@ function textFromMaterial(material: CareerMaterial, keys: string[]) {
   return material.sourceText?.trim() || ''
 }
 /**
- * Carry structured time bounds (and a legacy period) from a material into an
- * inserted resume entry when the source material supports them. Empty values
- * are omitted so a manual insertion never fabricates an empty date field.
+ * 把素材（careerMaterial = 用户在日常记录里沉淀的经历片段，如一段工作/项目描述）
+ * 携带的结构化时间区间（以及旧版 period 字段）搬进插入后的简历条目。
+ * 空值一律省略，避免手动插入时凭空造出一个空日期字段。
  */
 function timeFieldsFromMaterial(material: CareerMaterial) {
   const content = material.contentJson ?? {}
@@ -417,6 +436,11 @@ function timeFieldsFromMaterial(material: CareerMaterial) {
   }
 }
 async function insertMaterial() {
+  // 把选中的素材插入当前章节。整体流程：
+  // ①取选中素材 ID → ②拉取素材详情 → ③按当前章节类型把素材字段映射成简历条目（如 work 映射 company/position/时间区间）
+  // → ④写入 JSON 源码并清空选中态。
+  // 每一步 await 之后都要核对「简历 ID 没换 + epoch 还是当前值」再写状态，
+  // 防止用户已切换简历后，旧素材插入结果写进新页面。
   const id = selectedMaterialId.value
   if (!id || materialInsertLoading.value) return
   const epoch = editorContextEpoch
@@ -474,6 +498,7 @@ async function applyAtsArrival() {
 }
 
 async function openAiAssistant(scope: 'field' | 'section', label: string, section: string, value: unknown, apply?: (value: string) => void) {
+  // ① 打开 AI 助手弹层，生成一个幂等键（同一操作重复提交时后端靠它识别并只执行一次）
   const contentValue = Array.isArray(value) ? value.filter(Boolean).join('\n') : String(value ?? '').trim()
   const assistant = { idempotencyKey: newIdempotencyKey(), scope, label, section, content: contentValue, loading: false, result: null, error: '', needsConsent: false, apply }
   aiAssistant.value = assistant
@@ -481,11 +506,16 @@ async function openAiAssistant(scope: 'field' | 'section', label: string, sectio
   const epoch = editorContextEpoch
   aiAssistant.value.loading = true
   try {
+    // ② 先创建一个 AI 任务，拿到任务 ID；③ 再轮询这个任务直到后端算完并返回结果。
+    //    （轮询 = 每隔几秒问一次「好了吗」，直到结果出来或超时，因为 AI 生成是异步的、无法一次性返回）
     const createdTask = (await inlineOptimize({ resumeVersionId: currentVersionId.value, section, content: contentValue }, assistant.idempotencyKey))
     const result = await waitForAiTaskResult<InlineOptimizeResponse>(createdTask.id)
+    // ④ 结果回来时双重校验：页面上下文没换过（epoch 相同）且弹层还是同一个任务（idempotencyKey 相同）
+    //    才允许写入结果。用户中途关弹层或切换简历时，迟到的 AI 结果不会误写。
     if (epoch === editorContextEpoch && aiAssistant.value?.idempotencyKey === assistant.idempotencyKey) aiAssistant.value.result = result
   } catch (requestError: any) {
     if (epoch === editorContextEpoch && aiAssistant.value?.idempotencyKey === assistant.idempotencyKey) {
+      // 错误码 40302 = 用户还没同意 AI 服务条款，引导去授权页；超时则给出任务 ID 让用户稍后查看
       aiAssistant.value.needsConsent = extractErrorCode(requestError) === 40302
       aiAssistant.value.error = aiAssistant.value.needsConsent
         ? t('resumeEditor.consentRequired')
@@ -569,6 +599,8 @@ function updateResume(mutator: (draft: Record<string, any>) => void) {
 }
 
 function removeWithUndo(label: string, mutator: (draft: Record<string, any>) => void) {
+  // 删除条目时先把删除前的 JSON 全文存起来，弹一个「撤销」提示，6 秒后自动消失。
+  // 用户点撤销就把旧全文写回去（等于整体回滚），比逐字段反向恢复更简单可靠。
   if (!sourceValid.value) { updateResume(() => undefined); return }
   const prev = content.value
   updateResume(mutator)
@@ -697,6 +729,15 @@ function moveCustomEntry(sectionIndex: number, entryIndex: number, direction: -1
 function defaultResumeJson() { return { basics: { name: '' }, objective: { targetRole: '', targetIndustry: '', location: '', summary: '' }, links: [], work: [], volunteering: [], education: [], skills: [], projects: [], courses: [], certificates: [], publications: [], awards: [], languages: [], customSections: [], template: { code: 'classic' }, layout: defaultLayout } }
 
 async function loadEditor() {
+  // 编辑器加载总入口。流程：
+  // ①自增两个代次（editorLoadSequence 管「本次加载是否还有效」，editorContextEpoch 管
+  //   「本页面上下文是否还有效」），之后每个 await 分支都要核对，否则旧上下文的响应会污染新页面；
+  // ②清空上一份简历留下的所有状态（版本号、ATS 交接、素材、AI 弹层、草稿读取态等）；
+  // ③并行拉取简历详情和 ATS 交接上下文（从 ATS 报告跳转过来时 URL 上带 section/atsResultId 等参数）；
+  // ④决定加载哪个版本：正常情况用 currentVersionId；ATS 交接默认加载历史「源版本」（只读），
+  //   只有 URL 带了合法的 editVersionId（可编辑后继版本）才加载它；
+  // ⑤把版本 JSON 序列化进编辑器，记录 initialContent 作为 dirty 判断基准；非只读时尝试读本地草稿；
+  // ⑥catch 里区分两种失败：创建可编辑后继版本失败（回退并清掉 editVersionId 参数）和真正的加载失败（显示重试页）。
   // 先自增两个代次：之后所有 await 回来的分支都要再核对，否则旧上下文的响应会污染新页面
   const loadSequence = ++editorLoadSequence
   editorContextEpoch += 1
@@ -778,6 +819,12 @@ async function loadEditor() {
 }
 
 async function createEditableSuccessor() {
+  // ATS 交接时加载的是历史「源版本」（只读）。用户点「创建可编辑版本」后：
+  // ①调 restoreResumeVersion 把源版本复制成一个新版本（后端会写入 ATS 溯源信息 atsProvenance）；
+  // ②把新版本 ID 存进 pendingEditableSuccessorId，然后通过 router.replace 把 editVersionId
+  //   写进 URL → 触发 watch → 重新 loadEditor 加载这个可编辑版本。
+  // pendingEditableSuccessorId 的作用：若后端其实创建成功了但随后的重新加载失败，
+  // 用户再点一次按钮时直接复用已创建的版本 ID 重试加载，不会重复创建第二个版本。
   const sourceVersionId = atsSourceVersionId.value
   const context = atsContext.value
   if (!sourceVersionId || !context || creatingEditableVersion.value) return
@@ -838,6 +885,12 @@ onMounted(() => {
 onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeUnload); window.removeEventListener('keydown', handleKeydown); previewResizeObserver?.disconnect(); if (undoTimer) clearTimeout(undoTimer) })
 
 async function save() {
+  // 手动保存 = 把当前 JSON 原文提交成一个新版本（后端存快照，可回滚）。流程：
+  // ①守卫：只读的历史版本不允许写新版本；JSON 非法时不提交，避免把坏数据写入版本；
+  // ②记下当时的 epoch 和简历 ID（提交时快照）；
+  // ③调 createManualVersion 创建版本，成功后清掉这份简历的本地草稿（草稿已无用）；
+  // ④核对 epoch/简历 ID 仍有效后，更新 initialContent（dirty 归零）并跳转详情页；
+  // ⑤失败则把后端错误翻译给用户。所有后续步骤都先核对代次，慢的旧保存不能影响新上下文。
   // 只读的历史版本不允许写新版本；JSON 非法时不提交，避免把坏数据写入版本
   if (historicalSourceReadOnly.value) return
   let resumeJson: Record<string, unknown>

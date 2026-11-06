@@ -12,6 +12,9 @@ import java.util.Optional;
 /**
  * 用户表的数据访问。
  *
+ * <p>【小白导览】读写 {@code user} 表（注册查重、登录查人、删号加锁）。改坏它 →
+ * 重名注册、登录查错人；删号流程丢锁 → 同一用户并发删号/恢复互相踩。
+ *
  * <p>注意软删语义：{@link User} 继承 {@code SoftDeletableEntity}，Hibernate 会给这些派生查询
  * 自动加上 {@code deleted_at IS NULL}。因此删号后的账号在这里「查不到」——
  * 需要读取已删账号（撤销、清理、恢复）的场景必须换原生 SQL 或另加忽略过滤条件的查询。

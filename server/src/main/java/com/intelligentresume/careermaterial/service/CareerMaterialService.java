@@ -28,6 +28,18 @@ import java.util.Set;
 /**
  * 职业资料 CRUD + 类型过滤 + 引用偏好。
  *
+ * <p>用大白话说：用户在"素材库"页面新增、编辑、删除、搜索自己攒的职业素材
+ * （工作经历、项目、成就、技能证据……），这些素材将来是生成简历的原材料。
+ * 本类就是素材库的全部后台逻辑。
+ *
+ * <p>在链路里的位置：前端素材库页面 → {@link com.intelligentresume.careermaterial.controller.CareerMaterialController}
+ * → 本类 → {@code CareerMaterialRepository}（落库）。产出给两类下游：
+ * ①AI 选材/生成简历时从这里取素材（先经脱敏快照清洗）；②简历里的引用关系
+ * 会存素材的"快照"（当时数据的定格副本），所以素材删了历史简历仍能读。
+ *
+ * <p>改坏它用户会看到什么：越权查询（漏 userId 条件）会看到别人的素材；
+ * 软删改物理删会撞坏历史简历的引用；校验顺序重排会让前端报错提示对不上字段。
+ *
  * <p>关键约定:
  * <ul>
  *     <li>所有查询带 userId 条件,杜绝跨用户访问。</li>
@@ -180,7 +192,8 @@ public class CareerMaterialService {
         if (req.usagePreference() != null) {
             material.setUsagePreference(req.usagePreference());
         }
-        // saveAndFlush：版本冲突（@Version）在服务内即抛，由全局处理器映射为 40901，
+        // saveAndFlush：立即写库，让乐观锁版本冲突（@Version，即"提交时检查数据没被别人改过"，
+        // 改过就失败——不加锁、只靠版本号对比）在服务内即抛，由全局处理器映射为 40901，
         // 而不是延迟到事务提交点。
         repository.saveAndFlush(material);
         return toDetail(material);

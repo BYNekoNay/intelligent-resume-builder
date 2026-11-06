@@ -6,7 +6,14 @@ import java.util.Collection;
 import java.util.Map;
 
 /**
- * Shared evidence-quality boundary for career materials.
+ * 判断"一条素材够不够格被用"的唯一裁判：有来源原文（sourceText 非空）或
+ * 有至少一个有意义的结构化字段，就算"证据就绪"（evidenceReady）。
+ * 没就绪的素材在界面上会被标"资料不足"，AI 选材时也不该依赖它。
+ *
+ * <p>链路位置：创建/更新时是"写闸门"（不达标拒绝保存），列表/详情/搜索时是"读标记"
+ * （算出 evidenceReady 给前端）。全项目就这一处判定，别处另写会口径漂移。
+ *
+ * <p>Shared evidence-quality boundary for career materials.
  *
  * <p>A title is a label, not evidence. A material is usable when it has
  * non-blank source text or at least one meaningful structured value. The

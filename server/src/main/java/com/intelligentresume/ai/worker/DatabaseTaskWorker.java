@@ -18,7 +18,18 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 数据库轮询工作器。定期按任务分组领取并执行 PENDING 的 AI 任务。
+ * 数据库轮询工作器 —— AI 任务真正的"接活的人"。定期按任务分组领取并执行 PENDING 的 AI 任务。
+ *
+ * <p>【业务问题】任务创建后不会自己跑，必须有东西定时去数据库问"有没有新活"，
+ * 领回来交给对应的业务流程执行。这里没有消息队列，数据库表本身就是队列。</p>
+ *
+ * <p>【链路位置】Spring 调度按 {@code app.ai.worker.poll-interval-ms} 触发 {@link #poll()} →
+ * {@code TaskLeaseService.claimBatch} 领取（拿租约）→ 按 {@link Group} 提交到专属线程池 →
+ * {@code TaskExecutionService} 执行 → 结果由 {@code TaskLeaseService} 写回任务行。
+ * 产出即任务状态与结果 JSON，前端凭轮询看到。</p>
+ *
+ * <p>【改坏它会怎样】领取改成并行会让进程内并发计数失真、额度失效；漏减 {@code inFlight}
+ * 会让该分组永久卡在满额，用户的新任务永远不被执行；轮询间隔被调得过大，用户会明显感觉任务"没人管"。</p>
  *
  * <p>旧实现是单线程串行:一次只领一条、执行完再领下一条,于是一条分钟级的
  * {@code JOB_GENERATION} 会把同时到达的秒级 {@code INLINE_OPTIMIZE} 饿死数分钟。
@@ -29,7 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>轮询间隔由 {@code app.ai.worker.poll-interval-ms} 控制。
  * 测试环境通过 {@code app.worker-scheduling.enabled=false} 关闭自动调度。</p>
  *
- * <p>要点 / 易错点:
+ * <p>要点 / 易错点:</p>
  * <ul>
  *   <li>领取必须保持"单线程串行":同一个 JVM 内只有一个调度线程执行 {@code dispatch},
  *       不要给 {@link #poll()} 加 {@code @Async} 或并行流,否则 {@code inFlight} 计数会失真、

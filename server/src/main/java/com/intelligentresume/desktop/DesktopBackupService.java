@@ -22,6 +22,17 @@ import java.util.stream.Stream;
 /**
  * 桌面本地工作区的**备份与恢复**（ADR-012 阶段三 / R30 / R39 / F6）。
  *
+ * <p>小白三问：
+ * <ul>
+ *   <li><b>解决什么业务问题</b>：桌面版数据只存在用户自己电脑里，误删/软件损坏就全没了。
+ *       本类提供「一键备份整个工作区」和「从备份恢复」，恢复失败还要能自动退回原状。</li>
+ *   <li><b>在链路哪里</b>：{@code DesktopBackupController} 调它；直接对 H2 本地库执行
+ *       {@code SCRIPT TO / RUNSCRIPT}；备份文件落在数据目录的 {@code backups/} 下。</li>
+ *   <li><b>改坏它用户会看到什么</b>：校验跳过 → 坏快照被应用，工作区被清空又重建失败；
+ *       安全备份删掉 → 恢复失败时没有退路，本地库可能半残；缓存清理丢掉 →
+ *       恢复后界面仍显示旧数据。</li>
+ * </ul>
+ *
  * <p>备份形态：H2 的 {@code SCRIPT TO} 导出的 SQL 文本（含全部表结构、数据与
  * {@code flyway_schema_history}），落在数据目录的 {@code backups/} 下。
  * 选它而不是复制 {@code .mv.db} 文件的原因：数据库文件在运行时被连接占用，

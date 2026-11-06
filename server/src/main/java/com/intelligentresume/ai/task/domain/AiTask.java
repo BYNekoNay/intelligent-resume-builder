@@ -17,12 +17,21 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * AI 任务 —— 一次异步 AI 请求的唯一持久化载体。
+ * AI 任务 —— 一次异步 AI 请求在数据库里的唯一"档案行"。
  *
- * <p>用户提交后先落一行 PENDING，工作器领取后转 RUNNING，最终落到 SUCCESS / FAILED / CANCELLED。
- * 输入快照、生成结果、人工确认状态与跨实例的租约都在这一行上。
+ * <p>【业务问题】AI 调用很慢（几秒到几分钟），不能让 HTTP 请求干等。所以把每一次请求
+ * 记成一行数据：用户提交时写入 PENDING，后台工作器领走执行，结果（成功/失败）也写回这一行，
+ * 前端凭 taskId 轮询这行数据拿结果。</p>
  *
- * <p>要点 / 红线:
+ * <p>【链路位置】{@code AiTaskService#create} 写入首行 → {@code DatabaseTaskWorker} 经
+ * {@code TaskLeaseService} 领取并改状态 → 执行结果经 {@code releaseSuccess/releaseFailed} 写回。
+ * 输入快照、生成结果、人工确认状态与跨实例的租约都存在这一行上。</p>
+ *
+ * <p>【改坏它会怎样】字段与建表 SQL 对不上则应用启动失败；幂等键/指纹逻辑被破坏则
+ * 用户重复点提交会创建出重复任务并重复消耗模型额度；租约字段被误写会出现两个实例
+ * 重复执行同一任务；时间戳维护被破坏会让保留期清理与配额统计口径错乱。</p>
+ *
+ * <p>要点 / 红线:</p>
  * <ul>
  *   <li>字段与 V1 DDL {@code ai_task} 逐列对应。改字段前必须先有迁移，否则 Hibernate 校验不过。</li>
  *   <li>{@code (user_id, task_type, idempotency_key)} 上有唯一键。并发同键创建由数据库兜底,

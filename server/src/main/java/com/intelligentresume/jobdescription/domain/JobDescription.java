@@ -12,7 +12,14 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * 岗位描述。字段与 V1 DDL {@code job_description} 完全一致。
+ * 岗位描述实体，对应数据库表 {@code job_description}。一行 = 用户存的一份 JD：
+ * 原文 + 解析出来的关键词结果。
+ *
+ * <p>链路位置：{@code JobDescriptionService} 读写；简历创建时可绑定一份 JD；
+ * 解析结果供 ScoringService 算覆盖度与选材快照冻结内容。
+ *
+ * <p>改坏它用户会看到什么：三列解析结果只清其一会出现"版本号是新的、关键词是旧的"
+ * 的脏数据，覆盖度评分悄悄失真。
  *
  * <p>软删除:{@code @SQLRestriction("deleted_at IS NULL")} 全局过滤。
  * {@code jd_text} 原文永不覆盖;{@code parsed_keywords_json} 可重复解析覆盖。

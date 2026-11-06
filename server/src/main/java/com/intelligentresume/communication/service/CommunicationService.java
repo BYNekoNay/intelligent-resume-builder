@@ -30,6 +30,20 @@ import java.util.Map;
 /**
  * 沟通文案编排：模板兜底生成、AI 异步任务创建、发送前预览、草稿保存。
  *
+ * <p>小白三问：
+ * <ul>
+ *   <li><b>解决什么业务问题</b>：求职者要给 HR 发打招呼语、跟进邮件、求职信，但不知道怎么写。
+ *       本类负责把这些文案「写出来」——要么用现成模板拼一句得体的话（快、免费、稳定），
+ *       要么发起 AI 任务让模型写（灵活但要等）。写完只存草稿。</li>
+ *   <li><b>在链路哪里</b>：前端请求先进 {@code CommunicationController}，再转到本类。
+ *       模板路径在本类内部拼字符串直接出结果；AI 路径只是「下单」——组装 input 交给
+ *       {@code AiTaskService} 排队，真正调用模型在 worker 侧的 {@link CommunicationAiService}。
+ *       产出（草稿正文）落 {@code communication_draft} 表，返回给前端展示。</li>
+ *   <li><b>改坏它用户会看到什么</b>：模板句式拼错 → 用户看到病句或漏了公司/岗位名；
+ *       归属校验删掉 → A 用户能读到 B 用户的简历去生成文案（越权）；预览与生成不同源 →
+ *       用户预览看到一段话、实际 AI 生成的是另一段话。</li>
+ * </ul>
+ *
  * <p>职责边界（改这里前先确认不会越界）：
  * <ul>
  *   <li><b>只产草稿，绝不发送</b>：本类没有任何发信/发消息调用，{@code sentAutomatically} 恒为 false。</li>
@@ -70,6 +84,10 @@ public class CommunicationService {
     /**
      * 组装「要落库的任务 input」与「worker 实际交给模型的三段式 prompt」—— 创建与预览**共用同一实现**
      * （R32 AC-R32-8）。
+     *
+     * <p>步骤：① 校验简历版本归属当前用户且未归档；② 校验岗位描述归属；
+     * ③ 把请求 + 简历 JSON + JD 翻译成任务 input；④ 再由 input 现场拼出 prompt。
+     * ①②必须在③之前——素材不合法就不该进入后续组装，且 404 错误码只在这一步产生。
      *
      * <p>为什么必须连 prompt 一起算：{@code CommunicationAiService.executeTask} 是拿任务 input 现场调
      * {@link CommunicationAiPromptBuilder#build(Map)} 得到消息的，**不走** {@code PromptTemplates} 回落。
@@ -162,6 +180,11 @@ public class CommunicationService {
 
     /**
      * 模板生成：按 type 拼固定句式，语言取 {@code normalizedLanguage()}（缺省中文）。
+     *
+     * <p>步骤：① 校验简历版本与 JD 归属；② 从简历 JSON 抽姓名/第一项技能、从 JD 抽公司/岗位；
+     * ③ 缺什么用什么兜底（无姓名 → "候选人"，无公司 → "贵公司"，无技能 → "详见简历"句式）；
+     * ④ 按 type（求职信/邮件/开场白）套对应中文或英文句式；⑤ 落一条草稿并返回。
+     * ②③在④之前，因为句式拼接依赖这些值已经定稿。
      *
      * <p>占位数据缺失时有降级：无姓名 → "候选人"/"the candidate"，无公司 → "贵公司"/"your company"，
      * 无技能 → 改用"详见简历"句式。都不报错，因此这里产出的文案**总是完整可发**，

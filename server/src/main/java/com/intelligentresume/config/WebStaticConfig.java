@@ -17,6 +17,9 @@ import java.io.IOException;
 /**
  * 桌面本地工作区的前端托管（ADR-012 D1）。
  *
+ * <p>【小白导览】桌面版没有 nginx，前端页面由后端应用自己「兼职」托管：这个配置声明
+ * 「/assets/** 下的文件去哪读」。改坏它 → 桌面版界面白屏（JS/CSS 加载 404）。
+ *
  * <p>在线版的前端由 nginx 提供（{@code deploy/nginx/host.conf}），后端只提供 API。
  * 桌面端没有 nginx，因此由本应用直接托管前端产物：
  * <ul>

@@ -10,7 +10,16 @@ import java.util.List;
 /**
  * AI 提供者注册表 —— 按任务类型从 Spring 注入的 {@link AiProvider} 列表里挑一个来调用。
  *
- * <p>要点 / 易错点:
+ * <p>【业务问题】业务代码不该关心"背后是哪家模型服务"。所有 AI 调用统一到这里路由，
+ * 以后加第二家供应商只需新增实现，不用改调用方。</p>
+ *
+ * <p>【链路位置】{@code TaskExecutionService#executeDefault} 调 {@link #route} 拿 provider；
+ * 健康检查用 {@link #hasAvailableProvider()}/{@link #availableModelCount()} 判断 AI 能力是否可用。</p>
+ *
+ * <p>【改坏它会怎样】路由规则改动会直接影响所有 AI 任务用哪家的模型；
+ * 健康检查口径混淆会把"模型全部冷却"误报为健康。</p>
+ *
+ * <p>要点 / 易错点:</p>
  * <ul>
  *   <li>路由是「第一个 supports() 返回 true 的实现」,顺序由 Spring 注入的 List 决定
  *       (可再受 {@code @Order}/{@code Ordered} 影响)。当前只有一个百炼实现且它对所有类型

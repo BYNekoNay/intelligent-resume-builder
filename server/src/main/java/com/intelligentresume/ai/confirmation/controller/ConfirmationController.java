@@ -16,6 +16,9 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 来源确认控制器。
  *
+ * <p>一句人话：确认页的两个按钮——"提交确认"和"整单拒绝"——对应的 HTTP 入口。
+ * 本类只做取用户身份、调 service、包装响应，所有校验都在 service 层。
+ *
  * <p>路由：
  * <ul>
  *   <li>POST {@code /api/ai/tasks/{id}/confirm} — 用户逐项确认</li>

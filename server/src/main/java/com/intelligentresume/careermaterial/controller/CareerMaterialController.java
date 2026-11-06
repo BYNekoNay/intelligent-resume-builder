@@ -17,7 +17,11 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * 职业资料 CRUD 控制器。
+ * 职业资料 CRUD 控制器：素材库页面的 HTTP 入口（增删改查 + 搜索）。
+ *
+ * <p>链路位置：前端 {@code careerMaterial.ts} → 本类 → {@code CareerMaterialService}。
+ * 改坏它用户会看到什么：路由或参数名（type/sort 等）改名，前端请求会直接 404/400；
+ * 漏了 currentUserId 校验会变成匿名可访问。
  *
  * <p>路由与前端 {@code careerMaterial.ts} 契约一致:
  * <ul>

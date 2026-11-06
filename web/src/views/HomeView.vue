@@ -1,8 +1,23 @@
 <!--
-  首页 / 工作台：未登录时是落地页（含证明面板），登录后变成「下一步做什么」的行动面板。
-  上面板依赖 @/api/system 的健康检查（仅影响底部状态展示，失败不阻塞页面）；工作台数据来自 listResumes / listApplications / listTaskContinuations。
-  workspaceActions 按固定优先级拼装卡片：面试中的投递 > 草稿投递 > 未完成的 AI 任务 > 最近编辑的简历，第一项作为主 CTA，其余作为次要入口。
-  状态分支：三个工作台请求用 Promise.allSettled 并行，任一失败只置 workspaceError 并保留其余成功数据；全部为空且加载完成时展示空态引导。
+  首页 / 工作台。双重身份：
+  ①未登录 = 落地页（营销文案 + 「证明面板」示例简历，展示产品价值主张）；
+  ②已登录 = 「下一步做什么」行动面板，把用户手头所有未完成的事按优先级排成卡片。
+
+  【这个页面是干嘛的】用户视角：登录后打开首页，第一眼看到最大的那张卡片就是系统认为你最该做的事
+  （比如「有一场面试要准备」「有一个 AI 任务等确认」），下面是其他待办的次要入口。
+
+  【依赖】@/api/system 的健康检查（仅影响底部服务状态展示，失败不阻塞页面）；
+  工作台数据来自 listResumes（简历列表）/ listApplications（投递列表）/ listTaskContinuations（未完成的 AI 任务）。
+
+  【状态分支】
+  - 工作台：workspaceLoading（加载中）→ workspaceError（任一请求失败，保留成功数据并提示重试）→
+    全部为空且加载完成时展示「空态引导」（引导去导入简历）→ 正常显示卡片。
+  - 三个工作台请求用 Promise.allSettled 并行（anySettled = 全部等完、单个失败不算整体失败），
+    任一失败只置 workspaceError 并保留其余成功数据。
+  - 健康检查：checking → UP / degraded / offline 四态，只影响页脚。
+
+  【优先级规则】workspaceActions 按固定优先级拼装卡片：
+  面试中的投递 > 草稿投递 > 未完成的 AI 任务 > 最近编辑的简历；第一项作为主 CTA（最大按钮），其余作为次要入口。
 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
@@ -65,6 +80,10 @@ interface WorkspaceAction {
 }
 
 const workspaceActions = computed<WorkspaceAction[]>(() => {
+  // 按业务优先级从高到低拼装待办卡片：
+  // ①面试中的投递（最紧急：马上要面试了）→ ②草稿投递（选到一半还没投）→
+  // ③未完成的 AI 任务（SUCCESS = 已算完等确认；否则 = 还在跑）→ ④最近编辑的简历（兜底入口）。
+  // 第一张卡片会渲染成主 CTA，所以顺序即重要性。
   const actions: WorkspaceAction[] = []
 
   for (const interviewingApplication of interviewingApplications.value) {
@@ -141,6 +160,9 @@ function updatedLabel(value: string) {
 }
 
 async function loadWorkspace() {
+  // 并行拉取三类工作台数据。用 Promise.allSettled（等全部请求出结果、失败不抛异常）
+  // 而不是 Promise.all（任一失败立刻整体失败）：单个接口挂了不应让整个面板空白，
+  // 成功的那几类照常渲染，失败的统一置 workspaceError 提示用户重试。
   if (!auth.accessToken) return
   workspaceLoading.value = true
   workspaceError.value = false

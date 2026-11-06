@@ -19,6 +19,12 @@ import java.util.stream.Collectors;
 /**
  * 岗位选材：把候选资料交给模型挑出与 JD 相关的部分，再把结果收敛成可信结构。
  *
+ * <p>新人三问：①业务问题：用户不知道哪些资料适合投这个岗位，这里让 AI 当"参谋"
+ * 推荐最多 12 条并说明理由；②链路位置：后台 worker 执行 JOB_MATERIAL_SELECTION 任务时调用；
+ * 上游 {@code MaterialSelectionContextBuilder} 筛候选，下游产出 recommended/unselected 写进
+ * 任务结果，供选材页展示与确认（{@code MaterialSelectionConfirmationService}）；③改坏它用户会看到：
+ * 推荐里出现用户没确认过的资料（越权）、分数/理由乱来、或推荐条数失控。
+ *
  * <h2>这段代码保证的四件事（review 时逐条对）</h2>
  * <ol>
  *   <li><b>模型不能越界</b>：返回的 {@code materialId} 必须落在候选集合里，幻觉 ID 或过期 ID
@@ -56,6 +62,16 @@ public class JobMaterialSelectionService {
         this.providerRegistry = providerRegistry;
     }
 
+    /**
+     * 选材任务的主流程，①→⑥：
+     * ①从快照取岗位并校验归属（任务对应的 JD 必须还在且属于本人）；
+     * ②筛候选 + 拼 prompt（与预览共用 {@code MaterialSelectionContextBuilder}，见类注释）；
+     * ③候选为空直接返回"没有可用素材"——不调模型，白烧配额还产出假结论；
+     * ④调模型拿推荐；
+     * ⑤收敛推荐：先让模型输出过 {@link #parseRecommendations} 信任边界，再把用户强制勾选的
+     *    以 score=100 优先入列、AI 推荐补足到 30 封顶；
+     * ⑥落选的候选也给出原因（unselected），连同排除名单一起写结果。
+     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> executeTask(AiTask task) {
         Map<String, Object> snapshot = task.getInputSnapshotJson();

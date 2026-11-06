@@ -27,7 +27,7 @@ const props = withDefaults(
     aspectRatio?: string
     /** 占位渐变 */
     fallback?: string
-    /** 是否启用 IntersectionObserver 拦截(默认 true;首屏关键图可在父组件设 false) */
+    /** 跳过懒加载拦截立即请求（默认 false 即默认拦截；首屏关键图可设 true） */
     eager?: boolean
   }>(),
   {

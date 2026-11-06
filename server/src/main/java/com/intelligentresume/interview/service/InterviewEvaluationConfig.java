@@ -13,6 +13,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * 面试 AI 评估的后台执行器。
  *
+ * <p>【小白导读】
+ * ① 业务问题：AI 点评一轮要 1~2 分钟，不能让 HTTP 请求干等到超时。这里提供一个小小的
+ *    后台线程池（2 个线程 + 50 个排队位），作答请求把评估任务丢进来就立刻返回，
+ *    前端靠轮询拿结果。
+ * ② 链路位置：被 {@link InterviewAnswerService} 与 {@link InterviewRetryService} 以
+ *    {@code @Qualifier("interviewEvaluationExecutor")} 注入；池里跑的任务就是那两个类
+ *    的后台评估方法。
+ * ③ 改坏它：线程池没界会拖垮整台机器（内存只有 3.6 GiB）；拒绝策略改错则队列满时
+ *    任务静默消失，会话永远停在「评估中」。
+ *
  * <p><b>为什么需要这个类</b>：{@code POST /api/interviews/{id}/answer} 原先在**请求线程内
  * 同步等待 AI 评估**。实测 4 轮耗时 102.3 / 76.4 / 110.0 / 145.9s（平均 108.7s），
  * 而前端该接口的超时只有 60s（`web/src/api/interview.ts`）—— <b>4 轮全部超时</b>：

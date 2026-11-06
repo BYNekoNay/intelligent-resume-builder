@@ -8,6 +8,9 @@ import java.util.Map;
 /**
  * 单条草稿决策。
  *
+ * <p>一句人话：用户对草稿某一条内容的三选一处理——接受（ACCEPT）、
+ * 改过再要（EDIT，附 editedValue）、不要（REJECT）。
+ *
  * @param outputPath  草稿中的路径，如 "work[0].highlights[2]"
  * @param decision    ACCEPT / EDIT / REJECT
  * @param editedValue 仅 decision=EDIT 时必填，覆盖原字段

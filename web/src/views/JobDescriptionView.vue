@@ -1,8 +1,16 @@
 <!--
-  职位描述（JD）库页面：列表 + 新建/编辑表单 + 解析结果预览。
-  依赖接口 @/api/jobDescription 的 createJob / updateJob / deleteJob / getJob / parseJob，列表数据来自 useJobDescriptionStore。
+  职位描述（JD）库页面。JD（Job Description，目标岗位的招聘描述）是「AI 定向生成简历」的靶子——
+  AI 会按 JD 里的要求挑素材、写简历。本页管理 JD：列表展示 + 新建/编辑表单 + 调后端解析（提取关键词）+ 从某条 JD 一键去生成简历。
+
+  【依赖】@/api/jobDescription 的 createJob / updateJob / deleteJob / getJob / parseJob，列表数据来自 useJobDescriptionStore（Pinia）。
+
+  【状态分支】store.loading 列表加载中 / 空态 / 正常列表；saving 控制保存按钮；
+  editDetailLoaded 表示「编辑详情是否已回填完成」——未就绪时表单禁用、保存被拦截。
   表单复用同一份状态：editingId 为 null 表示新建，否则为编辑；点击编辑时先回填列表摘要，再异步拉取详情补全 jdText。
-  易错点：详情请求可能乱序返回，用 editRequestId 做代次校验丢弃过期响应；详情未加载完成时禁止保存，避免用空的 jdText 覆盖原值。
+
+  【易错点】详情请求可能乱序返回（用户快速点开不同 JD 编辑），用 editRequestId 做「代次校验」：
+  每次点编辑就把编号 +1，晚到的旧响应编号对不上直接丢弃，防止 JD A 的内容回填到 JD B 的表单里；
+  详情未加载完成时禁止保存，避免用空的 jdText 覆盖原值。
 -->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'

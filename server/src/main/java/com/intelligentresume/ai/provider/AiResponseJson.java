@@ -4,9 +4,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 从模型输出里抽出 JSON 载荷。
+ * 从模型输出里抽出 JSON 载荷 —— 模型偶尔会在 JSON 外面裹一层说明文字，这里负责把 JSON 剥出来。
  *
- * <p>抽成独立类的原因有两个：
+ * <p>【链路位置】{@code BailianAiProvider#parseResponseContent} 先调 {@link #extract}
+ * 剥壳，再交给 Jackson 解析；剥不出就返回原文由上层兜底。</p>
+ *
+ * <p>【改坏它会怎样】提取顺序或正则改动会让原本能解析的输出解析失败，
+ * 用户看到的结果从"结构化 JSON"退化成 rawContent 原文。</p>
+ *
+ * <p>抽成独立类的原因有两个：</p>
  * <ol>
  *   <li>{@code BailianAiProvider} 踩着行数棘轮（已登记 597 行，只许下调），
  *       这段纯字符串处理放在里面会让它无法再改；</li>

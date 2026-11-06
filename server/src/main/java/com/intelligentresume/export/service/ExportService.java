@@ -25,6 +25,22 @@ import java.util.List;
 /**
  * 导出服务。编排创建、查询、下载流程。
  *
+ * <h2>① 解决什么业务问题</h2>
+ * 用户想把某份简历按某个模板导出成 PDF 下载走。渲染耗时不能让用户干等，
+ * 所以走异步：这里只负责"受理"（建任务）和"交付"（查进度、给文件），
+ * 真正生成 PDF 的是后台的 {@code ExportTaskWorker}。
+ *
+ * <h2>② 在链路哪里</h2>
+ * 被 {@code ExportController} 调用（HTTP /api/exports 的后端）；
+ * 它写入 {@code export_task} 表，{@code ExportTaskWorker} 领任务渲染，
+ * 渲染出的文件经 {@code ExportStorageService} 存取；产出 {@code ExportTaskStatusResponse} 给前端。
+ *
+ * <h2>③ 改坏它用户会看到什么</h2>
+ * 归属校验删掉 → 用户能下载别人的简历 PDF（严重隐私事故）；
+ * 复用逻辑去掉 → 同一版本狂点导出会重复排队、重复渲染；
+ * 过期检查去掉 → 用户下载到早已该销毁的旧文件；
+ * retry 次数限制去掉 → 用户可无限次触发真实渲染，拖垮后台。
+ *
  * <p>职责一句话：把"用户点了导出"变成一条任务行，并保证下载只发生在"属于你、已成功、未过期"的前提下。
  *
  * <p>关键不变量:
@@ -32,7 +48,7 @@ import java.util.List;
  *   <li>templateCode 必须属于统一支持列表</li>
  *   <li>跨用户 → NOT_FOUND(不泄露存在性)；归属校验必须排在归档校验之前</li>
  *   <li>下载必须 status=SUCCESS 且未过期</li>
- *   <li>不暴露 storageKey</li>
+ *   <li>不暴露 storageKey（文件在存储里的真实路径——泄露等于把文件门禁绕掉）</li>
  *   <li>落库的 errorMessage 可能是上游原文，出口一律经 {@code PublicFailureCopy} 转成稳定文案</li>
  * </ul>
  */
@@ -68,8 +84,10 @@ public class ExportService {
     /**
      * 创建导出任务。校验简历版本归属后创建 PENDING 任务,由 worker 异步渲染。
      *
-     * <p>顺序是刻意的：先模板白名单 → 再归属 → 再归档状态，保证"不是你的版本"永远只会得到 404，
-     * 不会因为归档与否而暴露它存在。
+     * <p>步骤：①模板白名单校验 → ②归属校验 → ③归档校验 → ④可复用任务检查 → ⑤建 PENDING 任务行。
+     * 前三步的顺序是刻意的：先模板白名单 → 再归属 → 再归档状态，保证"不是你的版本"永远只会得到 404，
+     * 不会因为归档与否而暴露它存在（信息泄露：如果他人版本报"已归档"、不存在报"不存在"，
+     * 攻击者就能靠报错差异探测别人有哪些版本）。
      *
      * <p>命中可复用任务时直接返回旧任务（可能已在 RUNNING/SUCCESS），不会重复排队。
      */
@@ -151,7 +169,10 @@ public class ExportService {
     }
 
     /**
-     * 重试失败的导出任务。
+     * 重试失败的导出任务。步骤：①确认任务属于你且状态是 FAILED（别的状态重试没有意义）；
+     * ②检查手动重试次数是否超上限（超限就让用户"重新发起导出"——生成新任务行，
+     * 顺带区分"这行本身有问题"和"下游临时故障"）；③把任务推回 PENDING、清错误信息、
+     * 计一次重试、清掉延迟时间、刷新过期时间；④保存，等 worker 再领走。
      */
     @Transactional
     public ExportTaskStatusResponse retry(Long taskId, Long userId) {

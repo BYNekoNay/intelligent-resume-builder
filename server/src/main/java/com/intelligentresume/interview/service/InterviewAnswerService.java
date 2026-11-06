@@ -31,6 +31,16 @@ import java.util.concurrent.RejectedExecutionException;
 /**
  * 面试回答流程：两阶段短事务 + 事务外评估 AI（评估在**后台执行器**中运行）。
  *
+ * <p>【小白导读】
+ * ① 业务问题：用户在面试页点「提交本题答案」。这个类负责把答案收下来、交给 AI 点评、
+ *    点评完写入本轮记录并放出下一题（或宣布面试结束）。
+ * ② 链路位置：上游由 {@code InterviewService.answer}（Controller 的 /answer 接口）调用；
+ *    下游调 {@link InterviewAiService}（模型）与 {@link InterviewPromptContextAssembler}（组装材料），
+ *    产出写入 {@code interview_record}（本轮记录）并更新 {@code interview_session}（会话状态）。
+ *    前端拿到的只是「已收到、评估中」，最终结果靠轮询状态接口获取。
+ * ③ 改坏它：轻则同一答案被评估两次、扣两次配额（幂等失效）；重则用户的答案丢了
+ *    （后台异常没落库）、会话永远停在「评估中」转圈。
+ *
  * <p>TX1 校验状态/同意/配额/幂等并创建 attempt（状态置 {@code EVALUATING_ANSWER}）→
  * **把评估提交给后台执行器并立即返回** → 后台完成 AI 调用与 TX2（记录 + outcome）。
  *
@@ -38,6 +48,11 @@ import java.util.concurrent.RejectedExecutionException;
  * 而前端该接口超时仅 60s，4 轮全部超时 → 用户卡在无法前进的面试里。
  * 详见 {@link InterviewEvaluationConfig} 的类注释与
  * {@code docs/reviews/2026-09-25-full-functional-verification.md} §2。
+ *
+ * <p>术语速查：轮次（round）—— 一道题从出题到作答完评的完整来回，第几轮就是 roundNo；
+ * attempt —— 一次 AI 调用的档案（谁发的、什么状态、成功失败），见 {@link InterviewAiAttempt}；
+ * 幂等键 —— 客户端为每次操作生成的唯一编号，网络重发时服务端靠它识别「同一次操作」，
+ * 不重复扣费、不重复评估。
  *
  * <p>要点：
  * <ul>
@@ -97,6 +112,15 @@ public class InterviewAnswerService {
 
     /**
      * 提交一次回答。
+     *
+     * <p>【小白导读】核心方法，分「前台一个短事务」+「后台一段评估」两段。
+     * 前台（TX1）步骤：①锁会话行 → ②查幂等键，命中则按旧 attempt 的状态原样回放
+     * （不重新评估、不重复扣费）→ ③校验会话确实在「等回答」状态且有当前题目
+     * → ④校验用户授权（缺授权落一条失败档案）→ ⑤校验今日配额（不足同样落失败档案）
+     * → ⑥算轮次号、建 attempt、把会话置为「评估中」。后台步骤：⑦组装评估上下文调模型
+     * → ⑧TX2：写本轮记录、attempt 记成功、推进会话（出下一题或收尾）。
+     * 顺序不能换：必须先建 attempt 再改会话状态，attempt 是「这轮在做 AI」的唯一凭据；
+     * 校验必须在建 attempt 之前，否则失败也要留一条脏档案。
      *
      * <p>幂等语义：同一 Idempotency-Key 且指纹一致时，<b>不重新评估</b>，只按已有 attempt 的状态回放
      * （失败→返回失败信息、处理中→原样返回 EVALUATING_ANSWER、成功→返回当前状态）。

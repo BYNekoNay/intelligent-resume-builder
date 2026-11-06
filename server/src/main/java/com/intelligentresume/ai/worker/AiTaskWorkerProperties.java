@@ -4,9 +4,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * AI 工作器配置属性。绑定 {@code app.ai.worker.*}。
+ * AI 工作器配置属性。绑定 {@code app.ai.worker.*}：轮询间隔、租约时长、重试上限、并发额度等。
  *
- * <p>要点 / 易错点:
+ * <p>【链路位置】被 {@code DatabaseTaskWorker}（轮询/批次/并发额度）、
+ * {@code TaskLeaseService}（租约时长/收口阈值）、{@code AiTaskWorkerConfig}（池大小）、
+ * {@code AiTaskService#retry}（用户重试上限）共同读取，是这四处的统一参数源。</p>
+ *
+ * <p>【改坏它会怎样】默认值与 yml 不一致会让"配置缺省时行为悄悄变了"；
+ * {@code leaseSeconds} 小于任务最坏时长会让任务执行到一半被别人接管重跑。</p>
+ *
+ * <p>要点 / 易错点:</p>
  * <ul>
  *   <li>这里的**默认值**只在 yml 缺键时生效;yml 里一旦写了同名键,以 yml 为准。
  *       改默认值时务必同步 {@code application.yml},否则两处不一致会导致"配置缺省时行为悄悄变了"。</li>

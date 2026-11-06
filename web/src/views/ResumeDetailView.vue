@@ -1,9 +1,17 @@
 <!--
-  简历详情页（/resumes/:id）：版本历史（活动/归档切换）、改标题、设当前版本、归档/取消归档、恢复版本、导出 PDF、去打分/对比/编辑。
-  依赖 @/api/resume（getResume / listVersions / setCurrentVersion / archiveResumeVersion / restoreResumeVersion / updateResumeTitle / downloadJsonResume）、
-  @/api/jobDescription（关联岗位）、@/api/export（创建导出任务）、@/api/scoring（发起匹配打分）、@/api/interviewAsset 与 @/api/careerMaterial（关联素材展示）。
-  状态分支：versionsLoading 区分「版本列表还没回来」与「真的没有版本」；runningAction 按操作所在行禁用按钮，避免并发重复操作。
-  易错点：关联岗位可能已被删除，取不到时只清空展示，不阻断页面其他内容。
+  简历详情页（/resumes/:id）。核心是「版本历史管理」：本项目的简历每次保存都是一个新版本（快照式），
+  用户在这里回看所有版本、切换哪个是「当前版本」、归档不想要的版本、从旧版本恢复出新版本，以及从每个版本直接发起导出 PDF / 导出 JSON / 匹配打分 / 版本对比 / 继续编辑。
+
+  【依赖】@/api/resume（getResume / listVersions / setCurrentVersion / archiveResumeVersion / restoreResumeVersion / updateResumeTitle / downloadJsonResume）、
+  @/api/jobDescription（关联岗位）、@/api/export（创建导出任务）、@/api/scoring（发起匹配打分）、
+  @/api/interviewAsset 与 @/api/careerMaterial（关联素材展示）。
+
+  【状态分支】
+  - versionsLoading 区分「版本列表还没回来」（骨架屏）与「真的没有版本」（空态文案）——
+    不区分的话用户会误以为没有历史，数据随后又突然出现；
+  - runningAction 记录正在执行操作的版本 id，按行禁用按钮，避免并发重复操作。
+
+  【易错点】关联岗位可能已被删除，取不到时只清空展示，不阻断页面其他内容。
 -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'

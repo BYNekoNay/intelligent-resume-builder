@@ -11,11 +11,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * AI 任务执行线程池:每个领取分组一个独立线程池,互不抢占额度。
  *
- * <p>不放进 {@code WorkerSchedulingConfig},因为后者在测试环境下被
- * {@code app.worker-scheduling.enabled=false} 关闭,而工作器 bean 仍需执行器。
+ * <p>【业务问题】重任务（分钟级）和轻任务（秒级）如果共用一个池，一条慢任务就会占满所有线程，
+ * 轻任务全部排队。分开建池，各管各的。</p>
+ *
+ * <p>【链路位置】{@code DatabaseTaskWorker} 构造时注入这里的两个 {@code ExecutorService}；
  * 池大小取自 {@code app.ai.worker.heavy-concurrency} / {@code light-concurrency}。</p>
  *
- * <p>要点:
+ * <p>【改坏它会怎样】两个池合并或大小改成一样，等于取消分组隔离，轻任务会被重任务饿死。</p>
+ *
+ * <p>不放进 {@code WorkerSchedulingConfig},因为后者在测试环境下被
+ * {@code app.worker-scheduling.enabled=false} 关闭,而工作器 bean 仍需执行器。</p>
+ *
+ * <p>要点:</p>
  * <ul>
  *   <li>固定大小线程池 + 无界队列:池大小就是硬并发上限,队列积压不会被拒绝,只会排队等待。</li>
  *   <li>池大小至少为 1({@code Math.max(1, size)}),配置成 0 或负数不会让应用起不来,

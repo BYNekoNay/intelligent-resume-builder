@@ -4,12 +4,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * AI 调用结果。
+ * AI 调用结果 —— 一次模型调用（可能含多次模型尝试）的最终结论。
+ *
+ * <p>【链路位置】provider 返回本对象 → worker 据此写任务成功/失败；
+ * {@code modelAttempts}（尝试轨迹）随结果落库给前端看。</p>
  *
  * <p>{@code modelAttempts} 是 R33 的落点：模型链顺延以前只写日志，用户看不到"这次换了几个模型"。
- * 现在每次尝试都记进结果，由 worker 落到任务结果里 —— **换可以换，但不能静默**。
+ * 现在每次尝试都记进结果，由 worker 落到任务结果里 —— **换可以换，但不能静默**。</p>
  *
- * <p>要点:
+ * <p>要点:</p>
  * <ul>
  *   <li>成功时 {@code data} 非空、{@code errorMessage} 为 null;失败时相反。
  *       两个工厂方法({@link #ok}/{@link #fail})维持这个不变量,不要手工 new 出半成品。</li>

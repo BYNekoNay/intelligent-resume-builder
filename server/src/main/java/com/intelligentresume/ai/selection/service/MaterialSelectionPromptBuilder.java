@@ -16,6 +16,11 @@ import java.util.Map;
 /**
  * 选材提示词：把 JD、候选资料和用户强制勾选的内容拼成一次模型调用。
  *
+ * <p>新人三问：①业务问题：让模型明白自己是"选资料参谋"、输出固定格式（推荐+理由+缺口），
+ * 并且只能从候选名单里选；②链路位置：被 {@code MaterialSelectionContextBuilder} 调用，
+ * 产物是发给模型的三段消息；③改坏它用户会看到：推荐越界（选了候选之外的 ID）、
+ * 资料内容被截断得没法判断、或格式乱掉导致解析失败。
+ *
  * <h2>三条与"可信"直接相关的约定</h2>
  * <ol>
  *   <li><b>资料先脱敏再进 prompt</b>：候选统一过 {@code CareerMaterialAiSnapshotSanitizer}，

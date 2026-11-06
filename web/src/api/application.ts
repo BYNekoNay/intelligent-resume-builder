@@ -1,7 +1,11 @@
 /**
- * 投递（求职申请）接口层：9 状态流转、列表/详情、统计、增删改。
+ * 投递（求职申请）接口层：对应后端 ApplicationController（/api/applications）。
+ * 业务：用户把「用哪份简历投了哪个岗位」登记进来，按 9 个状态（草稿→已投递→筛选中→面试中…）跟进，
+ * 本模块负责状态流转、列表/详情、统计、增删改。
  * 边界：列表用 ApplicationSummary（无三段长文本，只有 draftCount），详情才拿 ApplicationRecord 全文；
- * updateApplicationStatus 带 version 做乐观锁，feedbackText 只在显式传入时才提交（不传表示保留服务端现值）。
+ * updateApplicationStatus 带 version 做乐观锁（version 是后端每次修改后的递增号，
+ * 提交时带旧值，别人改过则对不上，请求以 40901 拒绝——防止两个人/两个标签页互相覆盖状态），
+ * feedbackText 只在显式传入时才提交（不传表示保留服务端现值）。
  */
 import { http } from './client'
 

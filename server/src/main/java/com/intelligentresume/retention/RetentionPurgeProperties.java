@@ -4,7 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * 数据生命周期分档清扫配置（决策 D2 阶段 1）。
+ * 数据生命周期分档清扫配置（决策 D2 阶段 1）：清扫作业的开关、演习模式、批量与保留期
+ * 全由这份配置控制，改配置不用改代码。
  *
  * <p>设计见 {@code docs/plans/2026-10-01-001-data-retention-tiered-purge.md}。
  * 两条**默认安全**的护栏在此固化：

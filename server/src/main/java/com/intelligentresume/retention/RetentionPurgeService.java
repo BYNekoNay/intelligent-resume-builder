@@ -18,6 +18,23 @@ import java.util.function.ToIntFunction;
 /**
  * 数据生命周期分档清扫作业（决策 D2：阶段 1 = A 档物理删除；阶段 2 = B 档转最小快照）。
  *
+ * <p>用大白话说：用户删掉的素材/简历版本不会立刻从数据库消失（先软删，保留一段时间
+ * 供反悔恢复）；本作业是定时"扫地机器人"，把过期很久的软删行真正清掉。
+ * 清法分两档：A 档（没有任何东西引用它）→ 物理删除；B 档（还有历史简历引用它）→
+ * 不能删（会撞外键），改成把正文换成一个"已清空"标记，只留外壳。
+ *
+ * <p>DRY_RUN 是什么：默认开着"演习模式"——作业照常运行、照常扫描，但只把"我本打算删哪些行"
+ * 打进日志，一行都不真写。先跑两周演习看清影响面，再把 {@code dryRun} 置 false 正式开删。
+ * 加上总开关 {@code enabled=false}（默认关闭），构成"部署即安全"的双保险。
+ *
+ * <p>防误删的四道防线：①软删满恢复期+宽限期（默认 30+7 天）才进候选；
+ * ②SQL 里用 {@code NOT EXISTS} 现场复查"真没人引用"；③删除语句带
+ * {@code deleted_at IS NOT NULL} 二次保护（就算候选查询被改坏也碰不到活数据）；
+ * ④外键冲突时降级跳过（扫描和删除之间有人重新引用了，下次再判）。
+ *
+ * <p>改坏它用户会看到什么：误删活数据（最严重）、误删被引用行导致历史简历打开报错；
+ * 引用清单漏一张表会让该表的行永远清不掉或被误删。
+ *
  * <p>设计见 {@code docs/plans/2026-10-01-001-data-retention-tiered-purge.md}。
  * 与既有的 {@code AiTaskRetentionService}（AI 任务快照压缩）**同范式**：
  * 单轮上限、幂等可重跑、单批独立事务。
@@ -68,7 +85,9 @@ public class RetentionPurgeService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    /** @return 本次调度**实际物理删除**的行数（dry-run 与关闭状态恒为 0）。 */
+    /** @return 本次调度**实际物理删除**的行数（dry-run 与关闭状态恒为 0）。
+     *  步骤：①检查开关（没开直接返回）；②算截止时间（now − 恢复期 − 宽限期）；
+     *  ③对六个资源逐一各取 A/B 两档候选批次并处置；④汇总日志与指标。 */
     @Scheduled(fixedDelayString = "${app.retention.purge.interval-ms:21600000}")
     public int purgeExpiredSoftDeleted() {
         if (!properties.isEnabled()) {

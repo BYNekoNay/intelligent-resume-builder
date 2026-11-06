@@ -6,6 +6,9 @@ import com.intelligentresume.common.error.ErrorCode;
 /**
  * pdf-service 的**容量拒绝**（503 + {@code Retry-After}）。
  *
+ * <p>一句话定位：一个专门给"PDF 服务太忙"准备的异常类型——它不是错误，是"排队"信号，
+ * worker 看到它就把任务重新排队而不是判失败。
+ *
  * <p>要点：
  * <ul>
  *     <li>它是 {@link BusinessException} 的子类，错误码仍是 {@code PDF_FAILURE}；区分靠**异常类型**，不靠错误码。</li>

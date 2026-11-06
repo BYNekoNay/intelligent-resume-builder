@@ -15,7 +15,10 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 职业资料仓储。
+ * 职业资料的数据库访问层：Service 说"查谁的素材/存这条素材"，真正拼 SQL 的是这里。
+ *
+ * <p>改坏它用户会看到什么：新增查询漏了 userId 会造成跨用户数据泄露（最严重的一类事故）；
+ * 搜索的 {@code escape '\\'} 与 Service 的转义不成对，会让含 %/_ 的搜索词返回错误结果。
  *
  * <p>要点：
  * <ul>

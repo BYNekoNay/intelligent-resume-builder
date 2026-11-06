@@ -8,6 +8,9 @@ import java.util.List;
  * 岗位定制生成请求。通过 CreateAiTaskRequest.input 传递,
  * 本 record 用于 JobGenerationService 内部解析。
  *
+ * <p>一句人话：用户发起"按这个岗位生成简历"时勾的三类资料——必须用（included）、
+ * 优先用（preferred）、不要用（excluded），加上目标简历和岗位两个 ID。
+ *
  * <p>要点：
  * <ul>
  *   <li>三个 ID 列表都可为 null —— 只有 {@code targetResumeId} / {@code jobDescriptionId} 是必需的。</li>

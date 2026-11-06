@@ -1,8 +1,17 @@
 <!--
-  全局外壳布局：顶部导航（分组下拉 + 语言切换 + 登录态入口）、移动端菜单、会话异常提示条，内容区由 <RouterView> 承载。
-  导航项来自 @/navigation/registry，requiresDesktop 的入口只在 useDesktopMode().probe() 探测成功后渲染（在线部署没有这些端点）。
-  activeGroup 通过匹配当前路径反查所属分组；/match/:id 与 /exports/:id 没有独立导航项，统一归属 resume 组。
-  状态分支：未登录显示登录/注册入口、已登录显示账号菜单；auth.initializationError === 'NETWORK' 时显示页内重试而不是直接登出。
+  全局外壳布局。除登录/注册/隐私政策/404 外的所有页面都套在这个壳里：
+  顶部导航（分组下拉 + 语言切换 + 登录态入口）、移动端菜单、会话异常提示条，内容区由 <RouterView> 承载。
+
+  【依赖】导航项来自 @/navigation/registry（集中登记所有入口，路由表会校验一致性）；
+  登录态来自 useAuthStore；requiresDesktop 的入口（桌面工作区）只在 useDesktopMode().probe()
+  探测成功后渲染（在线部署没有这些桌面端点）。
+
+  【状态分支】
+  - 未登录显示登录/注册入口，已登录显示账号菜单；
+  - activeGroup 通过匹配当前路径反查所属分组，用于高亮导航；/match/:id 与 /exports/:id
+    没有独立导航项，统一归属 resume 组；
+  - auth.initializationError === 'NETWORK'（断网导致会话校验失败）时显示页内重试条，
+    而不是直接登出——用户可能只是暂时断网。
 -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'

@@ -1,8 +1,15 @@
 <!--
-  导出任务状态页（/exports/:exportTaskId）：展示 PDF 导出的进度、失败原因、文件大小与过期时间，并在成功后提供下载。
-  依赖 @/api/export 的 getExportTask / downloadExport / retryExport；页面用 setTimeout 自轮询，只有 PENDING/RUNNING 才排下一次。
-  状态分支：SUCCESS 可下载；FAILED 可重试任务；EXPIRED / UNKNOWN 只能重查状态；首次加载失败或无任务时显示整块错误态。
-  易错点：服务端状态可能是未知字符串，normalizeStatus 统一降级为 UNKNOWN，避免 v-if 分支全部落空；离开页面必须清掉定时器。
+  导出任务状态页（/exports/:exportTaskId）。用户在简历详情点「导出 PDF」后会建一个导出任务并跳到这里；
+  本页展示该任务的进度、失败原因、文件大小与过期时间，成功后提供下载。
+
+  【依赖】@/api/export 的 getExportTask / downloadExport / retryExport；
+  页面用 setTimeout 自轮询（间隔 1s→2s→4s→5s 逐步放慢），只有 PENDING/RUNNING 才排下一次查询。
+
+  【状态分支】SUCCESS 可下载；FAILED 可重试任务；EXPIRED / UNKNOWN 只能重查状态；
+  首次加载失败或无任务时显示整块错误态。
+
+  【易错点】服务端状态可能是未知字符串，normalizeStatus 统一降级为 UNKNOWN，避免模板 v-if 分支全部落空导致页面空白；
+  离开页面必须清掉轮询定时器（onBeforeUnmount），否则定时器会一直向已卸载的组件写状态。
 -->
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'

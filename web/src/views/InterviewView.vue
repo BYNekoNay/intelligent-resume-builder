@@ -1,10 +1,22 @@
 <!--
-  模拟面试页（/interviews）：设置（简历来源 / 面试模式 / 题量 / 目标岗位）→ 会话（AI 出题、作答、评测、追问）→ 报告（分数、逐轮回顾、薄弱项专项练习）。
-  依赖 @/api/interview（startInterview / getInterviewState / answerInterview / continueWithRules / retryAi / finishInterview / getInterviewReport / previewFollowUp 等）、
-  @/api/ai 的 getTask 轮询、@/api/interviewAsset（把好答案存成问答资产）、useAiTaskPreview（发送前预览令牌）。
-  状态分支：按 sessionState.status 驱动 —— GENERATING_QUESTION / EVALUATING_ANSWER 为 AI 处理中，AI_ACTION_REQUIRED 需重试或规则降级，AWAITING_ANSWER 可作答，COMPLETED 看报告。
-  易错点：会话 id 存 sessionStorage（interview-session-id）用于刷新后恢复；发起请求前把 payload + 幂等键挂起（pendingStart/pendingAnswer），超时或重试时复用同一键；
-  状态轮询有次数上限（STATE_POLL_MAX_ATTEMPTS），避免后台标签被节流后无限轮询。
+  AI 模拟面试页（/interviews）。用户在这里和 AI 面试官做一轮完整的多轮面试：
+  【三阶段】设置（选简历来源 / 面试模式 / 题量 / 目标岗位）→ 会话（AI 出题、用户作答、AI 评测打分、可能追问）→ 报告（总分、五维评分、逐轮回顾、薄弱项专项练习）。
+
+  【依赖】@/api/interview（startInterview / getInterviewState / answerInterview / continueWithRules / retryAi /
+  finishInterview / getInterviewReport / previewFollowUp 等）、@/api/ai 的 getTask 轮询、
+  @/api/interviewAsset（把好答案存成问答资产）、useAiTaskPreview（发送前预览令牌）。
+
+  【状态分支】按 sessionState.status 驱动整个页面：
+  - GENERATING_QUESTION / EVALUATING_ANSWER：AI 处理中（出题/评测），页面进入轮询等结果；
+  - AI_ACTION_REQUIRED：AI 失败，用户可选「重试」或「降级为规则出题」（规则降级 = 不用 AI，按模板规则出下一题）；
+  - AWAITING_ANSWER：可作答；COMPLETED：看报告。
+
+  【易错点】
+  - 会话 id 存 sessionStorage（interview-session-id），刷新页面后靠 recoverSession 恢复进行中的面试；
+  - 发起请求前把 payload + 幂等键挂起（pendingStart/pendingAnswer）：超时或重试时只要 payload 没变就复用
+    同一个幂等键（后端靠它去重），避免网络抖动时把同一答案提交两次、产生两轮重复评测；
+  - 状态轮询有次数上限（STATE_POLL_MAX_ATTEMPTS = 120），且间隔按指数退避（1s→2s→4s→5s 封顶）：
+    防止后台标签页被浏览器节流后无声地永久轮询。
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -142,12 +154,17 @@ function stopStatePoll() {
 }
 
 function scheduleStatePoll() {
+  // AI 正在出题/评测时，前端不知道何时完成，只能定时来问。间隔按指数退避：
+  // 第 1 次等 1 秒、第 2 次 2 秒、第 3 次起 4 秒、5 秒封顶（2^n 的 min 限制）——
+  // 刚开始问得勤（用户在等），问多了自动放慢，减少无效请求。
   if (statePollTimer !== null || interviewId.value === null) return
   const delay = Math.min(1000 * 2 ** Math.min(statePollAttempt, 3), 5000)
   statePollTimer = setTimeout(() => { void pollInterviewState() }, delay)
 }
 
 async function pollInterviewState() {
+  // 轮询一轮：问一次会话状态 → 还是 AI 处理中就再排下一次 → 有次数上限，
+  // 超限说明后端卡住或标签页被长期节流，停止轮询并提示用户刷新。
   statePollTimer = null
   const id = interviewId.value
   if (id === null || !isAiLoading.value) return
@@ -170,6 +187,11 @@ async function pollInterviewState() {
 
 // ==================== 开始面试 ====================
 async function start() {
+  // ①校验：平台简历必须选了具体版本；没选目标岗位时弹确认（无 JD 的面试质量会打折）；
+  // ②组装 payload（简历来源、面试模式、题量、输出语言等）；
+  // ③幂等处理：如果之前发起过一次同样内容的开始请求（pendingStart 里挂着），复用它的幂等键，
+  //   避免用户重复点击/网络重试时创建两个面试会话；payload 变了才生成新键；
+  // ④成功后用返回的会话状态接管页面；403 = 未同意 AI 服务条款，跳授权页。
   error.value = ''
   if (sourceType.value === 'PLATFORM_RESUME' && !resumeVersionId.value) { error.value = t('interview.selectVersionFirst'); return }
   const selectedJobId = jobId.value ? Number(jobId.value) : undefined
@@ -205,6 +227,9 @@ async function start() {
 
 // ==================== 提交回答 ====================
 async function submit() {
+  // 提交当前答案，等 AI 评测完返回下一轮状态。幂等逻辑与 start() 相同：
+  // 同一份答案挂起期间复用同一幂等键，防止重复提交产生两轮重复评测。
+  // 成功后只有「不是 AI 失败」才清空输入框——AI 失败时要保留原文供用户重试。
   if (interviewId.value === null || !answer.value.trim()) return
   const payload = { interviewId: interviewId.value, answer: answer.value.trim() }
   const pending = pendingAnswer.value && samePayload(pendingAnswer.value.payload, payload)
@@ -467,6 +492,9 @@ function dimensionLabels(scores: { relevance: number; evidenceSpecificity: numbe
 
 // ==================== 刷新恢复 ====================
 async function recoverSession() {
+  // 页面刷新后 sessionStorage 里的会话 id 还在：拿它重新问后端当前状态，
+  // 进行中的面试无缝接续（含 AI 处理中 → 自动恢复轮询），已完成的直接加载报告。
+  // 恢复失败（会话已不存在/过期）就清掉存储，回到设置阶段。
   const savedId = sessionStorage.getItem(sessionIdStorageKey)
   if (!savedId) return
   const id = Number(savedId)

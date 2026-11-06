@@ -6,15 +6,18 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
- * 启动时把已保存的本地 AI 设置装进运行时覆盖。
+ * 启动时把已保存的本地 AI 设置装进运行时覆盖 —— 让"上次保存的设置"在重启后依然生效。
  *
- * <p>没有这一步，"上次保存的设置"在重启后就失效了 —— 用户会看到设置页填着值、实际任务却用配置文件里的
- * key。只影响 desktop profile：在线部署 {@link DesktopModeProperties#isEnabled()} 为 false，直接返回。
+ * <p>【链路位置】应用启动完成事件（ApplicationReadyEvent）触发 → 读设置表 →
+ * 逐行调 {@code LocalAiSettingService#publishToRuntime} 推给 {@code AiRuntimeOverlay}。</p>
+ *
+ * <p>【改坏它会怎样】去掉这一步，重启后设置页填着值、实际任务却用配置文件里的 key。
+ * 只影响 desktop profile：在线部署 {@link DesktopModeProperties#isEnabled()} 为 false，直接返回。</p>
  *
  * <p>刻意不在 {@code CommandLineRunner} 里做：那时 Flyway/连接池可能还没稳定，
- * 而 {ApplicationReadyEvent} 之后读库是安全的。
+ * 而 {ApplicationReadyEvent} 之后读库是安全的。</p>
  *
- * <p>要点:
+ * <p>要点:</p>
  * <ul>
  *   <li>只在 desktop 模式下运行;在线部署直接返回,运行时覆盖保持为空(行为与未改造前一致)。</li>
  *   <li>遍历所有设置行而不是取第一条:正常只有一行(表上有唯一约束),遍历是为了容忍历史脏数据。</li>

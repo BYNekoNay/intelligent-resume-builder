@@ -13,6 +13,12 @@ import java.util.regex.Pattern;
 /**
  * 草稿 JSON 标准化器。
  *
+ * <p>新人三问：①业务问题：AI 草稿里混着内部标记（_source/_pending，给溯源和"缺数据"提示用），
+ * 正式简历 JSON 里不能有它们；本类应用用户的逐条决策并清掉标记，产出能落库的干净 JSON；
+ * ②链路位置：只被 {@code DraftCommitService#commit} 调用（步骤 7）；③改坏它用户会看到：
+ * 简历里残留 _pending 这类乱码字段、拒绝的条目还在、或编辑的条目被串位覆盖
+ * （数组下标漂移，见下）。
+ *
  * <p>输入：含 {@code _source} / {@code _pending} 标记的草稿 JSON + 用户逐条决策。
  * <br>输出：剥离所有标记后的标准化 JSON。
  *

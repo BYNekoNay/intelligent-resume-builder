@@ -24,11 +24,27 @@ import java.util.UUID;
 /**
  * Polls and renders PDF export tasks after atomically claiming a short lease.
  *
+ * <h2>① 解决什么业务问题</h2>
+ * 用户提交导出请求后，总得有"人"去真正生成 PDF。本类就是那个后台工人：
+ * 每隔几秒醒来，领一批待处理的导出任务，渲染 PDF、存文件、把结果写回任务行。
+ *
+ * <h2>② 在链路哪里</h2>
+ * 上游：{@code ExportService.create} 建的 PENDING 任务行是它的原料；
+ * 它通过 {@link ExportTaskLeaseService} 领任务、回写结果；
+ * 渲染走 {@code PdfServiceClient}（在线版，pdf-service 用 Chrome 打印）或
+ * {@code JavaResumePdfRenderer}（桌面版，纯 Java）；产物经 {@code ExportStorageService} 落盘。
+ *
+ * <h2>③ 改坏它用户会看到什么</h2>
+ * 领取不用原子租约 → 多实例部署时同一份简历被渲染两次甚至写坏结果；
+ * 容量拒绝改成直接失败 → 高峰期用户的导出全部变成"失败"而不是"排队"；
+ * 孤儿文件清理去掉 → 存储里堆满没有任务引用的 PDF，且永远不会被过期作业清理。
+ *
  * <p>导出任务执行器：定时领取一批任务，校验用户/版本/内容后渲染 PDF 并落盘。
  *
  * <p>要点：
  * <ul>
- *     <li>领取靠 {@link ExportTaskLeaseService#claimBatch} 的原子租约，多实例下同一行只会被一个实例渲染。</li>
+ *     <li>领取靠 {@link ExportTaskLeaseService#claimBatch} 的原子租约（租约 = 一段"这个任务归我管"的
+ *         有期限占用权，超时未释放别人就可以接管），多实例下同一行只会被一个实例渲染。</li>
  *     <li>{@code poll()} 只负责"领一批 + 逐条处理"：领取本身的异常被吞掉并记日志，
  *         单条任务的失败在 {@code processTask} 内部落成 FAILED，不影响同批其它任务。</li>
  *     <li>渲染路径二选一：桌面模式走纯 Java 渲染器，否则走 pdf-service；两条路径的模板与内容模型必须保持一致。</li>
@@ -97,7 +113,15 @@ public class ExportTaskWorker {
     }
 
     /**
-     * 处理单条已领取的任务。
+     * 处理单条已领取的任务。步骤：
+     * ① 三道确定性闸门（任何一道不过都直接判失败、不重试，因为重试也不会变好）：
+     *    用户被禁用/注销 → 版本不存在或已归档 → 简历内容为空；
+     * ② 渲染 PDF：桌面模式走纯 Java 渲染器（不用 Node + Chromium），在线版走 pdf-service；
+     * ③ 把文件落盘，再向租约服务申报"成功"——注意顺序是先存文件后写库：
+     *    数据库行引用的 storageKey 必须指向一个真实存在的文件；
+     * ④ 申报被拒（租约已被别的实例接管）→ 本次产物成了孤儿文件，立即删掉；
+     * ⑤ 容量拒绝（下游说"现在没名额"）→ 按 Retry-After 延迟重排，试到上限才判终态失败；
+     * ⑥ 其它异常 → 记分类日志并落 FAILED；无论结局如何，finally 里上报一次统计指标。
      *
      * <p>渲染前的三道闸门都直接判失败、不重试：用户被禁用/注销、版本不存在或已归档、内容为空——
      * 这些是"重试也不会变好"的确定性失败。只有下游异常才可能值得重排。

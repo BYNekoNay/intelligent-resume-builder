@@ -11,6 +11,9 @@ import java.util.Optional;
 /**
  * 答案资产查询。
  *
+ * <p>【小白导读】一句话：素材收藏夹（interview_answer_asset 表）的读入口；
+ * search 一个方法吃下四个可空筛选条件，避免按条件拼四种查询。
+ *
  * <p>要点：
  * <ul>
  *   <li>实体带 {@code @SQLRestriction("deleted_at IS NULL")}，因此这里的查询天然不含已删行。</li>

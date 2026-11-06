@@ -14,18 +14,25 @@ import java.nio.file.StandardCopyOption;
 import java.util.Optional;
 
 /**
- * 本地 AI 凭据的加密落盘（ADR-012 D8 / R34）。
+ * 本地 AI 凭据的加密落盘（ADR-012 D8 / R34）—— 把用户的 API Key 加密存成本机文件。
  *
- * <p>存放位置：{@code <dataDir>/ai-credentials/user-<id>.bin}，**刻意不在工作区数据库里**。
+ * <p>【业务问题】API Key 是敏感凭据，明文存盘等于把钥匙贴在门上。用 Windows DPAPI 加密后
+ * 只有"这台机器 + 这个系统用户"能解开，拷走文件也解不出。</p>
+ *
+ * <p>【链路位置】{@code LocalAiSettingService} 在保存/读取/删除设置时调用；
+ * 存放位置：{@code <dataDir>/ai-credentials/user-<id>.bin}，**刻意不在工作区数据库里**。
  * 理由不是洁癖：备份是整库 {@code SCRIPT TO}、导出包按集合打包，密钥一旦入库就必然随包出境，
- * 直接违反 R34「凭据不得进备份 / Web 导出包 / 桌面迁移包」。
+ * 直接违反 R34「凭据不得进备份 / Web 导出包 / 桌面迁移包」。</p>
+ *
+ * <p>【改坏它会怎样】文件路径规则改动会让存量密文"消失"（看起来像没配过密钥）；
+ * 原子写被改成直接写，掉电会留下半份密文（读的时候解密失败且无法区分原因）。</p>
  *
  * <p>写盘用「临时文件 + 原子移动」：先写 {@code .tmp} 再 {@code ATOMIC_MOVE}，
- * 避免掉电/崩溃留下半个密文（半份密文比没有更糟 —— 读的时候会解密失败且无法区分原因）。
+ * 避免掉电/崩溃留下半个密文（半份密文比没有更糟 —— 读的时候会解密失败且无法区分原因）。</p>
  *
- * <p>entropy 绑定「应用 + 用户」：同一用户的不同 id 之间也不通用，防止把 A 的密文改名当 B 的用。
+ * <p>entropy 绑定「应用 + 用户」：同一用户的不同 id 之间也不通用，防止把 A 的密文改名当 B 的用。</p>
  *
- * <p>要点 / 易错点:
+ * <p>要点 / 易错点:</p>
  * <ul>
  *   <li>非 Windows 环境 {@code available()} 为 false,{@link #save}/{@link #load} 会抛
  *       IllegalStateException —— 刻意不降级成明文。</li>

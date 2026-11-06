@@ -17,7 +17,21 @@ import com.intelligentresume.common.error.ErrorCode;
 /**
  * ATS 体检的 HTTP 入口（/api/ats）：检查、查询、AI 重试、发送前预览、解析器视角。
  *
- * <p>要点：
+ * <h2>① 解决什么业务问题</h2>
+ * 给前端提供调用 ATS 体检的 REST 接口：用户在界面上点"开始体检"/"重试 AI 分析"/"看解析器视角"，
+ * 对应的就是这里的一个个端点。控制器只做"接待"：校验请求头、取出当前登录用户，真正的业务都在
+ * {@link AtsService}。
+ *
+ * <h2>② 在链路哪里</h2>
+ * 前端 → 本类 → {@link AtsService}。它是 ats 模块唯一的 HTTP 出入口，
+ * 身份来自过滤器写入的 {@code request.currentUserId}，响应统一包 {@code ApiResponse}。
+ *
+ * <h2>③ 改坏它用户会看到什么</h2>
+ * Idempotency-Key 校验放宽 → 用户重复提交会生成多条检查记录；
+ * currentUserId 校验删掉 → 匿名请求直接空指针/越权；
+ * 预览令牌头名改掉 → AI 分析永远落 PREVIEW_REQUIRED，用户以为 AI 坏了。
+ *
+ * <p>原有要点（保留）：
  * <ul>
  *   <li>{@code Idempotency-Key} 只在 {@code POST /check} 上强制：缺失、空白或超过 128 字符直接 400；
  *       查询 / 预览 / 解析器视角都不要求它。</li>
@@ -25,7 +39,8 @@ import com.intelligentresume.common.error.ErrorCode;
  *       {@code /check} 缺令牌不报错（降级成规则结果），{@code /checks/{id}/ai-retry} 缺令牌报错。</li>
  *   <li>用户身份取自过滤器写入的 {@code request.currentUserId}，缺失即 401；控制器本身不做归属判断，
  *       归属由 service 的 {@code findByIdAndUserId} 兜住。</li>
- *   <li>响应统一包 {@code ApiResponse} 并带 traceId；traceId 取不到时为 null，不影响成功响应。</li>
+ *   <li>响应统一包 {@code ApiResponse} 并带 traceId（一次请求的全链路追踪编号，排查问题时按它搜日志）；
+ *       traceId 取不到时为 null，不影响成功响应。</li>
  * </ul>
  */
 @RestController

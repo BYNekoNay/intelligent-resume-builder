@@ -14,9 +14,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * AI 同意管理控制器。
+ * AI 同意管理控制器 —— 前端"授权弹窗/撤回按钮"的 HTTP 入口:查状态、授权、撤回。
  *
- * <p>要点:
+ * <p>【链路位置】前端 ↔ 本控制器 ↔ {@code AiConsentService}。</p>
+ *
+ * <p>【改坏它会怎样】userId 若改从请求参数取会能替别人授权/撤回。</p>
+ *
+ * <p>要点:</p>
  * <ul>
  *   <li>{@code GET /api/ai/consent} 返回最新事件;用户从未同意过时返回 body 为 null 的成功响应,
  *       不是 404 —— 前端据此展示"未同意"。</li>

@@ -6,6 +6,11 @@ import org.springframework.stereotype.Component;
 /**
  * 限流阈值配置（`app.security.rate-limit.*`）。
  *
+ * <p>【小白导览】只放数字的配置类：每类端点「每分钟允许多少次」的默认值都集中在这，
+ * 可被环境变量覆盖（如 {@code RATE_LIMIT_LOGIN=10}）。改坏一个值 → 对应端点要么被
+ * 过度限流（永久 429），要么失去保护；0 或负数会被 {@code NumericConfigurationValidator}
+ * 在启动时直接拒绝。
+ *
  * <p>为什么从一堆 `@Value` 收成一个类：阈值此前散落在 {@code RateLimitFilter} 的 10 个构造参数里，
  * 每加一个受限端点就要改构造器签名、所有测试、所有 profile。现在阈值只在这里声明一次，
  * 「哪些路径受哪档限流」由 {@link RateLimitRegistry} 单独表达（路径与阈值分开维护，各自的变更理由不同）。

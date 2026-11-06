@@ -5,6 +5,10 @@ import java.util.UUID;
 /**
  * 全站统一响应信封：{@code {code, message, data, traceId}}。
  *
+ * <p>【小白导览】所有接口返回给前端的「标准快递盒」：code 是业务状态码（0=成功，非 0 看 ErrorCode），
+ * message 是给用户看的中文文案，data 是业务数据，traceId 是这次请求的追踪号（排查问题时
+ * 前后端对账用）。前端只认这个盒子的结构，改坏字段名 = 全站接口解析失败。
+ *
  * <p>不变量：
  * <ul>
  *   <li>{@code code == 0} 才表示成功；失败时 {@code data} 恒为 null，业务码见 {@link com.intelligentresume.common.error.ErrorCode}。</li>

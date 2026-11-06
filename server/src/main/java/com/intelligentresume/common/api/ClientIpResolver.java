@@ -7,6 +7,12 @@ import org.springframework.stereotype.Component;
 /**
  * 客户端 IP 解析：限流分桶与会话审计共用同一实现，避免两处语义漂移。
  *
+ * <p>【小白导览】回答一个问题：「这个请求到底来自哪个 IP？」看似简单，实则暗坑——
+ * 请求经过 nginx 等代理转发后，直连地址是代理的 IP，真实客户端 IP 藏在
+ * {@code X-Forwarded-For} 请求头里；而这个头可以被客户端伪造。本类决定「信不信这个头」。
+ * 改坏它：误信伪造的头 → 攻击者每换一个假 IP 就绕过限流；不信真实的头 → 所有用户
+ * 共享代理 IP 的同一个限流桶，正常用户被误伤。
+ *
  * <p>默认不信任 {@code X-Forwarded-For}（直连开发环境取 {@code remoteAddr}），
  * 伪造的 XFF 不参与分桶。仅当部署在可信反代之后才开启
  * {@code app.security.rate-limit.trust-forwarded-headers}（生产 compose 与

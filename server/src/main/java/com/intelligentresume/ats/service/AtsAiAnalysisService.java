@@ -15,9 +15,23 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * ATS 的 AI 分析执行体（worker 侧调用）：取任务输入 → 调 provider → 校验 → 组装结果 JSON。
+ * ATS 的 AI 分析执行体：后台 worker 领到任务后，真正"调模型干活"的就是这个类。
  *
- * <p>要点：
+ * <h2>① 解决什么业务问题</h2>
+ * 前面 {@code AtsAiStarter} 只是"下单"，本类是"后厨"：拿任务里存的简历+JD+规则结果，
+ * 按 prompt 模板发给模型，把模型返回的自由文本校验、翻译成系统能存的结构化结论。
+ *
+ * <h2>② 在链路哪里</h2>
+ * ai.task 模块的 worker 调它 → 它调 {@link AtsAiPromptBuilder} 组装 prompt、
+ * 调 ai.provider 模块发请求、调 {@link AtsAiResultValidator} 校验返回；
+ * 产出 {@link AnalysisResult} 交给 worker，由 worker 经 {@code AtsResultStateService} 写回检查记录。
+ *
+ * <h2>③ 改坏它用户会看到什么</h2>
+ * 修复重试改成无限重试 → 一条坏任务会反复烧模型配额；
+ * 校验环节跳过 → 模型编造的引文/多余的分数字段直接进库，界面上出现"简历里没有的话"；
+ * 版本号改取任务快照 → 数据库里出现"记录说 v1、实际按 v2 跑"的对不上账。
+ *
+ * <p>原有要点（保留）：
  * <ul>
  *   <li>修复重试只有一次，且只在 {@code INVALID_RESPONSE} 时触发；provider 超时/报错不再重试
  *       （那是重试整个任务的语义，不是修格式）。</li>
@@ -45,8 +59,13 @@ public class AtsAiAnalysisService {
     }
 
     /**
-     * 调用链：取输入 → provider 首次调用 → 校验；校验失败且是 INVALID_RESPONSE 才修复重试一次
-     * （第二次仍失败就直接把异常抛出去，不无限重试）。
+     * 一次完整分析。步骤：
+     * ① 从任务快照里取出创建时存好的输入（简历 JSON、JD、规则结果）；
+     * ② 用 prompt 模板组装出要发给模型的消息，首次调用模型；
+     * ③ 校验返回是否符合约定结构（字段白名单、条数上限、引文真实性）；
+     * ④ 校验失败且原因是"格式不对"（INVALID_RESPONSE）时，把上次的错误输出回喂模型修一次格式——
+     *    最多修一次，第二次仍失败直接抛异常，绝不无限重试；
+     * ⑤ 把结论连同 prompt/schema 版本号打包成结果，由 worker 写回检查记录。
      */
     public AnalysisResult analyze(AiTask task) {
         Map<String, Object> input = taskInput(task);

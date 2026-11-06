@@ -23,6 +23,13 @@ import java.util.List;
 /**
  * 面试接口入口（统一前缀 {@code /api/interviews}）。
  *
+ * <p>【小白导读】
+ * ① 业务问题：模拟面试全部 HTTP 接口的门牌号——开始、看状态、交答案、重试、转规则、
+ *    结束、看报告、历史列表、薄弱项练习及其预览。
+ * ② 链路位置：最外层。只做参数校验（含 Idempotency-Key 头）后透传给 {@link InterviewService}；
+ *    用户身份不来自请求参数，而是鉴权过滤器塞进 request attribute。
+ * ③ 改坏它：所有面试接口直接 401/404/400，前端整个面试流程点不动。
+ *
  * <p>要点：
  * <ul>
  *   <li>Controller 只做参数校验与透传，业务全部在 {@link InterviewService}；不要在这里加状态判断。</li>

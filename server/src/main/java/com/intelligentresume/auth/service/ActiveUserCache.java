@@ -13,6 +13,12 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 「用户是否为 ACTIVE」的短 TTL 进程内缓存（09-26 报告 PA-2）。
  *
+ * <p>【小白导览】①解决什么业务问题：每个带着令牌的请求都要确认「账号还没被停用/注销」，
+ * 但不能每个请求都查一次数据库——所以把答案记 30 秒（TTL，存活时间，到期即视为过期）。
+ * ②在链路哪里：JwtAuthenticationFilter 每个请求问它 isActive()；删号流程在事务提交后
+ * 调 evict() 强制作废。③改坏它用户会看到什么：缓存不失效 → 注销后的账号最长还能用 30 秒
+ * （安全延迟）；缓存永不回源 → 停用名单更新不及时。
+ *
  * <p>背景：{@code JwtAuthenticationFilter} 为落实 #6 的安全闭环（删号即失效），
  * 每个携带 Bearer 的请求都要查一次 user 表校验 ACTIVE。本缓存把该查询降到
  * 每用户 ≤1 次/TTL，用有界的失效延迟换取每请求的数据库往返。

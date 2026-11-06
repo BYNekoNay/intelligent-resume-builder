@@ -15,13 +15,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 桌面端本地 AI 设置端点（ADR-012 阶段五 / R31）。
+ * 桌面端本地 AI 设置端点（ADR-012 阶段五 / R31）—— 设置页的读/写/删/测试连接四个 HTTP 入口。
  *
- * <p>与其它 `/api/desktop/**` 一致：**只在 desktop profile 下存在**，在线部署返回 404
- * （已登录 404 / 匿名 401，见 `SecurityConfig`）。前端据此把入口藏起来。
+ * <p>【链路位置】前端设置页 ↔ 本控制器 ↔ {@code LocalAiSettingService}。
+ * 与其它 `/api/desktop/**` 一致：**只在 desktop profile 下存在**，在线部署返回 404
+ * （已登录 404 / 匿名 401，见 `SecurityConfig`）。前端据此把入口藏起来。</p>
+ *
+ * <p>【改坏它会怎样】{@code requireDesktopMode} 被去掉会把桌面专属功能暴露到在线部署；
+ * 读接口若回传密钥字段直接违反"密钥永不回传"。</p>
  *
  * <p>密钥处理：写接口可以带 {@code apiKey}（存进 DPAPI 密文文件），但**任何读接口都不回传它** ——
- * 页面只需要知道"有没有存过"。
+ * 页面只需要知道"有没有存过"。</p>
  */
 @RestController
 @RequestMapping("/api/desktop/ai-settings")

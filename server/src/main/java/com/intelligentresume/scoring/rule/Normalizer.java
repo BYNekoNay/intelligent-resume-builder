@@ -10,6 +10,20 @@ import java.util.regex.Pattern;
 /**
  * 归一化器：小写、去标点、折叠空格、同义词归一。
  *
+ * <p>小白三问：
+ * <ul>
+ *   <li><b>解决什么业务问题</b>：JD 里写 "Spring Boot"，简历里写 "springboot" 或 "SpringBoot"，
+ *       字面上不一样但意思相同。本类是「清洗」（把用户输入里的杂字符统一成标准形态）与
+ *       「同义词归一」（把 spring boot / spring cloud 都折算成 spring）的唯一执行者，
+ *       让两侧文本可以公平比较。</li>
+ *   <li><b>在链路哪里</b>：被 {@code KeywordRule}（JD 关键词归一 + 直接命中判定）和
+ *       {@code ResumeKeywordExtractor}（简历侧 token 清洗）共同调用；
+ *       词典来自 {@link ScoringProperties} 绑定的配置。</li>
+ *   <li><b>改坏它用户会看到什么</b>：清洗口径两侧不一致 → 简历里明明写了的技术被判"缺失"，
+ *       分数无故偏低；同义词词典加载失败 → 明细里所有命中都显示"直接命中"，失去区分度；
+ *       词组功能破坏 → "Spring Boot" 这类多词技术名永远算缺失。</li>
+ * </ul>
+ *
  * <p>同义词词典格式（配置注入）：canonical → [synonym1, synonym2, ...]。
  * 例如 {@code spring: ["spring", "spring boot", "spring cloud"]}，
  * 则 "Spring Boot" 归一化为 "spring"。
@@ -38,6 +52,11 @@ public class Normalizer {
      * 任一处改字符集就会与另外两处漂移——这是「同一事实多份副本」的典型形态。
      * 同时 {@code String#replaceAll} 每次都重新 {@code Pattern.compile}，
      * 在每 token 两次替换的热路径上是纯粹的重复编译。
+     *
+     * <p><b>性能实测</b>（依据 {@code docs/decisions/OPEN-DECISIONS.md} B5-3，2026-10-30）：
+     * 清洗收敛为单一入口 + 预编译 Pattern 后，同进程交替微基准
+     * 0.485 → 0.222 µs/token（−54%）；端到端「一次完整评分」712 → 363 µs（≈−49%）。
+     * 改动本类清洗路径时应保持该量级，勿退回 {@code replaceAll} 写法。
      */
     private static final Pattern NON_WORD_CHARS = Pattern.compile("[^\\p{L}\\p{N}\\s\\-]");
 

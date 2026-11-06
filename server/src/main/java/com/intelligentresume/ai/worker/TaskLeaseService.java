@@ -19,7 +19,19 @@ import java.util.function.Consumer;
 /**
  * 任务租约服务 —— 负责"领取、续租、落终态"三件事,是任务状态迁移的唯一入口。
  *
- * <p>要点 / 红线:
+ * <p>【业务问题】可能有多个应用实例同时跑工作器，必须保证一个任务同一时刻只被一个实例执行。
+ * 做法：领任务时用数据库条件更新抢占一个"租约"（worker 领任务后的一段时间使用权，
+ * 超时未完成会被收回）；执行中定期续租；写结果前再校验租约仍是自己的。</p>
+ *
+ * <p>【链路位置】{@code DatabaseTaskWorker} 调 {@link #claimBatch} 领取；
+ * {@code TaskExecutionService} 调 {@link #renew}（心跳）与 {@link #releaseSuccess}/{@link #releaseFailed}
+ * 写终态；底层 SQL 都在 {@code AiTaskRepository}。</p>
+ *
+ * <p>【改坏它会怎样】终态写入前漏了 owner 校验，租约被接管后两个 worker 会争着写同一行，
+ * 用户可能看到同一任务重复扣费/结果错乱；成功或失败漏清租约字段会让任务被当成"仍在执行"，
+ * 永远占着队列。</p>
+ *
+ * <p>要点 / 红线:</p>
  * <ul>
  *   <li>跨实例互斥靠 SQL 条件更新,不靠 JVM 锁:{@code acquireLease} 返回 0 就是没抢到,必须跳过。
  *       查询到可领取 ≠ 已持有租约(查询与更新之间可能被别的实例抢先)。</li>
@@ -46,7 +58,11 @@ public class TaskLeaseService {
 
     /**
      * 领取指定任务类型集合中可执行的任务。
-     * 先查询可领取任务(FOR UPDATE),再逐个尝试获取租约。
+     * 先查询可领取任务(FOR UPDATE 锁行防并发抢行)，再逐个尝试获取租约。
+     *
+     * <p>步骤:①查候选（PENDING 或租约已过期的 RUNNING）②逐条做"崩溃循环收口"判定
+     * ③条件更新抢占租约，抢到的才进返回列表。②必须在③之前：已到收口上限的任务
+     * 不能再被领走重跑。
      *
      * @param taskTypes 允许领取的任务类型;为空时不做任何领取
      */

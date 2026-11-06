@@ -13,6 +13,9 @@ import java.util.Optional;
 /**
  * 刷新会话表的数据访问。
  *
+ * <p>【小白导览】读写 {@code auth_session} 表（一次登录一行，管 refresh token 的续期与吊销）。
+ * 改坏它 → 刷新流程找不到会话，所有用户被踢回登录页；撤销查询写错 → 被吊销的令牌仍可用。
+ *
  * <p>三条查询口径不同，别混用：
  * <ul>
  *   <li>{@code findByRefreshTokenHash} 是刷新入口，按摘要精确定位一行；</li>

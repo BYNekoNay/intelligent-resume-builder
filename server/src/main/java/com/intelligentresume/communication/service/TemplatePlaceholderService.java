@@ -17,9 +17,23 @@ import java.util.regex.Pattern;
 /**
  * 模板占位符服务：白名单校验 + 纯字符串替换填充。
  *
- * <p>占位符白名单：{{candidateName}} {{jobTitle}} {{companyName}} {{topSkill}}
+ * <p>占位符（模板里的 {@code {{name}}}，发送前替换成真实值）白名单：
+ * {{candidateName}} {{jobTitle}} {{companyName}} {{topSkill}}
  * {{location}} {{email}} {{phone}}。联系方式（email/phone）由服务端从简历 basics 合并，
  * 模板填充为纯字符串替换，不经过任何模型。
+ *
+ * <p>小白三问：
+ * <ul>
+ *   <li><b>解决什么业务问题</b>：用户写模板时不想写死「尊敬的张三」，而是写 {@code {{candidateName}}}，
+ *       换个候选人用同一模板照样通顺。本类负责三件事：保存模板时拦住不认识的占位符、
+ *       预览时把占位符换成真实简历/JD 的值、把没值可换的占位符如实报告出来。</li>
+ *   <li><b>在链路哪里</b>：被 {@code CommunicationTemplateService} 调用——saveCustom/update 时调
+ *       {@link #validate} 拦非法占位符，preview 时调 {@link #fill} 出预览正文。它是模板路径唯一的
+ *       占位符解析入口。</li>
+ *   <li><b>改坏它用户会看到什么</b>：白名单漏放 → 用户保存 {@code {{foo}}} 模板后预览时
+ *       原样显示一串 {@code {{foo}}}；替换口径不一致 → 模板里写着 {@code {{ name }}}
+ *       （带空格）却永远替换不掉也不报缺失；值里的 {@code $} 未转义 → 填充结果被吃掉一段。</li>
+ * </ul>
  *
  * <p>要点：
  * <ul>
@@ -81,6 +95,11 @@ public class TemplatePlaceholderService {
 
     /**
      * 用真实简历 JSON + JD 填充白名单占位符。
+     *
+     * <p>步骤：① 按「简历 basics + JD」把 7 个白名单占位符的值收集成表（没值的记空串）；
+     * ② 从正文提取全部占位符，值缺失的记入 missing 列表；③ 用与①②同一个 Pattern
+     * 逐个匹配替换——有值换成真值，无值原样保留。②必须在③之前完成，
+     * 因为 missing 列表要随结果一起返回给前端做高亮提示。
      *
      * <p>缺失值占位符原样保留，并列入返回的 missingPlaceholders。
      *

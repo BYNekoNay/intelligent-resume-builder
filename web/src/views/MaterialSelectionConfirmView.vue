@@ -1,9 +1,17 @@
 <!--
-  选材确认页（/generate/materials?taskId=…）：承接 AI 选材任务的结果，让用户增删要写进简历的素材后确认生成。
-  依赖 @/api/ai 的 getTask（读取/轮询任务）、previewConfirmMaterials + confirmMaterials（预览令牌后提交）、retryTask（重跑选材）。
-  状态分支：非法 taskId / 任务类型不符 / 任务 FAILED/CANCELLED / 轮询超时（任务仍在后台）各有独立文案；SUCCESS 后渲染推荐、未选、排除三类列表。
-  易错点：轮询超时不等于失败，此时不提供「重新选材」；用户勾选结果按 userId + taskId 存 localStorage，并连带保存确认幂等键，
-  避免刷新后重复生成同一份简历。
+  选材确认页（/generate/materials?taskId=…）。「AI 生成简历」的第二站：AI 选完素材后，用户在这里增删要写进简历的素材，确认后创建正式的简历生成任务。
+
+  【依赖】@/api/ai 的 getTask（读取/轮询任务）、previewConfirmMaterials + confirmMaterials（预览令牌后提交）、retryTask（重跑选材）。
+
+  【状态分支】
+  - 非法 taskId / 任务类型不符 / 任务 FAILED/CANCELLED / 轮询超时（任务仍在后台）各有独立文案；
+  - 任务 SUCCESS 后渲染三类列表：推荐（默认勾选）、未选（可手动加入）、排除（含排除原因）。
+
+  【易错点】
+  - 轮询超时不等于失败：任务可能还在后台执行，此时不提供「重新选材」（重跑会作废还在跑的任务），只提示刷新；
+  - 用户勾选结果按 userId + taskId 存 localStorage，并连带保存确认幂等键——刷新页面后恢复勾选，
+    且再次确认时复用同一幂等键，避免重复生成同一份简历；
+  - 确认提交带 taskUpdatedAt（乐观锁）：任务结果若被别处更新过会被后端拒绝。
 -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
@@ -238,6 +246,12 @@ function remove(item: MaterialSelectionItem) {
 }
 
 async function confirmSelection() {
+  // 确认勾选并创建正式生成任务。流程：
+  // ①校验至少选了一条素材；
+  // ②确定乐观锁基准 taskUpdatedAt 与幂等键（localStorage 里已有则复用，防止刷新后重复生成），
+  //   并立刻持久化——即使页面中途崩了，下次进来还是同一把键；
+  // ③弹预览（用户确认将发送的 prompt）→ 取消则一次都不调创建端点；
+  // ④带预览令牌 + 幂等键提交，成功后记住生成任务 id 并跳生成确认页。
   if (!task.value || selectedIds.value.size === 0) {
     error.value = t('materialSelection.errorNoSelection')
     return

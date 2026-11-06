@@ -3,9 +3,15 @@ package com.intelligentresume.ai.provider;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 
 /**
- * AI 提供者接口。不同实现(mock、百炼等)通过 {@link #code()} 区分。
+ * AI 提供者接口 —— "怎么调一个模型服务"的统一约定，不同实现(mock、百炼等)通过 {@link #code()} 区分。
  *
- * <p>要点:
+ * <p>【链路位置】实现类（当前只有百炼）注册进 {@code AiProviderRegistry}，
+ * 由 {@code TaskExecutionService} 经注册表路由后调用。</p>
+ *
+ * <p>【改坏它会怎样】实现若在未配密钥时抛异常而不是返回失败结果，会把 worker 线程打崩、
+ * 任务状态没法落库。</p>
+ *
+ * <p>要点:</p>
  * <ul>
  *   <li>{@link #supports} 决定路由命中哪个实现;当前百炼实现对所有任务类型返回 true。</li>
  *   <li>未配置密钥时 {@link #call} 应返回失败结果而不是抛异常,这样调用方能把失败写进任务状态。</li>

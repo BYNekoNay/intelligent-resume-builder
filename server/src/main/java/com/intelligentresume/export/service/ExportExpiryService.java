@@ -18,11 +18,14 @@ import java.util.List;
  * 导出产物过期处理：删文件 + 把任务落成 EXPIRED。
  *
  * <p>职责一句话：保证"过期后既下不到文件，也不再占着存储"。
+ * 导出文件不是永久保存的（默认 24 小时，见 {@code app.pdf.file-ttl-hours}）；
+ * 到期后本类分两条路清理：定时批量扫（{@link #cleanupExpired}）+ 用户查询/下载时顺手惰性清理（{@link #expireIfDue}）。
  *
  * <p>要点：
  * <ul>
  *     <li>只有 {@code SUCCESS} 且 {@code expiresAt < now} 的行才会过期；PENDING/RUNNING/FAILED 不碰。</li>
- *     <li>删除文件失败时**不改状态**并返回 false，留给下一轮重试——先把文件删了再改状态是顺序红线。</li>
+ *     <li>删除文件失败时**不改状态**并返回 false，留给下一轮重试——先把文件删了再改状态是顺序红线
+ *         （反过来会出现"状态说已过期、文件却还在"的悬空行）。</li>
  *     <li>已经 EXPIRED 的行直接返回 true（幂等），重复调用不会重复删。</li>
  *     <li>行锁（{@code findByIdForUpdate}）避免与其它状态更新路径互相覆盖。</li>
  * </ul>

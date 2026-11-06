@@ -19,6 +19,9 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 个人档案的三个端点：读取、整份保存、从简历导入候选值。
  *
+ * <p>链路位置：前端档案页 → 本类 → {@code PersonalProfileService}；
+ * 保存动作产出档案行，供生成简历时服务端合并联系方式。
+ *
  * <p>一人一份（{@code user_id} 唯一），三个端点都把「当前登录用户」作为唯一的数据范围；
  * {@code import-suggestion} 只读不写，返回的候选值必须经用户确认，详见
  * {@link PersonalProfileService} 头部的隐私边界说明。</p>

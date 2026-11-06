@@ -26,8 +26,21 @@ import java.util.Optional;
 /**
  * 面试规则降级模式（单事务）。
  *
+ * <p>【小白导读】
+ * ① 业务问题：模型挂了/一直超时，用户不想干等。点「继续（不用 AI）」后，面试改用
+ *    本地写死的规则继续：固定话题轮流出题、按回答长度和关键词机械打分。
+ *    这是免费用户的兜底体验，保证「没有模型也能把面试走完、出报告」。
+ * ② 链路位置：上游是 {@code InterviewService} 的 continueWithRules / ruleAnswer
+ *    （Controller 的 /continue-with-rules 与规则模式下的 /answer）；下游调
+ *    {@link InterviewRuleEngine}（纯函数打分出题），写 {@code interview_record} 与会话。
+ * ③ 改坏它：降级后还能触发模型调用（授权绕过）、同一答案写出两轮记录（幂等失效）、
+ *    或降级是双向的导致 AI 模式回不来。
+ *
  * <p>continueWithRules / ruleAnswer 使用方法级 @Transactional（原样迁移），
  * 不混用 TransactionTemplate。
+ *
+ * <p>术语速查：降级 —— 从「AI 评估」切到「本地规则评分」的单向开关；
+ * RULE_FALLBACK —— attempt 的一种终态，表示「这轮由规则接管了」，等同有结论。
  *
  * <p>要点：
  * <ul>

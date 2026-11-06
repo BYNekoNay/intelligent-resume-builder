@@ -17,6 +17,9 @@ import java.util.List;
 /**
  * 面试答案资产接口（前缀 {@code /api/interview-answer-assets}）。
  *
+ * <p>【小白导读】面试「素材收藏夹」的增删改查入口：列表（可按 JD/关键词/章节/来源轮筛选）、
+ * 创建、更新、删除。只做参数校验与透传，业务在 {@link InterviewAssetService}。
+ *
  * <p>要点：
  * <ul>
  *   <li>列表的四个筛选参数均可选，直接透传给服务层组合查询。</li>

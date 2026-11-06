@@ -18,6 +18,15 @@ import java.util.List;
 /**
  * 确认编排服务。处理幂等、委派 {@link DraftCommitService} 完成事务性提交。
  *
+ * <p>新人三问：①业务问题：用户在确认页点"提交确认"或"整单拒绝"时的入口——
+ * 确认转给 DraftCommitService 落库，拒绝只改任务状态不产生任何简历版本；
+ * ②链路位置：被 {@code ConfirmationController} 调用，下游是 {@code DraftCommitService}
+ * （真正的多表写入在这里）；③改坏它用户会看到：网络重试报错（幂等失效）、
+ * 拒绝后任务还能被重复操作、或版本号来回跳。
+ *
+ * <p>术语：幂等（同一请求发两次效果和一次一样——本类的实现是"任务已 CONFIRMED 就
+ * 直接返回当时的版本号"，不新建任何东西）。
+ *
  * <p>幂等策略（MVP）：同 task 的 confirm 重放走"已 CONFIRMED"分支返回原版本，
  * 不新建幂等表。
  *

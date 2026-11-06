@@ -7,7 +7,9 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * AI 同意事件仓储。事件溯源:仅追加,不修改。
+ * AI 同意事件仓储。事件溯源:仅追加,不修改 —— 只有查询与插入，没有任何更新方法。
+ *
+ * <p>【链路位置】{@code AiConsentService} 读写授权流水；核心取数是"取某用户最新一条事件"。</p>
  */
 public interface AiConsentRepository extends JpaRepository<AiConsent, Long> {
 

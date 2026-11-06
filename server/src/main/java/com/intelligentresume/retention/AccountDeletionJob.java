@@ -12,7 +12,11 @@ import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
 /**
- * 账户删除撤销窗口任务（决策 D2 阶段 3，V35）。
+ * 账户删除撤销窗口任务（决策 D2 阶段 3，V35）。一行 = 一次删号申请：
+ * 记录谁申请删号、什么时候到反悔截止（cancel_until）、现在处理到哪一步（status）。
+ *
+ * <p>链路位置：用户删号 → {@code deleteAccount} 落一行 PENDING → 7 天窗口内可恢复 →
+ * 窗口过后 {@link AccountPurgeService} 扫到它执行真删 → 行转 SUCCESS。
  *
  * <p>删号请求 → {@code deleteAccount} 立即停用账号并撤销全部会话（安全动作不可逆），
  * 同时落一行 {@code PENDING}；窗口（{@code cancel_until}）内用户可凭密码恢复

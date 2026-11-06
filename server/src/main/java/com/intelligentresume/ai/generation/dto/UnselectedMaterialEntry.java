@@ -3,6 +3,8 @@ package com.intelligentresume.ai.generation.dto;
 /**
  * 未被选中的资料条目。selectionStatus: NOT_SELECTED / USER_EXCLUDED。
  *
+ * <p>一句人话：记录"哪条资料没被用上、为什么"，给前端解释用，不影响生成本身。
+ *
  * <p>要点：
  * <ul>
  *   <li><b>目前没有任何生产代码构造本 record</b>，它只描述契约形态。{@code result_json} 里

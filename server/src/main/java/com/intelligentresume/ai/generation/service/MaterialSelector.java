@@ -15,6 +15,13 @@ import java.util.stream.Collectors;
 /**
  * 资料选择器(确定性,不调 LLM)。
  *
+ * <p>新人三问：①业务问题：用户发起岗位定制时可勾选"必须用/尽量用/排除"某些资料，
+ * 剩下的资料也要按数量上限自动取舍——本类把这套规则算清楚，产出四段互不重叠的资料分组；
+ * ②链路位置：只被生成任务的旧路径（{@code JobGenerationService#executeLegacyTask}）调用，
+ * 新的快照路径不再二次筛选（确认时边界已定）；
+ * ③改坏它用户会看到：勾选的资料没被用、被排除的资料又冒出来、或"必须用"的资料
+ * 因无证据被悄悄丢弃（正确行为是报错）。
+ *
  * <p>按用户指定的 INCLUDED/PREFERRED/EXCLUDED 以及资料自身的
  * usagePreference 进行分类。跨用户或不存在的 included/preferred ID
  * 抛 NOT_FOUND(不泄露存在性)。
@@ -47,8 +54,14 @@ public class MaterialSelector {
     }
 
     /**
-     * 四段分类：fixed / preferred / excluded / normal，四段互不重叠（normal 是"剩下能用的"）。
-     * 顺序敏感：先剔除排除项 → 再判可用性 → 再校验归属 → 最后才截断 normal。
+     * 四段分类：fixed（必须用）/ preferred（优先用）/ excluded（排除）/ normal（剩下能用的），
+     * 四段互不重叠。顺序敏感，①→④ 每步业务含义：
+     * ①先剔除排除项（排除语义永远赢，用户说不要的资料不许进任何段）；
+     * ②判可用性（"必须用"的资料无有效证据直接 400，"优先用"的只静默剔除——显式要求值得一个明确报错，
+     *   非硬性偏好不值得打断流程）；
+     * ③校验归属（ID 必须真实存在且属于本人，不存在抛 NOT_FOUND，不泄露"资料存在但不属于你"）；
+     * ④最后才截断 normal 到配额（fixed + preferred 先占名额）——先截断再校验会让被截掉的资料
+     *   逃过可用性/归属检查。
      *
      * <p>{@code userId} 在方法体内**没有被使用**：越权安全完全依赖调用方传入的
      * {@code allMaterials} 已按用户过滤（{@code findByUserId...}）。改签名前先记住这一点。

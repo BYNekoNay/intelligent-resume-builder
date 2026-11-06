@@ -22,7 +22,23 @@ import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
- * 投递记录与 9 态状态机。三条不变量：
+ * 投递记录与 9 态状态机。
+ *
+ * <p><b>① 解决什么业务问题</b>：用户在这个平台投了简历后，需要一张"跟踪卡"记住
+ * 每次投递——投的哪家岗位、用的哪个简历版本、现在走到哪一步（待回复/筛选中/面试中/…）、
+ * 下次什么时候跟进。本类就是这张跟踪卡的增删改查 + 状态推进逻辑。
+ *
+ * <p><b>② 在链路哪里</b>：上游是 {@code ApplicationController}（HTTP 请求先到它，再转到这里）；
+ * 本类依赖四个仓储——{@link ApplicationRecordRepository}（投递主表）、
+ * {@link ApplicationStatusHistoryRepository}（状态历史）、{@link JobDescriptionRepository}
+ * （校验岗位存在）、{@link ResumeVersionRepository}（校验简历版本存在，来自 resume 模块）；
+ * 产出 DTO 给前端看板页面。统计算法不在这里，委托给 {@link ApplicationStatsCalculator} 纯函数。
+ *
+ * <p><b>③ 改坏它用户会看到什么</b>：状态白名单漏一条 → 前端看板拖拽报 409；
+ * 忘写状态历史 → 审计时间线（详情页的迁移记录）缺行；误刷 {@code stageEnteredAt}
+ * → 看板"平均停留天数"偏短（历史上真实发生过的 P1-4 缺陷）。
+ *
+ * <p>三条不变量（新手改代码前先读懂这三条，违者都会造成线上可见的错误）：
  * <ol>
  *   <li><b>迁移是白名单</b>：只有 {@code TRANSITIONS} 里的边可通行，其余一律 {@code CONFLICT}。新增状态必须
  *       同步改这里、前端状态数组与 {@code docs/04} 表格（门禁逐格比对），否则出现「后端能迁、前端画不出」。</li>
@@ -33,8 +49,10 @@ import org.springframework.beans.factory.annotation.Autowired;
  * </ol>
  * <p>每个状态都允许自环（「仍是此状态，只补备注」）。禁止自环会逼前端先跳走再跳回，在审计时间线上
  * **伪造一次从未发生的迁移** —— 比多一条无变化的记录危险得多。
- * <p>并发与删除：写操作基于 {@code version} 乐观锁；删除自 V40 起为软删（置 {@code deleted_at}），
- * 保留期后由 {@code RetentionPurgeService} 物理删除，状态历史随父行级联消亡。
+ * <p>并发与删除：写操作基于 {@code version} 乐观锁（版本号字段，防并发覆盖：客户端保存时回传
+ * 自己读到的版本号，与库里不一致说明有人先改过，拒绝保存而不是覆盖）；删除自 V40 起为软删
+ * （不真删，打 deleted_at 标记，查询时自动过滤），保留期后由 {@code RetentionPurgeService} 物理删除，
+ * 状态历史随父行级联消亡。
  * <p>统计口径不在本类：{@code ApplicationStatsCalculator} 是纯函数。
  */
 @Service
@@ -92,6 +110,12 @@ public class ApplicationService {
         this.historyRepository = historyRepository;
     }
 
+    /**
+     * 列表页：按跟进筛选条件返回摘要卡片。
+     * ① 把 followUp 参数归一成 ALL/TODAY/OVERDUE（非法值静默降级为 ALL，不报错——筛选条件传错不该 400）；
+     * ② 算出"今天"的起止边界与当前时刻，交给仓储的跟进过滤查询；
+     * ③ 每行转成摘要 DTO（不含长文本，详情接口再按需拉取）。
+     */
     @Transactional(readOnly = true)
     public List<ApplicationSummary> list(Long userId, String followUp) {
         String mode = normalizeFollowUp(followUp);
@@ -102,12 +126,25 @@ public class ApplicationService {
                 .stream().map(this::summary).toList();
     }
 
+    /**
+     * 详情页：一条投递的完整数据（含长文本 + 状态历史时间线）。列表摘要不含历史，
+     * 前端展开卡片时才来这里拉。
+     */
     @Transactional(readOnly = true)
     public ApplicationResponse get(Long id, Long userId) {
         ApplicationRecord record = owned(id, userId);
         return response(record, readHistory(record.getId()));
     }
 
+    /**
+     * 创建一条投递记录（用户对着某个 JD 点"我要投这份简历"）。
+     * ① 校验岗位与简历版本都存在且属于当前用户（防止拿别人的 JD/版本拼一条假投递）；
+     * ② 强制初始状态为 DRAFT——投递必须从草稿开始，"已投出去"要走状态迁移接口，
+     *    这样 appliedAt 和状态历史才会被正确记录；
+     * ③ 创建即写 stageEnteredAt（P1-4 修复）：DRAFT 阶段的停留时长从这一刻起算；
+     * ④ 保存并写第一条状态历史（from 为 null，因为它是这条投递时间线的起点）。
+     * 步骤②必须在③④之前：顺序换了会出现"没校验归属就落库"或"历史表指向不存在的记录"。
+     */
     @Transactional
     public ApplicationResponse create(CreateApplicationRequest request, Long userId) {
         validateReferences(request.jobDescriptionId(), request.resumeVersionId(), userId);
@@ -132,6 +169,16 @@ public class ApplicationService {
         return response(saved, readHistory(saved.getId()));
     }
 
+    /**
+     * 编辑投递记录的文案类字段（求职信/邮件正文/开场白/跟进时间），<b>不含状态</b>。
+     * ① 确认记录存在且属于当前用户，并校验乐观锁版本号（不一致 = 别人先改过，拒绝）；
+     * ② 请求里若带了与当前值不同的 status，直接拒绝——状态只能走 {@link #updateStatus}，
+     *    否则这次编辑不写状态历史，审计时间线会失真；
+     * ③ 若想改绑 JD/简历版本：只有还在 DRAFT 且从未真正投出（appliedAt 为空）才允许，
+     *    已进入流程的记录改绑会让历史与统计口径对不上；
+     * ④ 应用字段并保存。注意这里<b>绝不刷新 stageEnteredAt</b>：status 没变化，
+     *    刷了就会重置停留时长（P1-4 缺陷的反面教训）。
+     */
     @Transactional
     public ApplicationResponse update(Long id, UpdateApplicationRequest request, Long userId) {
         ApplicationRecord record = owned(id, userId);
@@ -157,6 +204,16 @@ public class ApplicationService {
         return response(saved, readHistory(saved.getId()));
     }
 
+    /**
+     * 状态迁移（全系统<b>唯一</b>合法的状态变更入口，前端看板拖拽卡片最终调到这里）。
+     * ① 确认记录归属并校验乐观锁版本号；
+     * ② 查 {@link #TRANSITIONS} 白名单：源状态 → 目标状态这条边不存在就 409（比如 HIRED 想回 SCREENING）；
+     * ③ 首次进入 APPLIED 时写入 appliedAt（只写一次，之后不动——它是"投了多久"的起点）；
+     * ④ 状态真变了才刷新 stageEnteredAt（自环如 DRAFT→DRAFT 不刷，否则停留时长被重置，P1-4 教训）；
+     * ⑤ feedbackText 是 PATCH 语义：null = 保持原备注不动（拖拽改状态的调用不该顺手清掉备注），
+     *    空白串 = 显式清空；
+     * ⑥ 只有真实迁移才写一条状态历史，自环不写（避免时间线噪声）。
+     */
     @Transactional
     public ApplicationResponse updateStatus(Long id, UpdateApplicationStatusRequest request, Long userId) {
         ApplicationRecord record = owned(id, userId);
@@ -200,12 +257,15 @@ public class ApplicationService {
         repository.save(record);
     }
 
+    /**
+     * 看板顶部的转化漏斗统计（总数、各状态占比、转化率、各阶段平均停留）。
+     * 本方法只负责两次仓储调用与事务边界；统计口径与算法见 ApplicationStatsCalculator
+     * （纯函数，可单测钉住，也避免本类继续变胖）。
+     * #3：计数在 SQL 聚合（group by），只有需要逐行时间戳的三个阶段才读行；
+     * 时长聚合在 Java 侧计算，兼容 MySQL 与 H2（不依赖 TIMESTAMPDIFF）。
+     */
     @Transactional(readOnly = true)
     public ApplicationStatsResponse stats(Long userId) {
-        // 本方法只负责两次仓储调用与事务边界；统计口径与算法见 ApplicationStatsCalculator
-        // （纯函数，可单测钉住，也避免本类继续变胖）。
-        // #3：计数在 SQL 聚合（group by），只有需要逐行时间戳的三个阶段才读行；
-        // 时长聚合在 Java 侧计算，兼容 MySQL 与 H2（不依赖 TIMESTAMPDIFF）。
         return ApplicationStatsCalculator.calculate(
                 repository.countGroupByStatus(userId),
                 repository.findDurationRowsByUserId(userId),

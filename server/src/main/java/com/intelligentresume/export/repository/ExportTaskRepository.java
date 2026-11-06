@@ -18,6 +18,10 @@ import java.time.LocalDateTime;
 /**
  * 导出任务仓库。DDL 含 user_id,跨用户校验直接 findByIdAndUserId。
  *
+ * <p>一句话定位：export_task 表的全部 SQL 都在这里——普通查询、行锁查询、
+ * 租约领取的条件更新、过期清理的批量查询。被 {@code ExportService} 与
+ * {@code ExportTaskLeaseService}/{@code ExportExpiryService} 使用。
+ *
  * <p>要点：
  * <ul>
  *     <li>下载/查询用 {@code findByIdAndUserId}（一箭双雕：不存在与不属于你都是空结果）。</li>

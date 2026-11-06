@@ -1,10 +1,19 @@
 <!--
-  生成确认页（/generate/confirm?taskId=…）：AI 已产出简历草稿，用户逐节复核/编辑后确认或拒绝，确认即落成正式简历版本。
-  依赖 @/api/ai 的 getTask / confirmTask / rejectTask / retryTask、useTaskPolling（任务未完成时轮询）、
-  @/api/resume 的 getResumeVersion / listResumesByJd（已确认任务回跳已有简历、提示同 JD 已有简历）。
-  状态分支：缺 taskId、加载失败、FAILED（可重试）、RUNNING/PENDING（保持 loading 由轮询推进，不能提前置 false 否则内容区空白）、
-  SUCCESS+PENDING 进入复核；SUCCESS+CONFIRMED 直接给出已生成的简历入口。
-  易错点：确认/拒绝都要带幂等键，避免重复点击产生多个版本；草稿复核状态由 useDraftReview 统一维护。
+  生成确认页（/generate/confirm?taskId=…）。「AI 生成简历」的最后一站：AI 已经产出整份简历草稿，
+  用户逐节复核（接受 / 编辑 / 拒绝每一节），全部处理完点「确认」→ 后端把草稿落成正式简历版本并跳详情页；点「拒绝」则丢弃草稿。
+
+  【依赖】@/api/ai 的 getTask / confirmTask / rejectTask / retryTask、useTaskPolling（任务未完成时轮询）、
+  @/api/resume 的 getResumeVersion / listResumesByJd（已确认任务回跳已有简历、提示同 JD 已有简历）、
+  useDraftReview（草稿复核状态：每节的接受/编辑决定都存在这里）。
+
+  【状态分支】
+  - 缺 taskId → 报错；加载失败 → 报错；FAILED → 显示失败 + 「重新生成」（仅 FAILED 任务可重试）；
+  - RUNNING/PENDING → 保持 loading 由轮询推进（不能提前把 loading 置 false，否则所有分支都不匹配、内容区空白）；
+  - SUCCESS+PENDING → 进入复核界面；SUCCESS+CONFIRMED → 提示已处理过并给出已生成简历入口；
+  - pollingTimedOut → 「仍在后台执行」的软状态，不显示失败按钮（对运行中的任务重试会被服务端拒绝）。
+
+  【易错点】确认/拒绝都要带幂等键 + taskUpdatedAt（乐观锁），避免重复点击产生多个版本；
+  同一 JD 下已有简历时先弹窗让用户选「新建一份」还是「更新已有简历」。
 -->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
@@ -123,6 +132,9 @@ function startPolling(id: number) {
 }
 
 async function handleConfirm() {
+  // 确认入口：①校验草稿里没有「未处理」的节（pendingCount>0 不放行）；
+  // ②检查同一 JD 下是否已有简历——有则先弹 ExistingJdDialog 让用户选「新建 / 更新已有」再继续；
+  // ③真正提交走 doConfirm。
   if (pendingCount.value > 0) {
     error.value = t('generationConfirm.pendingItemsError').replace('{count}', String(pendingCount.value))
     return
@@ -149,6 +161,8 @@ function extractJdId(): number | null {
 }
 
 async function doConfirm(targetResumeId: number | null) {
+  // 提交复核结果：①把每一节的路径/决定（ACCEPT 或 EDIT+编辑后的值）打包；
+  // ②带幂等键 + taskUpdatedAt（乐观锁）调 confirmTask；③清空任务缓存、跳到新简历详情页。
   closeJdDialog()
   confirming.value = true
   error.value = ''

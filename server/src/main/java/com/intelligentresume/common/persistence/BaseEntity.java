@@ -15,6 +15,10 @@ import java.time.LocalDateTime;
 /**
  * 公共实体基类:id + createdAt + updatedAt。
  *
+ * <p>【小白导览】几乎所有表的「公共列模板」：谁建的、什么时候建的、最后一次改动是什么时候
+ * （审计字段，自动填充不用手写）。业务实体继承它就自动带上这三列。改坏它 → 插入数据时
+ * 时间列为空直接报错（列有 NOT NULL 约束）。
+ *
  * <p>不包含 {@code deleted_at}。需要软删的实体继承 {@link SoftDeletableEntity}。
  *
  * <p>使用约束:

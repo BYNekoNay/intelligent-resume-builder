@@ -1,7 +1,10 @@
 package com.intelligentresume.export.domain;
 
 /**
- * PDF 导出任务状态。
+ * PDF 导出任务状态（一次导出从排队到交付的生命周期）。
+ *
+ * <p>每个状态的人话：PENDING=已受理待渲染；RUNNING=某 worker 正在渲染（带租约）；
+ * SUCCESS=PDF 已生成可下载；FAILED=渲染终态失败（可手动重试，有上限）；EXPIRED=文件过期已销毁。
  *
  * <p>合法流转（无数据库约束，全靠服务层保证）：
  * <ul>

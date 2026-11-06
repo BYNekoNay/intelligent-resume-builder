@@ -3,6 +3,11 @@ package com.intelligentresume.common.persistence;
 /**
  * 异步任务失败消息的持久化边界（ideation #514）。
  *
+ * <p>【小白导览】一个小工具：把异步任务（AI 任务/PDF 导出/面试评估）的失败原因文本
+ * 存进数据库前截到安全长度。为什么不直接存：数据库列宽固定 1024 字符，超长文本在
+ * MySQL 严格模式下会让整个「记录失败」的写入也失败——任务状态被卡住，真实失败原因
+ * 反而丢失。改坏它 → 失败任务的状态永远停在「进行中」。
+ *
  * <p>AI 任务、PDF 导出任务与面试 AI 尝试的 {@code error_message} 列均为
  * {@code VARCHAR(1024)}，而 provider/异常抛出的 message 长度不可控。超长消息在
  * MySQL 严格模式下会让「释放失败」事务直接失败：任务停留在 RUNNING（或面试尝试

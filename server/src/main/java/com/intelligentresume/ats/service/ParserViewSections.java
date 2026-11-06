@@ -7,6 +7,9 @@ import java.util.Set;
 /**
  * 「解析器视角」的章节注册表：**唯一一份**章节键、渲染顺序、标题与字段顺序。
  *
+ * <p>一句话定位：解析器"认识哪些章节、按什么顺序找、每章读哪几个字段"都登记在这里，
+ * 被 {@code ResumeParserViewRenderer} 消费；改这里 = 改机器读简历的方式。
+ *
  * <p>为什么单独成类而不是塞在渲染器里：这份注册表是**跨语言契约的一方**——
  * 它必须与前端 {@code web/src/resume/sectionRegistry.ts} 的 {@code SECTION_KEYS} 逐键相等，
  * 与后端 {@code ResumeSections.AI_CONTEXT_SECTIONS} 保持同一套键名。

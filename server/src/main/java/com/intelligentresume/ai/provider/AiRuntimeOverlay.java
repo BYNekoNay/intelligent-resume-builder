@@ -8,13 +8,19 @@ import java.util.Optional;
 import java.util.function.BiFunction;
 
 /**
- * 运行时 AI 配置覆盖（ADR-012 阶段五的「设置生效」部分）。
+ * 运行时 AI 配置覆盖（ADR-012 阶段五的「设置生效」部分）—— 让桌面端用户改完设置立即生效，不用重启应用。
  *
- * <p>为什么需要它：{@link BailianAiProvider} 的 `apiKey` / `baseUrl` / `model` 都是**构造期**
+ * <p>【业务问题】{@code BailianAiProvider} 的 `apiKey` / `baseUrl` / `model` 都是**构造期**
  * 注入的 final 值（`RestClient` 的 `Authorization` 头也是构造时固定），所以"用户在设置里换了 key
- * 立刻生效"在当时的结构下做不到。这里放一个可替换的快照，provider 每次调用时读一次。
+ * 立刻生效"在当时的结构下做不到。这里放一个可替换的快照，provider 每次调用时读一次。</p>
  *
- * <p>三条刻意约束：
+ * <p>【链路位置】写入方是 {@code LocalAiSettingService#publishToRuntime}（保存设置后）与
+ * {@code LocalAiRuntimeBootstrap}（重启时恢复）；读取方是 {@code BailianAiProvider} 每次调用。</p>
+ *
+ * <p>【改坏它会怎样】快照可见性（volatile）被去掉，并发读可能看到"半新半旧"的配置；
+ * 覆盖生效时若把配置里的模型链混回来，会出现"看起来换了设置、实际还在用旧链"。</p>
+ *
+ * <p>三条刻意约束：</p>
  * <ul>
  *   <li><b>默认空</b>：在线部署永远拿到 empty，行为与改造前逐字节一致；</li>
  *   <li><b>只有单 endpoint + model + key</b>（ADR-012 D7）—— 不把模型链搬进来，

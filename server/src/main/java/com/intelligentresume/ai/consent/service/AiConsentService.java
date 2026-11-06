@@ -14,11 +14,21 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Collection;
 
 /**
- * AI 同意服务。事件溯源模型:每次操作追加新事件,不修改历史。
+ * AI 同意服务 —— "用户是否授权把资料发给 AI"的唯一裁判。事件溯源模型:每次操作追加新事件,不修改历史。
  *
- * <p>判定规则很朴素:**最新一条事件**说了算。最新是 GRANTED 才算已授权,撤回同样只是追加一条。
+ * <p>【业务问题】用户简历属于敏感个人信息，发给模型前必须有显式授权；用户也有权随时撤回。
+ * 还要能举证"用户何时同意过哪个版本的协议"——所以不能只存一个开关位，要存每次操作的流水。</p>
  *
- * <p>要点 / 红线:
+ * <p>【链路位置】前端经 {@code AiConsentController} 调 {@link #grant}/{@link #withdraw}；
+ * {@code AiTaskService}（创建任务前）与 {@code TaskExecutionService}（执行前）调
+ * {@link #hasValidConsent} 做校验；账号删除流程调 {@link #withdrawIfGranted}。</p>
+ *
+ * <p>【改坏它会怎样】历史事件被 UPDATE/删除会让授权失去举证能力；
+ * 细粒度校验漏掉 policyVersion 比对会让旧协议授权"永久有效"，绕过新协议的重新同意。</p>
+ *
+ * <p>判定规则很朴素:**最新一条事件**说了算。最新是 GRANTED 才算已授权,撤回同样只是追加一条。</p>
+ *
+ * <p>要点 / 红线:</p>
  * <ul>
  *   <li>表是 append-only:不要 UPDATE 或删除历史行,否则"用户何时同意过什么"就无法举证。</li>
  *   <li>细粒度校验({@code hasValidConsent(userId, taskScope, dataCategories)})额外要求
@@ -136,7 +146,9 @@ public class AiConsentService {
      * 细粒度校验:最新事件必须是 GRANTED、政策版本与当前配置一致、
      * 且授权范围覆盖本次任务类型与全部数据类别。
      *
-     * <p>任一条不满足都返回 false(不区分原因),调用方统一报 CONSENT_REQUIRED。
+     * <p>步骤:①取最新事件 ②依次过滤四条件（已授权 → 版本一致 → 范围含任务类型 → 类别全覆盖），
+     * 任一条不满足都返回 false(不区分原因),调用方统一报 CONSENT_REQUIRED —— 不区分原因
+     * 是刻意的:不向未授权用户泄露"差哪一条"。</p>
      */
     @Transactional(readOnly = true)
     public boolean hasValidConsent(Long userId, String taskScope, Collection<String> dataCategories) {

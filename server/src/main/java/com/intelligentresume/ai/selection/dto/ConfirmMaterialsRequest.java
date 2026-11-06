@@ -8,6 +8,9 @@ import java.util.List;
 /**
  * 确认选材请求体（POST /api/ai/tasks/{taskId}/confirm-materials），预览端点用的是同一个 body。
  *
+ * <p>一句人话：用户在推荐结果页勾完资料点"确认"时提交的内容——勾了哪些、
+ * 有没有强制加入、以及页面停留期间的并发保护戳。
+ *
  * <p>要点：
  * <ul>
  *   <li>{@code taskUpdatedAt} 是乐观并发戳：必须回传查询选材任务时拿到的 {@code updatedAt}，

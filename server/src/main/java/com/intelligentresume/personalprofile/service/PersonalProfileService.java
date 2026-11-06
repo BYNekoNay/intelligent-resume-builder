@@ -21,6 +21,14 @@ import java.util.Map;
 /**
  * 个人档案：一人一份的「我是谁 + 我想找什么」。
  *
+ * <p>在链路里的位置：前端档案页 → {@code PersonalProfileController} → 本类。
+ * 读侧三个来源：档案表本身、简历当前版本（importSuggestion 反推建议）、
+ * 用户表（upsert 前的行锁）。写侧产出给生成链路：{@code JobGenerationService}
+ * 合并联系方式进最终简历。
+ *
+ * <p>改坏它用户会看到什么：丢了行锁，用户开两个标签页首次保存档案会撞唯一键报 409；
+ * 联系方式若被塞进提示词，用户隐私（姓名/电话/住址）会发给外部模型。
+ *
  * <h2>这里存的东西不会发给模型</h2>
  * 档案含姓名、邮箱、电话、住址。它们在生成简历时由服务端合并
  * （{@code JobGenerationService#mergePersonalProfile}），**不进入任何提示词**。
@@ -62,8 +70,10 @@ public class PersonalProfileService {
 
     @Transactional
     public PersonalProfileResponse upsert(PersonalProfileRequest request, Long userId) {
-        // 首次 upsert 的并发保护（ideation #70）：先锁**用户行**（不是 profile 行 ——
-        // 首次创建时 profile 还不存在，没有行可锁），串行化同一用户上的「查后插」。
+        // 首次 upsert 的并发保护（ideation #70）。步骤：①先锁**用户行**（悲观锁 = 直接锁住
+        // 这一行，别的请求等着）——为什么锁用户行而不是档案行？因为首次创建时档案还不存在，
+        // 没有行可锁；锁用户行把同一用户的「查后插」串行化，第二个请求会等到第一个插完。
+        // ②查档案，没有就新建；③逐字段覆盖保存。
         // 唯一键冲突仍由全局 handler 兜底映射 40901。
         userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHENTICATED));

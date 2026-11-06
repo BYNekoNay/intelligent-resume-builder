@@ -7,7 +7,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * JD 解析规则配置。使用 ConfigurationProperties 绑定 YAML 数组，避免
+ * JD 解析规则配置：解析器用的"词典"和"经验正则"都从 yml 配置读，改配置即可换规则、不用改代码。
+ *
+ * <p>链路位置：Spring 启动时把 {@code app.job.parser.*} 绑定进来 → {@code JdKeywordParser}
+ * 构造时消费（正则当场编译，写错启动就炸，不会拖到用户请求时）。
+ *
+ * <p>使用 ConfigurationProperties 绑定 YAML 数组，避免
  * {@code @Value} 将不存在的标量键回退成旧的逗号分隔默认值。
  *
  * <p>要点：

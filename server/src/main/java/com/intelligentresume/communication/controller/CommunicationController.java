@@ -31,6 +31,16 @@ import java.util.List;
 /**
  * 沟通文案接口：模板生成、AI 异步生成、发送前预览、模板库、草稿保存。
  *
+ * <p>小白三问：
+ * <ul>
+ *   <li><b>解决什么业务问题</b>：前端所有「沟通文案」相关操作（点生成、看模板、存草稿）的 HTTP 入口，
+ *       只做参数检查和转发，不含业务逻辑。</li>
+ *   <li><b>在链路哪里</b>：最外层。收请求 → 取登录用户 id → 调 {@link CommunicationService} 或
+ *       {@link CommunicationTemplateService} → 把结果包成统一 {@code ApiResponse} 返回。</li>
+ *   <li><b>改坏它用户会看到什么</b>：登录校验漏了 → 未登录也能生成文案；幂等键检查放宽 →
+ *       用户重复点击会创建多个 AI 任务、重复扣配额；HTTP 状态码改错（202→200）→ 前端异步轮询逻辑失灵。</li>
+ * </ul>
+ *
  * <p>要点：
  * <ul>
  *   <li><b>所有端点都要 {@code currentUserId}</b>，取不到即 401；归属校验在 service 层做，控制器不重复判断。</li>

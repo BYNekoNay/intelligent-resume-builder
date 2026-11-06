@@ -42,7 +42,20 @@ import java.util.concurrent.TimeUnit;
 /**
  * 任务执行服务 —— 按任务能力描述符把一条已领取的任务分发到对应的业务流程,并统一收尾。
  *
- * <p>要点 / 红线:
+ * <p>【业务问题】"领到任务之后干什么"因任务类型而异：选材、生成、ATS 分析、邮件草稿、面试追问
+ * 各有各的业务服务。本类是那层"路由器"，同时统一负责执行前的授权复查、执行中的租约心跳、
+ * 执行后的指标记录，让各业务服务只管业务。</p>
+ *
+ * <p>【链路位置】{@code DatabaseTaskWorker} 调 {@link #execute}；它向下调用
+ * {@code JobMaterialSelectionService}/{@code JobGenerationService}/{@code AtsAiAnalysisService}/
+ * {@code CommunicationAiService}/{@code InterviewFollowUpAiService} 或 {@code AiProviderRegistry}，
+ * 并通过 {@code TaskLeaseService} 写回成功/失败。它自己不写任务状态。</p>
+ *
+ * <p>【改坏它会怎样】执行前漏了授权复查，撤回授权的用户数据仍会被发给模型；
+ * 心跳线程池被合并进业务池，一次数据库抖动会连锁导致多任务租约过期、任务被重复执行（重复计费）；
+ * finally 里的指标漏记，排障时会"看不到这次执行存在过"。</p>
+ *
+ * <p>要点 / 红线:</p>
  * <ul>
  *   <li>执行前会**再查一次**授权:任务创建到真正执行之间可能隔了很久,用户可能已撤回同意。</li>
  *   <li>分支依据是 {@code AiTaskCapabilityRegistry} 的 executionMode,不是 if-else 猜类型;
@@ -314,7 +327,8 @@ public class TaskExecutionService {
     }
 
     /**
-     * 启动租约心跳:固定延迟续租,间隔为 {@code leaseSeconds/3},下限 1 秒。
+     * 启动租约心跳:固定延迟续租,间隔为 {@code leaseSeconds/3}（即租约每过三分之一时间就续一次，
+     * 下限 1 秒），保证长任务执行期间租约不会中途过期。
      *
      * <p>续租失败只记日志、不在这里终止任务:租约一旦过期,任务会被别的 worker 接管并重跑,
      * 本次结果会在写终态时被租约校验丢弃。也就是说"漏续租"的代价是重复调用 provider(重复计费),

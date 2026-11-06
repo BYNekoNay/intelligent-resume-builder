@@ -6,6 +6,9 @@ import java.util.Map;
 /**
  * 岗位定制生成草稿响应。存入 ai_task.result_json。
  *
+ * <p>一句人话：这就是生成任务完成后给确认页看的那份结果——AI 产出的简历草稿、
+ * 用了哪些资料、还缺什么、质量如何。
+ *
  * <p>要点：
  * <ul>
  *   <li>本 record 目前**没有生产代码构造它**，服务端是直接把一个 {@code LinkedHashMap} 写进

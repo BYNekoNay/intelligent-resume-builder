@@ -1,9 +1,19 @@
 <!--
-  ATS 兼容性检查页（/ats）：选简历版本 + 目标 JD，跑「规则检查」或「AI 深度分析」，展示分数、问题列表、解析器视角与改写建议。
-  依赖 @/api/ats（runAtsCheck / getAtsCheck 轮询、getAtsParserView、retryAtsAi）与 useResumeJobOptions（简历/版本/岗位下拉）。
-  状态分支：loading 为首次检查、analyzing 表示 AI 仍在后台分析（此时只显示等待态）、pollingTimedOut 表示轮询窗口耗尽（保留规则报告并提示后台继续）、
-  error 覆盖参数缺失/发起失败/轮询失败；结果 id 会写回 query.result，刷新可复原。
-  易错点：降级原因只按原因码映射本地文案，不透传服务端 message；「查看建议」跳编辑器时通过 query 携带 section/atsResultId/sourceVersionId/atsItem 交接。
+  ATS 兼容性检查页（/ats）。ATS（Applicant Tracking System，招聘方用来机器解析简历的系统）会按结构化规则读取简历；
+  本页模拟它的视角给简历打分：选简历版本 + 目标 JD，跑「规则检查」（纯规则秒出）或「AI 深度分析」（规则 + AI，异步轮询等结果），
+  展示分数、关键词缺口、问题列表、解析器视角（机器眼里的简历长什么样）与改写建议。
+
+  【依赖】@/api/ats（runAtsCheck / getAtsCheck 轮询、getAtsParserView、retryAtsAi）与 useResumeJobOptions（简历/版本/岗位下拉）。
+
+  【状态分支】
+  - loading：首次检查发起中；analyzing：AI 仍在后台分析（只显示等待态，不显示旧报告）；
+  - pollingTimedOut：轮询窗口耗尽（400 次 × 1.5s ≈ 10 分钟，对齐后端 AI 任务总预算），保留规则报告并提示后台继续，刷新后可再取；
+  - error 覆盖参数缺失/发起失败/轮询失败；结果 id 写回 query.result，刷新页面可复原本次报告。
+
+  【易错点】
+  - AI 降级（AI 不可用时回退纯规则）的原因只按原因码映射本地文案，不透传服务端 message（保证双语界面一致）；
+  - 「查看建议」跳编辑器时通过 query 携带 section/atsResultId/sourceVersionId/atsItem 四个参数做「交接」，
+    编辑器据此定位到具体章节的具体条目并决定是否只读加载。
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -70,6 +80,9 @@ async function rememberResult(id: number) {
 }
 
 async function check(useAi: boolean) {
+  // 发起检查：①校验已选版本和岗位；②清掉上一次结果与超时标记；
+  // ③调 runAtsCheck（AI 模式后端先出规则部分、AI 部分异步算）；④结果 id 写进 URL（刷新可恢复）；
+  // ⑤若 AI 还在分析（analysisStatus=ANALYZING）就启动轮询等完整报告。
   if (!resumeVersionId.value || !jobDescriptionId.value) {
     error.value = t('ats.selectError')
     return
@@ -152,6 +165,8 @@ function sourceLabel(current: AtsCheckResponse) {
 }
 
 function editorLocation(section: string, kind: 'evidence' | 'action', index: number) {
+  // 组装「去修改」跳转链接：带上章节映射、报告 id、源版本 id 和条目定位（kind:index），
+  // 编辑器靠这组 query 定位到具体问题条目（ATS 交接模式，可能以只读方式打开历史版本）。
   if (!result.value || result.value.resumeId === null) return null
   const mappedSection = mapAtsSection(section)
   if (!mappedSection) return null

@@ -13,6 +13,9 @@ import java.util.Map;
 /**
  * ATS 检查结果（表 {@code ats_check_result}）：一次"简历版本 × 岗位"的体检记录。
  *
+ * <p>一句话定位：用户每次发起体检就生成一行；分数、AI 结论、状态都存在这里，
+ * 前端查询检查结果读的就是它。由 {@code AtsService} 写入、{@code AtsResultStateService} 更新。
+ *
  * <p>要点：
  * <ul>
  *   <li>{@code (user_id, idempotency_key)} 上有唯一约束 —— {@code AtsService.check} 的并发重试依赖它，

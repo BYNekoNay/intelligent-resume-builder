@@ -15,6 +15,16 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 评分控制器。纯规则计算，不调用 LLM。
  *
+ * <p>小白三问：
+ * <ul>
+ *   <li><b>解决什么业务问题</b>：前端「算匹配度」「看历史评分结果」两个操作的 HTTP 入口，
+ *       只做登录检查和转发。</li>
+ *   <li><b>在链路哪里</b>：最外层；收请求 → 取登录用户 → 调 {@link ScoringService} →
+ *       包统一 {@code ApiResponse} 返回。</li>
+ *   <li><b>改坏它用户会看到什么</b>：查询端点放开 userId 过滤 → 任何人凭结果 id 能看别人的评分明细；
+ *       端点改异步/AI → 违背「评分确定性、无配额」的产品承诺。</li>
+ * </ul>
+ *
  * <p>路由：
  * <ul>
  *   <li>POST {@code /api/scoring/match} — 计算并保存</li>

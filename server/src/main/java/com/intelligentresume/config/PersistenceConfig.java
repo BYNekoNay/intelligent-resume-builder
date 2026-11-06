@@ -6,6 +6,9 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 /**
  * 启用 JPA 审计字段自动填充(created_at / updated_at)。
  *
+ * <p>【小白导览】总开关：打开后，所有实体的 createdAt/updatedAt 由框架在保存时自动填写，
+ * 业务代码不用管。改坏它（删掉这行）→ 插入数据时时间列为空，直接报 NOT NULL 错误。
+ *
  * <p>对 {@link com.intelligentresume.common.persistence.BaseEntity} 的审计字段生效。
  *
  * <p>依赖关系：{@code BaseEntity} 上的 {@code @CreatedDate}/{@code @LastModifiedDate} 没有这行注解

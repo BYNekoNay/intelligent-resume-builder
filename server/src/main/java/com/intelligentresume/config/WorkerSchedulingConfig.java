@@ -11,6 +11,11 @@ import org.springframework.scheduling.config.ScheduledTaskRegistrar;
  * 启用 {@code @Scheduled} 异步轮询(T06 工作器、T10 PDF 工作器复用)。
  * 配置 4 线程池,避免单线程调度器阻塞多个 Worker。
  *
+ * <p>【小白导览】后台定时任务的总开关与线程池：AI 任务轮询、PDF 渲染轮询、数据清理作业
+ * 都靠 {@code @Scheduled} 定时跑，Spring 默认只有 1 个线程，一个任务慢会拖住全部——
+ * 这里换成 4 线程的池。改坏它 → 后台任务全部停摆（AI 生成没人处理、清理不跑），
+ * 或池被打满导致定时任务集体延迟。
+ *
  * <p>注意：
  * <ul>
  *   <li>总开关是 {@code app.worker-scheduling.enabled}（缺省为 true）。置 false 会**同时停掉**

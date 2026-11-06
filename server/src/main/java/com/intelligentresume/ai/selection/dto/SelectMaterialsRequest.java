@@ -7,6 +7,9 @@ import java.util.List;
 /**
  * 发起选材 / 选材预览的请求体（POST /api/ai/select-materials-for-job 与其 /preview）。
  *
+ * <p>一句人话：用户点"让 AI 帮我挑资料"时提交的内容——岗位（已保存的 ID 或直接粘贴的 JD 原文）
+ * 加三类资料勾选（必须用/优先用/排除）。
+ *
  * <p>要点：
  * <ul>
  *   <li>岗位二选一：给 {@code jobDescriptionId} 用已保存的岗位；否则用 {@code jdText} 现建一条

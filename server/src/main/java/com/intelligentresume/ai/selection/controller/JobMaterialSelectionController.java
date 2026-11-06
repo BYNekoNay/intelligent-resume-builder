@@ -35,6 +35,15 @@ import java.util.List;
 /**
  * 选材 / 确认 / 生成三组「预览 + 执行」端点（全部挂在 /api/ai 下）。
  *
+ * <p>新人三问：①业务问题：这是"AI 帮用户挑资料→用户确认→AI 生成简历"整条流程的 HTTP 入口，
+ * 用户在界面上的每一步动作最终都落到本类的某个端点；②链路位置：最外层——接收请求、
+ * 鉴权（从过滤器取 userId）、调 service（确认走 {@code MaterialSelectionConfirmationService}，
+ * 选材走 {@code AiTaskService} 建任务，预览走 {@code AiPreviewService}）；③改坏它用户会看到：
+ * 接口 500、粘贴 JD 后留下孤儿岗位记录、重复点击创建多个任务、或绕过预览直接发送。
+ *
+ * <p>术语：幂等键（Idempotency-Key 请求头，客户端生成，防止网络重试导致重复创建任务）、
+ * 预览令牌（X-AI-Preview-Token，见 {@code AiPreviewGuard}）。
+ *
  * <p>要点：
  * <ul>
  *   <li>每组都是"先 /preview 拿 messages + 令牌 → 再带 {@code X-AI-Preview-Token} 提交"，

@@ -12,6 +12,9 @@ import java.util.Map;
 /**
  * 确认请求。用户逐项 ACCEPT / EDIT / REJECT 草稿条目。
  *
+ * <p>一句人话：确认页"提交"按钮的完整载荷——逐条决策（最多 200 条，不支持一键全选）、
+ * 可选的用户补充内容、可选的简历标题与目标简历。
+ *
  * @param taskUpdatedAt        乐观锁：必须与 ai_task.updated_at 一致，否则 40901
  * @param items                逐条决策列表（不允许一键全选）
  * @param additionalResumeJson 用户主动新增事实（可选，合并到 normalized JSON）

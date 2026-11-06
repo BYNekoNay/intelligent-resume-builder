@@ -16,11 +16,26 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * ATS 检查记录里 {@code result_json} 的状态迁移：ANALYZING → COMPLETED / RULES_FALLBACK。
+ * ATS 检查记录 {@code result_json} 字段的状态机管家：ANALYZING → COMPLETED / RULES_FALLBACK。
  *
- * <p>要点：
+ * <h2>① 解决什么业务问题</h2>
+ * AI 是异步跑的：检查请求先返回"分析中"，后台任务过一会儿才能把结论写回来。
+ * 这块 JSON 就是"成绩单"，谁来改、怎么改（是写成功结论还是写失败原因）必须集中在一处管，
+ * 否则并发下会互相覆盖。本类提供了三种改法：进入分析中（markAnalyzing）、
+ * 写入 AI 结论（markCompleted）、落兜底原因（markFallback）。
+ *
+ * <h2>② 在链路哪里</h2>
+ * 写方：{@link AtsAiStarter}（进入分析中/落兜底）和 ai.task 模块的 worker（写回 AI 结论）都调它。
+ * 读方：{@code AtsService.toResponse} 把这块 JSON 转成响应给前端。
+ *
+ * <h2>③ 改坏它用户会看到什么</h2>
+ * 悲观锁去掉 → AI 结论和用户重试并发时互相覆盖，界面显示"分析完成"但内容是旧的；
+ * taskId 比对去掉 → 用户重试后旧任务的迟到结果会覆盖新结果，用户看到上一轮的分析。
+ *
+ * <p>原有要点（保留）：
  * <ul>
- *   <li>所有写操作都在悲观锁内"读 → 改字段 → 写回"（{@code findOwnedForUpdate}），
+ *   <li>所有写操作都在悲观锁（数据库行锁：第一个事务改这行时，其他事务必须等）内
+ *       "读 → 改字段 → 写回"（{@code findOwnedForUpdate}），
  *       因为 {@code result_json} 是整列覆盖：不锁会丢并发写入的字段。</li>
  *   <li>{@code analysisStatus} 与 {@code analysisSource} 成对出现：ANALYZING / RULES_FALLBACK 配
  *       {@code RULES}，只有 COMPLETED 配 {@code HYBRID}。只改其中一个会让前端读到自相矛盾的状态。</li>

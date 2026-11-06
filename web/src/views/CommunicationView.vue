@@ -1,9 +1,21 @@
 <!--
-  沟通文案工作台（/communications）：两个 Tab ——「AI 生成」写求职信/邮件/开场白，「模板库」管理可复用的模板并预览套用。
-  依赖 @/api/communication（generateCommunication / generateCommunicationWithAi / 预览与保存草稿 / 模板增删改查）、@/api/ai（getTask / retryTask 轮询）、
-  useAiTaskPreview（AI 发送前预览令牌）、useResumeJobOptions（简历版本与岗位）、useToast（轻提示）。
-  状态分支：loadingMode 区分 AI / 模板 / 重试三种发起；failureKind 区分缺少同意、额度不足、一般失败；waitingInBackground 表示轮询超时后任务仍在后端。
-  易错点：AI 调用必须先拿预览令牌，用户取消则完全不发请求；同一请求沿用幂等键，避免重复计费；输出语言跟随当前 locale（en-US → EN，其余 → ZH_CN）。
+  沟通文案工作台（/communications）。帮用户在投递前后快速产出对外文案：求职信 / 跟进邮件 / 开场白。
+  两个 Tab：「AI 生成」选简历版本 + 目标岗位 + 文案类型，让 AI 写一份初稿；「模板库」管理可复用的模板（带占位符），预览套用后可直接保存为草稿。
+
+  【依赖】@/api/communication（generateCommunication / generateCommunicationWithAi / 预览与保存草稿 / 模板增删改查）、
+  @/api/ai（getTask / retryTask 轮询）、useAiTaskPreview（AI 发送前预览令牌）、
+  useResumeJobOptions（简历版本与岗位下拉）、useToast（轻提示）。
+
+  【状态分支】
+  - loadingMode 区分 AI / 模板 / 重试三种发起（按钮禁用与文案随其变化）；
+  - failureKind 区分缺少同意（40302 → 引导授权）/ 额度不足（42901 → 提示改用模板）/ 一般失败（→ 可重试）；
+  - waitingInBackground 表示轮询超时（约 5 分钟）后任务仍在后端执行，提示用户稍后刷新而不是报错。
+
+  【易错点】
+  - AI 调用必须先拿预览令牌（用户看清 prompt 才确认），用户取消则完全不发请求；
+  - 同一次生成的轮询/重试沿用同一幂等键，避免重复计费；
+  - 输出语言跟随当前 locale（en-US → EN，其余 → ZH_CN）；
+  - URL 上的 taskId 用于刷新后恢复：进入页面时按 id 查任务并续接轮询。
 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -215,6 +227,10 @@ function startPolling(taskId: number) {
 }
 
 async function generateAi() {
+  // AI 生成主流程：
+  // ①校验已选简历版本和岗位；②清空上一次结果并进入 AI 加载态；
+  // ③弹预览（用户确认即将发送的 prompt）→ 取消则到此为止（不发请求、不报错）；
+  // ④带预览令牌 + 幂等键创建 AI 任务；⑤若任务未立即完成，启动轮询等结果（写回 URL 便于刷新恢复）。
   if (!validateSelection()) return
   stopPolling()
   resetResult()
@@ -479,6 +495,9 @@ async function removeTemplate(template: CommunicationTemplateSummary) {
 }
 
 onMounted(async () => {
+  // 进入页面：①加载简历/岗位下拉；②加载模板列表；
+  // ③恢复 URL 里的 taskId（用户在 AI 任务未完成时刷新了页面）：按 id 查任务、
+  //    校验任务类型后直接接受结果或续接轮询，避免任务结果丢失。
   await load()
   void loadTemplates()
   const taskId = Number(route.query.taskId)

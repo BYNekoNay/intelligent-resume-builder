@@ -18,6 +18,14 @@ import java.util.List;
  * 解析 {@code Authorization: Bearer <jwt>},写入 {@code request.currentUserId} 与 SecurityContext。
  * 解析失败时不抛出 401,只保留无认证状态——由后续链路在需要时抛 UNAUTHENTICATED。
  *
+ * <p>【小白导览】①解决什么业务问题：每个 HTTP 请求进门时「验票」——从请求头里取出 JWT、
+ * 验真、认出这是哪个用户，然后把用户 id 挂到请求上，后面的所有代码都从挂点上取。
+ * ②在链路哪里：它是一个 servlet 过滤器，排在业务控制器之前（在限流过滤器之后、Spring Security
+ * 主链之内）；它自己不决定「要不要登录」，只负责识别身份，拒绝逻辑在 SecurityConfig。
+ * 产出是 request 属性 currentUserId——AuthController 等所有取当前用户的代码都读它。
+ * ③改坏它用户会看到什么：解析写严了，正常用户全被 401 拦住；写松了，过期/伪造令牌也能进门；
+ * 挂点属性名改了，所有接口取不到用户 id，全站 401。
+ *
  * <p>用户状态校验（#6 安全闭环）走 {@link ActiveUserCache} 短 TTL 缓存（PA-2），
  * 避免每个请求都查 user 表；删号路径在事务提交后显式清除缓存，保持「删号即失效」。
  */

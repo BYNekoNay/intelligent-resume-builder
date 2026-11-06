@@ -1,8 +1,17 @@
 <!--
-  简历导入页：上传 pdf/docx/txt，调用 @/api/resumeImport 的 parseResumeFile 解析出文本与结构化字段。
-  流程分两段：先选文件并解析（loading/error 都在这一段），解析成功后再展示可编辑的 extractedText 复核区。
-  复核确认后把文本与 normalizedResumeInput 写入 sessionStorage（键 resume-import-text / resume-import-candidates），再跳 material-generation；
-  因此下一个页面依赖这两个 sessionStorage 键，清空或改名会断链。顶部的 activeStep 只根据「是否选了文件/是否有结果」推导，不代表真实上传进度。
+  简历导入页。用户已有现成简历文件（pdf/docx/txt），上传后系统解析出文本和结构化字段，作为后续 AI 加工的原料。
+  依赖 @/api/resumeImport 的 parseResumeFile（上传文件 → 返回提取文本 + 结构化候选字段）。
+
+  【两段式流程】
+  ①选文件并解析（loading/error 都在这一段）；②解析成功后展示可编辑的 extractedText 复核区——
+  解析可能抽错字，让用户核对后再用。
+
+  【页面间交接】复核确认后把文本与 normalizedResumeInput（解析出的结构化候选）写入
+  sessionStorage（键 resume-import-text / resume-import-candidates），再跳 material-generation 继续生成；
+  下一个页面依赖这两个 sessionStorage 键，清空或改名会断链。
+
+  【易错点】重新选文件时清掉上一次解析结果（防止旧文本被当成新文件的内容继续流转）；
+  顶部步骤条的 activeStep 只根据「是否选了文件/是否有结果」推导，不代表真实上传进度。
 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'

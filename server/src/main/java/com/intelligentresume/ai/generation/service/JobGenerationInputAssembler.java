@@ -19,6 +19,15 @@ import java.util.Objects;
 /**
  * JOB_GENERATION 的 provider input 组装 —— worker 与发送前预览**共用同一实现**（R32 AC-R32-8）。
  *
+ * <p>新人三问：①业务问题：生成前用户会先"预览将要发给 AI 的内容"，而这个类保证
+ * 「预览看到的」和「worker 实际发出的」逐字节相同——同一份代码，不是两份手工同步的拷贝；
+ * ②链路位置：上承确认快照（{@code MaterialSelectionConfirmationService} 落库的那份），
+ * 下接 worker / {@code AiPreviewService}，产出 {@code _systemPrompt/_taskPrompt/_dataPrompt} 三段；
+ * ③改坏它用户会看到：预览与实际发送不一致（比没有预览更糟）、或快照半写完时被静默放行。
+ *
+ * <p>术语：快照（snapshot）= 用户确认那一刻冻结的 JSON，后续执行只读它，不再实时查库
+ * ——用户中途删资料也不会影响已经在跑的任务。
+ *
  * <p>为什么必须抽出来：{@code executeTask} 的快照分支原本在方法体内就地重建实体、拼三段式 prompt
  * 并装成 {@code _systemPrompt/_taskPrompt/_dataPrompt}。预览如果自己再拼一遍，
  * 两份实现必然漂移，用户看到的和实际发出去的就会悄悄不一样 —— 这比没有预览更糟。

@@ -27,14 +27,32 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * ATS 体检门面：规则评分（本地、必出结果）+ 可选 AI 深度分析（异步、由 {@link AtsAiStarter} 负责）。
+ * ATS 体检的门面服务：用户点「检查这份简历和这个岗位匹配不匹配」后，所有业务逻辑从这里开始。
  *
- * <p>要点：
+ * <h2>① 解决什么业务问题</h2>
+ * 求职者想知道自己的简历能不能通过企业 ATS（ATS = Applicant Tracking System，
+ * 招聘软件的机器初筛：先按关键词和结构把简历"读"一遍，读不出来就直接被筛掉）。
+ * 本类给出两块答案：规则评分（本地代码算，必出结果：结构完整性 + 关键词/技能/经验覆盖）
+ * 和可选的 AI 深度分析（异步跑，分析了什么见 {@link AtsAiStarter}）。分数存进数据库，
+ * 用户可以随时回来看某次检查的结论。
+ *
+ * <h2>② 在链路哪里</h2>
+ * 被 {@link AtsController} 调用（HTTP /api/ats 下各个端点的直接后端）；
+ * 它调用 {@code ScoringService} 算分、{@link AtsAiStarter} 启动 AI 任务、
+ * {@link AtsResultStateService} 维护结果状态；产出写进 {@code ats_check_result} 表，
+ * 最终以 {@link AtsCheckResponse} 返回给前端展示。
+ *
+ * <h2>③ 改坏它用户会看到什么</h2>
+ * 幂等逻辑被删 → 用户狂点按钮会生成一堆重复检查记录；归属校验漏掉 → 用户能看/查别人的检查结果；
+ * 结构分规则改错 → 首页总分失真；兜底字段没默认值 → AI 没跑成时前端整个面板渲染不出来。
+ *
+ * <p>原有要点（保留）：
  * <ul>
  *   <li><b>规则结果永远先算先落库</b>：结构分由本类 {@code structureScore} 的四段固定规则给出（每段 25 分），
  *       关键词/技能/经验覆盖来自 {@code ScoringService}；AI 是否可用、是否成功都不影响这条记录存在，
  *       AI 失败只把状态改成 {@code RULES_FALLBACK}（见 {@code AtsResultStateService}）。</li>
- *   <li>幂等三元组是 (userId, Idempotency-Key, requestFingerprint)：同键同指纹返回既有记录，
+ *   <li>幂等三元组是 (userId, Idempotency-Key, requestFingerprint)（幂等键 = 客户端给每次请求带的唯一编号，
+ *       网络重试时服务端靠它认出"这是同一个请求"，只算一次）：同键同指纹返回既有记录，
  *       同键不同指纹 409；并发下靠数据库唯一键兜底，捕获 {@code DataIntegrityViolationException}
  *       后重新查赢家 —— 别把这段当成"多余的 try/catch"删掉。</li>
  *   <li>带 {@code useAi} 但不带预览令牌时<b>不启动 AI</b>，落 {@code PREVIEW_REQUIRED} 兜底；
@@ -78,8 +96,17 @@ public class AtsService {
     }
 
     /**
-     * 发起一次 ATS 检查。顺序不能换：幂等预检 → 归属校验 → 评分 → 组装 result_json → 落库
-     * → （可选）启动 AI → 回读。
+     * 发起一次 ATS 检查。步骤：
+     * ① 算幂等键的"内容指纹"并查重 —— 同键同内容直接返回旧结果（网络重试不重复计费/计分），
+     *    同键不同内容说明客户端复用了 key，拒绝；顺序不能换，否则重复请求会各自算一遍再撞库。
+     * ② 校验简历版本和岗位都是当前用户自己的（他人的 404、已归档的 409）——
+     *    先校验再算分，避免替别人做无用功。
+     * ③ 调 {@code ScoringService} 算规则分，并加上本地结构分（四段 × 25），
+     *    组装成 checks / passedChecks / risks / keywordGap 等展示结构。
+     * ④ 落库 —— 必须在启动 AI 之前：AI 结果要写回这条记录，记录不存在就没地方写；
+     *    并发撞唯一键时重新读出赢家，而不是把数据库报错漏给用户。
+     * ⑤ 若用户要 AI，则交给 {@link AtsAiStarter} 启动（所有失败都只落兜底，不影响已入库的规则分）。
+     * ⑥ 回读最终状态返回（AI 可能是 ANALYZING，前端拿 aiTaskId 去轮询）。
      *
      * <p>{@code persisted} 里先写入一份"规则态"的完整结构（aiTaskId / aiInsights / fallback 全为 null），
      * 之后 AI 的每一步都用 {@code AtsResultStateService} 在这个 JSON 上原地改字段 ——
@@ -129,6 +156,7 @@ public class AtsService {
         // 用户看不出「哪些是直接命中、哪些只是同义词命中、各自差多少」，也就无法决定先补哪个。
         persisted.put("keywordGap", keywordGap(match));
         persisted.put("disclaimer", DISCLAIMER);
+        // 初始状态：要 AI 就先标"规则兜底"（等 AI 任务结果回写），不要 AI 就是纯规则
         persisted.put("analysisStatus", request.shouldUseAi()
                 ? AtsAnalysisStatus.RULES_FALLBACK.name() : AtsAnalysisStatus.RULES_ONLY.name());
         persisted.put("analysisSource", AtsAnalysisSource.RULES.name());
@@ -218,6 +246,8 @@ public class AtsService {
             // 已归档的版本资源本身存在,与"不存在"(404)区分:归档是可逆状态,用 409 提示先恢复
             throw new BusinessException(ErrorCode.VERSION_ARCHIVED, "该简历版本已归档，请先恢复后再发起检查");
         }
+        // 再查一遍"这份版本所属的简历是不是当前用户的"——版本表本身没有 userId 字段，
+        // 归属校验只能通过它挂着的简历来确认，防止用户拿别人的版本 ID 来检查
         if (resumeRepository.findByIdAndUserId(version.getResumeId(), userId).isEmpty()) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "简历版本不存在");
         }
@@ -277,6 +307,12 @@ public class AtsService {
         return score.compareTo(BigDecimal.valueOf(threshold)) >= 0;
     }
 
+    /**
+     * 结构分：检查简历四大块"机器能不能读到"，每块 25 分、满分 100。
+     * 四块分别是：①basics.name 姓名；②work 工作经历；③skills 技能；
+     * ④education 教育或 projects 项目（二者有其一即可）——
+     * 这是最朴素的"ATS 能不能解析出简历骨架"检查，不看内容质量，只看结构在不在。
+     */
     private int structureScore(Map<String, Object> resume) {
         if (resume == null) return 0;
         int score = 0;

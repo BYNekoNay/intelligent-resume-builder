@@ -25,9 +25,20 @@ import java.util.List;
 /**
  * AI 任务服务 —— 任务的创建(含同意校验、配额、幂等)与读取。
  *
- * <p>不负责执行:任务落库后由 {@code DatabaseTaskWorker} 异步领取。
+ * <p>【业务问题】用户点"开始生成"后不能干等 AI 跑几分钟，所以这里把请求变成一条
+ * PENDING 任务并立刻返回 taskId，前端拿着 taskId 轮询进度。创建前要拦住四类不该发出去的请求：
+ * 没授权的、超配额的、重复提交的、内容被改过的。</p>
  *
- * <p>要点 / 红线:
+ * <p>【链路位置】前端 → {@code AiTaskController} → 本类 → {@code AiConsentService}(查授权)、
+ * {@code AiQuotaService}(查配额)、{@code IdempotencyService}(算指纹) → 落库 {@code ai_task} 表。
+ * 执行不归它管：任务落库后由 {@code DatabaseTaskWorker} 异步领取。
+ * {@code get} 是前端轮询的读取口；{@code retry} 是失败任务的用户手动重试入口。</p>
+ *
+ * <p>【改坏它会怎样】步骤顺序被打乱会导致：被拒请求也扣配额、重复提交创建重复任务、
+ * 越权读到别人的任务；错误文案不类别化会把模型内部报错原文暴露给前端；
+ * 刻意不加外层事务这一点若被"顺手修好"，并发同键创建反而会出问题。</p>
+ *
+ * <p>要点 / 红线:</p>
  * <ul>
  *   <li>创建流程的步骤顺序是语义的一部分,不能随意调换:同意 → 指纹 → 幂等重放判定 →
  *       调用方守卫(previewToken) → 配额 → 落库。被拒的请求既不消耗配额,也不产生 ai_task 行。</li>
@@ -64,19 +75,25 @@ public class AiTaskService {
     }
 
     /**
-     * 创建 AI 任务。
+     * 创建 AI 任务（幂等键 = 客户端带来的 {@code Idempotency-Key} 请求头，用来标记"这是同一次提交"）。
      *
      * <ol>
-     *   <li>校验 AI 同意</li>
-     *   <li>校验配额</li>
-     *   <li>计算请求指纹</li>
-     *   <li>幂等性检查:相同 idempotencyKey + 相同指纹 → 返回已有任务;不同指纹 → CONFLICT</li>
-     *   <li>创建 PENDING 任务;并发同键竞态撞唯一键时回读赢家(幂等语义)</li>
+     *   <li>校验 AI 同意 —— 用户没点过授权，资料一个字都不能发给模型；</li>
+     *   <li>计算请求指纹 —— 把输入快照压成一个短哈希，作为"内容有没有变"的判据；</li>
+     *   <li>幂等性检查 —— 相同幂等键 + 相同指纹 = 网络重试，直接返回已有任务不重复创建；
+     *       相同键 + 不同指纹 = 客户端偷偷改了内容，抛 CONFLICT。这一步必须在校验配额之前：
+     *       重放不新增消耗，不该因配额刚用完而被拒；</li>
+     *   <li>执行调用方守卫（如预览令牌校验）—— 只对"真正要新建"的请求生效，被拒不留任务行；</li>
+     *   <li>校验配额 —— 今天这类任务的额度用完了就拒绝（真正的消耗体现在任务行的尝试数上）；</li>
+     *   <li>创建 PENDING 任务；两个并发请求同键撞唯一键时，回读先落库的赢家并按幂等语义响应。</li>
      * </ol>
+     *
+     * <p>为什么顺序不能换：同意、指纹、幂等判定都必须在任何消耗之前；守卫必须在写入之前
+     * 才能保证"拒绝不留任务行"；配额最后查，才能让重放请求绕过额度不足的误拒。</p>
      *
      * <p>刻意不加外层事务：并发同键创建的唯一键冲突会污染当前持久化上下文，
      * 而幂等回读必须基于干净会话；本流程只有一次写入（saveAndFlush），
-     * 各步骤各自事务即可保证一致。
+     * 各步骤各自事务即可保证一致。</p>
      */
     public AiTaskStatusResponse create(CreateAiTaskRequest req, String idempotencyKey, Long userId) {
         return create(req, idempotencyKey, userId, () -> { });
@@ -157,9 +174,9 @@ public class AiTaskService {
     }
 
     /**
-     * 查询任务状态。
+     * 查询任务状态 —— 前端轮询（每隔一两秒调一次 GET，直到状态变成 SUCCESS/FAILED）的入口。
      *
-     * <p>返回的 errorMessage 已经过类别化处理,与库里的原文不是同一份(原文仍在库与日志里)。
+     * <p>返回的 errorMessage 已经过类别化处理,与库里的原文不是同一份(原文仍在库与日志里)。</p>
      */
     @Transactional(readOnly = true)
     public AiTaskStatusResponse get(Long id, Long userId) {
@@ -260,10 +277,10 @@ public class AiTaskService {
      * 用户手动重试失败任务:把它退回 PENDING 交给工作器重新领取。
      *
      * <p>注意 {@code retryCount} **不会被清零**,所以它同时限制着"用户还能点几次"
-     * ({@code maxRetries})和工作器的"崩溃循环收口"({@code maxAttempts})。
+     * ({@code maxRetries})和工作器的"崩溃循环收口"({@code maxAttempts})。</p>
      *
      * <p>重试前要重新过同意与配额:用户可能在此期间撤回了授权,或当日额度已用完;
-     * 这与 R33"不自动重试"是配套的 —— 消耗必须由人明确发起。
+     * 这与 R33"不自动重试"是配套的 —— 消耗必须由人明确发起。</p>
      */
     @Transactional
     public AiTaskStatusResponse retry(Long taskId, Long userId) {

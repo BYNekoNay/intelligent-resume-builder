@@ -3,6 +3,9 @@ package com.intelligentresume.ai.generation.dto;
 /**
  * 被选中的资料条目。outputPath 示例: "work[0].highlights[2]"。
  *
+ * <p>一句人话：记录"草稿的哪个位置用了哪条资料"，是确认页展示来源、
+ * 以及资料留存清扫判断"还有人用"的依据。
+ *
  * <p>要点：
  * <ul>
  *   <li>{@code outputPath} 是草稿中的真实位置，由 {@code collectSources} 递归拼接（数组带下标）。</li>

@@ -5,6 +5,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * 桌面本地工作区的开关与路径（ADR-012 D1-D3）。
  *
+ * <p>【小白导览】两个配置项：是否进入桌面模式（免登录+本机数据目录）、数据放在哪个文件夹。
+ * 改坏它 → 误开桌面模式会把在线版变成「无登录直接用」的形态。
+ *
  * <p>默认全部关闭：在线版与 CI 不受任何影响，只有 {@code --spring.profiles.active=desktop}
  * 时 {@code enabled} 才为 true。
  */
