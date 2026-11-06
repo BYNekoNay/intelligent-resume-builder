@@ -483,6 +483,7 @@ const enUS: MessageTree = {
         applying: 'Writing…',
         applyFailed: 'Applying failed; the workspace was not modified.',
         result: 'Import finished: {inserted} inserted, {updated} updated, {skipped} skipped, {keptLocal} kept local.',
+        skippedAfterConflict: '{count} record(s) previewed as conflicts were skipped at apply time because local content already matched; your resolution was not applied: {items}',
       },
     },
     home: {

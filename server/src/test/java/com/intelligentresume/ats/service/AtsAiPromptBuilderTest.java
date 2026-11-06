@@ -52,6 +52,24 @@ class AtsAiPromptBuilderTest {
     }
 
     @Test
+    void masksContactDetailsEmbeddedInFreeTextValues() {
+        AtsAiPromptBuilder builder = new AtsAiPromptBuilder(new ObjectMapper(), "v1.0.0", "v1.0.0");
+
+        Map<String, Object> sanitized = builder.sanitizeInput(Map.of(
+                "jdText", "联系我：13800138000 或 alice@example.com，证件号 11010119900307867X，主页 https://example.com/me"));
+
+        String text = String.valueOf(sanitized);
+        assertFalse(text.contains("13800138000"));
+        assertFalse(text.contains("alice@example.com"));
+        assertFalse(text.contains("11010119900307867X"));
+        assertFalse(text.contains("https://example.com/me"));
+        assertTrue(text.contains("[PHONE]"));
+        assertTrue(text.contains("[EMAIL]"));
+        assertTrue(text.contains("[ID]"));
+        assertTrue(text.contains("[URL]"));
+    }
+
+    @Test
     void repairPromptKeepsInvalidOutputUntrustedButUsesValidationErrorAsTrustedInstruction() {
         AtsAiPromptBuilder builder = new AtsAiPromptBuilder(new ObjectMapper(), "v1.0.0", "v1.0.0");
 

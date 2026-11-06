@@ -48,6 +48,35 @@ class AtsAiAnalysisServiceTest {
     }
 
     @Test
+    void classifiesTimeoutsFromStructuredAttemptCategory_evenWithoutKeywordInMessage() {
+        // #67：真实 provider 超时路径（BailianAiProvider 捕获 ResourceAccessException）返回的
+        // errorMessage 是「百炼 API 网络异常」——文案不含 timeout/超时；结构化信号在
+        // modelAttempts 的 failureCategory（AiFailureCategory.TIMEOUT.name()）里。
+        // 判定必须优先用结构化类别，文案匹配只作兜底。
+        when(provider.call(any())).thenReturn(
+                AiCallResult.fail("百炼 API 网络异常", true, "req-net")
+                        .withAttempts(List.of(new AiCallResult.ModelAttempt("qwen-max", "TIMEOUT", "百炼 API 网络异常"))));
+
+        AtsAiAnalysisException error = assertThrows(AtsAiAnalysisException.class,
+                () -> service.analyze(task()));
+
+        assertEquals(AtsFallbackCode.PROVIDER_TIMEOUT, error.fallbackCode());
+        assertTrue(error.retryable());
+    }
+
+    @Test
+    void stillFallsBackToMessageMatchingWhenAttemptsCarryNoCategory() {
+        // #67：无 attempts（如单次失败路径）时文案匹配兜底仍生效，超时路径仍落 PROVIDER_TIMEOUT。
+        when(provider.call(any())).thenReturn(AiCallResult.fail("百炼 API 网络异常", true, "req-no-attempts"));
+
+        AtsAiAnalysisException error = assertThrows(AtsAiAnalysisException.class,
+                () -> service.analyze(task()));
+
+        // 无结构化信号、文案也不含 timeout 关键词 → 只能落 PROVIDER_ERROR（文档化现状）
+        assertEquals(AtsFallbackCode.PROVIDER_ERROR, error.fallbackCode());
+    }
+
+    @Test
     void classifiesProviderServerErrors() {
         when(provider.call(any())).thenReturn(AiCallResult.fail("Provider returned HTTP 503", true, "req-503"));
 

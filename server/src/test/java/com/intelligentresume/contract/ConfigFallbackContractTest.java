@@ -36,6 +36,21 @@ class ConfigFallbackContractTest {
     private static final Pattern VALUE_ANNOTATION =
             Pattern.compile("@Value\\(\"\\$\\{([^:}]+):([^}]*)\\}\"\\)");
 
+    /**
+     * 匹配编译期常量拼接形式：{@code @Value("${key:" + RuleVersion.CURRENT + "}")}（#78）。
+     * 常量真源写法（如规则版本号）合法且推荐，门禁须解析常量字面值而非把它当字符串兜底。
+     */
+    private static final Pattern VALUE_CONSTANT_ANNOTATION =
+            Pattern.compile("@Value\\(\"\\$\\{([^:}]+):\"\\s*\\+\\s*([A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)?)\\s*\\+\\s*\"\\}\"\\)");
+
+    /** 类/接口/记录/枚举的简单名（常量引用按「简单名.字段」或「字段」反查）。 */
+    private static final Pattern TYPE_NAME =
+            Pattern.compile("\\b(?:class|interface|record|enum)\\s+([A-Za-z0-9_]+)");
+
+    /** {@code static final String NAME = "..."} 字面量声明。 */
+    private static final Pattern STRING_CONSTANT =
+            Pattern.compile("static\\s+final\\s+String\\s+([A-Za-z0-9_]+)\\s*=\\s*\"([^\"]*)\"");
+
     /** yml 中的 {@code ${ENV:default}} 占位形式。 */
     private static final Pattern ENV_PLACEHOLDER = Pattern.compile("^\\$\\{[^:}]+:(.*)\\}$");
 
@@ -43,6 +58,7 @@ class ConfigFallbackContractTest {
     @DisplayName("代码 @Value 兜底与 application.yml 默认值逐项一致")
     void codeFallbacksMatchYamlDefaults() throws Exception {
         Map<String, Object> yaml = loadYaml("server/src/main/resources/application.yml");
+        Map<String, String> constants = stringConstants(javaSources("server/src/main/java"));
 
         List<String> mismatches = new ArrayList<>();
         int compared = 0;
@@ -51,9 +67,11 @@ class ConfigFallbackContractTest {
             String source = SourceText.read(file);
             Matcher matcher = VALUE_ANNOTATION.matcher(source);
             while (matcher.find()) {
-                total++;
                 String key = matcher.group(1);
                 String fallback = matcher.group(2);
+                // fallback 里出现引号 = 常量拼接形式被贪婪误捕，交由 VALUE_CONSTANT_ANNOTATION 处理
+                if (fallback.contains("\"")) continue;
+                total++;
                 Object yamlValue = resolve(yaml, key);
                 if (yamlValue == null) continue;
                 String yamlDefault = scalarDefault(yamlValue);
@@ -61,6 +79,23 @@ class ConfigFallbackContractTest {
                 compared++;
                 if (!normalize(fallback).equals(normalize(yamlDefault))) {
                     mismatches.add("  " + key + " → 代码兜底 [" + fallback + "] vs yml 默认 [" + yamlDefault + "]");
+                }
+            }
+            // 常量拼接形式：兜底是编译期常量的字面值，解析不到真源即视为漂移风险
+            Matcher constantMatcher = VALUE_CONSTANT_ANNOTATION.matcher(source);
+            while (constantMatcher.find()) {
+                total++;
+                String key = constantMatcher.group(1);
+                String constantRef = constantMatcher.group(2);
+                String fallback = constants.get(constantRef);
+                Object yamlValue = resolve(yaml, key);
+                if (yamlValue == null) continue;
+                String yamlDefault = scalarDefault(yamlValue);
+                if (yamlDefault == null) continue;
+                compared++;
+                if (fallback == null || !normalize(fallback).equals(normalize(yamlDefault))) {
+                    mismatches.add("  " + key + " → 代码兜底 [" + (fallback == null
+                            ? constantRef + "（常量真源解析失败）" : fallback) + "] vs yml 默认 [" + yamlDefault + "]");
                 }
             }
         }
@@ -122,6 +157,29 @@ class ConfigFallbackContractTest {
                 "以下 @ConfigurationProperties 字段默认值与 application.yml 不一致：该键在 yml 存在时以 yml 为准，"
                         + "仅当 yml 缺键时才用字段默认值 —— 两处不一致即「配置缺省时静默采用另一个值」的陷阱：\n"
                         + String.join("\n", mismatches));
+    }
+
+    /** 收集全库 {@code static final String} 常量字面值：键为「类简单名.字段」与「字段」两种形态。 */
+    private Map<String, String> stringConstants(List<Path> sources) {
+        Map<String, String> constants = new LinkedHashMap<>();
+        for (Path file : sources) {
+            String source;
+            try {
+                source = SourceText.read(file);
+            } catch (Exception e) {
+                continue;
+            }
+            Matcher typeMatcher = TYPE_NAME.matcher(source);
+            String typeName = typeMatcher.find() ? typeMatcher.group(1) : "";
+            Matcher matcher = STRING_CONSTANT.matcher(source);
+            while (matcher.find()) {
+                String field = matcher.group(1);
+                String value = matcher.group(2);
+                if (!typeName.isBlank()) constants.putIfAbsent(typeName + "." + field, value);
+                constants.putIfAbsent(field, value);
+            }
+        }
+        return constants;
     }
 
     /** camelCase → kebab-case（字段名反推配置键）。 */

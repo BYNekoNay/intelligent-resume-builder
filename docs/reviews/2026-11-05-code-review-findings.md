@@ -174,7 +174,21 @@
 
 ## 修复批次记录
 
-### R1（2026-11-06，已完成，提交含本清单更新）
+### R2（2026-11-06，已完成，提交含本清单更新）
+
+| 项 | 结果 |
+| --- | --- |
+| #1 ATS 脱敏缺打码 | ✅ `AtsAiPromptBuilder` 补值级打码（EMAIL/PHONE/URL/ID 四正则，与素材侧逐字对齐；刻意不引入国际号码/地址标签规则并注明理由），先红后绿；**三处收敛为单一工具类未做**，收敛设计留在评审记录待下批决策 |
+| #59 选材上限双源 | ✅ 确认侧改读 `app.ai.generation.max-selected-materials` 同一配置键，删除 `MAX_FINAL_MATERIALS` 常量，两处语义绑定；测试用非默认值证明跟随 |
+| #78 规则版本双源 | ✅ `@Value("${...:" + RuleVersion.CURRENT + "}")` 编译期常量拼接，代码常量为唯一真源；**顺带增强 `ConfigFallbackContractTest` 门禁**：正则解析常量拼接形式、校验常量真源（坏样本验证会红） |
+| #67 超时判定靠文案 | ✅ 结构化优先（异常类型/错误码判定），文案匹配降级为兜底 |
+| #77 桌面导入 SKIP 静默忽略 | ✅ 保守修法（SKIP 语义不变）：apply 响应带 `SkippedAfterConflict` 清单（table/stableId/原因），前端结果摘要展示提示；独立 IT 覆盖，避开行数棘轮 |
+| #80 轮询三套节奏 | ✅ 新建 `web/src/utils/aiPolling.ts` 单一节奏源（退避表 + 稳态 5s），三处引用；**`useTaskPolling` 刻意不收敛**（组件内通用轮询，视图按场景传自定义 intervalMs） |
+
+- 回归：mvn test **1229 项 0 失败**（+6：MaterialSelectionConfirmationServiceTest/AtsAiPromptBuilderTest/AtsAiAnalysisServiceTest/DesktopImportServiceIT 等）；前端 build + 全门禁 + vitest 通过。
+- 执行备注：#1 路执行体中途因模型提供方 500 挂掉，**挂前产出已基本完整**（打码逻辑+测试+取舍注释），主控验证后纳入；收敛设计建议缺失，已在上述表格补记。
+
+### R1（2026-11-06，已完成）
 
 | 项 | 结果 |
 | --- | --- |

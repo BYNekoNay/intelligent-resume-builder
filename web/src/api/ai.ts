@@ -19,6 +19,7 @@
  * （超时抛 AiTaskTimeoutError，表示任务仍在后台而非失败）。
  */
 import { http } from './client'
+import { aiTaskPollDelayMs } from '@/utils/aiPolling'
 
 export interface ConsentRequest {
   policyVersion: string
@@ -283,13 +284,13 @@ export class AiTaskTimeoutError extends Error {
   }
 }
 
-/** 默认 300 次 × 2s ≈ 10 分钟，与 useTaskPolling 的轮询窗口及后端链路预算（600s）对齐 */
+/** 默认 300 次，与 useTaskPolling 的轮询窗口及后端链路预算（600s）对齐；
+ *  实际节奏走 utils/aiPolling 的主退避（#80），稳态 5s 时 300 次只是窗口上界。 */
 export const AI_TASK_POLL_ATTEMPTS = 300
-const AI_TASK_POLL_INTERVAL_MS = 2000
 
 export async function waitForAiTaskResult<T>(taskId: number, maxAttempts: number = AI_TASK_POLL_ATTEMPTS): Promise<T> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await new Promise((resolve) => window.setTimeout(resolve, AI_TASK_POLL_INTERVAL_MS))
+    await new Promise((resolve) => window.setTimeout(resolve, aiTaskPollDelayMs(attempt)))
     const task = await getTask(taskId)
     if (task.status === 'SUCCESS' && task.resultJson) return task.resultJson as unknown as T
     if (task.status === 'FAILED' || task.status === 'CANCELLED') {

@@ -29,6 +29,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -55,13 +56,18 @@ class MaterialSelectionConfirmationServiceTest {
     private final AiPreviewGuard previewGuard = mock(AiPreviewGuard.class);
     private com.intelligentresume.ai.generation.service.JobGenerationInputAssembler inputAssembler;
     private MaterialSelectionConfirmationService service;
+    private MaterialSelectionConfirmationService configuredService;
     private AiTask selection;
 
     @BeforeEach
     void setUp() {
         inputAssembler = new com.intelligentresume.ai.generation.service.JobGenerationInputAssembler(
                 promptBuilder, "v1.0.0");
-        service = new MaterialSelectionConfirmationService(taskRepository, materialRepository,
+        service = new MaterialSelectionConfirmationService(30, taskRepository, materialRepository,
+                jobRepository, profileRepository, new IdempotencyService(), consentService, quotaService,
+                inputAssembler, previewGuard);
+        // #59：非默认上限的实例，用于证明确认侧上限跟随配置键
+        configuredService = new MaterialSelectionConfirmationService(2, taskRepository, materialRepository,
                 jobRepository, profileRepository, new IdempotencyService(), consentService, quotaService,
                 inputAssembler, previewGuard);
         when(promptBuilder.build(any(), anyList(), anyList(), anyList(), any(Map.class), anyString()))
@@ -201,6 +207,42 @@ class MaterialSelectionConfirmationServiceTest {
         org.junit.jupiter.api.Assertions.assertSame(first, replay);
         verify(previewGuard, never()).require(any(), any(), any());
         verify(quotaService, org.mockito.Mockito.times(1)).check(7L, AiTaskType.JOB_GENERATION);
+    }
+
+    @Test
+    void confirmsUpToTheConfiguredLimit() {
+        selection.setResultJson(Map.of(
+                "recommended", List.of(Map.of("materialId", 1L)),
+                "unselected", List.of(),
+                "excluded", List.of()));
+        doAnswer(invocation -> invocation.getArgument(0)).when(taskRepository).save(any(AiTask.class));
+        ConfirmMaterialsRequest request = new ConfirmMaterialsRequest(
+                selection.getUpdatedAt(), List.of(1L), List.of(), "岗位简历");
+        AiTask generation = configuredService.confirm(10L, request, "confirm-limit-under", "token-1", 7L);
+        assertEquals(AiTaskStatus.PENDING, generation.getStatus());
+    }
+
+    @Test
+    void rejectsBeyondTheConfiguredLimit_notTheHardcoded30() {
+        // #59：上限必须来自 app.ai.generation.max-selected-materials（此处实例化为 2），
+        // 而不是旧实现里硬编码的 30 —— 改配置后确认侧必须同步收紧，否则
+        // "选材放行、确认拒绝" 的双源分叉再次出现。
+        selection.setResultJson(Map.of(
+                "recommended", List.of(
+                        Map.of("materialId", 1L),
+                        Map.of("materialId", 2L),
+                        Map.of("materialId", 3L)),
+                "unselected", List.of(),
+                "excluded", List.of()));
+        ConfirmMaterialsRequest request = new ConfirmMaterialsRequest(
+                selection.getUpdatedAt(), List.of(1L, 2L, 3L), List.of(), "岗位简历");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> configuredService.confirm(10L, request, "confirm-limit-over", "token-1", 7L));
+
+        assertEquals(ErrorCode.VALIDATION, ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("Select between 1 and 2 materials"));
+        verify(taskRepository, never()).save(any());
     }
 
     private CareerMaterial material(Long id, UsagePreference preference) {

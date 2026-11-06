@@ -16,6 +16,7 @@ import com.intelligentresume.common.error.ErrorCode;
 import com.intelligentresume.jobdescription.domain.JobDescription;
 import com.intelligentresume.jobdescription.repository.JobDescriptionRepository;
 import com.intelligentresume.personalprofile.repository.PersonalProfileRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,15 +48,16 @@ import java.util.stream.Collectors;
  *       "选材已确认但永远生成不了"的死锁。</li>
  *   <li>并发保护靠 {@code findByIdForUpdate} 悲观锁 + {@code taskUpdatedAt} 乐观比对，
  *       两者缺一都会被并发确认穿透。</li>
- *   <li>{@link #MAX_FINAL_MATERIALS} 是硬编码 30，而 {@code MaterialSelector} 的上限来自配置
- *       {@code app.ai.generation.max-selected-materials}；改配置而不改这里会出现"选材放过、
- *       生成阶段裁剪"的不一致。</li>
+ *   <li>确认侧的上限与 {@code MaterialSelector} 的上限来自同一配置键
+ *       {@code app.ai.generation.max-selected-materials}（#59）：两处语义绑定，
+ *       改配置不会出现"选材放过、确认拒绝"的分叉。</li>
  * </ul>
  */
 @Service
 public class MaterialSelectionConfirmationService {
 
-    private static final int MAX_FINAL_MATERIALS = 30;
+    /** #59：与 {@code MaterialSelector} 共用同一配置键，两处上限语义绑定，不再独立硬编码。 */
+    private final int maxFinalMaterials;
     private final AiTaskRepository taskRepository;
     private final CareerMaterialRepository materialRepository;
     private final JobDescriptionRepository jobRepository;
@@ -66,7 +68,9 @@ public class MaterialSelectionConfirmationService {
     private final JobGenerationInputAssembler inputAssembler;
     private final AiPreviewGuard previewGuard;
 
-    public MaterialSelectionConfirmationService(AiTaskRepository taskRepository,
+    public MaterialSelectionConfirmationService(
+                                                @Value("${app.ai.generation.max-selected-materials:30}") int maxFinalMaterials,
+                                                AiTaskRepository taskRepository,
                                                 CareerMaterialRepository materialRepository,
                                                 JobDescriptionRepository jobRepository,
                                                 PersonalProfileRepository profileRepository,
@@ -75,6 +79,7 @@ public class MaterialSelectionConfirmationService {
                                                 AiQuotaService quotaService,
                                                 JobGenerationInputAssembler inputAssembler,
                                                 AiPreviewGuard previewGuard) {
+        this.maxFinalMaterials = maxFinalMaterials;
         this.taskRepository = taskRepository;
         this.materialRepository = materialRepository;
         this.jobRepository = jobRepository;
@@ -230,12 +235,13 @@ public class MaterialSelectionConfirmationService {
                 ? new LinkedHashSet<>() : new LinkedHashSet<>(request.forcedIncludedMaterialIds());
     }
 
-    /** 常规勾选 ∪ 强制加入，1..30 条。 */
+    /** 常规勾选 ∪ 强制加入，1..maxFinalMaterials 条（上限取配置键）。 */
     private LinkedHashSet<Long> resolvedSelection(ConfirmMaterialsRequest request) {
         LinkedHashSet<Long> selectedIds = new LinkedHashSet<>(requestedIds(request));
         selectedIds.addAll(forcedIds(request));
-        if (selectedIds.isEmpty() || selectedIds.size() > MAX_FINAL_MATERIALS) {
-            throw new BusinessException(ErrorCode.VALIDATION, "Select between 1 and 30 materials");
+        if (selectedIds.isEmpty() || selectedIds.size() > maxFinalMaterials) {
+            throw new BusinessException(ErrorCode.VALIDATION,
+                    "Select between 1 and " + maxFinalMaterials + " materials");
         }
         return selectedIds;
     }

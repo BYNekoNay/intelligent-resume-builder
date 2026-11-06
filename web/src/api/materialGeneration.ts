@@ -6,6 +6,7 @@
  */
 import { http } from './client'
 import { AI_TASK_POLL_ATTEMPTS, AiTaskTimeoutError } from './ai'
+import { aiTaskPollDelayMs } from '@/utils/aiPolling'
 import { AI_CONTEXT_SECTION_KEYS } from '@/resume/sectionRegistry'
 
 export interface MaterialGenerationResponse {
@@ -83,7 +84,8 @@ async function createMaterialTask(input: Record<string, unknown>, idempotencyKey
 
 async function waitForTask(taskId: number, maxAttempts: number = AI_TASK_POLL_ATTEMPTS) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await delay(attempt < 3 ? [1000, 2000, 4000][attempt] : 2000)
+    // 节奏收敛到 utils/aiPolling 的主退避（#80）：1s/2s/4s/5s 后恒 5s，原为 1s/2s/4s 后恒 2s
+    await delay(aiTaskPollDelayMs(attempt))
     const task = await http.get<{
       id: number; status: string; resultJson: Record<string, unknown>; errorMessage: string | null
     }>(`/api/ai/tasks/${taskId}`)

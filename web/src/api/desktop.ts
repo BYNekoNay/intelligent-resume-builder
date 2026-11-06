@@ -54,12 +54,30 @@ export interface DesktopImportPreview {
   items: DesktopPreviewItem[]
 }
 
+/**
+ * 一条「预览时判为 CONFLICT、apply 时被 SKIP」的记录（#77）。
+ * apply 会重新 plan：预览到写入之间本地内容可能已一致，用户给的 resolution 被后端
+ * SKIP 分支忽略 —— 后端在这里点名，避免静默吞掉用户的决定。
+ */
+export interface DesktopSkippedAfterConflict {
+  /** 稳定 ID（与 resolutions 的键同口径）。 */
+  stableId: string
+  /** 集合路径：`jobDescriptions` / `resumes.versions` 等。 */
+  collection: string
+  /** 本地表名（与 desktop_import_map.entity_type 同口径）。 */
+  entityType: string
+  /** 跳过原因（来自 apply 时重新 plan 的判定）。 */
+  reason: string
+}
+
 export interface DesktopImportResult {
   inserted: number
   updated: number
   skipped: number
   keptLocal: number
   insertedStableIds: string[]
+  /** 用户给过 resolution、但 apply 时被 SKIP 的冲突记录（#77）；未发生时为空数组。 */
+  skippedAfterConflict: DesktopSkippedAfterConflict[]
 }
 
 /** 备份与恢复是同步长请求（恢复要「校验 + 安全备份 + 应用」三遍），全局 10s 超时会误判失败。 */

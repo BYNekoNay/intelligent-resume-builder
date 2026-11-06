@@ -116,16 +116,40 @@ public class DesktopImportService {
     }
 
     /**
+     * 一条「预览时判为冲突、apply 时却被跳过」的记录（#77）。
+     *
+     * <p>apply 会重新 plan：预览到写入之间本地库可能变化，一条预览时 CONFLICT 的记录
+     * 到 apply 时可能因本地内容已一致而判 SKIP —— 用户给出的 resolution 会被 SKIP 分支
+     * 忽略。这份清单把这件事点名出来，让调用方与用户至少能看到发生了什么，
+     * 而不是静默吞掉用户的决定。
+     *
+     * @param stableId 记录的稳定 ID（与 resolutions 的键同口径）
+     * @param collection 集合路径：{@code jobDescriptions} / {@code resumes.versions} 等
+     * @param entityType 本地表名（与 desktop_import_map.entity_type 同口径）
+     * @param reason 跳过原因（来自 apply 时重新 plan 的判定）
+     */
+    public record SkippedAfterConflict(String stableId,
+                                       String collection,
+                                       String entityType,
+                                       String reason) {
+    }
+
+    /**
      * 应用结果计数。
      *
      * <p>口径：{@code keptLocal} 包含"冲突但没给解决方式"和"给了无法识别的解决方式"两种，
      * 即<b>凡是没写入的冲突都算保留本地</b>；{@code insertedStableIds} 只记新增的条目，可用于前端做二次定位。
+     *
+     * <p>{@code skippedAfterConflict}（#77）：预览时判 CONFLICT（用户给过 resolution）、
+     * apply 时重新 plan 因本地内容已一致而走 SKIP 的记录。判定以「apply 时决策为 SKIP 且
+     * resolutions 里有这个 stableId」为准 —— resolutions 的键只会为预览期的冲突而给出。
      */
     public record ImportResult(int inserted,
                                int updated,
                                int skipped,
                                int keptLocal,
-                               List<String> insertedStableIds) {
+                               List<String> insertedStableIds,
+                               List<SkippedAfterConflict> skippedAfterConflict) {
     }
 
     /**

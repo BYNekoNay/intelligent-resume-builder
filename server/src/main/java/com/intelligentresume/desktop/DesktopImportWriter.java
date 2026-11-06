@@ -71,6 +71,9 @@ final class DesktopImportWriter {
         int skipped = 0;
         int keptLocal = 0;
         List<String> insertedIds = new ArrayList<>();
+        // #77：apply 重新 plan 后判 SKIP、但用户给过 resolution 的记录 —— resolutions 的键
+        // 只会为预览期的 CONFLICT 而给出，命中即说明「预览冲突 → apply 被跳过」，点名而不是静默吞掉
+        List<DesktopImportService.SkippedAfterConflict> skippedAfterConflict = new ArrayList<>();
 
         for (DesktopImportPlanner.Entry entry : plan.entries()) {
             switch (entry.decision()) {
@@ -84,6 +87,10 @@ final class DesktopImportWriter {
                 case SKIP -> {
                     seed(entry, entry.localId(), idMap);
                     skipped++;
+                    if (resolutions.containsKey(entry.stableId())) {
+                        skippedAfterConflict.add(new DesktopImportService.SkippedAfterConflict(
+                                entry.stableId(), entry.collectionPath(), entry.table(), entry.reason()));
+                    }
                 }
                 case CONFLICT -> {
                     seed(entry, entry.localId(), idMap);
@@ -107,7 +114,8 @@ final class DesktopImportWriter {
         }
         backfillCurrentVersions(plan, idMap);
         log.info("桌面工作区导入完成：新增 {}、更新 {}、跳过 {}、保留本地 {}", inserted, updated, skipped, keptLocal);
-        return new DesktopImportService.ImportResult(inserted, updated, skipped, keptLocal, List.copyOf(insertedIds));
+        return new DesktopImportService.ImportResult(inserted, updated, skipped, keptLocal,
+                List.copyOf(insertedIds), List.copyOf(skippedAfterConflict));
     }
 
     // ------------------------------------------------------------------ 写入

@@ -22,6 +22,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getTask, type AiTask } from '@/api/ai'
 import { useLocale } from '@/i18n'
+import { aiTaskPollDelayMs } from '@/utils/aiPolling'
 import { useAuthStore } from '@/stores/auth'
 
 const TASK_STORAGE_PREFIX = 'intelligent-resume.active-ai-task'
@@ -119,9 +120,10 @@ export const useAiTaskStore = defineStore('ai-task', () => {
           return
         }
         attempt += 1
-        // 退避节奏固定为 1s/2s/4s/5s，第 4 次之后恒定 5s：AI 任务前期进展快（密集查能尽快出结果），
-        // 后期耗时以分钟计，固定高频只会把后端打满且对用户没有额外收益
-        const delay = [1000, 2000, 4000, 5000][Math.min(attempt - 1, 3)]
+        // 退避节奏收敛到 utils/aiPolling 的主节奏（1s/2s/4s/5s，之后恒 5s，#80）：
+        // AI 任务前期进展快（密集查能尽快出结果），后期耗时以分钟计，
+        // 固定高频只会把后端打满且对用户没有额外收益
+        const delay = aiTaskPollDelayMs(attempt - 1)
         timer = window.setTimeout(tick, delay)
       } catch {
         // 单次查询失败（如断网）就整体终止并报错，让用户手动重试，而不是无限重试

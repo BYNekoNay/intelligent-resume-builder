@@ -9,6 +9,7 @@ import com.intelligentresume.ai.task.domain.AiTask;
 import com.intelligentresume.ai.task.domain.AiTaskType;
 import com.intelligentresume.ats.dto.AtsAiInsights;
 import com.intelligentresume.ats.dto.AtsFallbackCode;
+import com.intelligentresume.common.observability.AiFailureCategory;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -91,17 +92,23 @@ public class AtsAiAnalysisService {
     }
 
     /**
-     * provider 失败 → 转成带兜底码的异常。超时判定是**字符串匹配**
-     * （{@code timeout} / {@code timed out} / {@code 超时}）：provider 改了报错文案就会退化成
-     * {@code PROVIDER_ERROR}，只影响落库的兜底码/前端文案；{@code retryable} 另取
-     * {@code response.retryable()}，与本次判定无关。
+     * provider 失败 → 转成带兜底码的异常。超时判定**优先用结构化信号**（#67）：
+     * 真实超时路径（BailianAiProvider 捕获 {@code ResourceAccessException}）的 errorMessage
+     * 是「百炼 API 网络异常」，不含 timeout 文案，但 attempts 的 {@code failureCategory}
+     * 固定为 {@code AiFailureCategory.TIMEOUT}；只有拿不到结构化类别时才退回文案匹配
+     * （{@code timeout} / {@code timed out} / {@code 超时}）——文案匹配是会随上游措辞漂移的兜底。
+     * {@code retryable} 另取 {@code response.retryable()}，与本次判定无关。
      */
     private AiCallResult call(AiProvider provider, Map<String, Object> prompt) {
         AiCallResult response = provider.call(new AiCallContext(AiTaskType.ATS_ANALYSIS, prompt));
         if (response.success()) return response;
         String message = response.errorMessage() == null ? "AI ATS analysis failed" : response.errorMessage();
         String normalized = message.toLowerCase();
-        AtsFallbackCode code = normalized.contains("timeout") || normalized.contains("timed out") || message.contains("超时")
+        boolean structuredTimeout = response.modelAttempts().stream()
+                .anyMatch(attempt -> AiFailureCategory.TIMEOUT.name().equals(attempt.failureCategory()));
+        boolean messageTimeout = normalized.contains("timeout") || normalized.contains("timed out")
+                || message.contains("超时");
+        AtsFallbackCode code = structuredTimeout || messageTimeout
                 ? AtsFallbackCode.PROVIDER_TIMEOUT : AtsFallbackCode.PROVIDER_ERROR;
         throw new AtsAiAnalysisException(code, message, response.retryable());
     }

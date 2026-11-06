@@ -140,6 +140,14 @@ function reset() {
       }) }}
     </p>
 
+    <!-- #77：apply 重新 plan 后被 SKIP 的冲突记录 —— 用户给的处理方式未生效，必须点名 -->
+    <p v-if="result?.skippedAfterConflict?.length" class="status-line" role="status">
+      {{ t('desktop.import.skippedAfterConflict', {
+        count: result.skippedAfterConflict.length,
+        items: result.skippedAfterConflict.map(item => item.stableId).join(', '),
+      }) }}
+    </p>
+
     <div class="desktop-panel-actions">
       <button type="button" class="btn-neon btn-secondary" :disabled="parsing || workspacePackage === null" @click="runPreview">
         {{ parsing ? t('desktop.import.previewing') : t('desktop.import.preview') }}

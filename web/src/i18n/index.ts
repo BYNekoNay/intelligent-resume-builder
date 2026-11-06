@@ -499,6 +499,7 @@ const messages: Partial<Record<Locale, MessageTree>> = {
         applying: '正在写入…',
         applyFailed: '应用失败，工作区没有被修改。',
         result: '导入完成：新增 {inserted} 条，更新 {updated} 条，跳过 {skipped} 条，保留本地 {keptLocal} 条。',
+        skippedAfterConflict: '另有 {count} 条记录预览时是冲突，应用时因本地内容已一致被跳过，你给的处理方式未生效：{items}',
       },
     },
     home: {

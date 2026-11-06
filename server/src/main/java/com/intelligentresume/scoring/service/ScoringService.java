@@ -49,7 +49,8 @@ import java.util.*;
  *   <li><b>结果可复用但不可串号</b>：复用条件是「同版本 + 同 JD + 同规则版本 + JD 未晚于结果更新」，
  *       放宽任一条都会把过期分数当新结果返回。</li>
  *   <li><b>GET 与 POST 共用 {@link #toResponse}</b>：两处字段口径必须一致，持久化字段名不得直接外泄。</li>
- *   <li>{@code ruleVersion} 取配置（默认 v1.0.0），改规则逻辑就必须同时改它，否则新旧结果无法区分。</li>
+ *   <li>{@code ruleVersion} 取配置，默认值编译期拼接 {@link RuleVersion#CURRENT}（#78）：
+ *       常量是唯一真源，改规则逻辑就必须同时改常量，否则新旧结果无法区分。</li>
  * </ul>
  */
 @Service
@@ -65,7 +66,7 @@ public class ScoringService {
     private final ResumeKeywordExtractor keywordExtractor;
     private final RuleRegistry ruleRegistry;
 
-    @Value("${app.scoring.rule-version:v1.0.0}")
+    @Value("${app.scoring.rule-version:" + RuleVersion.CURRENT + "}")
     private String ruleVersion;
 
     @Value("${app.scoring.user-disclaimer:本结果为 JD 规则覆盖度，非企业 ATS 结果、非录用概率}")
